@@ -155,6 +155,10 @@ a general review-quality pass.
 unchanged. Keep the checkpoint arm available only in the experiment script.
 Test broader fixtures and adjudicate complete claims before any prompt rollout.
 
+The [follow-up handoff pilot](2026-09-21-native-handoff.md) measures repeated reads
+across reviewer and verifier sessions, then tests supplying the verifier with
+the relevant source upfront. It also stays offline.
+
 ## Validation and self-review
 
 All 1,113 tests, typecheck, lint, formatting and build passed. A final cheap-model
