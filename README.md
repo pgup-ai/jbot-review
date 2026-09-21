@@ -477,12 +477,11 @@ The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); 
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
 sandbox, so read-only is enforced by withholding `bash` rather than by
-filtering it). `read_file` supports a starting line, `search_repo` finds literal
-text in non-ignored files without following directory symlinks, and `git_diff` serves the reviewed change. All three return
-up to 128 KiB per response with byte offsets for continuation; large files and
-diffs remain fully accessible. Reads and searches stay inside the repository.
-The provider catalog supplies each model's context window; tool-page size is a
-response budget, not a model context-window override. Repository investigation has
+filtering it). Sessions use Pi's native `read`, `grep`, `find`, and `ls` tools,
+including their line limits, regex search and output truncation. J-Bot supplies
+every assigned diff hunk before investigation. Native tools are not a filesystem
+sandbox; use an isolated checkout/container for untrusted repositories.
+The provider catalog supplies each model's context window. Repository investigation has
 no tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
 existing session deadlines and per-command process limits still apply. Pi manages
 provider prompt caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions only.
@@ -624,34 +623,15 @@ Use `provider: commandcode` with `commandcode-access-key` /
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
 `commandcode`, then removed after the run. Sessions start in an empty directory;
-repository and operator settings, hooks, mods, and skills are excluded. Repository tools are
-disabled by default pending controlled quality and latency comparisons.
+repository and operator settings, hooks, mods, and skills are excluded.
 
-Set `JBOT_COMMANDCODE_TOOLS=true` in the Action step's `env`, local environment,
-or app/worker environment to enable repository investigation for CommandCode
-review and verification sessions. JSON repair is always fresh and tool-less,
-bounded by the remaining session deadline. Arena comparisons use the frozen
-`reviewConfig.commandCodeTools` manifest value instead of ambient environment; legacy v1
-manifests that omit it retain tools enabled. The opt-in exposes `jbot_read_file`,
-`jbot_list_files`, and `jbot_search`. Reads reject paths and symlinks resolving
-outside the repository. Search covers non-ignored files without following symlinks;
-listing includes tracked and non-ignored untracked files. Direct reads reject Git
-metadata and ignored untracked files. Shell, writes, and web access stay disabled.
-J-Bot continues embedding the complete review diff. Tool
-results are paginated, with no additional aggregate read/tool-call quota.
-
-CommandCode `jbot_search` and Pi `search_repo` accept `query` as a literal string
-or an array of literals (match any), plus optional `paths` containing literal
-repository-relative files or directories. For example,
-`{"query":["execute","timeoutMs"],"paths":["src/shared"]}` searches both terms
-in one call. Searches use current worktree contents, preserve each backend's
-file-access rules, and support the existing pagination; no index is introduced.
-
-The tools use a trusted mod with the image's pinned CommandCode 1.56.2; local
-runs need that version. Mod initialization failure stops the CLI. Logs record
-sanitized tool outcome counts and effective workspace access; per-tool timing
-remains unavailable. See the [tooling evaluation](docs/audits/2026-09-07-commandcode-repository-tools.md)
-for the model comparison and rollout limits.
+CommandCode uses its native CLI tools in plan mode by default. Set
+`JBOT_COMMANDCODE_TOOLS=false` to use embedded evidence only. Local arena and
+benchmark runs use the `reviewConfig.commandCodeTools` manifest value.
+J-Bot loads no custom tool mod and continues embedding the complete assigned diff.
+Native tools own search syntax, read limits and continuation behavior; J-Bot
+records their completion/error counts and session token usage. JSON repairs use a
+fresh temporary home with tools denied, leaving other sessions unaffected.
 
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which

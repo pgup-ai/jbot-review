@@ -1959,7 +1959,7 @@ async function runReviewPipeline(params: {
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     log(
       options.commandCodeTools
-        ? 'CommandCode repository read/search tools enabled; launch configuration isolated.'
+        ? 'CommandCode native tools enabled in plan mode; launch configuration isolated.'
         : 'CommandCode reviews run with skills and tools disabled.',
     );
     commandCodeBackend = createCommandCodeBackend(
@@ -2165,17 +2165,8 @@ async function runReviewPipeline(params: {
             : undefined,
           toolTelemetry: backendToolTelemetry,
           embeddedFirstPrompt: options.embeddedFirstPrompt,
-          // Shell-less pi sessions recover omitted/truncated hunks through the
-          // read-only git_diff tool (invariant 1); base and diff form mirror
-          // the run's diff scope.
-          diffScope: baseSha
-            ? { base: baseSha, worktree: !!localDiff, ...(headSha ? { head: headSha } : {}) }
-            : undefined,
         },
       );
-      if (!baseSha) {
-        log('pi git_diff tool unavailable (no base sha); large diffs may be reviewed truncated.');
-      }
     } catch (error) {
       await cleanupCliHomes();
       throw error;
@@ -3626,7 +3617,7 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
-    commandCodeTools: options?.commandCodeTools ?? false,
+    commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     sharedPrefixPrompt: options?.sharedPrefixPrompt ?? false,
     auxModel: options?.auxModel ?? '',

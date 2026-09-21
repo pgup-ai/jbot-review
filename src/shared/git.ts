@@ -65,7 +65,7 @@ async function runGitConfigCommand(args: string[]): Promise<string> {
 
 /**
  * The exact `git` invocation for every diff the review pipeline reads (the
- * local driver's merge-base→worktree diff and the pi engine's git_diff tool),
+ * local driver's merge-base→worktree diff),
  * exported so tests can run REAL git against hostile config. The `-c` pins
  * neutralize user gitconfig that changes the output shape parseGitDiff depends
  * on: `diff.noprefix`, `diff.mnemonicPrefix`, and (git ≥2.45)

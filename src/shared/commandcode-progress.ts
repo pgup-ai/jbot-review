@@ -14,7 +14,7 @@ export function parseCommandCodeUsage(value: unknown): PromptTokenUsage | undefi
   return { input, output, reasoning: 0, cacheRead, cacheWrite };
 }
 
-const TOOL_NAMES = ['jbot_read_file', 'jbot_search', 'jbot_list_files'];
+const TOOL_NAMES = ['read_file', 'grep', 'glob', 'shell_command', 'list_files'];
 const OUTCOMES = ['tool_completed', 'tool_errored', 'tool_denied', 'tool_hook_blocked'];
 
 export function commandCodeToolOutcome(frame: unknown): string | undefined {

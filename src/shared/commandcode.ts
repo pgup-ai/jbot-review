@@ -4,12 +4,19 @@ import {
   createCommandCodeProgress,
   type CommandCodeProgress,
 } from './commandcode-progress.ts';
-import { chmodSync, createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  createReadStream,
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { parseModelName } from '@symma/protocol';
@@ -106,29 +113,6 @@ export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): 
   );
   chmodCommandCodeFile(path);
   mkdirSync(join(home, 'launch'), { mode: 0o700, recursive: true });
-  if (tools) {
-    const bundled = new URL('../commandcode-mod.js', import.meta.url);
-    const mod = existsSync(fileURLToPath(bundled))
-      ? bundled
-      : new URL('./commandcode-mod.ts', import.meta.url);
-    // CommandCode normally swallows mod-load failures. Stop before any unguarded tool can run.
-    writeFileSync(
-      join(home, 'review.mjs'),
-      `export default async function(cmd) {
-  try {
-    if (process.env.JBOT_COMMANDCODE_REPAIR === 'true') {
-      cmd.setActiveTools([]);
-      cmd.hooks({ beforeToolCall() { return { block: true }; } });
-      return;
-    }
-    const mod = await import(${JSON.stringify(mod.href)}); await mod.default(cmd);
-  }
-  catch { console.error('CommandCode repository tools failed to initialize.'); process.exit(1); }
-}
-`,
-      { mode: 0o600 },
-    );
-  }
   return path;
 }
 
@@ -657,10 +641,10 @@ async function runCommandCodePrompt(
   const args = buildCommandCodeCliArgs({ model, effort });
   if (resumeSessionId) args.push('--resume', resumeSessionId);
   const repair = label.endsWith('-repair');
-  if (runtime?.tools) {
-    if (!repair) args.push('--add-dir', workspace);
-    args.push('--mod', join(runtime.home, 'review.mjs'));
-  }
+  if (runtime?.tools && !repair) args.push('--add-dir', workspace);
+  const repairHome =
+    runtime?.tools && repair ? mkdtempSync(join(runtime.home, 'repair-')) : undefined;
+  const home = repairHome ?? runtime?.home;
   const input =
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
@@ -676,18 +660,14 @@ async function runCommandCodePrompt(
   }, 60_000);
   heartbeat.unref();
   try {
+    if (repairHome) {
+      writeCommandCodeReadOnlySettings(repairHome, false);
+      copyFileSync(commandCodeAuthPath(runtime!.home), commandCodeAuthPath(repairHome));
+    }
     const result = await runCliProcess(COMMANDCODE_CLI_BIN, args, {
-      cwd: runtime ? join(runtime.home, 'launch') : workspace,
+      cwd: home ? join(home, 'launch') : workspace,
       input,
-      env: {
-        ...(commandCodeEnvForHome(runtime?.home) ?? process.env),
-        ...(runtime?.tools
-          ? {
-              JBOT_COMMANDCODE_WORKSPACE: repair ? '' : workspace,
-              JBOT_COMMANDCODE_REPAIR: String(repair),
-            }
-          : {}),
-      },
+      env: commandCodeEnvForHome(home) ?? process.env,
       timeoutMs,
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
       onStdout: progress.feed,
@@ -704,7 +684,7 @@ async function runCommandCodePrompt(
       log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
     const estimatedCostUsd =
       runtime && parsed.sessionId && !resumeSessionId
-        ? await commandCodeSessionEstimatedCost(runtime.home, parsed.sessionId)
+        ? await commandCodeSessionEstimatedCost(home!, parsed.sessionId)
         : undefined;
     usage = parsed.usage
       ? {
@@ -727,6 +707,7 @@ async function runCommandCodePrompt(
     complete = true;
     return { finalText: parsed.finalText, sessionId: parsed.sessionId };
   } finally {
+    if (repairHome) rmSync(repairHome, { recursive: true, force: true });
     clearInterval(heartbeat);
     progress.finish();
     usage ??= progress.usage();

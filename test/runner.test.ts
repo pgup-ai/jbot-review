@@ -1197,7 +1197,7 @@ describe('normalizeOptions defaults', () => {
   });
 
   it('keeps embedded-first prompts on and CommandCode investigation opt-in', () => {
-    assert.equal(normalizeOptions(undefined).commandCodeTools, false);
+    assert.equal(normalizeOptions(undefined).commandCodeTools, true);
     assert.equal(normalizeOptions({ commandCodeTools: true }).commandCodeTools, true);
     assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, true);
     assert.equal(normalizeOptions({ embeddedFirstPrompt: false }).embeddedFirstPrompt, false);

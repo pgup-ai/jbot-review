@@ -28,7 +28,6 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     verificationEvidence: 'off',
     reuse: { shared: false, handoff: false, prefetch: false },
     exploration: {
-      retrieval: false,
       checkpoints: false,
       readEvidence: false,
       readEvidencePhase: 'all',

@@ -586,7 +586,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
       complete: false,
       observedEvents: 1,
       droppedFrames: 0,
-      toolOutcomes: { 'jbot_read_file:tool_completed': 1 },
+      toolOutcomes: { 'read_file:tool_completed': 1 },
     });
     const updated = rec
       .toJsonl()

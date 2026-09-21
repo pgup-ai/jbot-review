@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -282,7 +283,7 @@ describe('CommandCode CLI provider helpers', () => {
         JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
         JSON.stringify({
           type: 'event',
-          event: { type: 'tool_completed', toolName: 'jbot_read_file', result: 'private content' },
+          event: { type: 'tool_completed', toolName: 'read_file', result: 'private content' },
         }),
         JSON.stringify({
           type: 'event',
@@ -307,7 +308,7 @@ describe('CommandCode CLI provider helpers', () => {
     assert.deepEqual(result, {
       finalText: '{"summary":"ok","findings":[]}',
       sessionId: 'session-1',
-      toolOutcomes: { 'jbot_read_file:tool_completed': 1, 'other:tool_hook_blocked': 1 },
+      toolOutcomes: { 'read_file:tool_completed': 1, 'other:tool_hook_blocked': 1 },
       usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
     });
 
@@ -718,6 +719,7 @@ describe('CommandCode multi-key pick', () => {
 
 it('resumes each CommandCode review explicitly while verification stays fresh', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-resume-'));
+  writeCommandCodeAuth('test-key', home);
   writeCommandCodeReadOnlySettings(home, true);
   const cli = join(home, 'command-code');
   writeFileSync(
@@ -732,19 +734,16 @@ let input = '';
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', async () => {
   if (model === 'abort') {
-    console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'jbot_read_file',result:'PRIVATE_CONTENT'}}));
+    console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'read_file',result:'PRIVATE_CONTENT'}}));
     console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
     setInterval(() => {}, 1000);
     return;
   }
-  const repair = process.env.JBOT_COMMANDCODE_REPAIR === 'true';
-  if (repair) {
-    const mod = await import(args[args.indexOf('--mod') + 1]);
-    let names, hook;
-    await mod.default({setActiveTools(value) { names = value; }, hooks(value) { hook = value.beforeToolCall; }});
-    if (names.length || !hook({toolName:'read_file'}).block || args.includes('--add-dir')) throw new Error('Repair tools are not disabled');
-  }
-  fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, repair, args, input, cwd: process.cwd()}) + '\n');
+  const repair = path.basename(process.env.HOME).startsWith('repair-');
+  if (repair && JSON.parse(fs.readFileSync(path.join(process.env.HOME,'.commandcode','settings.json'),'utf8')).permissions.deny[0] !== '*') throw new Error('Repair tools enabled');
+  if (args.includes('--mod')) throw new Error('Custom mod loaded');
+  if (repair && args.includes('--add-dir')) throw new Error('Repair has workspace access');
+  fs.appendFileSync(path.join(repair ? path.dirname(process.env.HOME) : process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, repair, args, input, cwd: process.cwd()}) + '\n');
   const sessionId = resume || model + (repair ? '-repair-session' : '-session');
   const dir = path.join(process.env.HOME, '.commandcode', 'projects');
   fs.mkdirSync(dir, {recursive: true});
@@ -826,10 +825,17 @@ process.stdin.on('end', async () => {
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
     for (const call of calls) {
       if (call === lensCall) continue;
-      assert.equal(call.cwd, realpathSync(join(home, 'launch')));
+      if (!call.repair) assert.equal(call.cwd, realpathSync(join(home, 'launch')));
+      else assert.ok(call.cwd.startsWith(realpathSync(home) + '/repair-'));
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
-      assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));
+      assert.equal(call.args.includes('--mod'), false);
       if (call.repair) {
+        assert.equal(existsSync(call.cwd), false);
+        assert.equal(
+          JSON.parse(readFileSync(join(home, '.commandcode', 'settings.json'), 'utf8')).permissions
+            .defaultMode,
+          'plan',
+        );
         assert.equal(call.resume, undefined);
         assert.match(call.input, /Tool use disabled/);
       }
@@ -910,7 +916,7 @@ process.stdin.on('end', async () => {
     assert.equal(partial.length, 1);
     assert.equal((partial[0] as { complete: boolean }).complete, false);
     assert.deepEqual((partial[0] as { toolOutcomes: unknown }).toolOutcomes, {
-      'jbot_read_file:tool_completed': 1,
+      'read_file:tool_completed': 1,
     });
     assert.equal((partialUsage[0] as { input: number }).input, 12);
     assert.match(logs.join('\n'), /final progress/);
