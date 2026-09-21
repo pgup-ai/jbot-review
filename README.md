@@ -858,12 +858,12 @@ At most 20 locations are sampled, within a 16 KiB context budget, with omitted
 or unavailable evidence labeled explicitly. These are excerpts, not
 complete files or proof that omitted behavior is absent.
 
-All findings, including P3 and nits, receive verification in severity-ordered
-batches of ten. Findings arriving after an overlapping verification receive a
+With verification enabled, all emitted findings, including concrete investigation
+candidates, P3 and nits, enter severity-ordered batches of ten. Findings arriving after an overlapping verification receive a
 follow-up check. Verification shares the remaining verification time budget;
-failed or missing verdicts retain findings as unverified advisories and report incomplete coverage.
-Uncertain findings are explicitly labeled unverified, with low confidence and
-an investigate kind; blocking severities become P3, while nits remain nits.
+Failed or missing verdicts retain candidates as `not-completed` diagnostics and
+report incomplete coverage. An uncertain verdict is `inconclusive`, not an
+unattempted check. Both remain withheld from PR findings.
 
 ## Local review
 
@@ -1027,8 +1027,8 @@ head-pinned candidates distinguish `inconclusive`, `not-completed`, and
 the same file beside telemetry and log the candidates. Source evidence uses the
 existing two cited locations per candidate, 20-location batch cap, 16 KiB excerpt
 budget and 1.5-second read deadline. No second verification round is added.
-See the [publication-policy audit](docs/audits/2026-09-20-publication-policy.md)
-for routing replays, live comparisons and the remaining precision limits.
+See the [candidate-verification audit](docs/audits/2026-09-20-candidate-verification.md)
+for promotion tests, paired latency measurements and remaining limits.
 
 Local comparisons require the usual provider credential and configured model.
 Keep the revision, model, backend and other review settings fixed:

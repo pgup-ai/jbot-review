@@ -52,7 +52,6 @@ test('renderOrphanedSection heads with the marker the prior-comment filter keys 
   assert.equal(
     renderOrphanedSection([{ path: 'a.ts', line: 0, severity: 'P2', title: 't', body: 'b' }])[0],
     ORPHANED_FINDINGS_HEADING,
-    candidateDiagnostics,
   );
 });
 
