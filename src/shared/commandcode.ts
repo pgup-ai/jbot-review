@@ -51,6 +51,7 @@ import {
   percentLabel,
 } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+import { IncompleteReviewError } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
@@ -673,8 +674,16 @@ async function runCommandCodePrompt(
     });
     progress.finish();
     if (progress.snapshot().stopReason === 'permission_denied') {
-      throw new Error(
+      let findings: Finding[] = [];
+      try {
+        const parsed = parseCommandCodeJsonOutput(result.stdout);
+        findings = parseReview(parsed.finalText, label, log, { strict: true }).findings;
+      } catch {
+        // A denied run often ends with prose; never repair it into findings.
+      }
+      throw new IncompleteReviewError(
         `commandcode ${label}: native tool permission denied; check workspace permissions.`,
+        findings,
       );
     }
     if (result.exitCode !== 0) {

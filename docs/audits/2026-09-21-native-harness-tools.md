@@ -135,3 +135,19 @@ three searches. This confirms functional recovery, not a latency improvement.
 The local run found a stale `retrieval` entry in the configuration-matrix test;
 it was removed before pushing. Its claimed typecheck failure was not reproduced:
 all checks passed before that cleanup too.
+
+### Permission-denied candidate recovery
+
+Denied CommandCode sessions now preserve strictly parsed findings in an error.
+Lens and guideline callers retain those candidates through the existing file
+clamp and verification pipeline while recording failed coverage. Main review
+still rejects the incomplete page. Invalid output is not repaired, and recovery
+adds no model calls.
+
+Validation: all 1,111 tests, typecheck, lint and build passed. The local Docker
+pipeline with DeepSeek V4 Flash Fast retained the seeded defect and completed in
+16.4s including startup. Deterministic denial tests cover candidate recovery and
+rejection of prose; the live smoke did not induce a permission failure. No new
+standalone tests were added. The one new comment explains why repair is skipped.
+The core benchmark was not rerun for this fix; the branch's full-corpus default
+rollout gate and documented filesystem-isolation concerns remain outstanding.

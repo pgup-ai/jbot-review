@@ -324,6 +324,7 @@ import {
 } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
+import { IncompleteReviewError } from './types.ts';
 
 const VERIFICATION_BATCH_SIZE = 10;
 
@@ -3784,7 +3785,13 @@ export function startLensPasses(params: {
                   state: 'failed',
                   error,
                 });
-                return { findings: [], partial: true };
+                const findings = clampFindingsToFiles(
+                  error instanceof IncompleteReviewError ? error.findings : [],
+                  plan.assignedFiles,
+                  changed,
+                );
+                params.onFindings?.(`review-${key}`, findings);
+                return { findings, partial: true };
               }
             }),
           );
@@ -4832,7 +4839,13 @@ function startGuidelineComplianceCheck(params: {
               `${session}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
             );
             params.onCoverage?.({ session: `${session}-page-${page + 1}`, state: 'failed', error });
-            return [];
+            const findings = clampFindingsToFiles(
+              error instanceof IncompleteReviewError ? error.findings : [],
+              plan.assignedFiles,
+              changed,
+            );
+            params.onFindings?.(findings);
+            return findings;
           }
         }),
       );

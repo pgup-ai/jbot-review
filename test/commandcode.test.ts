@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { REVIEW_LENSES } from '../src/shared/prompt.ts';
+import { IncompleteReviewError } from '../src/shared/types.ts';
 
 import {
   buildCommandCodeCliArgs,
@@ -746,7 +747,10 @@ process.stdin.on('end', async () => {
   }
   if (model.startsWith('denied')) {
     console.error('Reasoning effort set to low for model.');
-    console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText:'I will review.'}));
+    const finalText = model === 'denied-findings'
+      ? JSON.stringify({findings:[{path:'a.ts',line:1,severity:'P1',title:'Bug',body:'Concrete defect'}]})
+      : 'I will review.';
+    console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText}));
     process.exitCode = model === 'denied' ? 9 : 0;
     return;
   }
@@ -778,13 +782,18 @@ process.stdin.on('end', async () => {
   const pathBefore = process.env.PATH;
   process.env.PATH = `${home}:${pathBefore}`;
   try {
-    for (const model of ['denied', 'denied-zero']) {
+    for (const model of ['denied', 'denied-zero', 'denied-findings']) {
       await assert.rejects(
         runCommandCodeReview(home, `commandcode/${model}`, 'FULL_DIFF', '', () => {}, {
           runtime: { home, tools: true },
           timeoutMs: 5000,
         }),
-        /native tool permission denied; check workspace permissions/,
+        (error: unknown) => {
+          assert.ok(error instanceof IncompleteReviewError);
+          assert.match(error.message, /native tool permission denied; check workspace permissions/);
+          assert.equal(error.findings.length, model === 'denied-findings' ? 1 : 0);
+          return true;
+        },
       );
     }
     await Promise.all(

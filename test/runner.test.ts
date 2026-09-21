@@ -45,6 +45,7 @@ import { completedReviewHead } from '../src/shared/github.ts';
 import { auxiliaryBaselines } from '../src/shared/auxiliary-reuse.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
+import { IncompleteReviewError } from '../src/shared/types.ts';
 import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
 import { assembleFindingVerificationPrompt } from '../src/shared/prompt.ts';
 
@@ -1443,13 +1444,14 @@ it('does not let optional bookkeeping delay posting, but keeps settled results',
 });
 
 it('keeps finished lens-page findings when another page outlives the grace', async () => {
-  const finding = {
+  const finding: Finding = {
     path: 'a.ts',
     line: 1,
     severity: 'P1',
     title: 'Bug',
     body: 'A concrete defect.',
   };
+  const partialFinding: Finding = { ...finding, line: 2 };
   let release!: () => void;
   const pending = new Promise<void>((resolve) => {
     release = resolve;
@@ -1462,6 +1464,8 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
       name: 'fake',
       runReview: async (_m: string, context: string) => {
         if (context === 'failed') throw new Error('page launch failed');
+        if (context === 'denied')
+          throw new IncompleteReviewError('permission denied', [partialFinding]);
         if (context === 'pending') await pending;
         return { summary: '', findings: context === 'ready' ? [finding] : [] };
       },
@@ -1471,7 +1475,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     guidelinesForPrompt: '',
     lensKeys: ['interactions'],
     plans: () =>
-      ['ready', 'pending', 'failed'].map((context) => ({
+      ['ready', 'pending', 'failed', 'denied'].map((context) => ({
         label: context,
         context,
         baseContext: context,
@@ -1498,7 +1502,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     1,
     release,
   );
-  assert.deepEqual(result, [finding]);
+  assert.deepEqual(result, [finding, partialFinding]);
   assert.ok(
     logs.some((line) => line.includes('review-interactions-page-3 failed: page launch failed')),
   );
