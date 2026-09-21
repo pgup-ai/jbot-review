@@ -83,7 +83,8 @@ describe('limitReviewBackendSessions', () => {
   it('keeps verification capacity at both queues while auxiliary pages are still active', async () => {
     for (const sharedProvider of [true, false]) {
       const global = new Semaphore(3, true);
-      const provider = createProviderSessionLimiters(['test'], () => 2).forProvider('test');
+      const limiters = createProviderSessionLimiters(['test'], () => 2);
+      const provider = limiters.forProvider('test');
       let finish!: () => void;
       let started!: () => void;
       const running = new Promise<void>((resolve) => {
@@ -110,6 +111,9 @@ describe('limitReviewBackendSessions', () => {
       await Promise.all([first, next]);
       assert.equal(global.isBusy(), false);
       assert.equal((provider as Semaphore).isBusy(), false);
+      limiters.releaseReservations();
+      const held = await Promise.all([provider!.acquire('normal'), provider!.acquire('normal')]);
+      held.forEach((release) => release());
     }
   });
 
@@ -470,6 +474,10 @@ describe('Semaphore', () => {
       releaseAuxiliary();
       otherAuxiliary.forEach((release) => release());
       assert.equal(slots.isBusy(), false);
+      slots.releaseReservation();
+      const all = await Promise.all(Array.from({ length: limit }, () => slots.acquire('normal')));
+      all.forEach((release) => release());
+      assert.equal(slots.isBusy(), false, 'after verification, finders can use the full cap');
     }
   });
 

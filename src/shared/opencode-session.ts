@@ -59,6 +59,7 @@ export class Semaphore {
   private active = 0;
   private auxiliaryActive = 0;
   private lastGranted: SemaphorePriority = 'normal';
+  private reserveSlot = true;
 
   constructor(
     private readonly limit: number,
@@ -106,7 +107,9 @@ export class Semaphore {
       const { verification, high, normal, low } = this.queues;
       // One slot stays available to main/verification; a serial provider cannot reserve one.
       const auxiliaryRoom =
-        !this.reviewScheduling || this.auxiliaryActive < Math.max(1, this.limit - 1);
+        !this.reviewScheduling ||
+        !this.reserveSlot ||
+        this.auxiliaryActive < Math.max(1, this.limit - 1);
       const auxiliaryTurn =
         this.reviewScheduling &&
         this.auxiliaryActive === 0 &&
@@ -130,6 +133,11 @@ export class Semaphore {
       }
       next.grant();
     }
+  }
+
+  releaseReservation(): void {
+    this.reserveSlot = false;
+    this.drain();
   }
 
   isBusy(): boolean {

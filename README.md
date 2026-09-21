@@ -1326,7 +1326,8 @@ handles findings that describe the same defect from different perspectives.
 Main and auxiliary finders share the concurrency cap. Auxiliary pages get a turn
 while main pages remain queued; pending auxiliary passes rotate between groups.
 With a cap above one, auxiliary work leaves one slot available to main review or
-verification. Verification gets the next available slot before any finder. A
+verification. Once main and its early verification settle, auxiliary pages can
+use the full cap. Verification gets the next available slot before any finder. A
 serial provider cannot reserve capacity, so main and auxiliary pages alternate
 and verification waits for the active call to finish.
 Auxiliary pages continue after main completes until the run's finder deadline,

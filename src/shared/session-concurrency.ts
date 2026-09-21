@@ -97,8 +97,9 @@ export function createProviderSessionLimiters(
 ): {
   configured: Array<{ providerID: string; limit: number }>;
   forProvider: (providerID: string) => SessionSlots | undefined;
+  releaseReservations: () => void;
 } {
-  const limiters = new Map<string, { limit: number; slots: SessionSlots }>();
+  const limiters = new Map<string, { limit: number; slots: Semaphore }>();
   for (const providerID of new Set(providerIDs)) {
     const limit = concurrencyFor(providerID);
     if (limit !== undefined) limiters.set(providerID, { limit, slots: new Semaphore(limit, true) });
@@ -106,6 +107,9 @@ export function createProviderSessionLimiters(
   return {
     configured: [...limiters].map(([providerID, { limit }]) => ({ providerID, limit })),
     forProvider: (providerID) => limiters.get(providerID)?.slots,
+    releaseReservations: () => {
+      for (const { slots } of limiters.values()) slots.releaseReservation();
+    },
   };
 }
 

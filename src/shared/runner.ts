@@ -2969,6 +2969,14 @@ async function runReviewPipeline(params: {
       options.verifyOverlapGrace && verificationEnabled
         ? startOverlapVerification().catch(() => 'skipped' as const)
         : undefined;
+    const releaseReservations = () => {
+      sessionSlots.releaseReservation();
+      providerLimiters.releaseReservations();
+      for (const slots of serializedBackends.values()) slots.releaseReservation();
+      log('Reserved session capacity released to auxiliary work.');
+    };
+    if (overlapVerification) void overlapVerification.then(releaseReservations);
+    else releaseReservations();
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       ...lensPasses,
       guidelineComplianceCheck,
