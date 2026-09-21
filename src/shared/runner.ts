@@ -187,6 +187,7 @@ import { createDevinCliBackend } from './devin-cli.ts';
 import { resolveOpencodeApiKeys } from './opencode-usage.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
+  COMMANDCODE_MODEL_LIMITS,
   COMMANDCODE_TELEMETRY_CAPABILITY,
   commandCodeSessionEffort,
   fetchCommandCodePlanUsageLine,
@@ -2296,11 +2297,15 @@ async function runReviewPipeline(params: {
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
     (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
+      (providerID === COMMANDCODE_PROVIDER_ID ? COMMANDCODE_MODEL_LIMITS[modelID] : undefined) ??
       (await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined)),
   );
   const auxPromptBudget = reviewPromptBudget(
     auxBaseBackend.name,
     (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
+      (auxProviderID === COMMANDCODE_PROVIDER_ID
+        ? COMMANDCODE_MODEL_LIMITS[auxModelID]
+        : undefined) ??
       (await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(
         () => undefined,
       )),

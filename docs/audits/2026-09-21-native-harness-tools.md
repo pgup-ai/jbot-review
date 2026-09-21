@@ -164,3 +164,56 @@ recovered the removed guard from the 66 KB diff and confirmed the seeded defect
 in 8.6s. The core corpus was not rerun. The latest dogfood artifact's one withheld
 candidate correctly identifies the still-outstanding full-corpus rollout gate.
 Cline remains tool-less; its CLI's global auto-approval was not enabled.
+
+### CommandCode prompt capacity
+
+Run 35640189001 reviewed the full PR, not just the +3/-2 follow-up commit.
+It delivered 118 hunks through seven main pages and five joint auxiliary pages.
+The native session cost estimate was $1.4279; auxiliary interactions accounted
+for $1.0987. These are estimates, not additional GOAT-plan billing.
+
+The planner used a 128,000-token fallback for Muse Contributor and DeepSeek
+Flash Fast. CommandCode 1.56.2's bundled catalog gives them 1,048,576 and
+1,000,000 tokens respectively. Both main and auxiliary planning now use those
+known capacities. The 256 KiB assembled-prompt ceiling, output reserve, unknown
+model fallback and mandatory hunk coverage checks remain unchanged.
+
+A deterministic replay of fd67fa1's local Git diff, using the logged guideline
+and core byte counts as placeholder context, reduced seven pages to one and
+assembled prompt bytes from 501,783 to 192,290. All 122 Git-parsed hunks remained
+assigned. This is a planner comparison, not an exact replay of GitHub's 118-hunk
+input or evidence of equivalent model recall.
+
+All 1,112 tests, typecheck, lint and build passed. The existing capacity test now
+checks CommandCode paging and complete delivery too; no standalone test was
+added. The cheap-model local smoke completed in 21.0s including startup, found
+the seeded defect and retained it after native-tool verification. The one added
+comment records the source of the model limits. Dead experiment-plan retrieval
+branches were removed; legacy retrieval plans fail explicitly.
+
+No arbitrary native turn cutoff or cross-head cache reuse was introduced.
+Neither has quality evidence sufficient to replace the existing coverage
+contract. The core corpus was not rerun; the branch's full-corpus rollout gate
+and filesystem-isolation concerns remain outstanding.
+
+The two withheld findings in that run were inconclusive verdicts about Pi and
+CommandCode filesystem isolation. Verification executed native reads/searches,
+but lacked authoritative evidence about dependency internals. Tool availability
+does not guarantee a conclusive verdict or justify publishing a hypothesis.
+
+The full local branch run then completed in 545.3s (547.3s with Docker startup):
+one main session, one joint auxiliary session and one verifier. It delivered all
+130/130 hunks with no incomplete tasks. Main review took 504.5s, auxiliary work
+255.1s and verification 36.9s. Estimated session costs totaled about $0.308.
+Main used Muse Contributor, auxiliary/verification DeepSeek Flash Fast, all at
+low effort. The CI comparison used medium main effort, different context and
+cache state, plus summary/addressed sessions absent locally; this is functional
+validation, not a matched latency or recall benchmark.
+
+The run confirmed a small telemetry defect: native Pi `ls` was classified as
+`other-readonly`. It now maps to `list`, with an assertion folded into the existing
+classifier test. This does not alter model input or tool execution.
+
+Follow-up de-slop: one new comment kept for catalog provenance; assertions folded
+into two existing tests, no new standalone cases. Removed the dead retrieval
+plan field and branches. No new P1/P2 issue found in these follow-up changes.

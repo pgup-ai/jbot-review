@@ -141,7 +141,8 @@ describe('phase and tool telemetry', () => {
     );
     assert.doesNotMatch(recorder.toJsonl(), /secret/);
   });
-  it('classifies external documentation tools before generic searches', () => {
+  it('classifies native tools and prioritizes external documentation over searches', () => {
+    assert.equal(classifyReadonlyTool('ls'), 'list');
     assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_read_doc'), 'external-docs');

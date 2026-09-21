@@ -59,6 +59,15 @@ const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
 
+// Context windows from the pinned CommandCode 1.56.2 catalog.
+export const COMMANDCODE_MODEL_LIMITS: Record<string, { contextTokens: number }> = {
+  'meta/muse-spark-1.3-contributor': { contextTokens: 1_048_576 },
+  'meta/muse-spark-1.3': { contextTokens: 1_048_576 },
+  'deepseek/deepseek-v4-flash-fast': { contextTokens: 1_000_000 },
+  'deepseek/deepseek-v4-flash': { contextTokens: 1_000_000 },
+  'deepseek/deepseek-v4.1-flash': { contextTokens: 1_000_000 },
+};
+
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
 export const COMMANDCODE_TELEMETRY_CAPABILITY = 'opaque' as const;
 export const COMMANDCODE_MODEL_LIST_ARGS = ['--no-auto-update', '--list-models'];

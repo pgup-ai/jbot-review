@@ -53,7 +53,6 @@ type Plan = {
   evidence?: boolean;
   docs?: string;
   reuse?: boolean;
-  retrieval?: boolean;
   readEvidence?: boolean | 'linked';
   experiment?: 'phases' | 'diff-batches';
 };
@@ -62,7 +61,7 @@ const planPath = process.argv[2];
 if (!planPath) throw new Error('Usage: tsx scripts/jev-prefetch-experiment.ts <plan.json>');
 const plan: Plan = JSON.parse(readFileSync(planPath, 'utf8'));
 if (!plan.seed || !plan.model || !plan.cases.length) throw new Error('Expected a seeded plan');
-if (plan.retrieval) throw new Error('The custom retrieval tool experiment has been removed.');
+if ('retrieval' in plan) throw new Error('The custom retrieval tool experiment has been removed.');
 const out = resolve(dirname(planPath), 'runs');
 if (existsSync(out))
   throw new Error('Run directory already exists; preserve it and use a fresh plan directory');
@@ -245,7 +244,7 @@ for (const key of Object.keys(env)) {
     delete env[key];
 }
 if (env.OPENCODE_API_KEY) env.OPENCODE_API_KEY = env.OPENCODE_API_KEY.split(',')[0].trim();
-if (!plan.experiment && !plan.retrieval && !plan.readEvidence && !env.TYPESAFE_API_KEY)
+if (!plan.experiment && !plan.readEvidence && !env.TYPESAFE_API_KEY)
   throw new Error('TYPESAFE_API_KEY is required for the on arm');
 const results: unknown[] = [];
 const cacheRoot = plan.reuse
@@ -291,7 +290,7 @@ try {
       ...reviewExperiment({}),
       preset: 'custom',
       jevPrefetch:
-        plan.experiment || plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence
+        plan.experiment || plan.evidence || plan.reuse || plan.readEvidence
           ? 'off'
           : evidenceMode(run.arm),
       explorationEvidence: evidenceMode(
