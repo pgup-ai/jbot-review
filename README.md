@@ -1321,6 +1321,20 @@ Specialists do not start general reviews or another specialist's audit. Independ
 verification intentionally rechecks evidence; deterministic deduplication still
 handles findings that describe the same defect from different perspectives.
 
+Large guideline bundles are split across auxiliary tasks when the assembled
+prompt cannot fit. Each guideline part reviews the complete assigned diff;
+existing concurrency limits still apply. Prompt checks include instructions,
+caller evidence, and output headroom. Known model limits can allow larger inputs,
+while Cline retains its argument-size limit and unknown models keep the
+conservative fallback budget.
+
+Guideline selection uses the full PR's changed paths. Explicitly scoped `.mdc`
+rules that do not match are excluded; global rules and unknown scopes remain.
+Use the existing `.pr-governance/review/rules-for-diff.yaml` to prioritize relevant
+governance sections. No additional routing file or flag is needed. Logs report
+scope exclusions, guideline parts, prompt bytes, and page completion. The existing
+guideline discovery limits and omission notices still apply.
+
 ### Review scheduling
 
 Main and auxiliary finders share the concurrency cap. Auxiliary pages get a turn

@@ -1570,6 +1570,58 @@ it('records a lens that wrapped up on its own deadline as partial coverage', asy
   assert.deepEqual(rows, ['review-interactions:partial', 'guideline-compliance:partial']);
 });
 
+it('dispatches each auxiliary page with its planned guidelines', async () => {
+  const delivered: string[] = [];
+  const rows: string[] = [];
+  const collected: string[] = [];
+  const backend = {
+    name: 'fake',
+    runReview: async (_model, _context, guidelines) => {
+      delivered.push(guidelines);
+      return {
+        summary: '',
+        findings: ['part one', 'part two', 'unchanged.ts'].map((path) => ({
+          path,
+          line: 1,
+          severity: 'P2',
+          title: path,
+          body: path,
+        })),
+      };
+    },
+  } as unknown as ReviewBackend;
+  const results = await Promise.all(
+    startLensPasses({
+      backend,
+      model: 'fake/model',
+      lensPrContext: 'CTX',
+      guidelinesForPrompt: '',
+      guidelineCompliance: 'oversized full bundle',
+      lensKeys: ['interactions'],
+      log: () => {},
+      plans: () =>
+        ['part one', 'part two'].map((guidelines) => ({
+          label: guidelines,
+          context: 'complete diff',
+          baseContext: '',
+          assignedFiles: [guidelines],
+          guidelines,
+          diffCoverage: { totalFiles: 0, completeFiles: 0, truncatedFiles: 0, omittedFiles: 0 },
+        })),
+      onFindings: (_label, findings) => collected.push(...findings.map((finding) => finding.path)),
+      onCoverage: (row) => rows.push(`${row.session}:${row.state}`),
+    }),
+  );
+  assert.deepEqual(delivered, ['part one', 'part two']);
+  assert.deepEqual(collected, ['part one', 'unchanged.ts', 'part two', 'unchanged.ts']);
+  assert.deepEqual(
+    results.flat().map((finding) => finding.path),
+    collected,
+  );
+  assert.ok(rows.includes('review-interactions:completed'));
+  assert.ok(rows.includes('guideline-compliance:completed'));
+});
+
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
   assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
   assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);

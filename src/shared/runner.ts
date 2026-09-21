@@ -1,6 +1,7 @@
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
   buildShardPlans,
+  buildAuxiliaryPlans,
   prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedVerifierContext,
@@ -42,6 +43,7 @@ import {
   applyFindingVerdicts,
   checkConfirmationEvidence,
   filterFindings,
+  clampFindingsToFiles,
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
@@ -248,6 +250,7 @@ import {
   buildReviewContext,
   buildReviewScopeContext,
   discoverGuidelineDocs,
+  applicableGuidelines,
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
@@ -1491,14 +1494,18 @@ async function runReviewPipeline(params: {
     commandCodeEffortContext,
   );
 
-  const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const discoveredGuidelines = applicableGuidelines(loadedGuidelines, changedFiles);
+  log(
+    `Guideline scope: ${discoveredGuidelines.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - discoveredGuidelines.docs.length} explicitly scoped documents excluded.`,
+  );
   const guidelines = formatGuidelines(discoveredGuidelines);
   const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
     forFiles: changedFiles,
   });
   if (guidelines) {
     log(
-      `Guidelines loaded (${guidelines.length} bytes; finder slice ${finderGuidelines.length} bytes).`,
+      `Guidelines loaded (${Buffer.byteLength(guidelines)} bytes; finder slice ${Buffer.byteLength(finderGuidelines)} bytes).`,
     );
   }
 
@@ -2756,11 +2763,11 @@ async function runReviewPipeline(params: {
       lens: true,
     });
     const prepareAuxPlans = async (lens?: string, lensRules = lensGuidelines) => {
-      const render = (context: string) =>
+      const render = (context: string, rules = lens ? lensRules : guidelines) =>
         lens
           ? assembleReviewPrompt(
               context,
-              lensRules,
+              rules,
               lens,
               options.evidenceQuotes,
               options.embeddedFirstPrompt,
@@ -2769,8 +2776,8 @@ async function runReviewPipeline(params: {
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
-          : assembleGuidelineCompliancePrompt(context, guidelines);
-      const plans = buildShardPlans({
+          : assembleGuidelineCompliancePrompt(context, rules);
+      const plans = buildAuxiliaryPlans({
         coreContext: lens
           ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
           : mainCoreContext,
@@ -2778,6 +2785,8 @@ async function runReviewPipeline(params: {
         shards,
         budget: auxPromptBudget,
         renderPrompt: render,
+        guidelines: lens ? lensRules : guidelines,
+        guidelineLabels: discoveredGuidelines.docs.map((doc) => doc.label),
         evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
       });
       await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
@@ -3736,8 +3745,9 @@ export function startLensPasses(params: {
           const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
             await (params.plans?.(lens, guidelines) ?? [{ context: params.lensPrContext }]);
           params.log(
-            `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
+            `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, guidelineParts: new Set(plans.map((plan) => plan.guidelines ?? guidelines)).size, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
           );
+          const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
           const results = await Promise.all(
             plans.map(async (plan, page) => {
               try {
@@ -3746,7 +3756,7 @@ export function startLensPasses(params: {
                 const result = await params.backend.runReview(
                   params.model,
                   plan.context,
-                  guidelines,
+                  plan.guidelines ?? guidelines,
                   params.log,
                   {
                     lensAddendum: lens,
@@ -3759,7 +3769,8 @@ export function startLensPasses(params: {
                     contextFirst: params.contextFirst,
                   },
                 );
-                params.onFindings?.(`review-${key}`, result.findings);
+                const findings = clampFindingsToFiles(result.findings, plan.assignedFiles, changed);
+                params.onFindings?.(`review-${key}`, findings);
                 if (plans.length > 1)
                   cover({
                     session: `review-${key}-page-${page + 1}`,
@@ -3767,7 +3778,7 @@ export function startLensPasses(params: {
                     promptBytes: plan.promptBytes,
                     diff: plan.diffCoverage,
                   });
-                return result;
+                return { ...result, findings };
               } catch (error) {
                 params.log(
                   `review-${key}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
@@ -4470,10 +4481,7 @@ export async function runShardedReview(params: {
     // Anchoring clamp: findings in another shard's changed file are that
     // shard's to report. Findings outside the changed set (orphaned notes)
     // pass through and dedupe by path:line.
-    const assigned = new Set(plan.assignedFiles);
-    const kept = result.findings.filter(
-      (finding) => assigned.has(finding.path) || !changed.has(finding.path),
-    );
+    const kept = clampFindingsToFiles(result.findings, plan.assignedFiles, changed);
     const clamped = result.findings.length - kept.length;
     if (clamped > 0) {
       log(`${plan.label}: dropped ${clamped} finding(s) anchored outside its assigned files.`);
@@ -4800,18 +4808,20 @@ function startGuidelineComplianceCheck(params: {
     .then(async () => {
       const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
         await (params.plans?.() ?? [{ context: params.prContext }]);
+      const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
       const results = await Promise.all(
         plans.map(async (plan, page) => {
           try {
             const findings = await params.backend.runGuidelineComplianceCheck(
               params.model,
               plan.context,
-              params.guidelinesForPrompt,
+              plan.guidelines ?? params.guidelinesForPrompt,
               params.log,
               params.timeoutMs,
               params.onTokenUsage,
             );
-            params.onFindings?.(findings);
+            const kept = clampFindingsToFiles(findings, plan.assignedFiles, changed);
+            params.onFindings?.(kept);
             if (plans.length > 1)
               params.onCoverage?.({
                 session: `${session}-page-${page + 1}`,
@@ -4819,7 +4829,7 @@ function startGuidelineComplianceCheck(params: {
                 promptBytes: plan.promptBytes,
                 diff: plan.diffCoverage,
               });
-            return findings;
+            return kept;
           } catch (error) {
             partial = true;
             params.log(

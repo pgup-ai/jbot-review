@@ -9,6 +9,7 @@ import { Semaphore } from '../src/shared/opencode.ts';
 import { test } from 'node:test';
 import {
   buildShardPlans,
+  buildAuxiliaryPlans,
   prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedDiff,
@@ -16,7 +17,13 @@ import {
   reviewDelivery,
   reviewPromptBudget,
 } from '../src/shared/review-plan.ts';
-import { assembleReviewPrompt, UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
+import {
+  assembleReviewPrompt,
+  assembleGuidelineCompliancePrompt,
+  GUIDELINE_REVIEW_LENS,
+  REVIEW_LENSES,
+  UNTRUSTED_PR_CONTENT_NOTE,
+} from '../src/shared/prompt.ts';
 import {
   buildClinePromptArg,
   CLINE_MAX_ARGV_BYTES,
@@ -30,6 +37,7 @@ import {
   compactReviewPageContext,
 } from '../src/shared/prompt.ts';
 import { catalogModelLimits } from '../src/shared/pi.ts';
+import { formatGuidelines } from '../src/shared/review-context.ts';
 import {
   limitReviewBackendSessions,
   type ReviewBackend,
@@ -112,6 +120,18 @@ test('budgets instructions, guidelines, context and output separately from trans
   assert.equal(limits.contextTokens, limits.outputTokens);
   assert.ok(measureReviewPrompt(renderPrompt(''), reviewPromptBudget('pi', limits)).fits);
   assert.equal(await catalogModelLimits('openai', 'jbot-nonexistent-model', true), undefined);
+  assert.ok(
+    measureReviewPrompt(
+      'x'.repeat(150000),
+      reviewPromptBudget('opencode', { contextTokens: 256000 }),
+    ).fits,
+  );
+  assert.equal(
+    measureReviewPrompt('x'.repeat(150000), reviewPromptBudget('cline', { contextTokens: 256000 }))
+      .fits,
+    false,
+  );
+  assert.equal(measureReviewPrompt('x'.repeat(150000), reviewPromptBudget('opencode')).fits, false);
   const tokenLimited = {
     ...budget,
     contextTokens: 100,
@@ -367,5 +387,142 @@ test('late diff pages receive actual unchanged caller code and verifier selectio
   assert.match(
     targetedDiff(plans, [{ path: 'money.ts', line: 0, body: 'file-level concern' }]),
     /return n \* 100/,
+  );
+});
+
+test('large auxiliary guidelines preserve every rule and hunk within the assembled budget', () => {
+  const labels = ['.cursorrules', '.windsurfrules', '.coderabbit.yaml', 'greptile.json'];
+  const docs = Array.from({ length: 32 }, (_, i) => ({
+    label: i < labels.length ? labels[i] : `rule-${i}.md`,
+    text: `### Internal section\n${'東京 rule. '.repeat(240)}`,
+    relevance: 1 as const,
+  }));
+  const guidelineLabels = docs.map((doc) => doc.label);
+  const guidelines = formatGuidelines({ docs, referenced: [], budgetExhausted: false });
+  const files = Array.from({ length: 7 }, (_, i) => ({
+    filename: `src/file-${i}.ts`,
+    patch: '@@ -1 +1 @@\n-old()\n+new()',
+  }));
+  for (const renderPrompt of [
+    (context: string, rules: string) =>
+      assembleReviewPrompt(
+        context,
+        rules,
+        `${REVIEW_LENSES.interactions}\n${GUIDELINE_REVIEW_LENS}`,
+      ),
+    assembleGuidelineCompliancePrompt,
+  ]) {
+    assert.throws(
+      () =>
+        buildShardPlans({
+          ...base,
+          shards: [files],
+          renderPrompt: (context) => renderPrompt(context, guidelines),
+        }),
+      /before any diff/,
+    );
+    const plans = buildAuxiliaryPlans({
+      ...base,
+      shards: [files],
+      guidelines,
+      guidelineLabels,
+      renderPrompt,
+      evidenceReserveBytes: 8192,
+    });
+    assert.ok(plans.length > 1);
+    assert.equal(plans.map((plan) => plan.guidelines).join(''), guidelines);
+    assert.equal(new Set(plans.map((plan) => plan.label)).size, plans.length);
+    for (const plan of plans) {
+      assert.ok(
+        guidelineLabels.some(
+          (label) =>
+            plan.guidelines!.startsWith(`### ${label}\n`) ||
+            plan.guidelines!.startsWith(`### ${label} [part `),
+        ),
+      );
+      assert.equal(plan.units!.length, 7);
+      assert.ok(
+        measureReviewPrompt(renderPrompt(plan.context, plan.guidelines!), budget, 8192).fits,
+      );
+      assert.equal(plan.diffCoverage.omittedFiles + plan.diffCoverage.truncatedFiles, 0);
+    }
+    const rootRules = formatGuidelines({
+      docs: labels.map((label) => ({
+        label,
+        text: 'Preserve the public contract.\n'.repeat(1000),
+        relevance: 1,
+      })),
+      referenced: [],
+      budgetExhausted: false,
+    });
+    const rootPlans = buildAuxiliaryPlans({
+      ...base,
+      shards: [files],
+      guidelines: rootRules,
+      guidelineLabels: labels,
+      renderPrompt,
+    });
+    assert.ok(rootPlans.length > 1);
+    assert.equal(rootPlans.map((plan) => plan.guidelines).join(''), rootRules);
+    const small = buildAuxiliaryPlans({
+      ...base,
+      shards: [files],
+      guidelineLabels,
+      guidelines: 'Global rules',
+      renderPrompt,
+    });
+    assert.equal(small.length, 1);
+    assert.equal(small[0].guidelines, 'Global rules');
+    assert.throws(
+      () =>
+        buildAuxiliaryPlans({
+          ...base,
+          shards: [files],
+          guidelineLabels,
+          guidelines: 'x'.repeat(130000),
+          renderPrompt,
+        }),
+      /before any diff/,
+    );
+  }
+});
+
+test('auxiliary planning frees guideline space for a long changed line without dropping it', () => {
+  const guidelines = `### a.md\n${'rule '.repeat(4000)}\n\n### b.md\n${'rule '.repeat(4000)}`;
+  const patch = `@@ -0,0 +1 @@\n+${'x'.repeat(30000)}`;
+  const shards = [[{ filename: 'src/long.ts', patch }]];
+  const renderPrompt = (context: string, rules: string) => assembleReviewPrompt(context, rules);
+  assert.throws(
+    () =>
+      buildShardPlans({
+        ...base,
+        shards,
+        evidenceReserveBytes: 8192,
+        renderPrompt: (context) => renderPrompt(context, guidelines),
+      }),
+    /one diff line/,
+  );
+  const options = {
+    ...base,
+    shards,
+    guidelines,
+    guidelineLabels: ['a.md', 'b.md'],
+    renderPrompt,
+    evidenceReserveBytes: 8192,
+  };
+  const plans = buildAuxiliaryPlans(options);
+  assert.equal(plans.length, 2);
+  assert.equal(plans.map((plan) => plan.guidelines).join(''), guidelines);
+  for (const plan of plans) {
+    assert.equal(plan.units![0].file.patch, patch);
+    assert.ok(measureReviewPrompt(renderPrompt(plan.context, plan.guidelines!), budget, 8192).fits);
+  }
+  assert.throws(
+    () =>
+      buildAuxiliaryPlans({
+        ...options,
+        shards: [[{ filename: 'src/long.ts', patch: `@@ -0,0 +1 @@\n+${'x'.repeat(200000)}` }]],
+      }),
+    /one diff line/,
   );
 });

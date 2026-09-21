@@ -64,7 +64,6 @@ export function measureReviewPrompt(prompt: string, budget: ReviewPromptBudget, 
 
 function inputCapacity(budget: ReviewPromptBudget): number {
   return Math.min(
-    120 * 1024,
     budget.transportBytes,
     budget.contextTokens - budget.outputTokens - budget.harnessTokens,
   );
@@ -85,6 +84,7 @@ export interface ShardPlan {
   diffCoverage: ReturnType<typeof diffHunksCoverage> & { pagedFiles?: number };
   units?: DiffUnit[];
   promptBytes?: number;
+  guidelines?: string;
 }
 
 export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
@@ -104,8 +104,9 @@ function diffUnits(file: PrFile): DiffUnit[] {
 function splitUnit(unit: DiffUnit): [DiffUnit, DiffUnit] {
   const lines = unit.file.patch!.split('\n');
   const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/.exec(lines[0]);
-  if (!header || lines.length < 3)
-    throw new Error(
+  if (!header) throw new Error(`Incomplete diff delivery: invalid hunk in ${unit.file.filename}.`);
+  if (lines.length < 3)
+    throw new PromptCapacityError(
       `Incomplete diff delivery: one diff line in ${unit.file.filename} exceeds the assembled prompt budget.`,
     );
   const body = lines.slice(1);
@@ -134,6 +135,8 @@ function splitUnit(unit: DiffUnit): [DiffUnit, DiffUnit] {
   }) as [DiffUnit, DiffUnit];
 }
 
+class PromptCapacityError extends Error {}
+
 export function buildShardPlans(params: {
   coreContext: string;
   context7Block: string;
@@ -141,6 +144,7 @@ export function buildShardPlans(params: {
   renderPrompt: (context: string) => string;
   budget: ReviewPromptBudget;
   evidenceReserveBytes?: number;
+  minimumDiffBytes?: number;
   embeddedFirstPrompt?: boolean;
   diffFirst?: boolean;
   batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
@@ -208,11 +212,11 @@ export function buildShardPlans(params: {
       promptBytes: Buffer.byteLength(params.renderPrompt(context)),
     };
   };
-  const fits = (units: DiffUnit[]) =>
+  const fits = (units: DiffUnit[], extraReserve = 0) =>
     measureReviewPrompt(
       params.renderPrompt(render(units, 999999, 1000000).context),
       params.budget,
-      reserve,
+      reserve + extraReserve,
     ).fits;
   const fixedBytes =
     Buffer.byteLength(params.renderPrompt(render([], 999999, 1000000).context)) -
@@ -222,8 +226,8 @@ export function buildShardPlans(params: {
     Math.max(256, inputCapacity(params.budget) - reserve - fixedBytes - 24 * 1024),
     'PR metadata and prior-review context',
   );
-  if (!fits([]))
-    throw new Error(
+  if (!fits([], params.minimumDiffBytes))
+    throw new PromptCapacityError(
       'Incomplete diff delivery: instructions, guidelines and shared context exhaust the assembled prompt budget before any diff can be delivered.',
     );
   const pages: DiffUnit[][] = [];
@@ -265,6 +269,43 @@ export function buildShardPlans(params: {
       );
     return plan;
   });
+}
+
+export function buildAuxiliaryPlans(
+  params: Omit<Parameters<typeof buildShardPlans>[0], 'renderPrompt'> & {
+    guidelines: string;
+    guidelineLabels: string[];
+    renderPrompt: (context: string, guidelines: string) => string;
+  },
+): ShardPlan[] {
+  const labels = new Set(params.guidelineLabels);
+  const plan = (guidelines: string): ShardPlan[] => {
+    try {
+      return buildShardPlans({
+        ...params,
+        minimumDiffBytes: 8 * 1024,
+        renderPrompt: (context) => params.renderPrompt(context, guidelines),
+      }).map((page) => ({ ...page, guidelines }));
+    } catch (error) {
+      if (!(error instanceof PromptCapacityError)) throw error;
+      // Keep internal section headings attached to their labelled source fragment.
+      const boundaries = [...guidelines.matchAll(/\n\n(?=### ([^\n]+)\n)/g)]
+        .filter(
+          (match) =>
+            labels.has(match[1]) || labels.has(match[1].replace(/ \[part \d+\/\d+\]$/, '')),
+        )
+        .map((match) => match.index! + 2);
+      if (!boundaries.length) throw error;
+      const middle = boundaries.reduce((best, at) =>
+        Math.abs(at - guidelines.length / 2) < Math.abs(best - guidelines.length / 2) ? at : best,
+      );
+      return [...plan(guidelines.slice(0, middle)), ...plan(guidelines.slice(middle))];
+    }
+  };
+  return plan(params.guidelines).map((page, index) => ({
+    ...page,
+    label: `auxiliary-page-${index + 1}`,
+  }));
 }
 
 export function reviewDelivery(plans: ShardPlan[], completed: Set<string>) {
@@ -332,7 +373,7 @@ export function targetedVerifierContext(
 export async function addReviewEvidence(
   plans: ShardPlan[],
   evidence: EvidenceStore,
-  renderPrompt: (context: string) => string,
+  renderPrompt: (context: string, guidelines?: string) => string,
   budget: ReviewPromptBudget,
   log: (message: string) => void,
 ): Promise<void> {
@@ -372,7 +413,7 @@ export async function addReviewEvidence(
         );
         plan.context += `\n\n${block}`;
         plan.baseContext += `\n\n${block}`;
-        const measured = measureReviewPrompt(renderPrompt(plan.context), budget);
+        const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
         if (!measured.fits)
           throw new Error(
             'Incomplete diff delivery: caller evidence exceeded its reserved prompt budget.',
