@@ -89,6 +89,7 @@ export interface Finding {
   id?: string;
   /** Set by verification, never accepted from model output. */
   verificationUncertain?: boolean;
+  verificationUnavailable?: boolean;
 }
 
 export interface AddressedPriorComment {
@@ -111,4 +112,6 @@ export interface FindingVerdict {
   index: number;
   verdict: VerificationVerdict;
   reason?: string;
+  finding?: Pick<Finding, 'title' | 'severity' | 'kind' | 'evidence'>;
+  unavailable?: boolean;
 }

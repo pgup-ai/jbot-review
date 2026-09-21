@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile, spawn } from 'node:child_process';
+import type { Writable } from 'node:stream';
 import { spawnWithTimeout, type CliProcessOptions, type CliProcessResult } from '@symma/protocol';
 
 const sessionSignal = new AsyncLocalStorage<AbortSignal>();
@@ -81,10 +82,15 @@ export function createCliProcessScope() {
 export function runCliProcess(
   command: string,
   args: string[],
-  options: CliProcessOptions & { onStdout?: (chunk: string) => void },
+  options: CliProcessOptions & {
+    onStdout?: (chunk: string) => void;
+    // Piped output is not captured; the caller owns closing and flushing the stream.
+    output?: Writable;
+  },
 ): Promise<CliProcessResult> {
   const signal = sessionSignal.getStore();
-  if (!signal && !options.onStdout) return spawnWithTimeout(command, args, options);
+  if (!signal && !options.onStdout && !options.output)
+    return spawnWithTimeout(command, args, options);
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -138,15 +144,25 @@ export function runCliProcess(
     const abort = () => cancel(new Error(String(signal?.reason ?? 'CLI aborted')));
     signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => cancel(new Error(options.timeoutMessage)), options.timeoutMs);
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      stdout += chunk;
-      options.onStdout?.(chunk);
-    });
-    child.stderr?.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
+    const outputError = (error: Error) => {
+      cancel(error);
+      failure ??= error;
+    };
+    if (options.output) {
+      options.output.once('error', outputError);
+      child.stdout?.pipe(options.output, { end: false });
+      child.stderr?.pipe(options.output, { end: false });
+    } else {
+      child.stdout?.setEncoding('utf8');
+      child.stderr?.setEncoding('utf8');
+      child.stdout?.on('data', (chunk: string) => {
+        stdout += chunk;
+        options.onStdout?.(chunk);
+      });
+      child.stderr?.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+    }
     child.stdin?.on('error', (error: Error) => {
       stderr += `\n[stdin error: ${error.message}]`;
     });
@@ -160,6 +176,7 @@ export function runCliProcess(
       clearTimeout(killTimer);
       clearTimeout(exitTimer);
       signal?.removeEventListener('abort', abort);
+      options.output?.removeListener('error', outputError);
       await treeKill;
       if (failure) reject(failure);
       else resolve({ stdout, stderr, exitCode });

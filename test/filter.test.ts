@@ -4,6 +4,8 @@ import { describe, it } from 'node:test';
 import {
   anchorFindings,
   applyFindingVerdicts,
+  filterFindings,
+  isUnresolvedFinding,
   mergeVerdictsByLocation,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
@@ -292,8 +294,64 @@ describe('applyFindingVerdicts', () => {
         ],
       );
       assert.match(result[0].title, /^Unverified concern:/);
+      assert.match(result[0].body, /Verification inconclusive/);
+      assert.equal(result[0].verificationUnavailable, undefined);
       assert.match(result[0].body, /Caller unavailable/);
       assert.match(result[0].body, /> Definitely broken/);
+    }
+  });
+
+  it('promotes verified hypotheses only with a grounded replacement at the original location', () => {
+    const candidate = finding({
+      kind: 'investigate',
+      confidence: 'low',
+      severity: 'P3',
+      id: 'candidate',
+    });
+    const confirmed = {
+      ...candidate,
+      kind: 'bug' as const,
+      confidence: 'high' as const,
+      severity: 'P1' as const,
+      path: 'cannot-relocate.ts',
+      line: 999,
+      body: 'A demonstrated trigger loses jobs.',
+      evidence: 'return jobs.slice(0, 100);',
+    };
+    for (const replacement of [
+      confirmed,
+      undefined,
+      { ...confirmed, kind: 'investigate' as const },
+      { ...confirmed, evidence: '' },
+    ]) {
+      const verdicts = [
+        {
+          index: 0,
+          verdict: 'confirmed' as const,
+          reason: '201 submitted jobs become 100.',
+          finding: replacement,
+        },
+      ];
+      for (const result of [
+        applyFindingVerdicts([candidate], [0], verdicts),
+        mergeVerdictsByLocation([candidate], [candidate], verdicts),
+      ]) {
+        const promoted = replacement === confirmed;
+        assert.equal(isUnresolvedFinding(result.findings[0]), !promoted);
+        const routed = anchorFindings(
+          result.findings,
+          new Map([[candidate.path, new Set([candidate.line])]]),
+          true,
+        );
+        assert.equal(routed.inline.length, promoted ? 1 : 0);
+        if (promoted) {
+          assert.equal(result.findings[0].severity, 'P1');
+          assert.equal(result.findings[0].body, verdicts[0].reason);
+          assert.equal(result.findings[0].path, candidate.path);
+          assert.equal(result.findings[0].line, candidate.line);
+          assert.equal(result.findings[0].id, candidate.id);
+        }
+      }
     }
   });
 
@@ -309,6 +367,8 @@ describe('applyFindingVerdicts', () => {
     assert.equal(result.length, findings.length - 1);
     for (const f of result) {
       assert.equal(f.verificationUncertain, true);
+      assert.equal(f.verificationUnavailable, true);
+      assert.match(f.body, /Verification not completed/);
       assert.equal(f.confidence, 'low');
       assert.match(f.body, /Finding verification did not return a verdict/);
     }
@@ -728,18 +788,51 @@ describe('anchorFindings', () => {
 
   it('splits findings into inline, file-level, and orphaned buckets', () => {
     const fallback = finding({ path: 'a.ts', line: 99 });
+    const unresolved = [
+      finding({ path: 'a.ts', line: 1, verificationUncertain: true }),
+      finding({ path: 'a.ts', line: 0, kind: 'investigate' }),
+      finding({ path: 'outside.ts', line: 99, confidence: 'low' }),
+    ];
     const out = anchorFindings(
       [
         finding({ path: 'a.ts', line: 1 }),
         finding({ path: 'a.ts', line: 0 }),
         fallback,
         finding({ path: 'outside.ts', line: 99 }),
+        ...unresolved,
       ],
       addable,
       true,
     );
     assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
     assert.equal(fallback.line, 0);
+    assert.deepEqual(out.withheld, unresolved);
+    assert.equal(out.withheld[2].line, 99);
+    const bounded = anchorFindings(
+      filterFindings(
+        [
+          ...unresolved,
+          finding({ path: 'a.ts', line: 2, severity: 'P1', confidence: 'high' }),
+          finding({ path: 'a.ts', line: 1, severity: 'P2', confidence: 'high' }),
+        ],
+        { minSeverity: 'P1', maxFindings: 1 },
+      ),
+      addable,
+      true,
+    );
+    assert.equal(bounded.inline.length, 1);
+    assert.equal(bounded.inline[0].severity, 'P1');
+    assert.deepEqual(bounded.withheld, unresolved);
+
+    assert.equal(
+      isPrCleanAfterRun(
+        out.inline.length + out.fileLevel.length + out.orphaned.length + out.withheld.length,
+        0,
+        true,
+        true,
+      ),
+      false,
+    );
     assert.deepEqual(out.anchorMissed, [fallback], 'a model-declared line 0 is not an anchor miss');
   });
 

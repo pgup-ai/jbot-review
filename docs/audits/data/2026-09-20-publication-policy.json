@@ -1,0 +1,595 @@
+{
+  "publicationReplay": {
+    "treatmentCommit": "40b8af7",
+    "historical": {
+      "total": 18,
+      "published": 0,
+      "withheld": 18,
+      "allClear": false
+    },
+    "corpus": {
+      "cases": 100,
+      "repetitions": 3,
+      "reviews": 300,
+      "retained": 1050,
+      "published": 150,
+      "withheld": 900,
+      "sha256": "996d4170c6fbc6adf6f457d5fe4a7238c4e42e14c9cc16a7058ef8ef9d9bab22"
+    },
+    "routingAndReportMs": {
+      "median": 0.0021660000000167656,
+      "p95": 0.004541999999986501
+    },
+    "limitation": "Deterministic publication-contract replay, not a model-quality or release-gate result."
+  },
+  "pipeline": {
+    "manifest": {
+      "control": "8f27454af1186290adaf01f5b775a85e8f5db2b0",
+      "treatmentCommit": "40b8af76cefc13e9ed283b3a32329578e26120da",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 3,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "b4b878fb640a720159168444644e59879adbb812",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus."
+    },
+    "driverHash": "047743ed7201f349ccec19135be81cf44c362a1cefecb6601d2b7ccb1f0bd015",
+    "rows": [
+      {
+        "arm": "control",
+        "name": "defect-control-1",
+        "durationMs": 27854,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "defect-treatment-1",
+        "durationMs": 34734,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "defect-treatment-2",
+        "durationMs": 24971,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "defect-control-2",
+        "durationMs": 31581,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "defect-control-3",
+        "durationMs": 31618,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "defect-treatment-3",
+        "durationMs": 31476,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "clean-control-1",
+        "durationMs": 30178,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-1",
+        "durationMs": 20884,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-2",
+        "durationMs": 14828,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "clean-control-2",
+        "durationMs": 18745,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "clean-control-3",
+        "durationMs": 27374,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-3",
+        "durationMs": 25580,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      }
+    ],
+    "negativeControlValidity": "Invalid as a clean control: Array.from refactor drops all jobs when limit is Infinity; original loop returns all. Zero findings do not establish precision."
+  },
+  "verifier": {
+    "manifest": {
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "effort": "provider-default",
+      "cliVersion": "1.44.0",
+      "controlCommit": "8f27454",
+      "candidateParent": "40b8af7",
+      "repetitions": 3,
+      "inputHash": "9d09c40ba36eaf0466f1ad9d25ae4a07167ef533e0de12048d2c8eddb2b62a77",
+      "promptHash": "0d6c94f2417bb008f8a8e0e34f265964d9676a8e15e9bbb4f2b65f5f33715d44",
+      "limitation": "Component replay with supplied decisive code, not exact hosted prompts or a release gate.",
+      "treatmentCommit": "ff7a81d2bfd245e29b3b74eb6b2e05db4d1002ca"
+    },
+    "driverHash": "04a15b071c3fa54f87bea5a1837a910f44c1ede5993d83808df083031d4dd18a",
+    "rows": [
+      {
+        "arm": "control",
+        "repeat": 1,
+        "durationMs": 21964,
+        "verdicts": [
+          {
+            "index": 0,
+            "verdict": "refuted",
+            "reason": "src/shared/review-plan.ts:111 already emits `+${newCount ? newLine : newLine - 1},${newCount}` using newLine as start, not newCount as claimed."
+          },
+          {
+            "index": 1,
+            "verdict": "refuted",
+            "reason": "src/shared/review-plan.ts:127 still exports buildShardPlans and src/shared/runner.ts:2-12 imports buildShardPlans and type ShardPlan from './review-plan.ts', so the alleged deletion/missing import does not exist."
+          },
+          {
+            "index": 2,
+            "verdict": "confirmed",
+            "reason": "drain in src/worker.ts:2 flats reviewBatch in src/batch.ts:2 which returns only `[jobs.slice(0, limit)]`, so 201 jobs returns just the first 100."
+          }
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repeat": 1,
+        "durationMs": 17732,
+        "verdicts": [
+          {
+            "index": 0,
+            "verdict": "refuted",
+            "reason": "The claimed expression `+${newCount ? newCount : newLine - 1}` does not exist; src/shared/review-plan.ts:111 already emits `+${newCount ? newLine : newLine - 1},${newCount}` as the finding proposes."
+          },
+          {
+            "index": 1,
+            "verdict": "refuted",
+            "reason": "The requested import check is already answered: src/shared/runner.ts:2 imports `buildShardPlans` and src/shared/runner.ts:11 imports `type ShardPlan` from './review-plan.ts'."
+          },
+          {
+            "index": 2,
+            "verdict": "confirmed",
+            "reason": "With 201 jobs, `return [jobs.slice(0, limit)]` (src/batch.ts:2) via `reviewBatch(jobs, 100).flat()` (src/worker.ts:2) returns only the first 100 jobs, dropping the rest."
+          }
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repeat": 2,
+        "durationMs": 20893,
+        "verdicts": [
+          {
+            "index": 0,
+            "verdict": "refuted",
+            "reason": "src/shared/review-plan.ts:111 already emits `+${newCount ? newLine : newLine - 1},${newCount}`, not the claimed `+${newCount ? newCount : ...}`; the new-side start is newLine."
+          },
+          {
+            "index": 1,
+            "verdict": "refuted",
+            "reason": "Supplied code shows src/shared/runner.ts:2-12 imports `buildShardPlans` and `type ShardPlan` from './review-plan.ts' and src/shared/review-plan.ts:127 still exports `buildShardPlans`; no broken reference is demonstrated."
+          },
+          {
+            "index": 2,
+            "verdict": "confirmed",
+            "reason": "With 201 jobs, `reviewBatch(jobs,100)` at src/batch.ts:2 returns `[jobs.slice(0,100)]` so `drain` at src/worker.ts:2 flattens to only the first 100 jobs, violating the all-jobs contract."
+          }
+        ]
+      },
+      {
+        "arm": "control",
+        "repeat": 2,
+        "durationMs": 31188,
+        "verdicts": [
+          {
+            "index": 0,
+            "verdict": "refuted",
+            "reason": "src/shared/review-plan.ts:111 already emits `+${newCount ? newLine : newLine - 1},${newCount}`, using the running start `newLine`, not `newCount` as claimed."
+          },
+          {
+            "index": 1,
+            "verdict": "uncertain",
+            "reason": "src/shared/runner.ts:1-12 shows `ShardPlan`/`buildShardPlans` are imported from `./review-plan.ts` and src/shared/review-plan.ts:127 still exports `buildShardPlans`, but src/shared/runner.ts:3642 content, the `ShardPlan` shape, and other importers are not in evidence and must be checked."
+          },
+          {
+            "index": 2,
+            "verdict": "confirmed",
+            "reason": "`drain()` returns `reviewBatch(jobs, 100).flat()` (src/worker.ts:2) and `reviewBatch` returns `[jobs.slice(0, limit)]` (src/batch.ts:2), so 201 jobs returns only the first 100."
+          }
+        ]
+      },
+      {
+        "arm": "control",
+        "repeat": 3,
+        "durationMs": 33476,
+        "verdicts": [
+          {
+            "index": 0,
+            "verdict": "refuted",
+            "reason": "The quoted buggy code does not exist: src/shared/review-plan.ts:111 already emits `+${newCount ? newLine : newLine - 1},${newCount}` using the running newLine start, not newCount."
+          },
+          {
+            "index": 1,
+            "verdict": "uncertain",
+            "reason": "The cited location src/shared/runner.ts:3642 and the alleged deleted ShardPlan shape are not in the embedded context; src/shared/runner.ts:2-12 and src/shared/review-plan.ts:127 show the import/export exists but cannot prove the shape mismatch or missing importers without the unprovided code."
+          },
+          {
+            "index": 2,
+            "verdict": "confirmed",
+            "reason": "src/batch.ts:2 returns only `[jobs.slice(0, limit)]` so src/worker.ts:1 `drain()` with limit 100 flattens to just the first 100 jobs, dropping the rest and violating the all-jobs contract."
+          }
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repeat": 3,
+        "durationMs": 20427,
+        "verdicts": [
+          {
+            "index": 0,
+            "verdict": "refuted",
+            "reason": "src/shared/review-plan.ts:111 emits `+${newCount ? newLine : newLine - 1},${newCount}` using newLine as the start, not newCount, so the claimed `+${newCount ? newCount ...}` expression does not exist."
+          },
+          {
+            "index": 1,
+            "verdict": "refuted",
+            "reason": "src/shared/runner.ts:2-12 already imports `buildShardPlans` and `type ShardPlan` from './review-plan.ts' and src/shared/review-plan.ts:127 still exports `buildShardPlans`; the claimed deletion and line 3642 are not in evidence."
+          },
+          {
+            "index": 2,
+            "verdict": "confirmed",
+            "reason": "With 201 jobs, src/worker.ts:2 `reviewBatch(jobs, 100).flat()` over src/batch.ts:2 `return [jobs.slice(0, limit)]` returns only `jobs.slice(0,100)`, dropping jobs 101-201."
+          }
+        ]
+      }
+    ]
+  },
+  "finalSmoke": {
+    "manifest": {
+      "control": "8f27454af1186290adaf01f5b775a85e8f5db2b0",
+      "treatmentCommit": "ff7a81d2bfd245e29b3b74eb6b2e05db4d1002ca",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 1,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "53bd3933e760a1997b6a9f2c9fb7d29c0b127abe",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus."
+    },
+    "rows": [
+      {
+        "arm": "control",
+        "name": "defect-control-1",
+        "durationMs": 23415,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "defect-treatment-1",
+        "durationMs": 25588,
+        "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "clean-control-1",
+        "durationMs": 20943,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-1",
+        "durationMs": 48389,
+        "fixtureHash": "41371406c383dca4a760223ef86a48cc90c0af4b4ebed750b570bf376e45b3d2",
+        "calls": 3,
+        "findings": 1,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      }
+    ],
+    "adjudication": "Treatment caught a demonstrated boundary difference in the originally labeled clean fixture. P1 severity is not established by its fixed-100 caller."
+  },
+  "correctedClean": {
+    "manifest": {
+      "control": "8f27454af1186290adaf01f5b775a85e8f5db2b0",
+      "treatmentCommit": "ff7a81d2bfd245e29b3b74eb6b2e05db4d1002ca",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 3,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "6021e7af4281bf3d2117a99dce47dc7970d7e789",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus."
+    },
+    "driverHash": "b62f79a0b057099ffba84d379516a1f64c2e775a81afb310ddae4d5b912a2b95",
+    "fixture": "Rename local batches binding to chunks; preserve the original loop and all behavior.",
+    "rows": [
+      {
+        "arm": "control",
+        "name": "clean-control-1",
+        "durationMs": 12994,
+        "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-1",
+        "durationMs": 9137,
+        "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-2",
+        "durationMs": 7135,
+        "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "clean-control-2",
+        "durationMs": 7184,
+        "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "control",
+        "name": "clean-control-3",
+        "durationMs": 13696,
+        "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      },
+      {
+        "arm": "treatment",
+        "name": "clean-treatment-3",
+        "durationMs": 7673,
+        "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+        "calls": 2,
+        "findings": 0,
+        "unresolved": 0,
+        "incomplete": [],
+        "delivery": {
+          "expectedHunks": 1,
+          "deliveredHunks": 1,
+          "expectedTasks": 1,
+          "completedTasks": 1,
+          "incompleteTasks": 0
+        }
+      }
+    ]
+  }
+}

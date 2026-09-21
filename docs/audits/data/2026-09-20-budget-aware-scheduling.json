@@ -1,0 +1,184 @@
+{
+  "baseCommit": "2d8f9239424ba6644dcc36e0d45433eb74640974",
+  "runs": [
+    {
+      "name": "control-run",
+      "runtimeCommit": "b25190423353fe490a47af78a27ac619fcff17c2",
+      "reviewedHead": "b25190423353fe490a47af78a27ac619fcff17c2",
+      "base": "origin/main",
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "timeBudgetMinutes": 30,
+      "concurrency": 5,
+      "elapsedMs": 395695,
+      "mainMs": 337056,
+      "mainPromptBytes": 4430924,
+      "auxiliaryWaitMs": 51634,
+      "delivery": {
+        "expectedHunks": 417,
+        "deliveredHunks": 417,
+        "expectedTasks": 59,
+        "completedTasks": 59,
+        "incompleteTasks": 0
+      },
+      "auxiliaryPages": {
+        "completed": 6,
+        "failed": 38
+      },
+      "verifierQueueMs": [2296],
+      "observedPeakPrompts": 5,
+      "remainingPromptsAtEnd": 0,
+      "mainPagesCompletedBeforeFirstAuxiliary": 55,
+      "estimatedCostUsd": 0.160029,
+      "findingDispositions": {
+        "posted-inline": 2,
+        "refuted": 1,
+        "withheld-unverified": 1
+      },
+      "hashes": {
+        "result": "330aa634f7a30f999fab6e071a4377adf666bf85d77af3aa582ab4f7c46935aa",
+        "log": "77c06b8943b1e845a6ab7bc26a6e83ab3832d79795fb777c1e52a176e41f6bb7",
+        "manifest": "85e0f1168e6b7b56f4d2d5164b213f8c47458e0c9d6e783f179fd4383f367682"
+      }
+    },
+    {
+      "name": "treatment-run",
+      "runtimeCommit": "7b01d02639335ce29c055a954f83d140bd55394f",
+      "reviewedHead": "b25190423353fe490a47af78a27ac619fcff17c2",
+      "base": "origin/main",
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "timeBudgetMinutes": 30,
+      "concurrency": 5,
+      "elapsedMs": 543164,
+      "mainMs": 439332,
+      "mainPromptBytes": 4408223,
+      "auxiliaryWaitMs": 97331,
+      "delivery": {
+        "expectedHunks": 417,
+        "deliveredHunks": 417,
+        "expectedTasks": 59,
+        "completedTasks": 59,
+        "incompleteTasks": 0
+      },
+      "auxiliaryPages": {
+        "completed": 44
+      },
+      "verifierQueueMs": [0],
+      "observedPeakPrompts": 5,
+      "remainingPromptsAtEnd": 0,
+      "mainPagesCompletedBeforeFirstAuxiliary": 1,
+      "estimatedCostUsd": 0.233442,
+      "findingDispositions": {
+        "withheld-unverified": 2,
+        "posted-inline": 1,
+        "refuted": 1
+      },
+      "hashes": {
+        "result": "6df517cd5673972b709269d5ababd23b0378a92b0b3b2d5bcd76c63dedd7151f",
+        "log": "70416914920a48aa160527c77bc7c5889a27268354ede729f22ac2d6343129b9",
+        "manifest": "e4b5cd1aad2956f4a1ebad37a277f96c14a83945bdd5f1ce57c1811137774960"
+      }
+    },
+    {
+      "name": "cline-seed",
+      "runtimeCommit": "7b01d02639335ce29c055a954f83d140bd55394f",
+      "reviewedHead": "d9901ffb676a3d8aff327ae37ebcf13a5b7e72be",
+      "base": "HEAD^",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "timeBudgetMinutes": 30,
+      "concurrency": 5,
+      "elapsedMs": 18228,
+      "mainMs": 10572,
+      "mainPromptBytes": 24200,
+      "auxiliaryWaitMs": 3,
+      "delivery": {
+        "expectedHunks": 1,
+        "deliveredHunks": 1,
+        "expectedTasks": 1,
+        "completedTasks": 1,
+        "incompleteTasks": 0
+      },
+      "auxiliaryPages": {},
+      "verifierQueueMs": [0],
+      "observedPeakPrompts": 1,
+      "remainingPromptsAtEnd": 0,
+      "mainPagesCompletedBeforeFirstAuxiliary": null,
+      "estimatedCostUsd": null,
+      "findingDispositions": {
+        "posted-inline": 1
+      },
+      "hashes": {
+        "result": "7657c9cecb1a75fff19f82315c83f66838a46f11d0012f957c84326938adb573",
+        "log": "20558c78e1774da1c62535b8d9dc9629bd431cfb00cfcc7983bf6401e0eca619",
+        "manifest": "2eec6224771da9a314023ebc9599d38f5606faf94505225844beb8ede57327cf"
+      }
+    },
+    {
+      "name": "cline-increment",
+      "runtimeCommit": "7b01d02639335ce29c055a954f83d140bd55394f",
+      "reviewedHead": "7b01d02639335ce29c055a954f83d140bd55394f",
+      "base": "b25190423353fe490a47af78a27ac619fcff17c2",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "timeBudgetMinutes": 30,
+      "concurrency": 5,
+      "elapsedMs": 104424,
+      "mainMs": 104126,
+      "mainPromptBytes": 90550,
+      "auxiliaryWaitMs": 0,
+      "delivery": {
+        "expectedHunks": 25,
+        "deliveredHunks": 25,
+        "expectedTasks": 1,
+        "completedTasks": 1,
+        "incompleteTasks": 0
+      },
+      "auxiliaryPages": {
+        "completed": 1
+      },
+      "verifierQueueMs": [],
+      "observedPeakPrompts": 2,
+      "remainingPromptsAtEnd": 0,
+      "mainPagesCompletedBeforeFirstAuxiliary": 0,
+      "estimatedCostUsd": null,
+      "findingDispositions": {},
+      "hashes": {
+        "result": "2e319c1dd62b4f4a71eb6b9ae525af152d05a54bf311c33f4194afe59ef370cd",
+        "log": "d5cb650f7f5357ad36127aa309064ed85828f7254bbabcc38809ccd8ab9fb71e",
+        "manifest": "59841ea5d18cb67279101767e8eccf7230f447bb79978c5328a13c8c0d707c02"
+      }
+    },
+    {
+      "name": "cline-deepseek-seed",
+      "runtimeCommit": "7b01d02639335ce29c055a954f83d140bd55394f",
+      "reviewedHead": "d9901ffb676a3d8aff327ae37ebcf13a5b7e72be",
+      "base": "HEAD^",
+      "model": "cline/deepseek/deepseek-v4-flash",
+      "timeBudgetMinutes": 2,
+      "concurrency": 5,
+      "elapsedMs": 30966,
+      "mainMs": 20947,
+      "mainPromptBytes": 24200,
+      "auxiliaryWaitMs": 2,
+      "delivery": {
+        "expectedHunks": 1,
+        "deliveredHunks": 1,
+        "expectedTasks": 1,
+        "completedTasks": 1,
+        "incompleteTasks": 0
+      },
+      "auxiliaryPages": {},
+      "verifierQueueMs": [0],
+      "observedPeakPrompts": 1,
+      "remainingPromptsAtEnd": 0,
+      "mainPagesCompletedBeforeFirstAuxiliary": null,
+      "estimatedCostUsd": null,
+      "findingDispositions": {
+        "posted-inline": 1
+      },
+      "hashes": {
+        "result": "59ea4a6a4b7296f0e69a2b1b3ef4249d3343199221f3e80c5d7c8e228455bbfe",
+        "log": "07fef9061ace424e8d724f432c952a57d5565af4b29c607cccbd3ab63afdc6d6",
+        "manifest": "c54387a65fd6168bc6b2d2b58a1541b65df34b506cf5aaeb42ab36812965be0e"
+      }
+    }
+  ]
+}

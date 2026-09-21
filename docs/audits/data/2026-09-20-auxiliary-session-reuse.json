@@ -1,0 +1,435 @@
+{
+  "protocol": {
+    "model": "cline/cline-free/muse-spark-1.3-contributor",
+    "baselineCommit": "3154f11c49d9e1ac4566c505621ebf5a74004925",
+    "treatmentCommit": "239bdf997634036ffa5b004746597ce85624512b",
+    "repetitions": 3,
+    "files": 92,
+    "patchBytes": 173912,
+    "fixtureHash": "380e22d79c71eed785959847e785a80180d8bb1a2958ab37c3137fac0414a738",
+    "baseCount": 201,
+    "headCount": 100,
+    "expected": [
+      "src/batch.ts silently drops jobs after the first 100 through unchanged worker.ts",
+      "src/policy.ts removes the explicit owner required by AGENTS.md"
+    ],
+    "qualityGate": "targeted experiment only; not the full corpus"
+  },
+  "runtimeFollowup": "3e1c952da221f89be95cc20790190cf3ba39f0f4",
+  "rawResultsHash": "6fe601c2587f64a6fb4d31c6082b222d7810ca0cf00d10bb22d106fea10765b2",
+  "runs": [
+    {
+      "arm": "control",
+      "repetition": 1,
+      "durationMs": 107455,
+      "calls": 15,
+      "finderPromptBytes": 1081940,
+      "mainMs": 38590,
+      "auxiliaryWaitMs": 62568,
+      "verificationMs": 6045,
+      "delivery": {
+        "expectedHunks": 92,
+        "deliveredHunks": 92,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incomplete": [],
+      "retained": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P1",
+          "title": "`partition()` drops jobs beyond `limit`"
+        },
+        {
+          "path": "src/policy.ts",
+          "line": 1,
+          "severity": "P1",
+          "title": "queue policy missing required owner field"
+        }
+      ],
+      "telemetryHash": "ab5e6d3a1b0f05b51e3b37027869d4b85478fa7ccf6ec68818a0302b0409fda8"
+    },
+    {
+      "arm": "treatment",
+      "repetition": 1,
+      "durationMs": 97601,
+      "calls": 11,
+      "finderPromptBytes": 787696,
+      "mainMs": 48077,
+      "auxiliaryWaitMs": 41134,
+      "verificationMs": 8176,
+      "delivery": {
+        "expectedHunks": 92,
+        "deliveredHunks": 92,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incomplete": [],
+      "retained": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P1",
+          "title": "`partition()` drops jobs beyond `limit`"
+        },
+        {
+          "path": "src/policy.ts",
+          "line": 1,
+          "severity": "P1",
+          "title": "`policy` removes required `owner` field"
+        }
+      ],
+      "telemetryHash": "6fa3feaf769b31f80f1cc6e98fee96a3cbbd66cdef28af3c1c2c5f18f6cba7ec"
+    },
+    {
+      "arm": "treatment",
+      "repetition": 2,
+      "durationMs": 82989,
+      "calls": 11,
+      "finderPromptBytes": 787696,
+      "mainMs": 43908,
+      "auxiliaryWaitMs": 31299,
+      "verificationMs": 7619,
+      "delivery": {
+        "expectedHunks": 92,
+        "deliveredHunks": 92,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incomplete": [],
+      "retained": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P1",
+          "title": "`partition()` drops jobs beyond `limit`"
+        },
+        {
+          "path": "src/policy.ts",
+          "line": 1,
+          "severity": "P1",
+          "title": "Restore `owner` in `policy`"
+        }
+      ],
+      "telemetryHash": "1ca41553a36c4dec9b607084ad49eb676a71e5d4813ad2f2d660647199a1c7d4"
+    },
+    {
+      "arm": "control",
+      "repetition": 2,
+      "durationMs": 114907,
+      "calls": 15,
+      "finderPromptBytes": 1081940,
+      "mainMs": 44024,
+      "auxiliaryWaitMs": 65113,
+      "verificationMs": 5608,
+      "delivery": {
+        "expectedHunks": 92,
+        "deliveredHunks": 92,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incomplete": [],
+      "retained": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P1",
+          "title": "`partition()` drops all jobs beyond `limit`"
+        },
+        {
+          "path": "src/policy.ts",
+          "line": 1,
+          "severity": "P1",
+          "title": "queue policy drops required owner field"
+        }
+      ],
+      "telemetryHash": "9539c562a123b92a23f9b63fe7cbdfcc7aa20599a3594f25c655154acc671c77"
+    },
+    {
+      "arm": "control",
+      "repetition": 3,
+      "durationMs": 102014,
+      "calls": 15,
+      "finderPromptBytes": 1081940,
+      "mainMs": 39964,
+      "auxiliaryWaitMs": 55865,
+      "verificationMs": 6027,
+      "delivery": {
+        "expectedHunks": 92,
+        "deliveredHunks": 92,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incomplete": [],
+      "retained": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P1",
+          "title": "`partition()` drops jobs beyond `limit`"
+        },
+        {
+          "path": "src/policy.ts",
+          "line": 1,
+          "severity": "P1",
+          "title": "queue policy owner field removed"
+        }
+      ],
+      "telemetryHash": "bf1a587a3fa4975d2b5fc3d0a4bffd6805a7ba039fc16d94e05a920e66c30d01"
+    },
+    {
+      "arm": "treatment",
+      "repetition": 3,
+      "durationMs": 70614,
+      "calls": 11,
+      "finderPromptBytes": 787696,
+      "mainMs": 38252,
+      "auxiliaryWaitMs": 25870,
+      "verificationMs": 6334,
+      "delivery": {
+        "expectedHunks": 92,
+        "deliveredHunks": 92,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incomplete": [],
+      "retained": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P1",
+          "title": "`partition()` drops jobs beyond `limit`"
+        },
+        {
+          "path": "src/policy.ts",
+          "line": 1,
+          "severity": "P2",
+          "title": "`policy` drops required `owner` field"
+        }
+      ],
+      "telemetryHash": "f081c654bc32c56f80d2cd5fa8fc635a79c5f8e31ace2f5fe04f69a9f0c9b8f3"
+    }
+  ],
+  "rejectedFourFindingBatches": {
+    "protocol": {
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "control": "3154f11c49d9e1ac4566c505621ebf5a74004925",
+      "treatment": "84cef934935c071418d44ebd7910ee476271e5d6",
+      "workspace": "3154f11c49d9e1ac4566c505621ebf5a74004925",
+      "inputHash": "9259cd91f688563ffb2df7743a860be4a0d1f99d177993eb9819f366ae39cff8",
+      "repetitions": 3,
+      "expected": "All nine posted hypotheses lack a demonstrated defect after source/API adjudication; this replay cannot prove absence of all other callers.",
+      "reconstruction": "Original hypotheses extracted from posted comments; no prior verifier uncertainty/reasoning included."
+    },
+    "hypothesisPaths": [
+      "src/shared/time-budget.ts",
+      "src/shared/telemetry.ts",
+      "src/shared/backend-selection.ts",
+      "src/local/index.ts",
+      "src/shared/evidence.ts",
+      "src/shared/jev-prefetch.ts",
+      "src/shared/opencode-session.ts",
+      "src/shared/runner.ts",
+      "src/shared/runner.ts"
+    ],
+    "contextPolicy": "Bounded full-file patches for target paths, identical between arms; not the production paged verifier context.",
+    "rawResultsHash": "76403c3a692e299dbf3977d5b287092843cace4800d58e4db0b34faf3f3b9b75",
+    "runs": [
+      {
+        "arm": "control",
+        "repetition": 1,
+        "durationMs": 32355,
+        "calls": 1,
+        "contextBytes": 55879,
+        "contextHashes": ["769a3d64ac2d705cc790f306fa95b66232a1959349612e2d7b7d284934d33923"],
+        "coverage": ["completed"],
+        "verdicts": [
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "confirmed",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 1,
+        "durationMs": 76458,
+        "calls": 3,
+        "contextBytes": 132749,
+        "contextHashes": [
+          "9f0daddabdc34c62da89af1dfd00af87a93640a7e92779f5ea77d8e7bb959e26",
+          "3f38b7488b79b7a1bab7d1f42adff31635e69dd5aa73641679e87140d4e16814",
+          "a8e939052b4e1b97061ab3384d32c0b638324e2acef96388e2372522443341bb"
+        ],
+        "coverage": ["completed"],
+        "verdicts": [
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "refuted",
+          "confirmed",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 2,
+        "durationMs": 82626,
+        "calls": 3,
+        "contextBytes": 132749,
+        "contextHashes": [
+          "9f0daddabdc34c62da89af1dfd00af87a93640a7e92779f5ea77d8e7bb959e26",
+          "3f38b7488b79b7a1bab7d1f42adff31635e69dd5aa73641679e87140d4e16814",
+          "a8e939052b4e1b97061ab3384d32c0b638324e2acef96388e2372522443341bb"
+        ],
+        "coverage": ["completed"],
+        "verdicts": [
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "refuted",
+          "confirmed",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "control",
+        "repetition": 2,
+        "durationMs": 64549,
+        "calls": 1,
+        "contextBytes": 55879,
+        "contextHashes": ["769a3d64ac2d705cc790f306fa95b66232a1959349612e2d7b7d284934d33923"],
+        "coverage": ["completed"],
+        "verdicts": [
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "control",
+        "repetition": 3,
+        "durationMs": 32043,
+        "calls": 1,
+        "contextBytes": 55879,
+        "contextHashes": ["769a3d64ac2d705cc790f306fa95b66232a1959349612e2d7b7d284934d33923"],
+        "coverage": ["completed"],
+        "verdicts": [
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "confirmed",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 3,
+        "durationMs": 75529,
+        "calls": 3,
+        "contextBytes": 132749,
+        "contextHashes": [
+          "9f0daddabdc34c62da89af1dfd00af87a93640a7e92779f5ea77d8e7bb959e26",
+          "3f38b7488b79b7a1bab7d1f42adff31635e69dd5aa73641679e87140d4e16814",
+          "a8e939052b4e1b97061ab3384d32c0b638324e2acef96388e2372522443341bb"
+        ],
+        "coverage": ["completed"],
+        "verdicts": [
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "refuted",
+          "confirmed",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      }
+    ]
+  },
+  "rejectedExtraEvidenceBudgetBatch": {
+    "protocol": {
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "control": "3154f11c49d9e1ac4566c505621ebf5a74004925",
+      "treatment": "85cf07fc3c05fc0a8628bf3b0d4ba0ef4a55d88c",
+      "workspace": "3154f11c49d9e1ac4566c505621ebf5a74004925",
+      "inputHash": "9259cd91f688563ffb2df7743a860be4a0d1f99d177993eb9819f366ae39cff8",
+      "repetitions": 1,
+      "expected": "All nine posted hypotheses lack a demonstrated defect after source/API adjudication; this replay cannot prove absence of all other callers.",
+      "reconstruction": "Original hypotheses extracted from posted comments; no prior verifier uncertainty/reasoning included."
+    },
+    "durationMs": 98307,
+    "calls": 1,
+    "verdicts": [
+      "uncertain",
+      "uncertain",
+      "confirmed",
+      "uncertain",
+      "confirmed",
+      "confirmed",
+      "uncertain",
+      "uncertain",
+      "uncertain"
+    ],
+    "rawResultsHash": "5748385b123e0e34b81b8ee92ee71db14c3aaea14b20a5e8b79900ca48a821cb",
+    "limitation": "One unpaired probe. Extra evidence did not refute any hypothesis; this does not establish a stable latency regression."
+  },
+  "finalRuntimeSmoke": {
+    "commit": "3e1c952da221f89be95cc20790190cf3ba39f0f4",
+    "durationMs": 86726,
+    "calls": 11,
+    "delivery": {
+      "expectedHunks": 92,
+      "deliveredHunks": 92,
+      "expectedTasks": 5,
+      "completedTasks": 5,
+      "incompleteTasks": 0
+    },
+    "incomplete": [],
+    "retained": [
+      {
+        "path": "src/batch.ts",
+        "line": 2,
+        "severity": "P1",
+        "title": "`partition()` drops jobs beyond `limit`"
+      },
+      {
+        "path": "src/policy.ts",
+        "line": 1,
+        "severity": "P1",
+        "title": "`policy` removes required `owner` field"
+      }
+    ],
+    "rawResultsHash": "f1da6a07a754a3f938eaab253ad4772d21f23ba1c3274b5b0edc33a52911cecd",
+    "limitation": "One final-runtime smoke run, not a new paired latency estimate."
+  }
+}

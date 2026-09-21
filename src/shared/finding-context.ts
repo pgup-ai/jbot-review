@@ -10,6 +10,80 @@ import type { Finding } from './types.ts';
 const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 256 * 1024;
 const MAX_SOURCE_LOCATIONS = 20;
+export const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|sql)$/i;
+
+type Source = { text: string; truncated: boolean };
+export class SourceCache {
+  entries = new Map<string, { signature: string; source: Source }>();
+  pending = new Map<string, Promise<Source | undefined>>();
+  hits = 0;
+  reads = 0;
+  sharedRequests = 0;
+  bytes = 0;
+}
+
+export async function readTrackedSource(
+  workspace: string,
+  path: string,
+  signal: AbortSignal,
+  options?: { tracked: Set<string>; cache?: SourceCache },
+): Promise<{ text: string; truncated: boolean } | undefined> {
+  const root = resolveWithinWorkspace(workspace, '.');
+  if (!root) return undefined;
+  const target = resolveWithinWorkspace(root, path);
+  // Tracked source only: never follow a cited symlink into runtime credentials.
+  if (!target || target !== resolve(root, path)) return undefined;
+  try {
+    if (options && !options.tracked.has(path)) return undefined;
+    if (!options)
+      await execFileAsync(
+        'git',
+        ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', path],
+        {
+          cwd: root,
+          signal,
+          maxBuffer: 2048,
+        },
+      );
+    const handle = await open(
+      target,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const stat = await handle.stat({ bigint: true });
+      if (!stat.isFile()) return undefined;
+      signal.throwIfAborted();
+      const signature = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
+      const cache = options?.cache;
+      const cached = cache?.entries.get(path);
+      if (cache && cached?.signature === signature) {
+        cache.hits++;
+        return cached.source;
+      }
+      const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
+      const text = buffer.toString('utf8', 0, bytesRead);
+      const truncated = stat.size > BigInt(bytesRead);
+      const lastNewline = text.lastIndexOf('\n');
+      const source = {
+        text: truncated && lastNewline >= 0 ? text.slice(0, lastNewline) : text,
+        truncated,
+      };
+      if (cache) {
+        cache.reads++;
+        cache.bytes += bytesRead;
+        if (cache.entries.size >= 64) cache.entries.delete(cache.entries.keys().next().value!);
+        cache.entries.set(path, { signature, source });
+      }
+      return source;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
 
 export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' | 'body'>[]) {
   const locations = new Map<string, { path: string; line: number }>();
@@ -21,7 +95,10 @@ export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' |
       ),
     ].map((match) => ({ path: match[1] ?? match[3], line: Number(match[2] ?? match[4]) }));
     let citations = 0;
-    for (const [index, ref] of [{ path: finding.path, line: finding.line }, ...refs].entries()) {
+    for (const [index, ref] of [
+      { path: finding.path, line: finding.line === 0 ? 1 : finding.line },
+      ...refs,
+    ].entries()) {
       if (
         !Number.isSafeInteger(ref.line) ||
         ref.line < 1 ||
@@ -43,57 +120,29 @@ export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' |
 export async function buildFindingSourceContext(
   workspace: string,
   findings: Finding[],
+  read: (path: string, signal: AbortSignal) => ReturnType<typeof readTrackedSource> = (
+    path,
+    signal,
+  ) => readTrackedSource(workspace, path, signal),
+  related: { path: string; line: number }[] = [],
 ): Promise<string> {
   const { locations, omitted } = findingSourceLocations(findings);
-  const root = resolveWithinWorkspace(workspace, '.');
-  const files = new Map<string, Promise<string | undefined>>();
+  for (const ref of related)
+    if (!locations.some((location) => location.path === ref.path && location.line === ref.line))
+      locations.push(ref);
+  const files = new Map<string, ReturnType<typeof readTrackedSource>>();
   const signal = AbortSignal.timeout(1500);
-
-  async function readSource(path: string): Promise<string | undefined> {
-    if (!root) return undefined;
-    const target = resolveWithinWorkspace(root, path);
-    // Tracked source only: never follow a cited symlink into runtime credentials.
-    if (!target || target !== resolve(root, path)) return undefined;
-    try {
-      await execFileAsync(
-        'git',
-        ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', path],
-        {
-          cwd: root,
-          signal,
-          maxBuffer: 2048,
-        },
-      );
-      const handle = await open(
-        target,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-      );
-      try {
-        const stat = await handle.stat();
-        if (!stat.isFile()) return undefined;
-        const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
-        const text = buffer.toString('utf8', 0, bytesRead);
-        return stat.size > bytesRead ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text;
-      } finally {
-        await handle.close();
-      }
-    } catch {
-      return undefined;
-    }
-  }
 
   const sources: FindingSource[] = await Promise.all(
     locations.slice(0, MAX_SOURCE_LOCATIONS).map(async (ref) => {
       let file = files.get(ref.path);
       if (!file) {
-        file = readSource(ref.path);
+        file = read(ref.path, signal);
         files.set(ref.path, file);
       }
-      const text = await file;
-      if (!text) return { ...ref };
-      const lines = text.split(/\r?\n/);
+      const source = await file;
+      if (!source?.text) return { ...ref };
+      const lines = source.text.split(/\r?\n/);
       if (ref.line > lines.length) return { ...ref };
       const startLine = Math.max(1, ref.line - 20);
       return { ...ref, startLine, lines: lines.slice(startLine - 1, ref.line + 20) };

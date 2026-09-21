@@ -1,0 +1,340 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "868a476c9e915f0494d35903aaf275323d5d8d3f",
+  "model": "cline/cline-free/muse-spark-1.3-contributor",
+  "patchBytes": 207078,
+  "requestedShards": 1,
+  "maxConcurrentSessions": 3,
+  "trials": [
+    {
+      "treatmentCommit": "3dd54a1b4a33efb4bf14af9d0070d32be0f80488",
+      "rawHash": "sha256:2d2942792f503484b417935c08b3fcbf83b1910e7c8e83219bac72c4b8de8ccb",
+      "rows": [
+        {
+          "arm": "control",
+          "repetition": 1,
+          "durationMs": 143,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 1,
+          "durationMs": 31916,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "treatment",
+          "repetition": 2,
+          "durationMs": 46491,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "control",
+          "repetition": 2,
+          "durationMs": 7,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "control",
+          "repetition": 3,
+          "durationMs": 6,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 3,
+          "durationMs": 32394,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        }
+      ]
+    },
+    {
+      "treatmentCommit": "df71e992937c435f161a8fdacbd0239aefb74298",
+      "rawHash": "sha256:2c0019b10077bf6f4771a3d03d223e34bfa0043620569d0cfcfe0dfa11cbe912",
+      "rows": [
+        {
+          "arm": "control",
+          "repetition": 1,
+          "durationMs": 144,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 1,
+          "durationMs": 37172,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "treatment",
+          "repetition": 2,
+          "durationMs": 37319,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "control",
+          "repetition": 2,
+          "durationMs": 7,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "control",
+          "repetition": 3,
+          "durationMs": 6,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 3,
+          "durationMs": 31703,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        }
+      ]
+    },
+    {
+      "treatmentCommit": "cdb449a50d405cfc04e0be03cb544aa53726f499",
+      "rawHash": "sha256:c1882f8ad96b33fcd27a4eb81d3d967cde68150d087f734f9c2660ec0a5c9f1d",
+      "rows": [
+        {
+          "arm": "control",
+          "repetition": 1,
+          "durationMs": 141,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 1,
+          "durationMs": 39153,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "treatment",
+          "repetition": 2,
+          "durationMs": 35643,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "control",
+          "repetition": 2,
+          "durationMs": 9,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "control",
+          "repetition": 3,
+          "durationMs": 8,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 3,
+          "durationMs": 47543,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        }
+      ]
+    }
+  ],
+  "dogfoodRunsNotPaired": [
+    {
+      "runId": 35530999481,
+      "jobId": 106131440350,
+      "headSha": "868a476c9e915f0494d35903aaf275323d5d8d3f",
+      "model": "commandcode/deepseek/deepseek-v4-flash-fast",
+      "elapsedMs": 125397,
+      "telemetryHash": "sha256:45f0764c0de1d8170d6c502c6e3cbdc5401fe1c6a4c1df27bb1fea8bde72dfed",
+      "sessionCalls": 6,
+      "mainDelivery": null,
+      "incompleteSessions": [],
+      "mainPhaseMs": 77606,
+      "graceWaitMs": 10,
+      "tokens": {
+        "inputTokens": 948183,
+        "outputTokens": 15023,
+        "cacheReadTokens": 158833
+      }
+    },
+    {
+      "runId": 35535032749,
+      "jobId": 106142411475,
+      "headSha": "45498ebad489d76dfd6eef57774e3e32472a2d64",
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "elapsedMs": 617777,
+      "telemetryHash": "sha256:c0c3029557eca114460080816ddc9f2fc4bed1b6ac6277e41baf8a90019fbe60",
+      "sessionCalls": 85,
+      "mainDelivery": {
+        "expectedHunks": 225,
+        "deliveredHunks": 225,
+        "expectedTasks": 34,
+        "completedTasks": 34,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [
+        {
+          "session": "changes-since-last-review",
+          "state": "failed",
+          "failureClass": "unknown"
+        },
+        {
+          "session": "review-interactions",
+          "state": "failed",
+          "failureClass": "aborted"
+        },
+        {
+          "session": "review-interactions-page-10",
+          "state": "failed",
+          "failureClass": "aborted"
+        }
+      ],
+      "mainPhaseMs": 277086,
+      "graceWaitMs": 322930,
+      "tokens": {
+        "inputTokens": 2646665,
+        "outputTokens": 200262,
+        "cacheReadTokens": 390834
+      }
+    }
+  ]
+}

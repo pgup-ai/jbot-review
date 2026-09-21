@@ -75,6 +75,9 @@ describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
       /Use no tools for this review/,
       /do not read files, search the repository, or run\s+git or shell commands/,
       /those checks have NOT been performed unless their results/,
+      /internal "investigate" candidate/,
+      /one specific\s+unanswered premise/,
+      /Do not invent locations/,
     ]) {
       assert.match(NO_TOOLS_REVIEW_DIRECTIVE, rule);
     }
@@ -545,8 +548,9 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /Field constraints:/);
   });
 
-  it('routes uncertain verdicts to advisory severity, not silence', () => {
-    assert.match(FINDING_VERIFICATION_PROMPT, /posted as advisory/);
+  it('keeps uncertain verdicts in diagnostics and out of PR comments', () => {
+    assert.match(FINDING_VERIFICATION_PROMPT, /withheld from PR comments/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /quote the decisive source expression/);
   });
 
   it('abstains on unverifiable third-party framework-internal premises', () => {
@@ -597,6 +601,14 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(prompt, /### Finding 0/);
     assert.match(prompt, /### Finding 1/);
     assert.ok(prompt.indexOf('PR_CONTEXT_SENTINEL') < prompt.indexOf('### Finding 0'));
+    assert.doesNotMatch(prompt, /Tentative candidate|Confirming tentative candidates/);
+    const tentative = assembleFindingVerificationPrompt('CTX', [
+      { ...findings[0], kind: 'investigate', confidence: 'low' },
+    ]);
+    assert.match(tentative, /Tentative candidate/);
+    assert.match(tentative, /"finding" is REQUIRED/);
+    assert.match(tentative, /"finding": \{/);
+    assert.ok(tentative.endsWith(VERIFICATION_OUTPUT_REMINDER));
   });
 
   it('renders line-0 findings as file-level locations', () => {
@@ -632,7 +644,8 @@ describe('assembleFindingVerificationPrompt', () => {
     // preserves the adversarial refute-by-default + framework-abstention discipline
     assert.match(prompt, /each finding is WRONG/);
     assert.match(prompt, /library\/framework behaves internally/);
-    assert.match(prompt, /posted as advisory/);
+    assert.match(prompt, /withheld from PR comments/);
+    assert.match(prompt, /quote the decisive source expression/);
     // still lists findings and ends with the recency reminder
     assert.match(prompt, /### Finding 0/);
     assert.ok(prompt.endsWith(VERIFICATION_OUTPUT_REMINDER));
@@ -778,7 +791,7 @@ describe('buildShardAssignmentBlock', () => {
 
   it('lists the assigned files and the shard position', () => {
     assert.match(block, /## Your assigned files/);
-    assert.match(block, /split across 3 parallel reviewers; you are reviewer 2/);
+    assert.match(block, /has 3 tasks; you are reviewer 2/);
     assert.match(block, /- src\/a\.ts/);
     assert.match(block, /- src\/b\.ts/);
   });
@@ -790,8 +803,11 @@ describe('buildShardAssignmentBlock', () => {
   });
 
   it('uses the exploration policy for embedded-first shards', () => {
+    const control = buildShardAssignmentBlock(['src/a.ts'], 0, 2, false);
     const treatment = buildShardAssignmentBlock(['src/a.ts'], 0, 2, true);
 
+    assert.match(control, /follow symbols wherever they lead/);
+    assert.doesNotMatch(control, /repository exploration policy/);
     assert.match(treatment, /Follow dependencies as far as needed/);
     assert.match(treatment, /Apply the repository exploration policy/);
     assert.doesNotMatch(treatment, /wherever they lead/);

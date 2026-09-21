@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 
 import {
   ORPHANED_FINDINGS_HEADING,
+  candidateDiagnostics,
   describeIncompleteReason,
   formatIncompleteCoverage,
   isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
   renderOrphanedSection,
+  reviewCoverageSessions,
   condenseSummary,
   formatSummaryMarkdown,
 } from '../src/shared/report.ts';
@@ -25,6 +27,22 @@ function f(overrides: Partial<Finding> = {}): Finding {
     ...overrides,
   };
 }
+
+test('candidate diagnostics retain unresolved details and distinguish verifier failures', () => {
+  const candidates = [
+    f({ kind: 'investigate' }),
+    f({ verificationUncertain: true }),
+    f({ verificationUncertain: true, verificationUnavailable: true }),
+  ];
+  const diagnostics = candidateDiagnostics('a'.repeat(40), [f(), ...candidates]);
+  assert.equal(diagnostics.headSha, 'a'.repeat(40));
+  assert.deepEqual(
+    diagnostics.candidates.map((c) => c.status),
+    ['not-verified', 'inconclusive', 'not-completed'],
+  );
+  assert.equal(diagnostics.candidates.length, 3);
+  assert.equal(diagnostics.candidates[0].body, candidates[0].body);
+});
 
 test('renderOrphanedSection heads with the marker the prior-comment filter keys on', () => {
   // The flat prior-comments block excludes jbot review bodies EXCEPT the ones
@@ -343,30 +361,51 @@ test('formatSummaryMarkdown preserves existing links, bare URLs, and code spans'
   );
 });
 
-test('incomplete-coverage notice names why each auxiliary session is missing', () => {
-  const notice = formatIncompleteCoverage([
+test('incomplete-coverage notice groups page failures without hiding missing passes', () => {
+  const sessions = reviewCoverageSessions([
+    { label: 'changes-since-last-review', reason: 'failed' },
+    ...Array.from({ length: 15 }, (_, index) => ({
+      label: `review-interactions-page-${index + 1}`,
+      reason: 'failed',
+    })),
     { label: 'review-interactions', reason: 'cut off 300s after the main review' },
     { label: 'guideline-compliance', reason: 'timed out' },
+    ...Array.from({ length: 26 }, (_, index) => ({
+      label: `guideline-compliance-page-${index + 10}`,
+      reason: 'failed',
+    })),
     { label: 'finding-verification', reason: 'failed' },
     { label: 'review-shard-2', reason: PARTIAL_COVERAGE_REASON },
+    { label: 'review-shard-3-retry', reason: PARTIAL_COVERAGE_REASON },
   ]);
-  assert.match(notice, /`review-interactions` \(cut off 300s after the main review\)/);
-  assert.match(notice, /`review-shard-2` \(cut short, partial findings included\)/);
-  assert.match(notice, /Main review cut short;/);
+  const notice = formatIncompleteCoverage(sessions);
+  assert.ok(sessions.every(({ label }) => label !== 'changes-since-last-review'));
+  assert.deepEqual(
+    reviewCoverageSessions([{ label: 'changes-since-last-review', reason: 'failed' }]),
+    [],
+  );
+  assert.match(
+    notice,
+    /Review interactions:\*\* cut off 300s after the main review; 15 pages incomplete/,
+  );
+  assert.match(notice, /Main review:\*\* cut short, partial findings included/);
+  assert.match(notice, /Main review cut short\./);
+  assert.equal(notice.split('\n').filter((line) => line.startsWith('- ')).length, 4);
+  assert.doesNotMatch(notice, /-page-|-shard-/);
   assert.match(
     formatIncompleteCoverage([{ label: 'review-retry', reason: PARTIAL_COVERAGE_REASON }]),
-    /Main review cut short;/,
+    /Main review cut short\./,
   );
   for (const label of ['review', 'review-shard-2', 'review-retry', 'review-shard-3-retry'])
     assert.equal(isMainReviewLabel(label), true, label);
   for (const label of ['review-interactions', 'guideline-compliance', 'finding-verification'])
     assert.equal(isMainReviewLabel(label), false, label);
   assert.match(
-    formatIncompleteCoverage([{ label: 'guideline-compliance', reason: 'failed' }]),
-    /Main review completed;/,
+    formatIncompleteCoverage([{ label: 'guideline-compliance-page-1', reason: 'failed' }]),
+    /Guideline compliance:\*\* failed; 1 page incomplete/,
   );
-  assert.match(notice, /`guideline-compliance` \(timed out\)/);
-  assert.match(notice, /`finding-verification` \(failed\)/);
+  assert.match(notice, /Guideline compliance:\*\* timed out; 26 pages incomplete/);
+  assert.match(notice, /Finding verification:\*\* failed/);
   assert.match(notice, /marked as unverified concerns/);
   assert.equal(formatIncompleteCoverage([]), '');
 });

@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url';
+import type { ReviewExperiment } from '../shared/review-experiment.ts';
 import { execFile, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
@@ -11,7 +13,7 @@ import { parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
 import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import {
   assertImageSupportsModels,
-  backendRequiresCompleteEmbeddedDiff,
+  cliBackendForProvider,
   selectReviewBackends,
   swallowedProviderWarnings,
   type CliBackendID,
@@ -46,7 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
+import { catalogModelLimits, piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -54,18 +56,18 @@ import {
   formatGuidelines,
   type ReviewCommit,
 } from '../shared/review-context.ts';
-import { EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS, runPrReview } from '../shared/runner.ts';
+import { runPrReview } from '../shared/runner.ts';
 import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
 import { ensureGitSafeDirectory, GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import {
-  buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
   isDocOnlyChange,
   shardFilesForReview,
 } from '../shared/diff-context.ts';
 import { planReviewFanout } from '../shared/fanout.ts';
-import { selectLensKeys } from '../shared/prompt.ts';
+import { assembleReviewPrompt, selectLensKeys } from '../shared/prompt.ts';
+import { buildShardPlans, reviewPromptBudget } from '../shared/review-plan.ts';
 import {
   benchmarkReviewOutput,
   loadDotEnv,
@@ -81,6 +83,7 @@ import {
   type LocalPaths,
 } from './args.ts';
 import {
+  buildArenaReview,
   aggregateArenaUsage,
   classifyJbotArenaFailure,
   emptyArenaUsage,
@@ -105,6 +108,7 @@ const execFileAsync = promisify(execFile);
 const REPORT_DIR = '.jbot-review';
 
 interface LocalInvocation {
+  experiment?: ReviewExperiment;
   args: LocalArgs;
   paths: LocalPaths;
   comparison?: ComparisonManifestV1;
@@ -532,6 +536,10 @@ async function review(
     return;
   }
 
+  const piEngine = resolvePiEngine(
+    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
+    process.version,
+  );
   // Before credential resolution on purpose: a preview must cost nothing and
   // need no key.
   if (preview) {
@@ -556,46 +564,35 @@ async function review(
     const shards = shardFilesForReview(reviewable, {
       requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
     });
-    // Mirror the runner for complete-diff backends: their sessions embed
-    // under the 512KiB hard budget, and an AUX overflow disables the
-    // compliance pass (widening finders to the full guideline set). Main and
-    // aux providers can differ, so each is checked separately. Provider id
-    // stands in for the CLI-backend id — for these backends they coincide.
-    const mainRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
-      provider,
-      provider as CliBackendID,
-    );
-    const auxRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
-      auxProviderID,
-      auxProviderID as CliBackendID,
-    );
-    const diffHunksOptions = mainRequiresCompleteDiff
-      ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
-      : undefined;
-    const auxDiffComplete =
-      !auxRequiresCompleteDiff ||
-      (() => {
-        const aux = buildDiffHunksBlockWithMetadata(
-          reviewable,
-          EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
-        );
-        return aux.truncatedFiles.length === 0 && aux.omittedFiles.length === 0;
-      })();
-    const guidelinePass = (fanout?.guidelinePass ?? true) && auxDiffComplete;
+    const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
+    const { providerID, modelID } = parseModelName(model);
+    const plans = buildShardPlans({
+      coreContext: '',
+      context7Block: '',
+      shards,
+      budget: reviewPromptBudget(
+        cliBackendForProvider(providerID) ?? 'opencode',
+        await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined),
+      ),
+      renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
+    });
+    log(
+      'Approximate preview: uses full guidelines and default prompt options. Runtime guideline selection, prompt options, PR metadata and caller evidence can change page counts and assignments.',
+    );
     console.log(
       `\n${renderReviewPreview({
-        shards: shards.map((shard, index) => {
-          const embedded = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
-          return {
-            label: shards.length > 1 ? `review-shard-${index + 1}` : 'main-review',
-            files: shard.map((f) => f.filename),
-            diffBytes: shard.reduce((sum, f) => sum + Buffer.byteLength(f.patch ?? '', 'utf8'), 0),
-            embeddedBytes: Buffer.byteLength(embedded.text, 'utf8'),
-            truncated: embedded.truncatedFiles.length,
-            omitted: embedded.omittedFiles.length,
-          };
-        }),
+        shards: plans.map((plan) => ({
+          label: plan.label,
+          files: plan.assignedFiles,
+          diffBytes: plan.units!.reduce(
+            (sum, unit) => sum + Buffer.byteLength(unit.file.patch ?? ''),
+            0,
+          ),
+          embeddedBytes: plan.diffCoverage.bytes,
+          truncated: plan.diffCoverage.truncatedFiles,
+          omitted: plan.diffCoverage.omittedFiles,
+        })),
         lensKeys,
         guidelinePass,
         ...(fanout ? { fanoutTier: fanout.tier, fanoutReason: fanout.reason } : {}),
@@ -640,10 +637,6 @@ async function review(
   const aux = parseModelName(auxModel || model);
   // Preflight-only resolution (the runner re-resolves for its own routing):
   // roles served by the in-process pi engine need no opencode binary.
-  const piEngine = resolvePiEngine(
-    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
-    process.version,
-  );
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
     ? await Promise.all([
         piModelAvailable(providerID, modelID),
@@ -726,6 +719,7 @@ async function review(
     baseSha: mergeBase,
     localDiff: { files, commits },
     options: {
+      experiment: invocation.experiment,
       modelPool: pool,
       enhancedContext: config?.enhancedContext ?? true,
       scrubSessionEnv: config?.scrubSessionEnv ?? true,
@@ -805,10 +799,7 @@ async function review(
       resolvedModelOptions: arenaRunState?.resolvedModelOptions ?? null,
       reviewMs: reviewDurationMs,
       usage: aggregateArenaUsage(finalizedReview.telemetry),
-      review: {
-        summary: finalizedReview.summary,
-        findings: finalizedReview.findings.map(({ id: _id, ...finding }) => finding),
-      },
+      review: buildArenaReview(finalizedReview),
       failure: null,
     });
   }
@@ -829,7 +820,7 @@ async function review(
   }
 }
 
-async function bootstrap(): Promise<void> {
+async function bootstrap(experiment?: ReviewExperiment): Promise<void> {
   const launchDirectory = process.cwd();
   const args = parseLocalArgs(process.argv.slice(2));
   if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
@@ -858,6 +849,7 @@ async function bootstrap(): Promise<void> {
   process.chdir(workspace);
   if (args.workspace) log(`Workspace: ${workspace}`);
   await main({
+    experiment,
     args,
     paths: { ...paths, workspace },
     ...(comparison ? { comparison, arenaAuth } : {}),
@@ -866,23 +858,29 @@ async function bootstrap(): Promise<void> {
 
 // Run verdict + observer flush live in runPrReview; here we only surface the
 // error, set the exit code, and guarantee the process actually ends.
-bootstrap()
-  .catch((error: unknown) => {
-    try {
-      writeArenaFailure(error);
-    } catch (outputError) {
-      console.error(
-        `[jbot-review] Could not write arena failure output: ${
-          outputError instanceof Error ? outputError.message : String(outputError)
-        }`,
-      );
-    }
-    const message = arenaRunState
-      ? sanitizeArenaFailureMessage(error, arenaRunState.secretValues)
-      : error instanceof Error
-        ? error.message
-        : String(error);
-    console.error(`[jbot-review] Local review failed: ${message}`);
-    process.exitCode = 1;
-  })
-  .finally(() => exitOnLingeringHandles(log));
+export function runLocalReview(experiment?: ReviewExperiment): Promise<void> {
+  return bootstrap(experiment)
+    .catch((error: unknown) => {
+      try {
+        writeArenaFailure(error);
+      } catch (outputError) {
+        console.error(
+          `[jbot-review] Could not write arena failure output: ${
+            outputError instanceof Error ? outputError.message : String(outputError)
+          }`,
+        );
+      }
+      const message = arenaRunState
+        ? sanitizeArenaFailureMessage(error, arenaRunState.secretValues)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      console.error(`[jbot-review] Local review failed: ${message}`);
+      process.exitCode = 1;
+    })
+    .finally(() => exitOnLingeringHandles(log));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void runLocalReview();
+}

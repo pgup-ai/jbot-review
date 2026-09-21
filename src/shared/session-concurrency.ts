@@ -88,7 +88,7 @@ export interface ReviewBackend {
 }
 
 export interface SessionSlots {
-  acquire(priority?: SemaphorePriority, signal?: AbortSignal): Promise<() => void>;
+  acquire(priority?: SemaphorePriority, signal?: AbortSignal, group?: string): Promise<() => void>;
 }
 
 export function createProviderSessionLimiters(
@@ -97,15 +97,19 @@ export function createProviderSessionLimiters(
 ): {
   configured: Array<{ providerID: string; limit: number }>;
   forProvider: (providerID: string) => SessionSlots | undefined;
+  releaseReservations: () => void;
 } {
-  const limiters = new Map<string, { limit: number; slots: SessionSlots }>();
+  const limiters = new Map<string, { limit: number; slots: Semaphore }>();
   for (const providerID of new Set(providerIDs)) {
     const limit = concurrencyFor(providerID);
-    if (limit !== undefined) limiters.set(providerID, { limit, slots: new Semaphore(limit) });
+    if (limit !== undefined) limiters.set(providerID, { limit, slots: new Semaphore(limit, true) });
   }
   return {
     configured: [...limiters].map(([providerID, { limit }]) => ({ providerID, limit })),
     forProvider: (providerID) => limiters.get(providerID)?.slots,
+    releaseReservations: () => {
+      for (const { slots } of limiters.values()) slots.releaseReservation();
+    },
   };
 }
 
@@ -144,11 +148,19 @@ export function limitReviewBackendSessions(
     });
     try {
       providerRelease = providerSlots
-        ? await providerSlots.acquire(priority, controller.signal)
+        ? await providerSlots.acquire(
+            priority,
+            controller.signal,
+            role === 'aux' ? session : undefined,
+          )
         : undefined;
       controller.signal.throwIfAborted();
       globalRelease = globalSlots
-        ? await globalSlots.acquire(priority, controller.signal)
+        ? await globalSlots.acquire(
+            priority,
+            controller.signal,
+            role === 'aux' ? session : undefined,
+          )
         : undefined;
       controller.signal.throwIfAborted();
       pending.delete(controller);
@@ -229,7 +241,7 @@ export function limitReviewBackendSessions(
       let queued = 0;
       for (const [controller, session] of pending) {
         if (session !== label || controller.signal.aborted) continue;
-        controller.abort(new Error(`${label} aborted while queued`));
+        controller.abort(new Error(`${label} stopped while queued`));
         queued++;
       }
       return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
@@ -268,14 +280,24 @@ export function limitReviewBackendSessions(
       );
     },
     runAddressedPriorCommentsCheck: (...args) =>
-      withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),
+      withSlots(
+        'addressed-prior-comments',
+        () => backend.runAddressedPriorCommentsCheck(...args),
+        'low',
+      ),
     runGuidelineComplianceCheck: (...args) =>
       withSlots('guideline-compliance', () => backend.runGuidelineComplianceCheck(...args)),
-    // The one auxiliary call the posting path awaits: never queue it behind
-    // recall sessions still holding slots past the settle grace.
     runFindingVerification: (...args) =>
-      withSlots('finding-verification', () => backend.runFindingVerification(...args), 'high'),
+      withSlots(
+        'finding-verification',
+        () => backend.runFindingVerification(...args),
+        'verification',
+      ),
     runChangesSinceLastReview: (...args) =>
-      withSlots('changes-since-last-review', () => backend.runChangesSinceLastReview(...args)),
+      withSlots(
+        'changes-since-last-review',
+        () => backend.runChangesSinceLastReview(...args),
+        'low',
+      ),
   };
 }

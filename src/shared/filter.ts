@@ -25,6 +25,16 @@ export function isNoiseFile(filename: string): boolean {
   return false;
 }
 
+export function isUnresolvedFinding(
+  finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain'>,
+): boolean {
+  return (
+    finding.verificationUncertain === true ||
+    finding.kind === 'investigate' ||
+    finding.confidence === 'low'
+  );
+}
+
 export const SEVERITY_RANK: Record<Severity, number> = {
   P0: 0,
   P1: 1,
@@ -231,26 +241,72 @@ export function mergeVerdictsByLocation(
     const verdict = verdictByIdentity.get(identity) ?? {
       verdict: 'uncertain',
       reason: 'Finding verification did not return a verdict.',
+      unavailable: true,
     };
-    if (verdict.verdict === 'confirmed') return [finding];
+    if (verdict.verdict === 'confirmed') return [confirmedFinding(finding, verdict)];
     if (verdict.verdict === 'refuted') {
       dropped.push({ finding, reason: verdict.reason });
       return [];
     }
     demoted.push({ finding, reason: verdict.reason });
-    return [unverifiedFinding(finding, verdict.reason)];
+    return [unverifiedFinding(finding, verdict.reason, verdict.unavailable)];
   });
   return { findings: result, dropped, demoted, lateUnverified };
 }
 
-function unverifiedFinding(finding: Finding, reason?: string): Finding {
+export function checkConfirmationEvidence(
+  verdict: FindingVerdict,
+  sourceContext: string,
+): FindingVerdict {
+  if (
+    !verdict.finding ||
+    (verdict.finding.evidence && sourceContext.includes(verdict.finding.evidence))
+  )
+    return verdict;
+  return {
+    index: verdict.index,
+    verdict: 'uncertain',
+    reason: 'The proposed confirmation did not quote evidence present in the supplied source.',
+  };
+}
+
+function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
+  if (!isUnresolvedFinding(finding)) return finding;
+  const confirmed = verdict.finding;
+  if (
+    !confirmed ||
+    !confirmed.kind ||
+    confirmed.kind === 'investigate' ||
+    !confirmed.title.trim() ||
+    !confirmed.evidence?.trim() ||
+    !verdict.reason?.trim()
+  )
+    return unverifiedFinding(
+      finding,
+      'The verifier returned confirmed without an evidence-backed finding and explanation.',
+    );
   return {
     ...finding,
-    ...formatUnverifiedFinding(finding, reason),
+    title: confirmed.title,
+    severity: confirmed.severity,
+    kind: confirmed.kind,
+    evidence: confirmed.evidence,
+    body: verdict.reason,
+    confidence: 'medium',
+    verificationUncertain: undefined,
+    verificationUnavailable: undefined,
+  };
+}
+
+function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {
+  return {
+    ...finding,
+    ...formatUnverifiedFinding(finding, reason, unavailable),
     severity: finding.severity === 'nit' ? 'nit' : 'P3',
     kind: 'investigate',
     confidence: 'low',
     verificationUncertain: true,
+    verificationUnavailable: unavailable || undefined,
   };
 }
 
@@ -262,20 +318,25 @@ export function applyFindingVerdicts(
 ): VerdictApplication {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
   const dropped: VerdictApplication['dropped'] = [];
-  const demotedByIndex = new Map<number, string | undefined>();
+  const demotedByIndex = new Map<number, Pick<FindingVerdict, 'reason' | 'unavailable'>>();
+  const confirmedByIndex = new Map<number, Finding>();
   const droppedIndexes = new Set<number>();
 
   selectedIndexes.forEach((findingIndex, position) => {
     const verdict = verdictByPosition.get(position) ?? {
       verdict: 'uncertain',
       reason: 'Finding verification did not return a verdict.',
+      unavailable: true,
     };
-    if (verdict.verdict === 'confirmed') return;
+    if (verdict.verdict === 'confirmed') {
+      confirmedByIndex.set(findingIndex, confirmedFinding(findings[findingIndex], verdict));
+      return;
+    }
     if (verdict.verdict === 'refuted') {
       droppedIndexes.add(findingIndex);
       dropped.push({ finding: findings[findingIndex], reason: verdict.reason });
     } else {
-      demotedByIndex.set(findingIndex, verdict.reason);
+      demotedByIndex.set(findingIndex, verdict);
     }
   });
 
@@ -283,10 +344,11 @@ export function applyFindingVerdicts(
   const result = findings.flatMap((finding, index) => {
     if (droppedIndexes.has(index)) return [];
     if (demotedByIndex.has(index)) {
-      demoted.push({ finding, reason: demotedByIndex.get(index) });
-      return [unverifiedFinding(finding, demotedByIndex.get(index))];
+      const verdict = demotedByIndex.get(index)!;
+      demoted.push({ finding, reason: verdict.reason });
+      return [unverifiedFinding(finding, verdict.reason, verdict.unavailable)];
     }
-    return [finding];
+    return [confirmedByIndex.get(index) ?? finding];
   });
 
   return { findings: result, dropped, demoted };
@@ -371,7 +433,25 @@ export function resolveFindingAnchors(
   return moved;
 }
 
+export function filterFindings(
+  findings: Finding[],
+  options: { minSeverity: Severity; maxFindings: number },
+): Finding[] {
+  const unresolved = findings.filter(isUnresolvedFinding);
+  let published = findings.filter(
+    (finding) =>
+      !isUnresolvedFinding(finding) &&
+      SEVERITY_RANK[finding.severity] <= SEVERITY_RANK[options.minSeverity],
+  );
+  if (options.maxFindings > 0)
+    published = [...published]
+      .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+      .slice(0, options.maxFindings);
+  return [...published, ...unresolved];
+}
+
 export interface AnchoredFindings {
+  withheld: Finding[];
   /** Postable at a specific added line. */
   inline: Finding[];
   /** Findings routed to a changed file instead of a specific added line. */
@@ -394,9 +474,16 @@ export function anchorFindings(
   addable: ReadonlyMap<string, ReadonlySet<number>>,
   hasHeadSha: boolean,
 ): AnchoredFindings {
-  const result: AnchoredFindings = { inline: [], fileLevel: [], orphaned: [], anchorMissed: [] };
+  const result: AnchoredFindings = {
+    inline: [],
+    fileLevel: [],
+    orphaned: [],
+    anchorMissed: [],
+    withheld: [],
+  };
   for (const f of findings) {
-    if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
+    if (isUnresolvedFinding(f)) result.withheld.push(f);
+    else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
     else if (hasHeadSha && addable.has(f.path)) {
       f.line = 0;

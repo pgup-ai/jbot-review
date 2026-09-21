@@ -25,6 +25,9 @@ import {
 import type { TokenUsageRecorder } from './token-usage.ts';
 import {
   sanitizeFinding,
+  VALID_SEVERITIES,
+  VALID_FINDING_KINDS,
+  EVIDENCE_MAX_CHARS,
   type AddressedPriorComment,
   type Finding,
   type FindingVerdict,
@@ -665,10 +668,27 @@ export function parseFindingVerdicts(
       VALID_VERDICTS.has(v.verdict as FindingVerdict['verdict'])
     ) {
       seen.add(v.index);
+      const correction = v.finding as Record<string, unknown> | undefined;
+      const finding =
+        correction &&
+        typeof correction.title === 'string' &&
+        typeof correction.severity === 'string' &&
+        VALID_SEVERITIES.has(correction.severity as Finding['severity']) &&
+        typeof correction.kind === 'string' &&
+        VALID_FINDING_KINDS.has(correction.kind as NonNullable<Finding['kind']>) &&
+        typeof correction.evidence === 'string'
+          ? {
+              title: correction.title,
+              severity: correction.severity as Finding['severity'],
+              kind: correction.kind as Finding['kind'],
+              evidence: correction.evidence.trim().slice(0, EVIDENCE_MAX_CHARS),
+            }
+          : undefined;
       verdicts.push({
         index: v.index,
         verdict: v.verdict as FindingVerdict['verdict'],
         reason: typeof v.reason === 'string' ? v.reason : undefined,
+        ...(v.verdict === 'confirmed' && finding ? { finding } : {}),
       });
     }
   }

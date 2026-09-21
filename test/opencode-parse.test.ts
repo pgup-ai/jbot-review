@@ -240,6 +240,38 @@ describe('parseFindingVerdicts', () => {
       ],
     });
 
+    const correction = {
+      path: 'a.ts',
+      line: 1,
+      severity: 'P2',
+      kind: 'bug',
+      confidence: 'high',
+      title: 'Bug',
+      body: 'Concrete trigger.',
+      evidence: 'bad();',
+    };
+    const promoted = parseFindingVerdicts(
+      JSON.stringify({
+        verdicts: [
+          {
+            index: 0,
+            verdict: 'confirmed',
+            reason: 'traced it',
+            finding: { ...correction, verificationUncertain: true },
+            unavailable: true,
+          },
+        ],
+      }),
+      1,
+      noLog,
+    );
+    assert.deepEqual(promoted?.[0].finding, {
+      title: correction.title,
+      severity: correction.severity,
+      kind: correction.kind,
+      evidence: correction.evidence,
+    });
+    assert.equal(promoted?.[0].unavailable, undefined);
     const verdicts = parseFindingVerdicts(raw, 3, noLog);
 
     assert.deepEqual(verdicts, [

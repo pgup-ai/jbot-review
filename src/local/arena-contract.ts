@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 
+import { isUnresolvedFinding } from '../shared/filter.ts';
 import { resolveModelSelection } from '../shared/model.ts';
 import { isNonArrayRecord as isRecord } from '../shared/text.ts';
 import {
@@ -10,6 +11,7 @@ import {
   type FindingConfidence,
   type FindingKind,
   type Severity,
+  type ReviewResult,
 } from '../shared/types.ts';
 
 export const ARENA_SCHEMA_VERSION = 1;
@@ -708,4 +710,18 @@ export function writeJbotArenaOutput(path: string, output: JbotArenaOutputV1): v
   } finally {
     rmSync(temporary, { force: true });
   }
+}
+
+export function buildArenaReview(
+  result: Pick<ReviewResult, 'summary' | 'findings'>,
+): NonNullable<JbotArenaOutputV1['review']> {
+  const withheld = result.findings.filter(isUnresolvedFinding).length;
+  return {
+    summary: withheld
+      ? `${withheld} unresolved candidates retained in run diagnostics; this is not an all-clear result.`
+      : result.summary,
+    findings: result.findings
+      .filter((finding) => !isUnresolvedFinding(finding))
+      .map(({ id: _id, ...finding }) => finding),
+  };
 }

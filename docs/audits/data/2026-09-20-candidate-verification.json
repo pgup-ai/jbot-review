@@ -1,0 +1,962 @@
+{
+  "scope": "Targeted candidate recovery, not a corpus gate or hosted deployment validation",
+  "controlCommit": "eb32d0254369f5af4dd82685d96519b2ff6b3cbb",
+  "claims": [
+    "False splitUnit newCount start expression",
+    "False missing ShardPlan import",
+    "True first-batch-only job loss",
+    "Unknown production ALLOW_DELETE environment"
+  ],
+  "verifierCohorts": [
+    {
+      "name": "full-replacement",
+      "controlCommit": "eb32d0254369f5af4dd82685d96519b2ff6b3cbb",
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "cliVersion": "1.44.0",
+      "effort": "provider-default",
+      "repetitions": 3,
+      "inputHash": "fd2481345dd1c94b5fbf3352b0b5ee2b4abaf57f425cfac6eaf9fd85939b70fd",
+      "promptHash": "245a66c9560c505bb18b64ac484e580927f890977f239f6162dd9f052f9a71df",
+      "treatmentCommit": "45905233d07501ff703d3940faf1d7dc7c26bbbc",
+      "rawResultsHash": "f4f52da115f88ba89f4092b752190946800ea3b2db9755328911c8a979575a87",
+      "rows": [
+        {
+          "arm": "control",
+          "repeat": 1,
+          "durationMs": 27475,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 1,
+          "durationMs": 62916,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 2,
+          "durationMs": 28452,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        },
+        {
+          "arm": "control",
+          "repeat": 2,
+          "durationMs": 29011,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "control",
+          "repeat": 3,
+          "durationMs": 24097,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 3,
+          "durationMs": 33782,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        }
+      ]
+    },
+    {
+      "name": "compact-fragment",
+      "controlCommit": "eb32d0254369f5af4dd82685d96519b2ff6b3cbb",
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "cliVersion": "1.44.0",
+      "effort": "provider-default",
+      "repetitions": 3,
+      "inputHash": "fd2481345dd1c94b5fbf3352b0b5ee2b4abaf57f425cfac6eaf9fd85939b70fd",
+      "promptHash": "f036678ec4a6339a085b4e7f960d96096713debee7871cdc4fef2e6fe51e8e25",
+      "treatmentCommit": "9da98e0799bbf8e80ee90bcdda2687f27427a043",
+      "rawResultsHash": "637384fdd73c8a5433606477333c529fbee57a99b38569b91cad22a49f05e05f",
+      "rows": [
+        {
+          "arm": "control",
+          "repeat": 1,
+          "durationMs": 25183,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 1,
+          "durationMs": 39113,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 2,
+          "durationMs": 18940,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "control",
+          "repeat": 2,
+          "durationMs": 17889,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "control",
+          "repeat": 3,
+          "durationMs": 18432,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 3,
+          "durationMs": 22135,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        }
+      ]
+    },
+    {
+      "name": "required-example",
+      "treatmentCommit": "e95195e8313d07919d4849ea4097bc264a30ffa1",
+      "controlCommit": "eb32d0254369f5af4dd82685d96519b2ff6b3cbb",
+      "model": "commandcode/meta/muse-spark-1.3-contributor",
+      "cliVersion": "1.44.0",
+      "effort": "provider-default",
+      "repetitions": 3,
+      "inputHash": "fd2481345dd1c94b5fbf3352b0b5ee2b4abaf57f425cfac6eaf9fd85939b70fd",
+      "promptHash": "cdb6f4bfa4007ce854c4c60ef3dfdda1c27a9b54a282352c0423fa9c91cf7417",
+      "rawResultsHash": "0eed9f6d73526cdeae4f93e208cb1944912a829074e370969e4fccef7e166176",
+      "rows": [
+        {
+          "arm": "control",
+          "repeat": 1,
+          "durationMs": 26770,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 1,
+          "durationMs": 34292,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 2,
+          "durationMs": 25666,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        },
+        {
+          "arm": "control",
+          "repeat": 2,
+          "durationMs": 16985,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "control",
+          "repeat": 3,
+          "durationMs": 25951,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": false
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": [],
+          "withheldPaths": ["src/shared/runner.ts", "src/batch.ts", "src/runtime.ts"]
+        },
+        {
+          "arm": "treatment",
+          "repeat": 3,
+          "durationMs": 20559,
+          "calls": 1,
+          "verdicts": [
+            {
+              "index": 0,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 1,
+              "verdict": "refuted",
+              "hasConfirmation": false
+            },
+            {
+              "index": 2,
+              "verdict": "confirmed",
+              "hasConfirmation": true
+            },
+            {
+              "index": 3,
+              "verdict": "uncertain",
+              "hasConfirmation": false
+            }
+          ],
+          "publishedPaths": ["src/batch.ts"],
+          "withheldPaths": ["src/runtime.ts"]
+        }
+      ]
+    }
+  ],
+  "pipelineCohorts": [
+    {
+      "name": "pipeline",
+      "control": "eb32d0254369f5af4dd82685d96519b2ff6b3cbb",
+      "treatmentCommit": "45905233d07501ff703d3940faf1d7dc7c26bbbc",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 3,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus.",
+      "rawResultsHash": "509d6dd9ef0c1e628aa5c6774a30941548d948c7d0d729ab4a4b23f939b13b67",
+      "rows": [
+        {
+          "arm": "control",
+          "name": "defect-control-1",
+          "durationMs": 34434,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "defect-treatment-1",
+          "durationMs": 28874,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "defect-treatment-2",
+          "durationMs": 35975,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "control",
+          "name": "defect-control-2",
+          "durationMs": 22461,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "control",
+          "name": "defect-control-3",
+          "durationMs": 27903,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "defect-treatment-3",
+          "durationMs": 26768,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "f5aa8ec210f49ec9d214e72e8449d040c808fa66",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "control",
+          "name": "clean-control-1",
+          "durationMs": 10228,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f65087e277fb44e1809e3ec09d5809242c1806f",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "clean-treatment-1",
+          "durationMs": 8677,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f65087e277fb44e1809e3ec09d5809242c1806f",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "clean-treatment-2",
+          "durationMs": 8827,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f65087e277fb44e1809e3ec09d5809242c1806f",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "control",
+          "name": "clean-control-2",
+          "durationMs": 8225,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f65087e277fb44e1809e3ec09d5809242c1806f",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "control",
+          "name": "clean-control-3",
+          "durationMs": 7901,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f65087e277fb44e1809e3ec09d5809242c1806f",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "clean-treatment-3",
+          "durationMs": 8998,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f65087e277fb44e1809e3ec09d5809242c1806f",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        }
+      ]
+    },
+    {
+      "name": "final-smoke",
+      "control": "eb32d0254369f5af4dd82685d96519b2ff6b3cbb",
+      "treatmentCommit": "e95195e8313d07919d4849ea4097bc264a30ffa1",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 1,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "18490b70f88b64f8b28fbecdbb958d394a105c6d",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus.",
+      "rawResultsHash": "3fd0c49eda0280b9d4b5fbe12aafb01c1bbad8ec92813c9360fbad24557a016c",
+      "rows": [
+        {
+          "arm": "control",
+          "name": "defect-control-1",
+          "durationMs": 26141,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "18490b70f88b64f8b28fbecdbb958d394a105c6d",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "defect-treatment-1",
+          "durationMs": 21110,
+          "calls": 3,
+          "fixtureHash": "b069debfff80020cc580c3b4a923aa1121e687dc1078c4bb36ef71c7c717c5cb",
+          "headSha": "18490b70f88b64f8b28fbecdbb958d394a105c6d",
+          "retainedPaths": ["src/batch.ts"],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "control",
+          "name": "clean-control-1",
+          "durationMs": 12527,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f89a6cd87135f4a28271464b9e321ea0937f28d",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        },
+        {
+          "arm": "treatment",
+          "name": "clean-treatment-1",
+          "durationMs": 10159,
+          "calls": 2,
+          "fixtureHash": "62ad024a1693c95590bf7271c1464aaccfbb6146ad7004135f4fc4d0795aa0c9",
+          "headSha": "7f89a6cd87135f4a28271464b9e321ea0937f28d",
+          "retainedPaths": [],
+          "withheldCount": 0,
+          "delivery": [
+            {
+              "expectedHunks": 1,
+              "deliveredHunks": 1,
+              "expectedTasks": 1,
+              "completedTasks": 1,
+              "incompleteTasks": 0
+            }
+          ],
+          "incomplete": []
+        }
+      ]
+    }
+  ],
+  "ordinaryPromptsIdentical": {
+    "toolful": true,
+    "singleShot": true
+  },
+  "artifacts": [
+    {
+      "run": "defect-treatment-1",
+      "schemaVersion": 1,
+      "headSha": "18490b70f88b64f8b28fbecdbb958d394a105c6d",
+      "candidateCount": 0
+    },
+    {
+      "run": "clean-treatment-1",
+      "schemaVersion": 1,
+      "headSha": "7f89a6cd87135f4a28271464b9e321ea0937f28d",
+      "candidateCount": 0
+    }
+  ]
+}

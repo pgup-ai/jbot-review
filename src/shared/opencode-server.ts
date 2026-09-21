@@ -1,3 +1,4 @@
+import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -293,6 +294,7 @@ export async function waitForPlugin(
 }
 
 export interface OpencodeRuntime {
+  explorationExperiment: ReviewExperiment['exploration'];
   client: OpenCodeClient;
   workspace: string;
   modelOptions: ModelOptionsByModel;
@@ -300,11 +302,13 @@ export interface OpencodeRuntime {
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
   verifyFork?: boolean;
+  onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   reviewerAgent?: boolean;
   stop(): void;
 }
 
 export interface StartOpencodeOptions {
+  explorationExperiment?: ReviewExperiment['exploration'];
   modelOptions?: Record<string, unknown>;
   verificationModelOptions?: Record<string, unknown>;
   port?: number;
@@ -315,6 +319,7 @@ export interface StartOpencodeOptions {
   scrubEnv?: boolean;
   transcriptDir?: string;
   verifyFork?: boolean;
+  onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   reviewerAgent?: boolean;
   runStats?: boolean;
 }
@@ -327,6 +332,7 @@ export async function startOpencode(
   log: (msg: string) => void,
   options: StartOpencodeOptions = {},
 ): Promise<OpencodeRuntime> {
+  const explorationExperiment = options.explorationExperiment ?? reviewExperiment().exploration;
   const promptCache = options.promptCache ?? true;
   const models: ModelEntry[] = [
     {
@@ -369,6 +375,9 @@ export async function startOpencode(
       sessionOptionsFile,
       proxyEnv: options.proxyEnv,
     });
+    env.JBOT_EXPLORATION_CONFIG = JSON.stringify(explorationExperiment);
+    env.JBOT_RETRIEVAL_WORKSPACE = workspace;
+    env.JBOT_EXPLORATION_STATS_DIR = dataHome;
     // 0: the OS picks a free port and the banner reports it.
     const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 0);
     spawned = true;
@@ -406,10 +415,12 @@ export async function startOpencode(
   return {
     client,
     workspace,
+    explorationExperiment,
     modelOptions: modelOptionsByModel(models),
     sessionOptionsFile,
     transcriptDir: options.transcriptDir,
     verifyFork: options.verifyFork,
+    onSourceRead: options.onSourceRead,
     reviewerAgent: options.reviewerAgent,
     stop,
   };

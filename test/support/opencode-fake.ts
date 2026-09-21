@@ -1,3 +1,4 @@
+import { reviewExperiment } from '../../src/shared/review-experiment.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -275,6 +276,7 @@ export function fakeRuntime(
     client: fake.client,
     workspace: '/ws',
     modelOptions: {},
+    explorationExperiment: reviewExperiment({}).exploration,
     sessionOptionsFile: join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json'),
     stop: () => undefined,
     ...extra,

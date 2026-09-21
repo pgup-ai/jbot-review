@@ -3,8 +3,8 @@ import {
   computeRunDeadline,
   computeRetryTimeoutMs,
   computeVerificationTimeoutMs,
+  computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
-  computeLensGraceMs,
   wrapUpReserveMs,
   sharedPrefixLaunchDelayMs,
   SHARED_PREFIX_STAGGER_MS,
@@ -18,7 +18,6 @@ import { describe, it } from 'node:test';
 import {
   buildBody,
   requestFindingVerdicts,
-  buildShardPlans,
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
@@ -28,21 +27,26 @@ import {
   startLensPasses,
   renderReviewMetadataBlock,
   settleWithinGrace,
+  takeSettledAuxiliary,
   runPrReview,
-  EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
   runShardedReview,
   buildSlimVerifierContext,
 } from '../src/shared/runner.ts';
-import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
-import type { Octokit, PrFile } from '../src/shared/github.ts';
+import type { Octokit } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
-import { UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
-import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
+import {
+  limitReviewBackendSessions,
+  type ReviewBackend,
+} from '../src/shared/session-concurrency.ts';
+import { Semaphore } from '../src/shared/opencode-session.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
+import { auxiliaryBaselines } from '../src/shared/auxiliary-reuse.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
+import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
+import { assembleFindingVerificationPrompt } from '../src/shared/prompt.ts';
 
 const PRIOR_JBOT_REVIEW = [
   '## J-Bot Code Review',
@@ -61,123 +65,6 @@ const RESOLVED_JBOT_REVIEW = [
   '',
   '<!-- jbot-review:review -->',
 ].join('\n');
-
-/** Longest common leading substring — the region a provider can cache. */
-function commonPrefix(a: string, b: string): string {
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  return a.slice(0, i);
-}
-
-describe('buildShardPlans cache-stable prefix', () => {
-  it('keeps the shared context as a byte-identical prefix across shards', () => {
-    const coreContext = '## Pull request\nTitle: T\nDescription: shared core context';
-    const context7Block = '## Context7 docs\nSHARED_CONTEXT7';
-    const plans = buildShardPlans({
-      coreContext,
-      fullDiffBlock: '',
-      context7Block,
-      shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
-    });
-
-    assert.equal(plans.length, 2);
-    assert.notEqual(plans[0].context, plans[1].context);
-
-    const prefix = commonPrefix(plans[0].context, plans[1].context);
-    // The cacheable region carries the expensive shared content...
-    assert.ok(prefix.includes(coreContext), 'coreContext must be in the shared prefix');
-    assert.ok(prefix.includes('SHARED_CONTEXT7'), 'context7 must be in the shared prefix');
-    // ...and none of the per-shard assignment (which is what diverges).
-    assert.doesNotMatch(prefix, /reviewer 1\b/);
-    assert.doesNotMatch(prefix, /reviewer 2\b/);
-  });
-
-  it('leads a single-shard review with the diff block and keeps sharded plans on their shared core prefix', () => {
-    const base = {
-      coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\n## Pull request\nCORE`,
-      fullDiffBlock: '## Diff hunks\nFULL_DIFF',
-      context7Block: '## Context7 docs\nC7',
-    };
-    // The trust boundary the runner put at the head of the core context stays
-    // first and is stated once; only the blocks behind it move behind the diff.
-    const order = (text: string) => [
-      text.indexOf(UNTRUSTED_PR_CONTENT_NOTE),
-      text.indexOf('## Diff hunks'),
-      text.indexOf('CORE'),
-    ];
-    const assertBoundaryThenDiff = (text: string, label: string) => {
-      assert.ok(text.startsWith(UNTRUSTED_PR_CONTENT_NOTE), label);
-      assert.equal(text.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2, label);
-      assert.deepEqual(
-        [...order(text)].sort((a, b) => a - b),
-        order(text),
-        label,
-      );
-    };
-    const single = buildShardPlans({
-      ...base,
-      shards: [[{ filename: 'src/a.ts' }]],
-      diffFirst: true,
-    });
-    assertBoundaryThenDiff(single[0].context, 'single context');
-    assertBoundaryThenDiff(single[0].baseContext, 'single base');
-    assert.ok(single[0].context.indexOf('CORE') < single[0].context.indexOf('C7'));
-    const control = buildShardPlans({ ...base, shards: [[{ filename: 'src/a.ts' }]] });
-    assert.ok(control[0].context.startsWith(base.coreContext));
-
-    const sharded = buildShardPlans({
-      ...base,
-      shards: [
-        [{ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n+a' }],
-        [{ filename: 'src/b.ts', patch: '@@ -1 +1 @@\n+b' }],
-      ],
-      diffFirst: true,
-    });
-    // Shards carry different diffs, so leading with them would destroy the
-    // prefix they share; sharded plans keep the default order.
-    const [shardA, shardB] = sharded;
-    assert.ok(shardA.context.startsWith(base.coreContext), shardA.label);
-    assert.ok(shardB.context.startsWith(base.coreContext), shardB.label);
-    assert.ok(commonPrefix(shardA.context, shardB.context).includes('C7'));
-  });
-
-  it('uses treatment shard instructions only when enabled', () => {
-    const base = {
-      coreContext: 'core',
-      fullDiffBlock: '',
-      context7Block: '',
-      shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
-    };
-
-    const control = buildShardPlans(base);
-    const treatment = buildShardPlans({ ...base, embeddedFirstPrompt: true });
-
-    assert.match(control[0].context, /follow symbols wherever they lead/);
-    assert.doesNotMatch(control[0].context, /repository exploration policy/);
-    assert.match(treatment[0].context, /Follow dependencies as far as needed/);
-    assert.match(treatment[0].context, /repository exploration policy/);
-  });
-});
-
-describe('EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS', () => {
-  it('embeds every changed file whole however large the PR, in a single shard', () => {
-    const files: PrFile[] = Array.from({ length: 4 }, (_, index) => ({
-      filename: `huge-${index}.ts`,
-      patch: `@@ -0,0 +1,9000 @@\n${Array.from(
-        { length: 9000 },
-        (_, line) => `+const v${line} = '${'x'.repeat(80)}';`,
-      ).join('\n')}`,
-    }));
-
-    const result = buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS);
-
-    assert.deepEqual(result.truncatedFiles, []);
-    assert.deepEqual(result.omittedFiles, []);
-    // Multiple megabytes, far past any cap a prompt-size budget would impose.
-    assert.ok(Buffer.byteLength(result.text, 'utf8') > 2 * 1024 * 1024);
-    for (const file of files) assert.ok(result.text.includes(file.patch as string));
-  });
-});
 
 describe('buildSummaryScopeBlock', () => {
   it('no longer instructs shards to describe changes since the reviewed head', () => {
@@ -298,6 +185,51 @@ describe('buildBody', () => {
     assert.match(body, /Rebased onto main/);
     assert.doesNotMatch(body, /low-value verification narrative/);
   });
+
+  it('withholds unresolved claims from the review body while preserving coverage provenance', () => {
+    const uncertain: Finding = {
+      ...finding,
+      title: 'Unverified concern: Caller may be missing',
+      kind: 'investigate',
+      body: 'The caller was not supplied.\n\nOriginal reviewer hypothesis (unverified):\n\nLong hypothesis.',
+    };
+    const baseline = {
+      session: 'review-interactions',
+      head: 'a'.repeat(40),
+      base: 'b'.repeat(40),
+      policy: 'c'.repeat(64),
+    };
+    const body = buildBody(
+      '',
+      'Speculative summary must stay private',
+      [uncertain],
+      [uncertain],
+      'model',
+      'owner',
+      'repo',
+      'd'.repeat(40),
+      undefined,
+      undefined,
+      undefined,
+      [],
+      {
+        auxiliaryBaselines: [baseline],
+        diagnosticsUrl: 'https://github.com/owner/repo/actions/runs/123#artifacts',
+      },
+    );
+    assert.match(body, /1 candidate withheld from PR comments/);
+    assert.ok(body.includes('https://github.com/owner/repo/actions/runs/123#artifacts'));
+    assert.match(body, /unverified-findings.json/);
+    assert.doesNotMatch(
+      body,
+      /Caller may be missing|The caller was not supplied|Long hypothesis|Speculative summary must stay private|<!-- jbot-review:finding -->/,
+    );
+    assert.match(body, /\| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \|/);
+    assert.match(body, /Review state:\*\* Unverified concerns remain/);
+    assert.deepEqual(auxiliaryBaselines(body), [baseline]);
+    assert.equal(completedReviewHead(body), 'd'.repeat(40));
+    assert.equal(uncertain.verificationUncertain, undefined);
+  });
 });
 
 describe('session timeout budgeting', () => {
@@ -318,6 +250,12 @@ describe('session timeout budgeting', () => {
     assert.equal(computeVerificationTimeoutMs(6, 6 * 60_000), 0);
     // Huge budget: capped at 5 minutes.
     assert.equal(computeVerificationTimeoutMs(120, 0), 5 * 60_000);
+    assert.equal(computeEvidenceTimeoutMs(undefined), 5000);
+    assert.equal(computeEvidenceTimeoutMs(60_000), 5000);
+    assert.equal(computeEvidenceTimeoutMs(47_000), 2000);
+    assert.equal(computeEvidenceTimeoutMs(45_000), 0);
+    assert.equal(computeEvidenceTimeoutMs(5_000), 0);
+    assert.equal(computeEvidenceTimeoutMs(-1), 0);
   });
 });
 
@@ -541,6 +479,13 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     context: 'ctx',
     baseContext: 'base',
     assignedFiles: ['a.ts'],
+    diffCoverage: {
+      assignedFiles: 1,
+      completeFiles: 1,
+      truncatedFiles: 0,
+      omittedFiles: 0,
+      bytes: 3,
+    },
   };
   const okResult = { summary: 'ok', findings: [] };
   const backendThrowingOnce = (message: string, calls: string[]) =>
@@ -1230,10 +1175,11 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');
   });
 
-  it('caps sessions at 3 by default and keeps explicit 0 as the unlimited escape hatch', () => {
+  it('uses the bounded default for omitted or nonpositive session caps', () => {
     assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
-    assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 0);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 3);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: -1 }).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 5 }).maxConcurrentSessions, 5);
   });
 
@@ -1401,8 +1347,10 @@ describe('settleWithinGrace', () => {
   });
 
   it('returns the real value when it lands inside the grace', async () => {
-    const done = Promise.resolve([1]);
-    assert.deepEqual(await settleWithinGrace(session(done), [], () => {}, 1000), [1]);
+    for (const grace of [1000, Infinity]) {
+      const done = new Promise<number[]>((resolve) => setTimeout(() => resolve([1]), 5));
+      assert.deepEqual(await settleWithinGrace(session(done), [], () => {}, grace), [1]);
+    }
   });
 
   it('falls back rather than throwing when the session rejects', async () => {
@@ -1425,23 +1373,136 @@ describe('settleWithinGrace', () => {
   });
 });
 
-it('caps auxiliary grace at five minutes while reserving verification and posting time', () => {
-  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 300_000);
-  assert.equal(computeAuxiliaryGraceMs(10, 120_000), 150_000);
-  assert.equal(computeAuxiliaryGraceMs(5, 0), 0);
+it('lets auxiliary work use the finder deadline without spending verification and posting reserves', () => {
+  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 1_380_000);
+  assert.equal(computeAuxiliaryGraceMs(10, 120_000), 165_000);
+  assert.equal(computeAuxiliaryGraceMs(5, 0), 135_000);
   assert.equal(computeAuxiliaryGraceMs(5, 0, false), 270_000);
-  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 300_000);
+  assert.equal(computeAuxiliaryGraceMs(30, 1_500_000), 0);
+  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), Infinity);
 });
 
-it("floors the auxiliary runway at ten minutes from the sessions' own start", () => {
-  // A 12 s main pass no longer leaves a slow lens 312 s of life: the grace
-  // stretches to whatever completes a 600 s runway...
-  assert.equal(computeAuxiliaryGraceMs(30, 90_000, true, 12_000), 588_000);
-  // ...never below the five-minute post-main grace when main itself was slow...
-  assert.equal(computeAuxiliaryGraceMs(30, 400_000, true, 350_000), 300_000);
-  // ...and never past the verification and posting reserves.
-  assert.equal(computeAuxiliaryGraceMs(10, 130_000, true, 60_000), 140_000);
-  assert.equal(computeAuxiliaryGraceMs(0, 0, true, 100_000), 500_000);
+it('does not let optional bookkeeping delay posting, but keeps settled results', async () => {
+  let skipped = 0;
+  const skip = () => {
+    skipped++;
+  };
+  assert.equal(
+    await takeSettledAuxiliary(
+      { label: 'summary', isSettled: () => false, promise: new Promise<string>(() => {}) },
+      '',
+      skip,
+    ),
+    '',
+  );
+  assert.equal(
+    await takeSettledAuxiliary(
+      { label: 'summary', isSettled: () => true, promise: Promise.resolve('ready') },
+      '',
+      skip,
+    ),
+    'ready',
+  );
+  assert.equal(
+    await takeSettledAuxiliary(
+      { label: 'summary', isSettled: () => true, promise: Promise.reject(new Error('failed')) },
+      '',
+      skip,
+    ),
+    '',
+  );
+  assert.equal(skipped, 1);
+
+  const slots = new Semaphore(1);
+  let stop!: () => void;
+  const backend = limitReviewBackendSessions(
+    {
+      name: 'fake',
+      runChangesSinceLastReview: () =>
+        new Promise<string>((resolve) => {
+          stop = () => resolve('');
+        }),
+      abortSessionsByLabel: () => {
+        stop();
+        return 1;
+      },
+      runFindingVerification: async () => [],
+    } as unknown as ReviewBackend,
+    'aux',
+    slots,
+  );
+  const promise = backend.runChangesSinceLastReview('model', '', () => {});
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const verification = backend.runFindingVerification('model', '', [], () => {});
+  await takeSettledAuxiliary({ label: 'summary', promise, isSettled: () => false }, '', () =>
+    backend.abortSessionsByLabel?.('changes-since-last-review', () => {}),
+  );
+  assert.deepEqual(await verification, []);
+  await promise;
+  assert.equal(slots.isBusy(), false);
+});
+
+it('keeps finished lens-page findings when another page outlives the grace', async () => {
+  const finding = {
+    path: 'a.ts',
+    line: 1,
+    severity: 'P1',
+    title: 'Bug',
+    body: 'A concrete defect.',
+  };
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const completed: (typeof finding)[] = [];
+  const logs: string[] = [];
+  let settled = false;
+  const [promise] = startLensPasses({
+    backend: {
+      name: 'fake',
+      runReview: async (_m: string, context: string) => {
+        if (context === 'failed') throw new Error('page launch failed');
+        if (context === 'pending') await pending;
+        return { summary: '', findings: context === 'ready' ? [finding] : [] };
+      },
+    } as ReviewBackend,
+    model: 'fake/model',
+    lensPrContext: '',
+    guidelinesForPrompt: '',
+    lensKeys: ['interactions'],
+    plans: () =>
+      ['ready', 'pending', 'failed'].map((context) => ({
+        label: context,
+        context,
+        baseContext: context,
+        assignedFiles: ['a.ts'],
+        diffCoverage: {
+          assignedFiles: 1,
+          completeFiles: 1,
+          truncatedFiles: 0,
+          omittedFiles: 0,
+          bytes: 1,
+        },
+      })),
+    onFindings: (_label, findings) => completed.push(...findings),
+    log: (message) => logs.push(message),
+  });
+  const tracked = promise.finally(() => {
+    settled = true;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const result = await settleWithinGrace(
+    { label: 'review-interactions', promise: tracked, isSettled: () => settled },
+    () => [...completed],
+    () => {},
+    1,
+    release,
+  );
+  assert.deepEqual(result, [finding]);
+  assert.ok(
+    logs.some((line) => line.includes('review-interactions-page-3 failed: page launch failed')),
+  );
+  await tracked;
 });
 
 it('never launches a staggered lens that was abandoned while it waited', async () => {
@@ -1482,9 +1543,16 @@ it('never launches a staggered lens that was abandoned while it waited', async (
 
 it('records a lens that wrapped up on its own deadline as partial coverage', async () => {
   const rows: string[] = [];
+  let calls = 0;
   const backend = {
     name: 'fake',
-    runReview: async () => ({ summary: '', findings: [], partial: true }),
+    runReview: async (_model, _context, guidelines, _log, options) => {
+      calls++;
+      assert.equal(guidelines, 'Full written rules');
+      assert.match(options.lensAddendum, /INTERACTION bugs/);
+      assert.match(options.lensAddendum, /Written-rule check/);
+      return { summary: '', findings: [], partial: true };
+    },
   } as unknown as ReviewBackend;
   await Promise.all(
     startLensPasses({
@@ -1492,12 +1560,14 @@ it('records a lens that wrapped up on its own deadline as partial coverage', asy
       model: 'fake/model',
       lensPrContext: 'CTX',
       guidelinesForPrompt: '',
+      guidelineCompliance: 'Full written rules',
       lensKeys: ['interactions'],
       log: () => {},
       onCoverage: (row) => rows.push(`${row.session}:${row.state}`),
     }),
   );
-  assert.deepEqual(rows, ['review-interactions:partial']);
+  assert.equal(calls, 1);
+  assert.deepEqual(rows, ['review-interactions:partial', 'guideline-compliance:partial']);
 });
 
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
@@ -1506,14 +1576,6 @@ it('staggers shared-prefix launches so the first prefill lands before the next r
   // On the main model itself the first lens waits for main's prefill too.
   assert.equal(sharedPrefixLaunchDelayMs(0, true), SHARED_PREFIX_STAGGER_MS);
   assert.equal(sharedPrefixLaunchDelayMs(2, true), 3 * SHARED_PREFIX_STAGGER_MS);
-  // Staggered lenses launched later, so their runway ends later: the last
-  // scheduled delay comes off the elapsed time before the floor applies.
-  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 2, true), 604_000);
-  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 1, false), 588_000);
-  assert.equal(
-    computeLensGraceMs(30, 90_000, true, 12_000, 0, true),
-    computeAuxiliaryGraceMs(30, 90_000, true, 12_000),
-  );
 });
 
 it('marks incomplete review bodies without claiming an all-clear result', () => {
@@ -1531,7 +1593,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     undefined,
     [{ label: 'review-interactions', reason: 'timed out' }],
   );
-  assert.match(body, /`review-interactions` \(timed out\)/);
+  assert.match(body, /Review interactions:\*\* timed out/);
   assert.equal(completedReviewHead(body), undefined);
   const head = 'a'.repeat(40);
   const complete = buildBody('', '', [], [], 'model', 'owner', 'repo', head);
@@ -1545,7 +1607,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.equal(completedReviewHead(complete + '\n\n<!-- jbot-review:incomplete -->'), undefined);
   assert.equal(completedReviewHead(PRIOR_JBOT_REVIEW), undefined);
   assert.match(body, /Review incomplete/);
-  assert.match(body, /review-interactions/);
+  assert.match(body, /Review interactions/);
   assert.match(body, /Main review completed/);
   assert.match(body, /Findings from completed passes are included/);
   assert.doesNotMatch(body, /unverified concerns/);
@@ -1577,8 +1639,25 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
         line: 1,
         title: 'Unverified concern',
         body: 'Claim',
-        severity: 'P3',
+        severity: 'P1',
         verificationUncertain: true,
+      },
+      {
+        path: 'b.ts',
+        line: 1,
+        title: 'Unverified nit',
+        body: 'Claim',
+        severity: 'nit',
+        verificationUncertain: true,
+      },
+      { path: 'c.ts', line: 1, title: 'Minor bug', body: 'Evidence', severity: 'P3' },
+      {
+        path: 'd.ts',
+        line: 1,
+        title: 'Needs a caller check',
+        body: 'Hypothesis',
+        severity: 'P2',
+        kind: 'investigate',
       },
     ],
     [],
@@ -1587,6 +1666,61 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     'repo',
   );
   assert.doesNotMatch(uncertain, /Definitely broken/);
+  assert.match(uncertain, /\| Total \| P0 \| P1 \| P2 \| P3 \| nit \| Unverified \|/);
+  assert.match(uncertain, /\| 4 \| 0 \| 0 \| 0 \| 1 \| 0 \| 3 \|/);
+  assert.match(uncertain, /Unverified concerns remain/);
+  assert.doesNotMatch(uncertain, /Mergeable with non-blocking comments/);
+});
+
+it('sizes verifier batches before optional evidence and rejects only oversized required context', async () => {
+  const budget = { ...reviewPromptBudget('test'), transportBytes: 40000 };
+  const targets: Finding[] = Array.from({ length: 7 }, (_, i) => ({
+    path: `file${i}.ts`,
+    line: 1,
+    severity: 'P2',
+    title: `finding ${i}`,
+    body: 'claim',
+  }));
+  for (const evidenceBytes of [6000, 100000]) {
+    const invoked: Finding[][] = [];
+    const prepared: Finding[][] = [];
+    const coverage: string[] = [];
+    const logs: string[] = [];
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: '',
+      contextForTargets: () => 'c'.repeat(10000),
+      sourceContext: async (findings) => 's'.repeat(findings.includes(targets[6]) ? 100000 : 16384),
+      prepareEvidence: async (findings) => {
+        prepared.push(findings);
+        return 'e'.repeat(evidenceBytes);
+      },
+      promptBudget: budget,
+      targets,
+      backend: {
+        async runFindingVerification(_model, context, findings) {
+          assert.ok(
+            measureReviewPrompt(assembleFindingVerificationPrompt(context, findings), budget).fits,
+          );
+          assert.equal(context.includes('e'.repeat(6000)), evidenceBytes === 6000);
+          invoked.push(findings);
+          return findings.map((_, index) => ({ index, verdict: 'confirmed' as const }));
+        },
+      },
+      log: (message) => logs.push(message),
+      onCoverage: (row) => coverage.push(row.state),
+    });
+    assert.deepEqual(invoked.flat(), targets.slice(0, 6));
+    assert.deepEqual(prepared.flat(), invoked.flat());
+    assert.deepEqual(
+      verdicts.filter((v) => !v.unavailable).map((v) => v.index),
+      [0, 1, 2, 3, 4, 5],
+    );
+    assert.deepEqual(coverage, ['failed']);
+    assert.equal(verdicts.find((v) => v.index === 6)?.unavailable, true);
+    assert.ok(logs.some((message) => /Optional verification evidence omitted/.test(message)));
+  }
 });
 
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
@@ -1622,7 +1756,7 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     });
     assert.deepEqual(sizes, [10, 10, 3]);
     assert.deepEqual(
-      verdicts.map((v) => v.index),
+      verdicts.filter((v) => !v.unavailable).map((v) => v.index),
       findings
         .map((_, i) => i)
         .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
@@ -1640,5 +1774,61 @@ it('verifies every batch and preserves successful verdicts when another batch fa
         .map((f) => f.line),
     );
     assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));
+    assert.ok(retained.every((f) => f.verificationUnavailable));
+  }
+});
+
+it('binds confirmation quotes to each candidate and only its delivered evidence', async () => {
+  const candidate: Finding = {
+    path: 'batch.ts',
+    line: 1,
+    severity: 'P3',
+    kind: 'investigate',
+    confidence: 'low',
+    title: 'Possible loss',
+    body: 'Does the caller pass more than 100 jobs?',
+  };
+  const quotes = ['return jobs.slice(0, 100);', 'callBatch(201);', 'invented source'];
+  const targets = Array.from({ length: 4 }, (_, i) => ({
+    ...candidate,
+    path: `batch${i}.ts`,
+  }));
+  for (const oversized of [false, true]) {
+    let calls = 0;
+    const budget = { ...reviewPromptBudget('test'), transportBytes: 40000 };
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: quotes[2],
+      targets,
+      promptBudget: budget,
+      log: () => {},
+      sourceContext: async ([target]) => (target === targets[0] ? quotes[0] : ''),
+      prepareEvidence: async ([target]) =>
+        target === targets[1] ? quotes[1] + (oversized ? 'x'.repeat(40000) : '') : '',
+      backend: {
+        async runFindingVerification(_model, context, findings) {
+          calls++;
+          assert.deepEqual(findings, targets);
+          assert.equal(context.includes(quotes[1]), !oversized);
+          return targets.map((_, index) => ({
+            index,
+            verdict: 'confirmed' as const,
+            reason: '201 jobs become 100.',
+            finding: {
+              ...candidate,
+              kind: 'bug' as const,
+              severity: 'P1' as const,
+              evidence: index === 2 ? quotes[0] : quotes[Math.min(index, 2)],
+            },
+          }));
+        },
+      },
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(
+      verdicts.map((v) => v.verdict),
+      ['confirmed', oversized ? 'uncertain' : 'confirmed', 'uncertain', 'uncertain'],
+    );
   }
 });

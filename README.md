@@ -394,10 +394,10 @@ the review itself is unaffected._
 | `auto-approve`            | `false`            | Approve the exact reviewed head when the run produces no findings before display filters, all prior jbot threads are resolved, and GitHub reports the PR open, non-draft, and mergeable. Existing same-head jbot approvals are not duplicated. GitHub branch protection still decides whether the PR can merge.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain findings remain unverified advisories.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `review-shards`           | `1`                | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions reserve 30s for posting and up to 5min for enabled verification (at most half the usable budget); shard retries and verification use whatever remains, or are skipped (fail-open). After main review, parallel auxiliary passes get up to five more minutes, limited by the remaining budget with 30s reserved for posting and up to 5min for enabled verification. An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `max-concurrent-sessions` | `3`                | Max model sessions in flight (`0` = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. The capped default keeps each session's deadline measuring model time, not queue time; drop to `2` on tight free tiers, or set `0` on paid tiers with real concurrency.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain candidates remain in diagnostics and are withheld from PR comments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `review-shards`           | `1`                | Initial file groups: `1`, `0` for automatic grouping, or `N`. Oversized groups and files are automatically paged against the full prompt budget. Every page must complete; additional pages wait under the session concurrency limit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). See [review scheduling](#review-scheduling) for finder deadlines, verification reserves and incomplete coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `max-concurrent-sessions` | `3`                | Maximum simultaneous model sessions. `0` also selects the bounded default of `3`; set a positive limit appropriate for your provider tier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `model-options`           | provider-dependent | JSON object of provider options for the main model. Native providers default to `{"reasoningEffort":"medium"}`; Poolside uses `{"reasoningEffort":"default"}` to leave reasoning provider-managed; custom providers default to `{}` because arbitrary endpoints may reject unknown options. Explicit values are preserved. Governs the main model only. An auxiliary session running a model of its own gets the same treatment one tier lower, since it sits on the tail of the run: `{"reasoningEffort":"low"}` on native providers, `{"reasoningEffort":"default"}` on Poolside, `{}` on custom ones. An auxiliary session drawing the main model shares its entry and its effort — on every engine: pi levels are per session, so a distinct aux model on a shared pi runtime takes the aux effort. CommandCode sessions map `reasoningEffort` onto the CLI `--effort` flag from a per-model allowlist in code: default options deliver medium to the main session and low to auxiliary ones wherever the model declares that tier (the DeepSeek flash models have no medium: v4.1-flash and v4-flash-fast fall back to low, v4-flash to high, since a tool-less review gains nothing from deeper reasoning), an explicitly-set effort clamps to the nearest declared tier, and undeclared models keep the CLI default. Finding verification on every backend runs one tier below the main session (never below low), rounding down where its model lacks that tier. Other CLI backends do not consume model options — on Devin, effort is part of the model id itself. |
 | `prompt-cache`            | `true`             | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `skip-doc-only`           | `true`             | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -438,18 +438,17 @@ longer timeout headroom): set the main `model` to the heavy tier, then
 ```yaml
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier first, then a fast tier for the aux draw
 review-shards: '0' # opt into auto-sharding on a paid concurrent tier
-max-concurrent-sessions: '0' # unlimited on a paid concurrent tier (default caps at 3)
-# defaults already active: review-shards 1 (off), time-budget-minutes 30,
+max-concurrent-sessions: '6' # six concurrent sessions on a provider tier that supports it
+# defaults already active: review-shards 1 (initial group), time-budget-minutes 30,
 # model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers.
 ```
 
-On a paid tier with real session concurrency, sharding keeps each heavy session
-small (one shard ≈ 24KB of diff), so reasoning time is bounded by the shard, not
-the PR; a main shard that still fails after its retry aborts the run rather than
-posting partial coverage (auxiliary sessions fail open and degrade only their
-own coverage). On free/throttled tiers the shards serialize on one key, so the
-default single session is both simpler and no slower — leave `review-shards` at
-`1` there.
+`review-shards` controls initial grouping. Complete diff pages are then fitted
+to the assembled prompt budget, so even `1` can produce several sessions.
+A main page that still fails after its retry aborts the run before posting
+partial coverage; auxiliary sessions fail open and report their incomplete
+coverage. On free/throttled tiers, leave the initial grouping at `1` and keep
+session concurrency within the provider's limits.
 
 ### Provider configuration (in-repo)
 
@@ -497,9 +496,37 @@ Setting that URL routes gateway-supported providers (`devin`, `cursor`,
 [Agent Client Protocol](https://agentclientprotocol.com); the gateway token and
 endpoint are then required. Remote read-only enforcement combines the ACP
 permission policy with each agent's read-only configuration.
-`cline` stays on its argv driver: its ACP mode currently returns empty turns
-([cline/cline#11015](https://github.com/cline/cline/issues/11015)). The
-opencode server engine keeps serving SDK providers directly — its ACP mode
+`cline` stays on its tool-less argv driver: the shared ACP permission policy
+allows shell execution and is not a sufficient read-only boundary for Cline.
+Every main task now receives all assigned diff hunks directly, on every backend.
+Related files stay grouped where they fit. Oversized groups split into pages;
+oversized files split at hunks, and a single large hunk splits at line boundaries
+with preserved coordinates. The original hunk body must reconstruct exactly.
+Even `review-shards: 1` can produce multiple pages. A single line or fixed prompt
+that cannot fit fails explicitly instead of truncating mandatory content.
+
+The planner measures instructions, guidelines, shared context, diff and evidence
+together. It checks transport bytes separately from a conservative UTF-8-byte
+bound on text tokens, reserving output and harness headroom (including backend
+tool directives). PR metadata and prior-review context shrink with an omission
+notice when needed to preserve room for the mandatory diff. Known SDK models use
+the installed offline catalog limits; Cline's free Muse, DeepSeek v4.1 Flash and
+Solar Pro 4 use limits from the pinned CLI catalog. Paid Muse Contributor and
+DeepSeek v4/v4.1 Flash use verified live-catalog limits. Unknown CLI models log an
+unknown model limit and use a conservative 128,000-token policy ceiling. This is not an exact
+provider tokenizer or a guarantee about a CLI's hidden prompt. Cline still has
+a final 120 KiB argv check, with 2 KiB reserved for its wrapper. No task contains
+more than 120 KiB of input text.
+
+All pages use the shared concurrency queue. Lens and guideline checks are paged
+too; oversized verification batches shrink and receive relevant diff pages plus
+cited source. Optional checks fail open with incomplete coverage. Logs and
+telemetry count expected/delivered hunks and expected/completed/incomplete tasks;
+file counts distinguish whole files from files continued on other pages. A
+hunk counts as delivered only when every part completes. Partial main results
+fail the run. These counts establish delivery, not model comprehension. Shared maps and bounded caller/contract
+excerpts support cross-file checks; they cannot prove exhaustive dependency
+coverage. The opencode server engine keeps serving SDK providers directly — its ACP mode
 would drop per-session token usage, provider model listing, and Context7 MCP.
 
 Review metadata reports backend usage counters when they are available.
@@ -808,7 +835,7 @@ documentation lookup.
 | `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                                                                                                                                                                                                             |
 | `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                                                                                                                                                                     |
 | `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                                                                                                                                                                                                               |
-| `enable-guideline-pass`      | No       | `true`                | Check repository guidelines in a separate session or an opted-in main-session sweep                                                                                                                                                                                          |
+| `enable-guideline-pass`      | No       | `true`                | Check repository guidelines; may share the first auxiliary review pass or an opted-in main-session sweep                                                                                                                                                                     |
 | `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                                                                                                                                                                                                              |
 
 ### Review output
@@ -834,12 +861,12 @@ At most 20 locations are sampled, within a 16 KiB context budget, with omitted
 or unavailable evidence labeled explicitly. These are excerpts, not
 complete files or proof that omitted behavior is absent.
 
-All findings, including P3 and nits, receive verification in severity-ordered
-batches of ten. Findings arriving after an overlapping verification receive a
+With verification enabled, all emitted findings, including concrete investigation
+candidates, P3 and nits, enter severity-ordered batches of ten. Findings arriving after an overlapping verification receive a
 follow-up check. Verification shares the remaining verification time budget;
-failed or missing verdicts retain findings as unverified advisories and report incomplete coverage.
-Uncertain findings are explicitly labeled unverified, with low confidence and
-an investigate kind; blocking severities become P3, while nits remain nits.
+Failed or missing verdicts retain candidates as `not-completed` diagnostics and
+report incomplete coverage. An uncertain verdict is `inconclusive`, not an
+unattempted check. Both remain withheld from PR findings.
 
 ## Local review
 
@@ -938,6 +965,131 @@ and precision against seeded defects.
   `JBOT_OPENCODE_PORT` pins one instead.
 
 ## Comparing review runs
+
+### Review experiment preset
+
+`JBOT_REVIEW_EXPERIMENT` is the only operator control for the Jev/retrieval
+experiments. **`diff-batches` is the default**; set `off` to disable the batching
+hints. Complete diff paging, deterministic caller context and coverage accounting remain enabled in every
+preset. Finder pages also compact repeated metadata above 16 KiB while retaining
+PR intent, guidelines, caller evidence and mandatory diff content; the log records
+the bytes saved. This is independent of the older `JBOT_CONTEXT_TRIM` experiment.
+Batching has not established a reliable end-to-end speedup. The presets
+are mutually exclusive. Batching hints require repository shell tools; Pi,
+CommandCode and tool-less backends do not receive them.
+
+| Value                    | Behavior                                                                            | Evidence / recommendation                                                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `off`                    | Complete paged review without batching hints                                        | Rollback for the batching default.                                                                                                                      |
+| `diff-batches` (default) | Bounded batched reads for supporting diffs in other tasks, when needed              | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow. |
+| `adaptive`               | Batching plus completed-auxiliary reuse for routine documentation follow-ups        | Opt-in experiment; full main review and verification remain enabled.                                                                                    |
+| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                       |
+| `jev`                    | Jev ranks caller excerpts from changed exported symbols                             | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
+
+The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
+compares historical benefits, quality failures and sample limits. The
+[complete-page audit](docs/audits/2026-09-20-budgeted-diff-pages.md) records the
+current delivery checks, dogfood diagnosis and unmet release gate. The
+[auxiliary timing audit](docs/audits/2026-09-20-auxiliary-review-optimization.md)
+records three paired trials of context compaction, scheduling and caller retrieval.
+The [session-reuse audit](docs/audits/2026-09-20-auxiliary-session-reuse.md) measures
+combined auxiliary passes, Cline stability fixes and verifier evidence; it also
+records the rejected fixed-size verification batches.
+The [earlier per-run CSV](docs/audits/data/2026-09-19-evidence-runs.csv) contains
+86 phase, diff-batching and full-branch reviews from the preceding experiments.
+These results describe the recorded source revisions, not a new benchmark of
+this configuration refactor. Earlier audits retain their historical flag names;
+those flags are no longer read by the runtime.
+
+Use a checkout or image containing this code. The public Action uses the published
+`latest` image; selecting this source branch does not rebuild that image.
+
+`adaptive` reuses a pass only when its last completed review has the same base,
+model, settings, instructions and PR intent, and every subsequent change is to a
+README, changelog or Markdown audit. Code, configuration, guidelines, unknown
+history and explicit same-head reruns run auxiliaries normally. Logs record each
+decision and the reused commit. Setting `dynamic-fanout: false` also forces normal
+auxiliary scheduling. Local mode has no prior GitHub review state, so it cannot exercise auxiliary reuse. Clean follow-ups that do not post a new review keep the older completion baseline. See the
+[paired follow-up experiment](docs/audits/2026-09-20-adaptive-auxiliary-review.md)
+for measured savings and the rejected verifier-retrieval trial.
+
+Every preset withholds uncertain, investigation-only and low-confidence candidates
+from inline, file-level and review-body findings. Their full details remain in
+run logs and local output; the PR receives only a count and a verification-limit
+notice. They still prevent automatic approval and an all-clear result. This rule
+adds no model pass, repository scan or configuration flag. Concrete investigation
+candidates still enter the existing verification batches. Confirmation promotes
+one only when the verifier supplies a factual title, classification, severity,
+trigger/impact explanation and a quote present in source supplied for that candidate.
+Prepared evidence counts only when it fits and reaches the verifier. Code preserves
+the candidate location. Uncertainty and provider/budget
+failures remain withheld, with different diagnostic labels.
+
+The dogfood workflow uploads `unverified-findings.json` alongside telemetry. Its
+head-pinned candidates distinguish `inconclusive`, `not-completed`, and
+`not-verified`; the PR notice links to the run artifacts. Other deployments retain
+the same file beside telemetry and log the candidates. Source evidence uses the
+existing two cited locations per candidate, 20-location batch cap, 16 KiB excerpt
+budget and 1.5-second read deadline. No second verification round is added.
+See the [candidate-verification audit](docs/audits/2026-09-20-candidate-verification.md)
+for promotion tests, paired latency measurements and remaining limits.
+
+Local comparisons require the usual provider credential and configured model.
+Keep the revision, model, backend and other review settings fixed:
+
+```sh
+export JBOT_SDK_ENGINE=opencode JBOT_RUN_STATS=1 JBOT_REVIEW_TELEMETRY=true
+export JBOT_REVIEW_EXPERIMENT=off
+npm run review:local -- --base origin/main
+
+JBOT_REVIEW_EXPERIMENT=diff-batches npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=adaptive npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=linked npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=jev npm run review:local -- --base origin/main
+```
+
+To disable the experiments, set `JBOT_REVIEW_EXPERIMENT=off`. Explicit environment
+values override local `.env`; unknown values disable the experiments. Removed
+flags cannot reactivate them. Keep the TypeSafe key in the ignored `.env` or a
+hosted secret. Only `jev` sends bounded diff/source fragments to TypeSafe;
+`off`, `diff-batches`, `adaptive` and `linked` make no Jev API call.
+
+The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
+source files, and bounds the complete JSON request to 30,000 bytes. Preparation
+shares a five-second deadline with no retries; missing credentials, timeout or
+invalid responses leave the existing context intact. At most four excerpts /
+6,000 bytes are injected, with omissions disclosed. Scores rank evidence; the
+existing reviewer and independent verifier still decide findings.
+
+`linked` attempts at most two distinct JS/TS reads per main session, including
+shards/retries. Each packet adds at most 7,000 bytes with a four-second preparation
+budget. Tracked-source checks, file freshness and ordinary deeper reads remain.
+Verification receives no linked packet in this preset. `diff-batches` supplies
+at most 4 KiB of command instructions, with eight paths and an estimated 8 KiB of
+output per batch; actual output can be larger, so truncation recovery remains.
+Neither preset narrows full-diff scope or caps exploration depth.
+
+Guideline checks share the first auxiliary lens when one is selected, so the same
+diff and rules do not require a separate guideline pass. Verification keeps cited
+source windows and budget-based batching. Extra import/local-definition windows
+and caller packets remain research-only after inconclusive quality results.
+
+`policy.configuration.reviewExperiment` records the selected preset and the
+resolved behavior participates in the cache fingerprint. Jev rows record actual
+selection/status/API usage; exploration rows record packets, preparation,
+fallbacks, tool calls/bytes/turns and diff headers. Compare these with main,
+verification and total elapsed time, retained findings, and cached/uncached
+input tokens. Counters show activity, not proof of saved reads or quality.
+Preserve the log and `.jbot-review/telemetry.jsonl` before the next run.
+
+The research driver `scripts/jev-prefetch-experiment.ts` retains historical
+ablation plans through explicit, per-run programmatic settings; they appear as
+`custom` in telemetry. Shared reads, handoff, persistent caches, background
+prefetch, broad packets, verifier delivery and checkpoints are research-only.
+No production environment switches or compatibility aliases enable those arms.
+Provider prompt caching is separate and remains provider-managed.
+
+### Run telemetry
 
 The telemetry `run` header records the repository, reviewed base/head, selected
 models, and GitHub workflow run ID, attempt, and job key when available. Bundles
@@ -1117,8 +1269,9 @@ Markdown docs referenced from `.pr-governance/README.md` are preloaded (within
 the guidance budget) because a governance index points at review rules by
 definition; docs referenced from other guidance files are deduplicated and
 listed as available paths, read on demand. When any guidelines are discovered,
-a dedicated guideline-compliance session audits the diff rule-by-rule in
-parallel with the main review (disable with `enable-guideline-pass: false`).
+guideline compliance audits the diff rule-by-rule alongside the main review. It
+shares the first auxiliary lens when one is selected, otherwise it runs separately
+(disable with `enable-guideline-pass: false`).
 
 CommandCode logs progress every minute: elapsed time, observed tool outcomes,
 last completed tool, and time since the last event. A final `commandcode-progress`
@@ -1168,26 +1321,39 @@ Specialists do not start general reviews or another specialist's audit. Independ
 verification intentionally rechecks evidence; deterministic deduplication still
 handles findings that describe the same defect from different perspectives.
 
-After main review completes, auxiliary sessions get a settle grace of at least
-five minutes, stretched so every auxiliary session has ten minutes from its
-launch, bounded by the run budget with verification and posting time reserved.
-Before a cancellation, OpenCode and Pi sessions are asked to wrap up: in the
-last fifth of the grace (at most 90 seconds, and only when the model keeps at
-least 45 seconds to answer) the turn is interrupted, tools are dropped, and the
-model reports what it had already established; a main review shard gets the
-same treatment in the last fifth of its own deadline. Those
-findings are posted, the pass is listed as cut short with partial findings
-included, and a wrapped-up shard is never cached. Sessions that still do not
-finish are cancelled and reported as incomplete coverage, and the review footer
-names the cutoff (cut off after the main review, timed out, or failed). The run
-deadline also applies while queued; expiry requests backend cancellation, and
-completed main findings survive.
+### Review scheduling
+
+Main and auxiliary finders share the concurrency cap. Auxiliary pages get a turn
+while main pages remain queued; pending auxiliary passes rotate between groups.
+With a cap above one, auxiliary work leaves one slot available to main review or
+verification. Once main and its early verification settle, auxiliary pages can
+use the full cap. Verification gets the next available slot before any finder. A
+serial provider cannot reserve capacity, so main and auxiliary pages alternate
+and verification waits for the active call to finish.
+Auxiliary pages continue after main completes until the run's finder deadline,
+which reserves time for verification and posting. Main completion does not cancel
+queued pages. With `time-budget-minutes: 0`, there is no post-main cutoff.
+Auxiliary pages prioritize higher-risk code using the same path ranking as diff
+context. Findings from completed pages survive a deadline, and unfinished coverage
+is reported. Main review still covers every hunk.
+OpenCode and Pi can request a tool-free wrap-up near a session's own deadline
+when the reserved fifth of its budget leaves at least 45 seconds for the response.
+Completed auxiliary findings remain eligible for verification. A partial main
+page fails the run before posting; it is never cached as a completed review.
+Deadlines also apply while queued. Coverage logs record any cutoff or failure.
+
+The changes-since summary and addressed-thread check use low-priority slots.
+Their results are kept if they have finished when main review completes;
+otherwise they are skipped and cancelled before verification can need their
+session slots. Skips appear in the
+run logs and coverage telemetry. A skipped addressed-thread check leaves prior
+threads unresolved.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.
 Verification still uses a fresh session. An enabled sweep is independent of
 auxiliary availability and fan-out; `enable-guideline-pass: false` disables it. This experiment defaults off; other backends retain the
-separate guideline pass, and Arena comparisons keep their existing policy.
+auxiliary guideline check, and Arena comparisons keep their existing policy.
 The sweep receives the full guidelines and has at most ten minutes within the
 main attempt's remaining deadline. Failures preserve main findings and mark
 coverage incomplete. Incomplete sweeps are not cached.

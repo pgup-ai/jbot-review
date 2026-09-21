@@ -12,6 +12,7 @@ import {
 import {
   MAX_TOOL_TELEMETRY_ROWS,
   classifyReadonlyTool,
+  countDiffFileHeaders,
   createToolTelemetryAccumulator,
   toolIdentity,
 } from '../src/shared/tool-telemetry.ts';
@@ -68,6 +69,78 @@ describe('createTelemetryRecorder (disabled = inert)', () => {
 });
 
 describe('phase and tool telemetry', () => {
+  it('distinguishes identical results from changed results and failed requests without retaining inputs', () => {
+    const recorder = createTelemetryRecorder(true);
+    const tools = createToolTelemetryAccumulator(recorder, 'salt');
+    for (const [exactRequest, resultIdentity, success] of [
+      ['read secret.ts 1:10', 'old-secret', true],
+      ['read secret.ts 1:10', 'error-secret', false],
+      ['read secret.ts 1:10', 'old-secret', true],
+      ['read secret.ts 1:10', 'new-secret', true],
+      ['read secret.ts 11:20', 'new-secret', true],
+    ] as const) {
+      tools.startTool({
+        session: 'review',
+        backend: 'opencode',
+        capability: 'observable',
+        toolClass: 'file-read',
+        inputBytes: 1,
+        exactRequest,
+      })({
+        success,
+        resultIdentity,
+        durationMs: 7,
+        outputBytesBeforeCap: 1,
+        outputBytesAfterCap: 1,
+      });
+    }
+    tools.startTool({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      toolClass: 'diff-recovery',
+      inputBytes: 1,
+    })({ success: true, outputBytesBeforeCap: 1, outputBytesAfterCap: 1, diffFileHeaders: 2 });
+    tools.finishSession({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+    });
+    tools.finishSession({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+      experiment: { checkpoints: 2 },
+    });
+    tools.finishSession({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+    });
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const row = rows.find((row) => row.kind === 'exploration');
+    assert.equal(row.experiment.checkpoints, 2);
+    assert.equal(row.exactRepeatCalls, 2);
+    assert.equal(row.unchangedRepeatCalls, 1);
+    assert.equal(row.changedRepeatCalls, 1);
+    assert.equal(row.unchangedRepeatDurationMs, 7);
+    assert.equal(row.diffFileHeaders, 2);
+    assert.equal(row.multiFileDiffCalls, 1);
+    assert.equal(
+      rows.find((r) => r.kind === 'tool' && r.toolClass === 'diff-recovery').diffFileHeaders,
+      2,
+    );
+    assert.doesNotMatch(recorder.toJsonl(), /secret/);
+  });
   it('classifies external documentation tools before generic searches', () => {
     assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');
@@ -77,6 +150,24 @@ describe('phase and tool telemetry', () => {
       'diff-recovery',
     );
     assert.equal(classifyReadonlyTool('exec', { command: 'git diff --stat' }), 'diff-recovery');
+    for (const flags of ['', '--no-pager '])
+      assert.equal(
+        classifyReadonlyTool('exec', {
+          command: `git ${flags}--literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts`,
+        }),
+        'diff-recovery',
+      );
+    assert.equal(
+      countDiffFileHeaders([
+        {
+          type: 'text',
+          text: 'diff --git a/a b/a\n@@ -1 +1 @@\n-diff --git not-a-header\n+new\ndiff --git a/b b/b\ntruncated',
+        },
+        { type: 'image', text: 'diff --git not-text' },
+      ]),
+      2,
+    );
+    assert.equal(countDiffFileHeaders('diff --git a/a b/a'), 1);
     assert.equal(classifyReadonlyTool('bash', { command: 'git status --short' }), 'other-readonly');
     assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }), {
       identity: 'src/**/*.ts',
@@ -348,6 +439,15 @@ describe('createTelemetryRecorder finding dispositions', () => {
     rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
 
     assert.equal(rec.findingRows()[0].disposition, 'posted-inline');
+    rec.route({
+      inline: [],
+      fileLevel: [],
+      orphaned: [],
+      rescued: [],
+      anchorMissed: [],
+      withheld: [f],
+    });
+    assert.equal(rec.findingRows()[0].disposition, 'withheld-unverified');
   });
 
   it('detects the stage each dropped finding fell out at', () => {
@@ -507,6 +607,13 @@ describe('run and coverage telemetry', () => {
       state: 'completed',
       durationMs: 1200,
       promptBytes: 64_000,
+      diff: {
+        assignedFiles: 4,
+        completeFiles: 1,
+        truncatedFiles: 1,
+        omittedFiles: 2,
+        bytes: 42_000,
+      },
     });
     t.recordCoverage({
       session: 'review-interactions',
@@ -558,6 +665,13 @@ describe('run and coverage telemetry', () => {
       ],
     );
     assert.equal(coverage[0].promptBytes, 64_000);
+    assert.deepEqual(coverage[0].diff, {
+      assignedFiles: 4,
+      completeFiles: 1,
+      truncatedFiles: 1,
+      omittedFiles: 2,
+      bytes: 42_000,
+    });
     // The redaction floor: only the class persists, never the error's own text.
     assert.doesNotMatch(t.toJsonl(), /secret\.example/);
   });

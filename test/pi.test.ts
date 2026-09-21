@@ -29,6 +29,7 @@ import {
   piProviderIDFor,
   piRuntimeSupported,
   piModelAvailable,
+  catalogModelLimits,
   piServesModel,
   piSupportsProvider,
   piThinkingLevel,
@@ -169,10 +170,11 @@ describe('resolvePiEngine', () => {
     assert.equal(resolvePiEngine({ JBOT_SDK_ENGINE: 'auto' }, 'v24.18.0').enabled, true);
   });
 
-  it('disables pi when the kill switch forces opencode', () => {
+  it('disables pi when the kill switch forces opencode', async () => {
     const resolved = resolvePiEngine({ JBOT_SDK_ENGINE: 'opencode' }, 'v24.18.0');
     assert.equal(resolved.enabled, false);
     assert.match(resolved.reason, /JBOT_SDK_ENGINE/);
+    assert.equal(await catalogModelLimits('openai', 'gpt-5', resolved.enabled), undefined);
   });
 
   it('fails safe to opencode on an unknown kill-switch value', () => {

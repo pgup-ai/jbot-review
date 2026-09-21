@@ -1,3 +1,4 @@
+import { reviewExperiment } from './review-experiment.ts';
 import { createHash } from 'node:crypto';
 import { parseModelName } from '@symma/protocol';
 import { backendCanReadWorkspace, cliBackendForProvider } from './backend-selection.ts';
@@ -41,13 +42,26 @@ const POLICY_KEYS = [
   'evidenceQuotes',
 ] as const satisfies readonly (keyof ReviewRunOptions)[];
 
-export function runConfiguration(options: ReviewRunOptions, model: string) {
+export function runConfiguration(
+  options: ReviewRunOptions,
+  model: string,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const experiment = options.experiment ?? reviewExperiment(env);
+  const { cacheDir, ...reuse } = experiment.reuse;
   const configuration = {
     ...Object.fromEntries(POLICY_KEYS.map((key) => [key, options[key]])),
     sdkEngine: ['auto', 'opencode'].includes(options.sdkEngine ?? '')
       ? options.sdkEngine
       : 'unrecognized',
     shardCacheEnabled: Boolean(options.shardCachePath),
+    reviewExperiment: experiment.preset,
+    jevPrefetch: experiment.jevPrefetch,
+    explorationEvidence: experiment.explorationEvidence,
+    verificationEvidence: experiment.verificationEvidence,
+    evidenceDocsEnabled: Boolean(experiment.docsPath),
+    evidenceReuse: { ...reuse, persistent: Boolean(cacheDir) },
+    explorationExperiment: experiment.exploration,
     modelPool: options.modelPool?.length ? options.modelPool : [model],
     requestedReasoningEffort: knownEffort(options.modelOptions?.reasoningEffort),
   };

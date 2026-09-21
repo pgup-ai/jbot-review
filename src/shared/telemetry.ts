@@ -1,4 +1,6 @@
+import type { EvidenceCacheStats } from './evidence.ts';
 import type { CommandCodeProgress } from './commandcode-progress.ts';
+import type { JevPrefetchStats } from './jev-prefetch.ts';
 import type { runConfiguration, runIdentity, roleTelemetry } from './run-telemetry.ts';
 import type { Finding, FindingConfidence, Severity } from './types.ts';
 
@@ -14,6 +16,7 @@ export type FindingDisposition =
   | 'severity-filtered'
   | 'posted-inline'
   | 'posted-file-level'
+  | 'withheld-unverified'
   | 'orphaned'
   | 'rescued'
   | 'anchor-missed';
@@ -98,12 +101,18 @@ export interface ToolTelemetryRow {
   outputBytesBeforeCap: number;
   outputBytesAfterCap: number;
   duplicate: boolean;
+  exactRepeat?: boolean;
+  unchangedResult?: boolean;
   success: boolean;
   failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   diffScope?: 'whole' | 'path';
+  diffFileHeaders?: number;
 }
 
 export interface ExplorationTelemetryRow {
+  diffFileHeaders?: number;
+  multiFileDiffCalls?: number;
+  experiment?: Record<string, number>;
   kind: 'exploration';
   session: string;
   backend: string;
@@ -121,6 +130,10 @@ export interface ExplorationTelemetryRow {
   duplicateReads: number;
   repeatedSearches: number;
   droppedToolRows: number;
+  exactRepeatCalls?: number;
+  unchangedRepeatCalls?: number;
+  changedRepeatCalls?: number;
+  unchangedRepeatDurationMs?: number;
 }
 
 export interface PhaseTelemetryStart {
@@ -172,6 +185,7 @@ export interface OutcomeTelemetryRow extends PriorThreadOutcome {
 
 export interface FindingRouting {
   inline: Finding[];
+  withheld?: Finding[];
   fileLevel: Finding[];
   orphaned: Finding[];
   rescued: Finding[];
@@ -219,6 +233,22 @@ export interface SessionCoverage {
   error?: unknown;
   durationMs?: number;
   promptBytes?: number;
+  delivery?: {
+    expectedHunks: number;
+    deliveredHunks: number;
+    expectedTasks: number;
+    completedTasks: number;
+    incompleteTasks: number;
+  };
+  reusedFrom?: string;
+  diff?: {
+    assignedFiles: number;
+    completeFiles: number;
+    pagedFiles?: number;
+    truncatedFiles: number;
+    omittedFiles: number;
+    bytes: number;
+  };
 }
 
 export type SessionCoverageRecorder = (coverage: SessionCoverage) => void;
@@ -264,6 +294,8 @@ export type TelemetryStage = 'gated' | 'deduped' | 'suppressed' | 'verified' | '
 const STAGE_ORDER: TelemetryStage[] = ['gated', 'deduped', 'suppressed', 'verified', 'filtered'];
 
 export interface TelemetryRecorder {
+  recordEvidenceCache(row: EvidenceCacheStats): void;
+  recordJevPrefetch(row: JevPrefetchStats): void;
   readonly enabled: boolean;
   /** Tag findings with a stable id + origin session; returns the tagged copies. */
   produced(session: string, findings: Finding[]): Finding[];
@@ -289,6 +321,8 @@ export interface TelemetryRecorder {
 }
 
 const DISABLED: TelemetryRecorder = {
+  recordEvidenceCache: () => undefined,
+  recordJevPrefetch: () => undefined,
   enabled: false,
   produced: (_session, findings) => findings,
   snapshot: () => undefined,
@@ -326,6 +360,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const stageSeverity = new Map<TelemetryStage, Map<string, Severity>>();
   const routing = {
     inline: new Set<string>(),
+    withheld: new Set<string>(),
     fileLevel: new Set<string>(),
     orphaned: new Set<string>(),
     rescued: new Set<string>(),
@@ -335,6 +370,8 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   // honest as the model's original output rather than mutating it.
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
+  const prefetch: JevPrefetchStats[] = [];
+  let evidenceCache: EvidenceCacheStats | undefined;
   const progress: CommandCodeProgressTelemetryRow[] = [];
   const phases: PhaseTelemetryRow[] = [];
   const tools: ToolTelemetryRow[] = [];
@@ -376,6 +413,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     route(routes) {
       const missed = idsOf(routes.anchorMissed);
       for (const id of idsOf(routes.inline)) routing.inline.add(id);
+      for (const id of idsOf(routes.withheld ?? [])) routing.withheld.add(id);
       for (const id of missed) routing.anchorMissed.add(id);
       for (const f of routes.fileLevel) {
         if (!f.id) continue;
@@ -412,6 +450,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         current
           ? {
               ...row,
+              ...((row.experiment ?? current.experiment)
+                ? { experiment: row.experiment ?? current.experiment }
+                : {}),
               ...(current.turnCountAvailable && !row.turnCountAvailable
                 ? { turnCountAvailable: true, turnCount: current.turnCount }
                 : {}),
@@ -421,6 +462,12 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
             }
           : row,
       );
+    },
+    recordEvidenceCache(row) {
+      evidenceCache = row;
+    },
+    recordJevPrefetch(row) {
+      prefetch.push(row);
     },
     recordOutcome(row) {
       outcomes.push({ kind: 'outcome', ...row });
@@ -444,6 +491,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         ...(cov.state === 'failed' ? { failureClass: classifySessionError(cov.error) } : {}),
         ...(cov.durationMs !== undefined ? { durationMs: cov.durationMs } : {}),
         ...(cov.promptBytes !== undefined ? { promptBytes: cov.promptBytes } : {}),
+        ...(cov.reusedFrom ? { reusedFrom: cov.reusedFrom } : {}),
+        ...(cov.diff ? { diff: cov.diff } : {}),
+        ...(cov.delivery ? { delivery: cov.delivery } : {}),
       });
     },
     findingRows() {
@@ -458,6 +508,8 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       const lines = [
         ...header,
         ...phases,
+        ...prefetch,
+        ...(evidenceCache ? [evidenceCache] : []),
         ...coverage,
         ...outcomes,
         ...this.findingRows(),
@@ -509,6 +561,7 @@ function deriveRow(
   stageSeverity: Map<TelemetryStage, Map<string, Severity>>,
   routing: {
     inline: Set<string>;
+    withheld: Set<string>;
     fileLevel: Set<string>;
     orphaned: Set<string>;
     rescued: Set<string>;
@@ -530,7 +583,8 @@ function deriveRow(
   const last = present[present.length - 1];
   let disposition: FindingDisposition;
   if (last === 'filtered') {
-    if (routing.rescued.has(id)) disposition = 'rescued';
+    if (routing.withheld.has(id)) disposition = 'withheld-unverified';
+    else if (routing.rescued.has(id)) disposition = 'rescued';
     else if (routing.inline.has(id)) disposition = 'posted-inline';
     else if (routing.anchorMissed.has(id)) disposition = 'anchor-missed';
     else if (routing.fileLevel.has(id)) disposition = 'posted-file-level';

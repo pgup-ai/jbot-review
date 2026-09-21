@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { createCliProcessScope } from '../src/shared/cli-process.ts';
+import { setTimeout as delay } from 'node:timers/promises';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -15,6 +19,7 @@ import {
   formatClinePromptTimeoutMessage,
   isClineProvider,
   parseClineFinalMessage,
+  runClineReview,
   stripClineModelReasoning,
   writeClineAuth,
 } from '../src/shared/cline.ts';
@@ -80,7 +85,11 @@ describe('Cline CLI provider helpers', () => {
     );
     assert.throws(
       () => assertClinePromptArgWithinBudget('review', 'x'.repeat(CLINE_MAX_ARGV_BYTES + 1)),
-      /cline review prompt is \d+ bytes, over the \d+-byte argv limit/,
+      /cline review prompt is \d+ bytes, over the \d+-byte argv limit.*Incomplete review coverage/,
+    );
+    assert.throws(
+      () => assertClinePromptArgWithinBudget('review', '界'.repeat(CLINE_MAX_ARGV_BYTES / 2)),
+      /argv limit/,
     );
   });
 
@@ -156,6 +165,7 @@ describe('Cline CLI provider helpers', () => {
       const env = clineEnvForHome('/tmp/jbot-cline-home-test');
 
       assert.equal(env.HOME, '/tmp/jbot-cline-home-test');
+      assert.equal(env.CLINE_NO_AUTO_UPDATE, '1');
       for (const key of credentialKeys) {
         assert.equal(env[key], undefined, `${key} must be stripped from the child env`);
         assert.equal(process.env[key], `ambient-${key}`, `${key} ambient env must be intact`);
@@ -189,9 +199,8 @@ describe('Cline CLI provider helpers', () => {
   });
 
   it('drops @-mention ENOENT warnings from failure output so the real error survives the cap', () => {
-    // 3.0.60 (the image) says `statx`, 3.0.61 says `stat`; the mention regex
-    // swallows the import's closing quote and punctuation, which is what
-    // separates these from a genuinely missing file.
+    // Punctuation swallowed by Cline's mention regex distinguishes these from missing files;
+    // older CLI versions report either `statx` or `stat`.
     const warnings = Array.from(
       { length: 40 },
       (_, i) =>
@@ -216,5 +225,89 @@ describe('Cline CLI provider helpers', () => {
       formatClinePromptTimeoutMessage('finding-verification', 'cline/default', 1200_000),
       'cline finding-verification prompt timed out after 1200s (model=cline/default)',
     );
+  });
+
+  it('cancels a running Cline process before its deadline and reaps it', async (t) => {
+    const workspace = mkdtempSync(join(tmpdir(), 'cline-cancel-'));
+    const originalPath = process.env.PATH;
+    const scope = createCliProcessScope();
+    t.after(async () => {
+      await scope.stop();
+      process.env.PATH = originalPath;
+      rmSync(workspace, { recursive: true, force: true });
+    });
+    process.env.PATH = `${workspace}:${originalPath}`;
+    writeClineAuth('{"providers":{}}', workspace);
+    const ready = join(workspace, 'pid');
+    writeFileSync(
+      join(workspace, 'cline'),
+      `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid));setInterval(() => {}, 1000);`,
+      { mode: 0o700 },
+    );
+    const result = scope.run('review-interactions', () =>
+      runClineReview(workspace, 'cline/default', 'context', '', () => {}, {
+        home: workspace,
+        timeoutMs: 10000,
+      }),
+    );
+    const rejected = assert.rejects(result, /aborted/);
+    let pid = 0;
+    for (let attempt = 0; attempt < 100 && !pid; attempt++) {
+      try {
+        pid = Number(readFileSync(ready, 'utf8'));
+      } catch {
+        await delay(10);
+      }
+    }
+    assert.ok(pid > 0);
+    assert.equal(scope.abort('review-interactions'), 1);
+    await rejected;
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  });
+
+  it('preserves the prompt outcome when temporary-home cleanup fails', async (t) => {
+    const workspace = mkdtempSync(join(tmpdir(), 'cline-cleanup-'));
+    const originalPath = process.env.PATH;
+    const cleanup: string[] = [];
+    const logs: string[] = [];
+    t.after(() => {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      process.env.PATH = originalPath;
+      for (const path of [...cleanup, workspace]) rmSync(path, { recursive: true, force: true });
+    });
+    process.env.PATH = `${workspace}:${originalPath}`;
+    writeClineAuth('{"providers":{}}', workspace);
+    t.mock.method(fs, 'rm', async (path: string) => {
+      cleanup.push(path);
+      throw Object.assign(new Error('private filesystem detail'), { code: 'ENOTEMPTY' });
+    });
+    syncBuiltinESMExports();
+    for (const fail of [false, true]) {
+      writeFileSync(
+        join(workspace, 'cline'),
+        `#!/usr/bin/env node\nif (process.env.CLINE_NO_AUTO_UPDATE !== '1') process.exit(3);\n${
+          fail
+            ? "console.error('original provider failure'); process.exit(7);"
+            : 'console.log(JSON.stringify({type:"run_result",text:\'{"summary":"","findings":[]}\'}));'
+        }\n`,
+        { mode: 0o700 },
+      );
+      const result = runClineReview(
+        workspace,
+        'cline/default',
+        'context',
+        '',
+        (m) => logs.push(m),
+        {
+          home: workspace,
+          timeoutMs: 5000,
+        },
+      );
+      if (fail) await assert.rejects(result, /original provider failure/);
+      else assert.deepEqual((await result).findings, []);
+    }
+    assert.equal(logs.filter((m) => /cleanup failed: ENOTEMPTY/.test(m)).length, 2);
+    assert.doesNotMatch(logs.join('\n'), /private filesystem detail/);
   });
 });

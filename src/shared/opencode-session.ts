@@ -1,5 +1,8 @@
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { readExplorationStats } from './exploration-policy.ts';
+import type { TelemetryStopReason } from './telemetry.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -26,6 +29,7 @@ import {
 } from './token-usage.ts';
 import {
   classifyReadonlyTool,
+  countDiffFileHeaders,
   serializedBytes,
   toolIdentity,
   type ToolTelemetryAccumulator,
@@ -43,60 +47,101 @@ export const OPENCODE_TELEMETRY_CAPABILITY = 'observable' as const;
 /** V2 tool ids → the names the shared telemetry classifier knows. */
 const TOOL_CLASS_ALIASES: Record<string, string> = { shell: 'bash', execute: 'bash' };
 
-/**
- * Bounds in-flight model sessions. Free / throttled provider tiers serialize
- * concurrent requests on one API key upstream anyway — observed as a
- * flash-tier session taking 7+ minutes while queued behind parallel shards.
- * Capping concurrency on OUR side keeps each session's deadline measuring
- * model time, not queue time. High-priority waiters wake first; each priority
- * remains FIFO. 0 = unlimited.
- */
-export type SemaphorePriority = 'high' | 'normal';
+export type SemaphorePriority = 'verification' | 'high' | 'normal' | 'low';
 
 export class Semaphore {
-  private highPriorityQueue: Array<() => void> = [];
-  private normalPriorityQueue: Array<() => void> = [];
+  private queues: Record<SemaphorePriority, Array<{ grant: () => void; group?: string }>> = {
+    verification: [],
+    high: [],
+    normal: [],
+    low: [],
+  };
   private active = 0;
+  private auxiliaryActive = 0;
+  private lastGranted: SemaphorePriority = 'normal';
+  private reserveSlot = true;
 
-  constructor(private readonly limit: number) {}
+  constructor(
+    private readonly limit: number,
+    private readonly reviewScheduling = false,
+  ) {}
 
-  async acquire(priority: SemaphorePriority = 'normal', signal?: AbortSignal): Promise<() => void> {
+  async acquire(
+    priority: SemaphorePriority = 'normal',
+    signal?: AbortSignal,
+    group?: string,
+  ): Promise<() => void> {
     signal?.throwIfAborted();
     if (this.limit === 0) return () => undefined;
-    if (this.active < this.limit) {
-      this.active += 1;
-    } else {
-      const queue = priority === 'high' ? this.highPriorityQueue : this.normalPriorityQueue;
-      await new Promise<void>((resolve, reject) => {
-        const grant = () => {
-          signal?.removeEventListener('abort', abort);
-          resolve();
-        };
-        const abort = () => {
-          queue.splice(queue.indexOf(grant), 1);
-          reject(signal?.reason);
-        };
-        queue.push(grant);
-        signal?.addEventListener('abort', abort, { once: true });
-      });
-    }
+    const auxiliary = priority === 'normal' || priority === 'low';
+    const queue = this.queues[priority];
+    await new Promise<void>((resolve, reject) => {
+      const grant = () => {
+        signal?.removeEventListener('abort', abort);
+        this.active++;
+        if (auxiliary) this.auxiliaryActive++;
+        this.lastGranted = priority;
+        resolve();
+      };
+      const abort = () => {
+        queue.splice(queue.indexOf(waiter), 1);
+        reject(signal?.reason);
+      };
+      const waiter = { grant, group };
+      queue.push(waiter);
+      signal?.addEventListener('abort', abort, { once: true });
+      this.drain();
+    });
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      const next = this.highPriorityQueue.shift() ?? this.normalPriorityQueue.shift();
-      if (next) {
-        next();
-      } else {
-        this.active -= 1;
-      }
+      this.active--;
+      if (auxiliary) this.auxiliaryActive--;
+      this.drain();
     };
   }
 
+  private drain(): void {
+    while (this.active < this.limit) {
+      const { verification, high, normal, low } = this.queues;
+      // One slot stays available to main/verification; a serial provider cannot reserve one.
+      const auxiliaryRoom =
+        !this.reviewScheduling ||
+        !this.reserveSlot ||
+        this.auxiliaryActive < Math.max(1, this.limit - 1);
+      const auxiliaryTurn =
+        this.reviewScheduling &&
+        this.auxiliaryActive === 0 &&
+        (this.limit > 1 || this.lastGranted !== 'normal');
+      const ordered = auxiliaryTurn
+        ? [verification, normal, high, low]
+        : [verification, high, normal, low];
+      const queue = ordered.find(
+        (q) => q.length && (auxiliaryRoom || q === verification || q === high),
+      );
+      const next = queue?.shift();
+      if (!next || !queue) break;
+      if (next.group) {
+        const sameGroup = queue.filter((waiter) => waiter.group === next.group);
+        queue.splice(
+          0,
+          queue.length,
+          ...queue.filter((waiter) => waiter.group !== next.group),
+          ...sameGroup,
+        );
+      }
+      next.grant();
+    }
+  }
+
+  releaseReservation(): void {
+    this.reserveSlot = false;
+    this.drain();
+  }
+
   isBusy(): boolean {
-    return (
-      this.active > 0 || this.highPriorityQueue.length > 0 || this.normalPriorityQueue.length > 0
-    );
+    return this.active > 0 || Object.values(this.queues).some((queue) => queue.length > 0);
   }
 }
 
@@ -232,7 +277,7 @@ export async function createReviewSession(
   }
   await client.session.environment({ sessionID, variables: sessionEnvironment() }, control());
   rememberSession(client, sessionID, { label: spec.label, agent });
-  registerSessionOptions(runtime, sessionID, spec.model, spec.tier ?? 'main');
+  registerSessionOptions(runtime, sessionID, spec);
   return sessionID;
 }
 
@@ -245,13 +290,14 @@ const sessionOptionsByRuntime = new WeakMap<
 function registerSessionOptions(
   runtime: OpencodeRuntime,
   sessionID: string,
-  model: string,
-  tier: OptionTier,
+  spec: CreateSessionSpec,
 ): void {
-  const options = sessionModelOptions(runtime.modelOptions, model, tier);
-  if (!options) return;
+  const options = sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
+  const experiment = runtime.explorationExperiment;
+  const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
+  if (!options && !label) return;
   const map = sessionOptionsByRuntime.get(runtime) ?? {};
-  map[sessionID] = options;
+  map[sessionID] = { ...options, ...(label ? { jbotSessionLabel: spec.label } : {}) };
   sessionOptionsByRuntime.set(runtime, map);
   const tmp = `${runtime.sessionOptionsFile}.tmp`;
   writeFileSync(tmp, JSON.stringify(map));
@@ -310,6 +356,10 @@ export function recordAssistantTools(
   telemetry: ToolTelemetryAccumulator,
   session: string,
   messages: AssistantMessage[],
+  options: {
+    experiment?: ReturnType<typeof readExplorationStats>;
+    stopReason?: TelemetryStopReason;
+  } = {},
 ): void {
   for (const message of messages) {
     for (const part of message.content ?? []) {
@@ -330,6 +380,9 @@ export function recordAssistantTools(
         capability: OPENCODE_TELEMETRY_CAPABILITY,
         toolClass,
         inputBytes: serializedBytes(part.state.input),
+        exactRequest: createHash('sha256')
+          .update(JSON.stringify([part.name, part.state.input]))
+          .digest('hex'),
         ...identity,
         ...(toolClass === 'diff-recovery'
           ? { diffScope: identity.identityKind === 'path' ? ('path' as const) : ('whole' as const) }
@@ -339,9 +392,15 @@ export function recordAssistantTools(
       const outputBytes = serializedBytes(output);
       finish({
         success: part.state.status === 'completed',
+        ...(toolClass === 'diff-recovery' && part.state.status === 'completed'
+          ? { diffFileHeaders: countDiffFileHeaders(output) }
+          : {}),
         ...(part.state.status === 'error' ? { failureClass: 'execution' as const } : {}),
         outputBytesBeforeCap: outputBytes,
         outputBytesAfterCap: outputBytes,
+        resultIdentity: createHash('sha256')
+          .update(JSON.stringify(output) ?? '')
+          .digest('hex'),
         durationMs: Math.max((part.time.completed ?? part.time.created) - part.time.created, 0),
       });
     }
@@ -351,7 +410,8 @@ export function recordAssistantTools(
     backend: 'opencode',
     capability: OPENCODE_TELEMETRY_CAPABILITY,
     budgetTier: 'observe-only',
-    stopReason: 'completed',
+    stopReason: options.stopReason ?? 'completed',
+    ...(options.experiment ? { experiment: options.experiment } : {}),
     ...(messages.length > 0 ? { turnCount: messages.length } : {}),
   });
 }
@@ -468,6 +528,18 @@ export async function promptInSession(
   }
 }
 
+function sessionExplorationStats(runtime: OpencodeRuntime, sessionID: string) {
+  try {
+    const file = join(
+      dirname(runtime.sessionOptionsFile),
+      `exploration-${createHash('sha256').update(sessionID).digest('hex')}.json`,
+    );
+    return readExplorationStats(JSON.parse(readFileSync(file, 'utf8')));
+  } catch {
+    return undefined;
+  }
+}
+
 async function promptHoldingSlot(
   runtime: OpencodeRuntime,
   sessionID: string,
@@ -482,7 +554,50 @@ async function promptHoldingSlot(
   let usage: PromptTokenUsage | undefined;
   try {
     const previous = await latestAssistant(client, sessionID);
+    const initialExperiment = sessionExplorationStats(runtime, sessionID);
     const startedAt = Date.now();
+    let recorded = false;
+    const recordTurn = async (
+      fallback: AssistantMessage[],
+      stopReason: TelemetryStopReason = 'completed',
+    ) => {
+      if (recorded) return;
+      recorded = true;
+      // Usage spans the whole turn: V2 writes one assistant message per step.
+      let turn = fallback;
+      try {
+        const since = await assistantsSince(client, sessionID, previous?.id, startedAt);
+        if (since.messages.length > 0) turn = since.messages;
+        if (!since.complete)
+          log(`${label} turn listing incomplete; usage and tools are under-counted`);
+      } catch (error) {
+        log(`${label} turn listing failed; using available messages: ${formatUnknown(error)}`);
+      }
+      if (runtime.onSourceRead && !label.includes('verification')) {
+        for (const assistant of turn) {
+          for (const part of assistant.content ?? []) {
+            if (part.type === 'tool' && part.state.status === 'completed' && part.state.input)
+              runtime.onSourceRead(part.name, part.state.input);
+          }
+        }
+      }
+      const telemetry = toolTelemetry.get(client);
+      if (telemetry) {
+        const current = sessionExplorationStats(runtime, sessionID);
+        const experiment =
+          current &&
+          Object.fromEntries(
+            Object.entries(current).map(([key, value]) => [
+              key,
+              value - (initialExperiment?.[key] ?? 0),
+            ]),
+          );
+        recordAssistantTools(telemetry, label, turn, { experiment, stopReason });
+      }
+      const turnUsage = sumUsage(turn);
+      log(`${label} ${formatTokenUsage(turnUsage)}`);
+      usage = extractPromptTokenUsage(turnUsage);
+    };
     log(`Calling ${label} prompt (${spec.model})`);
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
@@ -494,6 +609,7 @@ async function promptHoldingSlot(
     } catch (error) {
       // The server may have accepted the prompt before the request failed.
       await interruptBestEffort(client, sessionID, label, log);
+      await recordTurn([], 'failed');
       throw error;
     }
 
@@ -522,6 +638,7 @@ async function promptHoldingSlot(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
         await interruptBestEffort(client, sessionID, label, log);
+        await recordTurn([], 'aborted');
         await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT }, control());
         rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
         try {
@@ -544,30 +661,17 @@ async function promptHoldingSlot(
     } catch (error) {
       // A timed-out or failed wait leaves the session generating; stop it now.
       await interruptBestEffort(client, sessionID, label, log);
+      await recordTurn([], 'failed');
       throw error;
     } finally {
       clearTimeout(reserveTimer);
       unregister();
     }
 
+    await recordTurn([message], message.error ? 'failed' : 'completed');
     if (message.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknown(message.error)}`);
     }
-    // Usage spans the whole turn: V2 writes one assistant message per step.
-    let turn: AssistantMessage[] = [message];
-    try {
-      const since = await assistantsSince(client, sessionID, previous?.id, startedAt);
-      if (since.messages.length > 0) turn = since.messages;
-      if (!since.complete)
-        log(`${label} turn listing incomplete; usage and tools are under-counted`);
-    } catch (error) {
-      log(`${label} turn listing failed; counting the final message only: ${formatUnknown(error)}`);
-    }
-    const telemetry = toolTelemetry.get(client);
-    if (telemetry) recordAssistantTools(telemetry, label, turn);
-    const turnUsage = sumUsage(turn);
-    log(`${label} ${formatTokenUsage(turnUsage)}`);
-    usage = extractPromptTokenUsage(turnUsage);
     const text = assistantText(message);
     if (!text) {
       log(

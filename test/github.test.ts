@@ -119,6 +119,15 @@ describe('formatFindingLabel', () => {
         severity: 'P3',
         kind: 'investigate',
         confidence: 'low',
+        verificationUncertain: true,
+      }),
+      '**Unverified**',
+    );
+    assert.equal(
+      formatFindingLabel({
+        severity: 'P3',
+        kind: 'investigate',
+        confidence: 'low',
       }),
       '**P3 · investigate** (*conf: low*)',
     );

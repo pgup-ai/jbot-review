@@ -23,6 +23,7 @@ export interface ToolTelemetryStart {
   identityKind?: 'path' | 'query' | 'scope';
   page?: string;
   diffScope?: 'whole' | 'path';
+  exactRequest?: string;
 }
 
 export interface ToolTelemetryFinish {
@@ -31,6 +32,8 @@ export interface ToolTelemetryFinish {
   outputBytesAfterCap: number;
   failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   durationMs?: number;
+  resultIdentity?: string;
+  diffFileHeaders?: number;
 }
 
 export interface ExplorationTelemetryFinish {
@@ -41,6 +44,7 @@ export interface ExplorationTelemetryFinish {
   stopReason: TelemetryStopReason;
   turnCount?: number;
   explorationMode?: ExplorationMode;
+  experiment?: Record<string, number>;
 }
 
 export interface ToolTelemetryAccumulator {
@@ -58,6 +62,9 @@ interface SessionCounters {
   repeatedSearches: number;
   droppedToolRows: number;
   classes: Set<ToolTelemetryClass>;
+  diffFileHeaders?: number;
+  multiFileDiffCalls?: number;
+  exact?: { repeats: number; unchanged: number; changed: number; unchangedDurationMs: number };
 }
 
 const EMPTY: ToolTelemetryAccumulator = {
@@ -74,6 +81,7 @@ export function createToolTelemetryAccumulator(
 
   const sessions = new Map<string, SessionCounters>();
   const seen = new Set<string>();
+  const results = new Map<string, string>();
   let rows = 0;
 
   const countersFor = (backend: string, session: string): SessionCounters => {
@@ -131,10 +139,45 @@ export function createToolTelemetryAccumulator(
       return (finish) => {
         if (finished) return;
         finished = true;
+        let exactRepeat: boolean | undefined;
+        let unchangedResult: boolean | undefined;
+        if (
+          input.exactRequest !== undefined &&
+          finish.success &&
+          finish.resultIdentity !== undefined
+        ) {
+          const request = createHmac('sha256', salt)
+            .update(`${input.backend}\0${input.exactRequest}`)
+            .digest('hex');
+          const result = createHmac('sha256', salt).update(finish.resultIdentity).digest('hex');
+          const previous = results.get(request);
+          exactRepeat = previous !== undefined;
+          unchangedResult = exactRepeat && previous === result;
+          const exact = (counters.exact ??= {
+            repeats: 0,
+            unchanged: 0,
+            changed: 0,
+            unchangedDurationMs: 0,
+          });
+          if (exactRepeat) {
+            exact.repeats++;
+            if (unchangedResult) {
+              exact.unchanged++;
+              exact.unchangedDurationMs += boundedCount(finish.durationMs ?? 0);
+            } else exact.changed++;
+          }
+          if (results.size < MAX_TOOL_IDENTITIES || results.has(request))
+            results.set(request, result);
+        }
         counters.toolCalls += 1;
         counters.toolInputBytes += boundedCount(input.inputBytes);
         counters.toolOutputBytes += boundedCount(finish.outputBytesAfterCap);
         counters.classes.add(input.toolClass);
+        if (finish.diffFileHeaders !== undefined) {
+          counters.diffFileHeaders = (counters.diffFileHeaders ?? 0) + finish.diffFileHeaders;
+          counters.multiFileDiffCalls =
+            (counters.multiFileDiffCalls ?? 0) + Number(finish.diffFileHeaders > 1);
+        }
         if (duplicate && input.toolClass === 'file-read') counters.duplicateReads += 1;
         if (duplicate && input.toolClass === 'search') counters.repeatedSearches += 1;
         if (rows >= MAX_TOOL_TELEMETRY_ROWS) {
@@ -154,6 +197,10 @@ export function createToolTelemetryAccumulator(
           outputBytesAfterCap: boundedCount(finish.outputBytesAfterCap),
           duplicate,
           success: finish.success,
+          ...(finish.diffFileHeaders !== undefined
+            ? { diffFileHeaders: finish.diffFileHeaders }
+            : {}),
+          ...(exactRepeat !== undefined ? { exactRepeat, unchangedResult } : {}),
           ...(finish.failureClass ? { failureClass: finish.failureClass } : {}),
           ...(input.diffScope ? { diffScope: input.diffScope } : {}),
         });
@@ -169,6 +216,7 @@ export function createToolTelemetryAccumulator(
         explorationMode: input.explorationMode ?? deriveExplorationMode(counters.classes),
         budgetTier: input.budgetTier,
         stopReason: input.stopReason,
+        ...(input.experiment ? { experiment: input.experiment } : {}),
         turnCountAvailable: input.turnCount !== undefined,
         ...(input.turnCount !== undefined ? { turnCount: boundedCount(input.turnCount) } : {}),
         toolCalls: counters.toolCalls,
@@ -179,6 +227,20 @@ export function createToolTelemetryAccumulator(
         duplicateReads: counters.duplicateReads,
         repeatedSearches: counters.repeatedSearches,
         droppedToolRows: counters.droppedToolRows,
+        ...(counters.diffFileHeaders !== undefined
+          ? {
+              diffFileHeaders: counters.diffFileHeaders,
+              multiFileDiffCalls: counters.multiFileDiffCalls,
+            }
+          : {}),
+        ...(counters.exact
+          ? {
+              exactRepeatCalls: counters.exact.repeats,
+              unchangedRepeatCalls: counters.exact.unchanged,
+              changedRepeatCalls: counters.exact.changed,
+              unchangedRepeatDurationMs: counters.exact.unchangedDurationMs,
+            }
+          : {}),
       };
       recorder.recordExploration(row);
     },
@@ -194,7 +256,10 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     !Array.isArray(input)
       ? (input as Record<string, unknown>).command
       : undefined;
-  if (typeof command === 'string' && /\bgit\s+diff(?:\s|$)/i.test(command)) {
+  if (
+    typeof command === 'string' &&
+    /\bgit(?:\s+(?:--literal-pathspecs|--no-pager|-c\s+\S+))*\s+diff(?:\s|$)/i.test(command)
+  ) {
     return 'diff-recovery';
   }
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
@@ -213,6 +278,18 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     return 'list';
   }
   return 'other-readonly';
+}
+
+export function countDiffFileHeaders(content: unknown): number {
+  const blocks = Array.isArray(content) ? content : [{ type: 'text', text: content }];
+  return blocks.reduce(
+    (count, block) =>
+      count +
+      (block?.type === 'text' && typeof block.text === 'string'
+        ? (block.text.match(/^diff --git /gm) ?? []).length
+        : 0),
+    0,
+  );
 }
 
 export function serializedBytes(value: unknown): number {

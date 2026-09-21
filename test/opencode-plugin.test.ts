@@ -9,11 +9,14 @@ import { PERMISSION_DENIED_MESSAGE } from '../src/shared/prompt.ts';
 
 type Hook = (event: unknown) => unknown;
 
-async function loadPlugin(): Promise<{ context: Hook; evaluate: Hook }> {
+async function loadPlugin(
+  tool = { transform: async () => {}, hook: async () => {} },
+): Promise<{ context: Hook; evaluate: Hook }> {
   const file = join(hermeticOpencodeConfigHome(), 'opencode', 'plugins', 'jbot-review.js');
   const mod = await import(pathToFileURL(file).href);
   const hooks: Record<string, Hook> = {};
   await mod.default.setup({
+    tool,
     session: { hook: async (name: string, fn: Hook) => (hooks[`session.${name}`] = fn) },
     permission: { hook: async (name: string, fn: Hook) => (hooks[`permission.${name}`] = fn) },
   });
@@ -49,6 +52,37 @@ after(() => {
 });
 
 describe('jbot opencode plugin', () => {
+  it('keeps core read-only hooks when optional retrieval setup fails', async (t) => {
+    const previous = process.env.JBOT_EXPLORATION_CONFIG;
+    t.after(() => {
+      if (previous === undefined) delete process.env.JBOT_EXPLORATION_CONFIG;
+      else process.env.JBOT_EXPLORATION_CONFIG = previous;
+    });
+    const warnings = t.mock.method(console, 'warn', () => {});
+    const tool = {
+      transform: t.mock.fn(async () => {
+        throw new Error('retrieval registration failed');
+      }),
+      hook: async () => {},
+    };
+    for (const config of ['invalid JSON', '{"retrieval":true}']) {
+      process.env.JBOT_EXPLORATION_CONFIG = config;
+      const { context, evaluate } = await loadPlugin(tool);
+      const event = { agent: 'plan', tools: tools() };
+      context(event);
+      assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
+      const permission = { effect: 'ask', message: '' };
+      evaluate(permission);
+      assert.equal(permission.effect, 'deny');
+    }
+    assert.equal(warnings.mock.callCount(), 2);
+    assert.equal(tool.transform.mock.callCount(), 1);
+    assert.doesNotMatch(
+      JSON.stringify(warnings.mock.calls.map((c) => c.arguments)),
+      /invalid JSON|TypeError/,
+    );
+  });
+
   it('strips mutating and interactive tools for the plan agent and rewrites the Gemini-hostile schema', async () => {
     const { context } = await loadPlugin();
     const event = { agent: 'plan', tools: tools() };
@@ -72,7 +106,10 @@ describe('jbot opencode plugin', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
     temps.push(dir);
     const file = join(dir, 'opts.json');
-    writeFileSync(file, JSON.stringify({ ses_1: { reasoningEffort: 'low' } }));
+    writeFileSync(
+      file,
+      JSON.stringify({ ses_1: { reasoningEffort: 'low', jbotSessionLabel: 'review' } }),
+    );
     process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
     try {
       const known = {

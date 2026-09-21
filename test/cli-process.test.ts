@@ -4,9 +4,60 @@ import { promisify } from 'node:util';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { it } from 'node:test';
 import { createCliProcessScope, runCliProcess } from '../src/shared/cli-process.ts';
+
+it('streams both output channels with backpressure without retaining captures or closing the sink', async (t) => {
+  const bytes = new Map<number, number>();
+  const output = new Writable({
+    highWaterMark: 1024,
+    write(chunk: Buffer, _encoding, done) {
+      for (const byte of chunk) bytes.set(byte, (bytes.get(byte) ?? 0) + 1);
+      setImmediate(done);
+    },
+  });
+  t.after(() => output.destroy());
+  const result = await runCliProcess(
+    process.execPath,
+    [
+      '-e',
+      `process.stdout.write(Buffer.alloc(512 * 1024, 97));
+       process.stderr.write(Buffer.alloc(512 * 1024, 98)); process.exitCode = 7;`,
+    ],
+    { cwd: tmpdir(), timeoutMs: 5000, timeoutMessage: 'deadline', output },
+  );
+  assert.deepEqual(result, { stdout: '', stderr: '', exitCode: 7 });
+  assert.equal(output.writableEnded, false);
+  output.end();
+  await finished(output);
+  assert.equal(bytes.get(97), 512 * 1024);
+  assert.equal(bytes.get(98), 512 * 1024);
+});
+
+it('reaps a running child when its output sink fails', async () => {
+  let pid = 0;
+  const output = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      pid = Number(chunk.toString().trim());
+      done(new Error('log write failed'));
+    },
+  });
+  const closed = assert.rejects(finished(output), /log write failed/);
+  await assert.rejects(
+    runCliProcess(
+      process.execPath,
+      ['-e', 'console.log(process.pid); setInterval(() => {}, 1000);'],
+      { cwd: tmpdir(), timeoutMs: 5000, timeoutMessage: 'deadline', killGraceMs: 20, output },
+    ),
+    /log write failed/,
+  );
+  await closed;
+  assert.ok(pid > 0);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+});
 
 it('cancels one session and waits for descendant pipes to close without cancelling another', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-cancel-'));
@@ -51,7 +102,13 @@ it('cancels one session and waits for descendant pipes to close without cancelli
       ),
     );
     const limit = Date.now() + 3000;
-    while ((!existsSync(ready) || !existsSync(otherReady)) && Date.now() < limit) await delay(10);
+    while (
+      (!existsSync(ready) ||
+        !existsSync(otherReady) ||
+        !observed.includes('progress before abort')) &&
+      Date.now() < limit
+    )
+      await delay(10);
     assert.ok(existsSync(ready) && existsSync(otherReady));
     assert.match(observed, /progress before abort/);
     assert.equal(scope.abort('missing'), 0);

@@ -31,6 +31,12 @@ const shared: esbuild.BuildOptions = {
 
 await esbuild.build({
   ...shared,
+  entryPoints: ['src/shared/review-retrieval.ts'],
+  outfile: 'dist/review-retrieval.js',
+});
+
+await esbuild.build({
+  ...shared,
   entryPoints: ['src/shared/commandcode-mod.ts'],
   outfile: 'dist/commandcode-mod.js',
 });

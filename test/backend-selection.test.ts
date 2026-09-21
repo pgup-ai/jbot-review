@@ -10,15 +10,22 @@ import {
 } from '../src/shared/backend-selection.ts';
 
 describe('backendCanReadWorkspace', () => {
-  it('marks complete-embedded-diff routes AND cline as checkout-blind', () => {
-    // cline sessions run tool-less (NO_TOOLS_REVIEW_DIRECTIVE, --auto-approve
-    // false), so a "read the omitted docs yourself" instruction is a dead end
-    // there even though its diff handling is not embedded-only.
+  it('requires complete diffs for every checkout-blind route', () => {
     assert.equal(backendCanReadWorkspace('opencode', undefined), true);
     assert.equal(backendCanReadWorkspace('devin', 'devin'), true);
     assert.equal(backendCanReadWorkspace('cline', 'cline'), false);
     assert.equal(backendCanReadWorkspace('commandcode', 'commandcode'), false);
     assert.equal(backendCanReadWorkspace('poolside', undefined), false);
+    for (const backend of ['cline', 'commandcode', 'grok', 'qoder'] as const) {
+      assert.equal(backendRequiresCompleteEmbeddedDiff(backend, backend), true);
+    }
+    assert.equal(backendRequiresCompleteEmbeddedDiff('cline-pass', 'cline'), true);
+    for (const model of ['gpt-5', 'gemini-3.1-pro-preview']) {
+      assert.equal(backendRequiresCompleteEmbeddedDiff('gmi', undefined, model), true);
+    }
+    assert.equal(backendRequiresCompleteEmbeddedDiff('openai', undefined, 'gpt-5'), false);
+    assert.equal(backendRequiresCompleteEmbeddedDiff('google', undefined, 'gemini-3.1-pro'), false);
+    assert.equal(backendRequiresCompleteEmbeddedDiff('gmi', undefined), false);
   });
 });
 

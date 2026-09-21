@@ -396,6 +396,17 @@ export interface DiffHunksBlockResult {
   omittedFiles: string[];
 }
 
+export function diffHunksCoverage(files: PrFile[], result: DiffHunksBlockResult) {
+  const assignedFiles = files.filter((file) => file.patch).length;
+  return {
+    assignedFiles,
+    completeFiles: assignedFiles - result.truncatedFiles.length - result.omittedFiles.length,
+    truncatedFiles: result.truncatedFiles.length,
+    omittedFiles: result.omittedFiles.length,
+    bytes: Buffer.byteLength(result.text, 'utf8'),
+  };
+}
+
 /**
  * Renders the '## Diff hunks' prompt section. Returns '' when no file has a
  * patch. Truncation is per-file (a single huge file cannot starve the rest)

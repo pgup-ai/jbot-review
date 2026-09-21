@@ -555,6 +555,7 @@ export function buildReviewScopeContext(
     BuildReviewContextParams,
     'pullTitle' | 'pullBody' | 'changedFiles' | 'diffScope' | 'linkedIssues' | 'linkedIssuesOmitted'
   >,
+  includeChangedFiles = true,
 ): string {
   const sections: string[] = [];
 
@@ -573,17 +574,18 @@ export function buildReviewScopeContext(
   );
   if (linkedIssuesBlock) sections.push(linkedIssuesBlock);
 
-  sections.push(
-    params.changedFiles.length > 0
-      ? capListSection(
-          '## Changed files',
-          params.changedFiles.map((file) => `- ${file}`),
-          MAX_CHANGED_FILES_BYTES,
-          (omitted) =>
-            `(and ${omitted} more changed file(s) not listed to keep the prompt bounded; the diff itself is unaffected.)`,
-        )
-      : '## Changed files\n(none)',
-  );
+  if (includeChangedFiles)
+    sections.push(
+      params.changedFiles.length > 0
+        ? capListSection(
+            '## Changed files',
+            params.changedFiles.map((file) => `- ${file}`),
+            MAX_CHANGED_FILES_BYTES,
+            (omitted) =>
+              `(and ${omitted} more changed file(s) not listed to keep the prompt bounded; the diff itself is unaffected.)`,
+          )
+        : '## Changed files\n(none)',
+    );
 
   return sections.join('\n\n');
 }

@@ -41,7 +41,7 @@ ENTRYPOINT ["node", "/app/dist/app/server.js"]
 
 FROM runtime AS full-tools
 
-RUN npm install -g cline@3.0.60 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
+RUN npm install -g cline@3.0.62 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
   && npm cache clean --force \
   && cline --version \
   && grok --version \

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   createReviewSession,
+  configureOpencodeTelemetry,
   finalizeOpencodeSessionsByLabel,
   promptInSession,
   startProgressLogger,
@@ -9,9 +11,29 @@ import {
 import { DENY_ALL } from '../src/shared/opencode-config.ts';
 import { fakeOpencodeServer, fakeRuntime as runtime } from './support/opencode-fake.ts';
 
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
+
 const log = () => undefined;
 
 describe('createReviewSession', () => {
+  it('registers independent phase labels without model options, including forked verifiers', async () => {
+    const fake = fakeOpencodeServer(() => ({ text: '{}' }));
+    const rt = runtime(fake);
+    rt.explorationExperiment.readEvidence = 'linked';
+    rt.explorationExperiment.readEvidencePhase = 'verification';
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    const fork = await createReviewSession(rt, {
+      label: 'finding-verification',
+      model: 'openai/gpt-5',
+      forkFrom: id,
+    });
+    const options = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
+    assert.deepEqual(options[id], { jbotSessionLabel: 'review' });
+    assert.deepEqual(options[fork], { jbotSessionLabel: 'finding-verification' });
+    assert.equal('JBOT_EXPLORATION_CONFIG' in fake.sessions.get(fork)!.environment!, false);
+  });
+
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{}' }));
     const id = await createReviewSession(runtime(fake), { label: 'review', model: 'openai/gpt-5' });
@@ -64,6 +86,38 @@ describe('promptInSession', () => {
     assert.ok(fake.calls.some((c) => /POST .*\/wait$/.test(c)));
   });
 
+  it('hands off successful tool inputs from review without copying outputs or verification history', async () => {
+    const fake = fakeOpencodeServer(() => ({
+      text: '{}',
+      tools: [
+        {
+          name: 'read',
+          input: { filePath: 'guard.ts', offset: 20 },
+          output: 'source; reviewer conclusion',
+        },
+      ],
+    }));
+    const rt = runtime(fake);
+    const observed = [];
+    rt.onSourceRead = (tool, input) => observed.push({ tool, input });
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    await promptInSession(rt, id, {
+      model: 'openai/gpt-5',
+      text: 'review',
+      label: 'review',
+      timeoutMs: 5000,
+      log,
+    });
+    await promptInSession(rt, id, {
+      model: 'openai/gpt-5',
+      text: 'verify',
+      label: 'finding-verification',
+      timeoutMs: 5000,
+      log,
+    });
+    assert.deepEqual(observed, [{ tool: 'read', input: { filePath: 'guard.ts', offset: 20 } }]);
+  });
+
   it('waits in slices shorter than the fetch header timeout and keeps waiting across them', async () => {
     const fake = fakeOpencodeServer(() => ({ text: 'late', delayMs: 250 }));
     const rt = runtime(fake);
@@ -112,9 +166,16 @@ describe('promptInSession', () => {
 
   it('wraps up a cut-off turn: interrupt, switch to jbot-wrapup, prompt again, restore the agent', async () => {
     const fake = fakeOpencodeServer((session, text) =>
-      session.agent === 'jbot-wrapup' ? { text: '{"findings":[]}' } : { hang: true, text },
+      session.agent === 'jbot-wrapup'
+        ? { text: '{"findings":[]}' }
+        : { hang: true, text, tools: [{ name: 'read', input: { filePath: 'guard.ts' } }] },
     );
     const rt = runtime(fake);
+    const recorder = createTelemetryRecorder(true);
+    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+    const reads = [],
+      usage = [];
+    rt.onSourceRead = (tool, input) => reads.push({ tool, input });
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     const outcome = { wrappedUp: false };
     const result = await promptInSession(rt, id, {
@@ -125,6 +186,7 @@ describe('promptInSession', () => {
       log,
       outcome,
       wrapUpReserveMs: 59_000,
+      onTokenUsage: (value, _model, label) => usage.push({ label, ...value }),
     });
     assert.equal(result, '{"findings":[]}');
     assert.equal(outcome.wrappedUp, true);
@@ -132,6 +194,61 @@ describe('promptInSession', () => {
     assert.equal(session.interrupted, 1);
     assert.equal(session.agent, 'plan');
     assert.equal(fake.prompts.length, 2);
+    assert.deepEqual(reads, [{ tool: 'read', input: { filePath: 'guard.ts' } }]);
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const main = rows.find((row) => row.session === 'review' && row.kind === 'exploration');
+    const wrap = rows.find((row) => row.session === 'review-wrap-up' && row.kind === 'exploration');
+    assert.ok(main);
+    assert.ok(wrap);
+    assert.equal(main.toolCalls, 1);
+    assert.equal(main.stopReason, 'aborted');
+    assert.equal(wrap.toolCalls, 0);
+    assert.equal(wrap.stopReason, 'completed');
+    assert.deepEqual(
+      usage.map((row) => [row.label, row.input]),
+      [
+        ['review-wrap-up', 10],
+        ['review', 10],
+      ],
+    );
+  });
+
+  it('does not count the main turn again when wrap-up fails', async () => {
+    const fake = fakeOpencodeServer((session) =>
+      session.agent === 'jbot-wrapup'
+        ? { error: 'provider failure' }
+        : { hang: true, tools: [{ name: 'read', input: { path: 'guard.ts' } }] },
+    );
+    const rt = runtime(fake);
+    const recorder = createTelemetryRecorder(true);
+    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+    const usage: object[] = [];
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    await assert.rejects(
+      promptInSession(rt, id, {
+        model: 'openai/gpt-5',
+        text: 'review',
+        label: 'review',
+        log,
+        timeoutMs: 60_000,
+        wrapUpReserveMs: 59_990,
+        outcome: { wrappedUp: false },
+        onTokenUsage: (row) => usage.push(row),
+      }),
+      /provider failure/,
+    );
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(rows.find((r) => r.kind === 'exploration' && r.session === 'review').toolCalls, 1);
+    assert.deepEqual(
+      usage.map((u) => (u as { input: number }).input),
+      [10, 10],
+    );
   });
 
   it('reports a listing that stops short and leaves usage unknown without token counts', async () => {
@@ -172,8 +289,14 @@ describe('promptInSession', () => {
   });
 
   it('interrupts on timeout when no wrap-up is possible', async () => {
-    const fake = fakeOpencodeServer(() => ({ hang: true }));
+    const fake = fakeOpencodeServer(() => ({
+      hang: true,
+      tools: [{ name: 'read', input: { path: 'guard.ts' } }],
+    }));
     const rt = runtime(fake);
+    const recorder = createTelemetryRecorder(true);
+    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+    const usage: object[] = [];
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     await assert.rejects(
       promptInSession(rt, id, {
@@ -182,10 +305,19 @@ describe('promptInSession', () => {
         label: 'verify',
         timeoutMs: 100,
         log,
+        onTokenUsage: (row) => usage.push(row),
       }),
       /did not finish within/,
     );
     assert.equal(fake.sessions.get(id)!.interrupted, 1);
+    const row = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((row) => row.kind === 'exploration');
+    assert.equal(row.toolCalls, 1);
+    assert.equal(row.stopReason, 'failed');
+    assert.equal((usage[0] as { input: number }).input, 10);
   });
 });
 

@@ -1,4 +1,5 @@
-import type { Finding } from './types.ts';
+import type { Finding, Severity } from './types.ts';
+import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
 
 /**
@@ -17,6 +18,7 @@ function findingLine(finding: Finding): string {
  * listed flat with their full bodies (they are uncommon and self-contained).
  */
 export const ORPHANED_FINDINGS_HEADING = '### Findings (outside the diff)';
+export const ADVISORY_FINDINGS_HEADING = '### Unverified concerns';
 
 export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];
@@ -338,6 +340,10 @@ export interface IncompleteSession {
   reason: string;
 }
 
+export function reviewCoverageSessions(sessions: IncompleteSession[]): IncompleteSession[] {
+  return sessions.filter(({ label }) => label !== 'changes-since-last-review');
+}
+
 /** Footer-safe reason: the raw error may carry provider text and stays in the log. */
 export function describeIncompleteReason(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -355,7 +361,112 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
   const verificationFailed = sessions.some(
     ({ label }) => label === 'finding-verification' || label === 'late-finding-verification',
   );
-  const list = sessions.map(({ label, reason }) => `\`${label}\` (${reason})`).join(', ');
+  const groups = new Map<string, IncompleteSession[]>();
+  for (const session of sessions) {
+    const label = isMainReviewLabel(session.label)
+      ? 'review'
+      : session.label.replace(/-page-\d+$/, '');
+    const group = groups.get(label) ?? [];
+    group.push(session);
+    groups.set(label, group);
+  }
+  const list = [...groups].map(([label, group]) => {
+    const name = label === 'review' ? 'Main review' : label.replaceAll('-', ' ');
+    const reason =
+      group.find((session) => session.label === label)?.reason ??
+      [...new Set(group.map((session) => session.reason))].join('; ');
+    const pages = group.filter((session) => /-page-\d+$/.test(session.label)).length;
+    return `- **${name[0].toUpperCase()}${name.slice(1)}:** ${reason}${pages ? `; ${pages} page${pages === 1 ? '' : 's'} incomplete` : ''}.`;
+  });
   const main = sessions.some(({ label }) => isMainReviewLabel(label)) ? 'cut short' : 'completed';
-  return `⚠️ **Review incomplete:** Main review ${main}; ${list} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
+  return [
+    `⚠️ **Review incomplete.** Main review ${main}.`,
+    '',
+    ...list,
+    '',
+    `Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`,
+  ].join('\n');
+}
+
+export function getMergeGuidance(
+  findings: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>[],
+  incomplete: boolean,
+): {
+  state: string;
+  mergeGuidance: string;
+} {
+  const hasBlockingFinding = findings.some(
+    (finding) =>
+      !isUnresolvedFinding(finding) && SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
+  );
+  if (hasBlockingFinding) {
+    return {
+      state: 'Needs changes before approval',
+      mergeGuidance: 'Address the P0/P1/P2 findings before treating this PR as ready to approve.',
+    };
+  }
+
+  if (incomplete) {
+    return {
+      state: 'Review incomplete',
+      mergeGuidance: 'Do not treat incomplete coverage as an all-clear result.',
+    };
+  }
+
+  if (findings.some(isUnresolvedFinding)) {
+    return {
+      state: 'Unverified concerns remain',
+      mergeGuidance:
+        'Some candidates could not be substantiated. Do not treat this review as an all-clear result.',
+    };
+  }
+
+  if (findings.length === 0) {
+    return {
+      state: 'Good to go from jbot-review',
+      mergeGuidance: 'No new findings were found in this review run.',
+    };
+  }
+
+  return {
+    state: 'Mergeable with non-blocking comments',
+    mergeGuidance: 'Only P3/nit findings were found; jbot-review does not consider these blocking.',
+  };
+}
+
+export function buildSeverityTable(
+  findings: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>[],
+): string[] {
+  const graded = findings.filter((finding) => !isUnresolvedFinding(finding));
+  const counts = countBySeverity(graded);
+  const unverified = findings.length - graded.length;
+  return [
+    `| Total | P0 | P1 | P2 | P3 | nit |${unverified ? ' Unverified |' : ''}`,
+    `| ---: | ---: | ---: | ---: | ---: | ---: |${unverified ? ' ---: |' : ''}`,
+    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |${unverified ? ` ${unverified} |` : ''}`,
+    ...(unverified ? ['', 'Unverified concerns are excluded from the severity counts.'] : []),
+  ];
+}
+
+function countBySeverity(findings: Pick<Finding, 'severity'>[]): Record<Severity, number> {
+  const counts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0, nit: 0 };
+  for (const finding of findings) {
+    counts[finding.severity] += 1;
+  }
+  return counts;
+}
+
+export function candidateDiagnostics(headSha: string | undefined, findings: Finding[]) {
+  return {
+    schemaVersion: 1,
+    headSha,
+    candidates: findings.filter(isUnresolvedFinding).map((finding) => ({
+      status: finding.verificationUnavailable
+        ? 'not-completed'
+        : finding.verificationUncertain
+          ? 'inconclusive'
+          : 'not-verified',
+      ...finding,
+    })),
+  };
 }

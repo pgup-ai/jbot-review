@@ -1,4 +1,5 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -21,17 +22,26 @@ import {
   sessionEnvDenyKeys,
   type TokenUsageRecorder,
 } from './opencode.ts';
-import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { truncateForLog } from '@symma/protocol';
+import { runCliProcess } from './cli-process.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const CLINE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const CLINE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-// Cline is argv-only headless — piped stdin is ignored under --json (verified through
-// 3.0.38) — and Linux caps one arg at 128KB. Summed context budgets (24KB guidelines,
-// 40KB diff, bounded PR context) keep prompts well under the guard; it is a backstop.
+// Linux caps a single argv entry at 128 KiB; Cline's complete diff must fit too.
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 export const CLINE_MAX_ARGV_BYTES = 120 * 1024;
+
+// Free models use Cline 3.0.62's bundled catalog; paid IDs use its live catalog (2026-09-20).
+export const CLINE_MODEL_LIMITS: Record<string, { contextTokens: number; outputTokens: number }> = {
+  'cline-free/deepseek-v4.1-flash': { contextTokens: 1048576, outputTokens: 384000 },
+  'cline-free/muse-spark-1.3-contributor': { contextTokens: 1048576, outputTokens: 943718 },
+  'cline-free/solar-pro4': { contextTokens: 524288, outputTokens: 131072 },
+  'deepseek/deepseek-v4-flash': { contextTokens: 1048576, outputTokens: 384000 },
+  'deepseek/deepseek-v4.1-flash': { contextTokens: 1048576, outputTokens: 384000 },
+  'meta/muse-spark-1.3-contributor': { contextTokens: 1048576, outputTokens: 943718 },
+};
 
 export const CLINE_PROVIDER_ID = 'cline';
 export const CLINE_TELEMETRY_CAPABILITY = 'opaque' as const;
@@ -134,7 +144,9 @@ export function assertClinePromptArgWithinBudget(label: string, prompt: string):
   const promptBytes = Buffer.byteLength(prompt, 'utf8');
   if (promptBytes > CLINE_MAX_ARGV_BYTES) {
     throw new Error(
-      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_ARGV_BYTES}-byte argv limit`,
+      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_ARGV_BYTES}-byte argv limit. ` +
+        'Incomplete review coverage: the full assigned diff cannot be delivered. ' +
+        'Increase review-shards or select a backend with repository tools; the diff will not be truncated.',
     );
   }
 }
@@ -145,7 +157,8 @@ export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEn
   if (!home) {
     throw new Error('Missing Cline home. A temp HOME is required for auth.');
   }
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  // Isolated homes cannot see other sessions when Cline decides whether it is safe to self-update.
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, CLINE_NO_AUTO_UPDATE: '1' };
   for (const key of sessionEnvDenyKeys(Object.keys(env))) delete env[key];
   return env;
 }
@@ -391,7 +404,7 @@ async function runClinePrompt(
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
     const args = buildClineCliArgs({ model, promptArg: fullPrompt });
-    const result = await spawnWithTimeout(CLINE_CLI_BIN, args, {
+    const result = await runCliProcess(CLINE_CLI_BIN, args, {
       cwd: workspace,
       env: clineEnvForHome(dir),
       timeoutMs,
@@ -418,6 +431,8 @@ async function runClinePrompt(
     }
     return finalMessage;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(
+      (error: NodeJS.ErrnoException) => log(`Cline temporary-home cleanup failed: ${error.code}.`),
+    );
   }
 }

@@ -28,6 +28,95 @@ function makeBackend(onReview: () => void | Promise<void> = () => undefined): Re
 }
 
 describe('limitReviewBackendSessions', () => {
+  it('rotates paged auxiliary passes ahead of optional bookkeeping without delaying verification', async () => {
+    const slots = new Semaphore(1);
+    const release = await slots.acquire();
+    const order: string[] = [];
+    const backend = limitReviewBackendSessions(
+      {
+        ...makeBackend(),
+        runReview: async (_m, context) => {
+          order.push(context);
+          return { summary: '', findings: [] };
+        },
+        runGuidelineComplianceCheck: async (_m, context) => {
+          order.push(context);
+          return [];
+        },
+        runFindingVerification: async () => {
+          order.push('verify');
+          return [];
+        },
+        runChangesSinceLastReview: async () => {
+          order.push('summary');
+          return '';
+        },
+      },
+      'aux',
+      slots,
+    );
+    const queued = [
+      backend.runChangesSinceLastReview('m', '', noLog),
+      ...[1, 2, 3].map((n) =>
+        backend.runGuidelineComplianceCheck('m', `guideline-${n}`, '', noLog),
+      ),
+      ...[1, 2].map((n) =>
+        backend.runReview('m', `interaction-${n}`, '', noLog, { label: 'review-interactions' }),
+      ),
+      backend.runReview('m', 'security', '', noLog, { label: 'review-security' }),
+      backend.runFindingVerification('m', '', [], noLog),
+    ];
+    release();
+    await Promise.all(queued);
+    assert.deepEqual(order, [
+      'verify',
+      'guideline-1',
+      'interaction-1',
+      'security',
+      'guideline-2',
+      'interaction-2',
+      'guideline-3',
+      'summary',
+    ]);
+    assert.equal(slots.isBusy(), false);
+  });
+  it('keeps verification capacity at both queues while auxiliary pages are still active', async () => {
+    for (const sharedProvider of [true, false]) {
+      const global = new Semaphore(3, true);
+      const limiters = createProviderSessionLimiters(['test'], () => 2);
+      const provider = limiters.forProvider('test');
+      let finish!: () => void;
+      let started!: () => void;
+      const running = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const blocked = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const backend = limitReviewBackendSessions(
+        makeBackend(async () => {
+          started();
+          await blocked;
+        }),
+        'aux',
+        global,
+        sharedProvider ? provider : undefined,
+      );
+      const first = backend.runReview('m', '', '', noLog);
+      await running;
+      const next = backend.runReview('m', '', '', noLog);
+      await backend.runFindingVerification('m', '', [], noLog);
+      assert.equal(global.isBusy(), true, 'verification must not wait for auxiliary completion');
+      finish();
+      await Promise.all([first, next]);
+      assert.equal(global.isBusy(), false);
+      assert.equal((provider as Semaphore).isBusy(), false);
+      limiters.releaseReservations();
+      const held = await Promise.all([provider!.acquire('normal'), provider!.acquire('normal')]);
+      held.forEach((release) => release());
+    }
+  });
+
   it('owns provider slots independently for mixed-provider runs', () => {
     const limiters = createProviderSessionLimiters(['nvidia', 'openai', 'nvidia'], (providerID) =>
       providerID === 'nvidia' ? 1 : undefined,
@@ -62,7 +151,7 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(priorities, ['high', 'normal']);
   });
 
-  it('acquires verification slots at high priority even on the aux backend', async () => {
+  it('acquires verification slots ahead of main and auxiliary work', async () => {
     const priorities: SemaphorePriority[] = [];
     const slots: SessionSlots = {
       acquire: async (priority = 'normal') => {
@@ -75,7 +164,7 @@ describe('limitReviewBackendSessions', () => {
     await aux.runFindingVerification('model', 'context', [], noLog);
     await aux.runGuidelineComplianceCheck('model', 'context', '', noLog);
 
-    assert.deepEqual(priorities, ['high', 'high', 'normal', 'normal']);
+    assert.deepEqual(priorities, ['verification', 'verification', 'normal', 'normal']);
   });
 
   it('preserves backend capabilities and the abort handle through the limiter (TASK-076)', () => {
@@ -120,7 +209,7 @@ describe('limitReviewBackendSessions', () => {
         provider,
       );
       const pending = backend.runReview('model', 'ctx', '', noLog, { label: 'abandoned' });
-      const rejected = assert.rejects(pending, /aborted while queued/);
+      const rejected = assert.rejects(pending, /stopped while queued/);
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(backend.abortSessionsByLabel?.('abandoned', noLog), 1);
       await rejected;
@@ -129,6 +218,8 @@ describe('limitReviewBackendSessions', () => {
       await backend.runReview('model', 'ctx', '', noLog, { label: 'abandoned' });
       assert.equal(started, 1);
       assert.equal(provider.isBusy(), false);
+      assert.equal(global.isBusy(), false);
+      await backend.runFindingVerification('model', 'ctx', [], noLog);
       assert.equal(global.isBusy(), false);
     }
   });
@@ -351,6 +442,62 @@ describe('limitReviewBackendSessions', () => {
 });
 
 describe('Semaphore', () => {
+  it('gives auxiliary pages a turn before main drains and leaves room for verification', async () => {
+    for (const limit of [2, 3, 5]) {
+      const slots = new Semaphore(limit, true);
+      const activeMain = await Promise.all(
+        Array.from({ length: limit }, () => slots.acquire('high')),
+      );
+      let nextMainStarted = false;
+      const nextMain = slots.acquire('high').then((release) => {
+        nextMainStarted = true;
+        return release;
+      });
+      const auxiliary = slots.acquire('normal');
+      activeMain.shift()!();
+      const releaseAuxiliary = await auxiliary;
+      assert.equal(nextMainStarted, false, 'main backlog must not starve the first auxiliary');
+      activeMain.shift()!();
+      (await nextMain)();
+      activeMain.forEach((release) => release());
+      const otherAuxiliary = await Promise.all(
+        Array.from({ length: limit - 2 }, () => slots.acquire('normal')),
+      );
+      const abort = new AbortController();
+      const queued = slots.acquire('normal', abort.signal);
+      const rejected = assert.rejects(queued, /cancelled/);
+      const releaseVerifier = await slots.acquire('verification');
+      assert.equal(slots.isBusy(), true);
+      abort.abort(new Error('cancelled'));
+      await rejected;
+      releaseVerifier();
+      releaseAuxiliary();
+      otherAuxiliary.forEach((release) => release());
+      assert.equal(slots.isBusy(), false);
+      slots.releaseReservation();
+      const all = await Promise.all(Array.from({ length: limit }, () => slots.acquire('normal')));
+      all.forEach((release) => release());
+      assert.equal(slots.isBusy(), false, 'after verification, finders can use the full cap');
+    }
+  });
+
+  it('alternates main and auxiliary work on serial providers, with verification first', async () => {
+    const slots = new Semaphore(1, true);
+    const release = await slots.acquire('high');
+    const order: string[] = [];
+    const pending = (['high', 'high', 'normal', 'normal', 'verification'] as const).map(
+      async (priority) => {
+        const done = await slots.acquire(priority);
+        order.push(priority);
+        done();
+      },
+    );
+    release();
+    await Promise.all(pending);
+    assert.deepEqual(order, ['verification', 'normal', 'high', 'normal', 'high']);
+    assert.equal(slots.isBusy(), false);
+  });
+
   it('treats 0 as unlimited and frees one slot per acquisition even when released twice', async () => {
     await Promise.all([new Semaphore(0).acquire(), new Semaphore(0).acquire()]);
     const one = new Semaphore(1);

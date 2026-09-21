@@ -1,3 +1,4 @@
+import { reviewExperiment, type ReviewExperiment } from '../src/shared/review-experiment.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { normalizeOptions } from '../src/shared/runner.ts';
@@ -51,6 +52,59 @@ test('configuration fingerprints policy changes while excluding credentials and 
     first.configurationHash,
     runConfiguration({ ...options, sharedPrefixPrompt: true }, 'opencode/a').configurationHash,
   );
+  const custom = { ...reviewExperiment({}), preset: 'custom' as const };
+  const configuration = (experiment: ReviewExperiment) =>
+    runConfiguration({ ...options, experiment }, 'opencode/a');
+  const baseline = configuration(custom);
+  const documented = configuration({ ...custom, docsPath: '/private/docs.json' });
+  assert.notEqual(documented.configurationHash, baseline.configurationHash);
+  assert.equal(documented.configuration.evidenceDocsEnabled, true);
+  assert.doesNotMatch(JSON.stringify(documented), /private|docs\.json/);
+  assert.equal(
+    documented.configurationHash,
+    configuration({ ...custom, docsPath: '/another/location.json' }).configurationHash,
+  );
+  for (const key of ['jevPrefetch', 'explorationEvidence', 'verificationEvidence'] as const)
+    assert.notEqual(
+      configuration({ ...custom, [key]: 'on' }).configurationHash,
+      baseline.configurationHash,
+    );
+  const linked = {
+    ...custom,
+    exploration: { ...custom.exploration, readEvidence: 'linked' as const },
+  };
+  assert.notEqual(
+    configuration(linked).configurationHash,
+    configuration({ ...linked, exploration: { ...linked.exploration, readEvidence: true } })
+      .configurationHash,
+  );
+  assert.notEqual(
+    configuration({
+      ...linked,
+      exploration: { ...linked.exploration, readEvidencePhase: 'review' },
+    }).configurationHash,
+    configuration({
+      ...linked,
+      exploration: { ...linked.exploration, readEvidencePhase: 'verification' },
+    }).configurationHash,
+  );
+  for (const key of ['retrieval', 'checkpoints', 'readEvidence', 'batchDiffRecovery'] as const)
+    assert.notEqual(
+      configuration({
+        ...custom,
+        exploration: { ...custom.exploration, [key]: !custom.exploration[key] },
+      }).configurationHash,
+      baseline.configurationHash,
+    );
+  for (const key of ['shared', 'handoff', 'prefetch', 'cacheDir'] as const) {
+    const changed = configuration({
+      ...custom,
+      reuse: { ...custom.reuse, [key]: key === 'cacheDir' ? '/private/operator/cache' : true },
+      docsPath: '/private/operator/docs.json',
+    });
+    assert.notEqual(changed.configurationHash, baseline.configurationHash);
+    assert.doesNotMatch(JSON.stringify(changed), /private|operator/);
+  }
   assert.equal(
     runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a')
       .configuration.sdkEngine,

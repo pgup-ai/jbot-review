@@ -3,6 +3,7 @@ import { parseModelName } from '@symma/protocol';
 import { gatewayRoutedModels } from './acp-remote.ts';
 
 import { CLINE_PROVIDER_ID, isClineProvider } from './cline.ts';
+import { modelSupportsAgenticTools } from './config.ts';
 import { DIM_PROVIDER_ID, isDimProvider } from './dim.ts';
 import { CODEX_PROVIDER_ID, isCodexProvider } from '@symma/protocol';
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
@@ -52,12 +53,15 @@ export interface PiEngineConfig {
 export function backendRequiresCompleteEmbeddedDiff(
   providerID: string,
   cliBackend: CliBackendID | undefined,
+  opencodeModelID?: string,
 ): boolean {
   return (
     isPoolsideProvider(providerID) ||
+    cliBackend === CLINE_PROVIDER_ID ||
     cliBackend === COMMANDCODE_PROVIDER_ID ||
     cliBackend === GROK_PROVIDER_ID ||
-    cliBackend === QODER_PROVIDER_ID
+    cliBackend === QODER_PROVIDER_ID ||
+    (opencodeModelID !== undefined && !modelSupportsAgenticTools(providerID, opencodeModelID))
   );
 }
 
@@ -66,9 +70,7 @@ export function backendCanReadWorkspace(
   providerID: string,
   cliBackend: CliBackendID | undefined,
 ): boolean {
-  return (
-    !backendRequiresCompleteEmbeddedDiff(providerID, cliBackend) && cliBackend !== CLINE_PROVIDER_ID
-  );
+  return !backendRequiresCompleteEmbeddedDiff(providerID, cliBackend);
 }
 
 export interface ReviewBackendSelection {

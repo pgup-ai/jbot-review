@@ -41,10 +41,14 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 
 1. **Full-diff scope, always.** Every review run covers the complete
    base...head diff — as one session or as the UNION of parallel shards
-   (`shardFilesForReview`: every changed file in exactly one shard, anchoring
-   clamped in code). Never reintroduce delta-only review scope; "what changed
-   since the last run" applies to the summary TEXT only
-   (`buildSummaryScopeBlock`). Repeat-comment noise is handled downstream by
+   (`shardFilesForReview` assigns file groups; `buildShardPlans` partitions every
+   hunk into budgeted pages, with byte-conserving splits for oversized hunks).
+   Every mandatory page must complete; repository access alone is not delivery.
+   Findings remain clamped to assigned files in code. Never reintroduce delta-only review scope; "what changed
+   since the last run" applies to the summary TEXT (`buildSummaryScopeBlock`).
+   The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
+   documentation-only follow-ups with unchanged base and policy; the main review
+   still covers the full PR and verification remains enabled. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
    Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement
    sessions (lens passes, guideline pass) by diff shape — it never narrows the
@@ -55,7 +59,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 3. **Auxiliary sessions fail open.** Lens passes, the addressed check, the
    guideline pass, and finding verification must never fail the run or drop
    findings when they break. A broken precision filter must not become a
-   recall hole.
+   recall hole. Unresolved candidates remain in run diagnostics and local output;
+   preserving a candidate does not require publishing it as a PR comment.
 4. **Every injected context block has a hard byte budget** and lists what it
    omitted (diff hunks, guidelines, prior threads). No unbounded prompt
    fragments.

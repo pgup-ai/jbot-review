@@ -849,8 +849,9 @@ export async function updateReviewBody(
 }
 
 export function formatFindingLabel(
-  finding: Pick<Finding, 'severity' | 'kind' | 'confidence'>,
+  finding: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>,
 ): string {
+  if (finding.verificationUncertain) return '**Unverified**';
   const kind = finding.kind ? ` · ${finding.kind}` : '';
   const confidence = finding.confidence
     ? ` (*conf: ${finding.confidence === 'medium' ? 'med' : finding.confidence}*)`
@@ -868,7 +869,7 @@ export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): 
  * load-bearing: isJbotFinding and duplicate suppression recognize prior
  * findings by it, so every posting path must go through here.
  */
-function formatFindingCommentBody(finding: Finding): string {
+export function formatFindingCommentBody(finding: Finding): string {
   return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
 }
 
