@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { NativeEvidenceStore } from '../src/shared/native-evidence.ts';
 import { REVIEW_LENSES } from '../src/shared/prompt.ts';
 import { IncompleteReviewError } from '../src/shared/types.ts';
 
@@ -739,6 +740,8 @@ const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : 
 let input = '';
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', async () => {
+  const benchmark = args[args.indexOf('--benchmark-output') + 1];
+  fs.writeFileSync(benchmark, JSON.stringify({wallTimeMs: 100, turnDetails: [{apiDurationMs: 80, toolDurationMs: 5, toolCalls: []}]}));
   if (model === 'abort') {
     console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'read_file',result:'PRIVATE_CONTENT'}}));
     console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
@@ -798,6 +801,12 @@ process.stdin.on('end', async () => {
     }
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
+        const observed: string[] = [];
+        const evidence = new NativeEvidenceStore(home, 'head');
+        evidence.observe = async (transcript) => {
+          observed.push(transcript);
+          return { files: 0, omitted: 0, unsupportedReads: 0 };
+        };
         const coverage: Array<{ state: string }> = [];
         const usage: Array<{ estimatedCostUsd?: number; promptBytes?: number }> = [];
         const result = await runCommandCodeReview(
@@ -807,7 +816,7 @@ process.stdin.on('end', async () => {
           '',
           () => {},
           {
-            runtime: { home, tools: true },
+            runtime: { home, tools: true, evidence },
             guidelineSweep: {
               guidelines: 'FULL_GUIDELINES',
               onCoverage: (row) => coverage.push(row),
@@ -817,6 +826,8 @@ process.stdin.on('end', async () => {
           },
         );
         const completed = ['first', 'second', 'repair'].includes(model);
+        assert.equal(observed.length, model === 'missing' ? 0 : 1);
+        if (completed) assert.match(observed[0], /0\.125/);
         assert.equal(result.summary, 'main');
         assert.equal(result.findings.length, completed ? 2 : 1);
         assert.equal(coverage[0].state, completed ? 'completed' : 'failed');
@@ -834,6 +845,12 @@ process.stdin.on('end', async () => {
       lensAddendum: REVIEW_LENSES.interactions,
       timeoutMs: 5000,
     });
+    const evidence = new NativeEvidenceStore(home, 'head');
+    let preparations = 0;
+    evidence.prepare = async () => {
+      preparations++;
+      throw new Error('Unexpected optional preparation');
+    };
     await runCommandCodeFindingVerification(
       home,
       'commandcode/verifier',
@@ -842,8 +859,9 @@ process.stdin.on('end', async () => {
       () => {},
       5000,
       undefined,
-      { home, tools: true },
+      { home, tools: true, evidence },
     );
+    assert.equal(preparations, 0);
     const calls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
       .trim()
       .split('\n')
@@ -853,6 +871,7 @@ process.stdin.on('end', async () => {
     assert.match(lensCall.input, /Tool use disabled/);
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
     for (const call of calls) {
+      assert.equal(existsSync(call.args[call.args.indexOf('--benchmark-output') + 1]), false);
       if (call === lensCall) continue;
       if (!call.repair) assert.equal(call.cwd, realpathSync(join(home, 'launch')));
       else assert.ok(call.cwd.startsWith(realpathSync(home) + '/repair-'));

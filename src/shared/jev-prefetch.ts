@@ -69,6 +69,7 @@ export function selectJevCandidates(
   value: unknown,
   candidates: JevCandidate[],
   allCandidates = candidates,
+  maxSelected = MAX_SELECTED,
 ) {
   const response = value as {
     model?: unknown;
@@ -105,6 +106,7 @@ export function selectJevCandidates(
     candidates,
     indexes.filter((i) => scores[i] >= 0.5),
     allCandidates,
+    maxSelected,
   );
   return {
     selected,
@@ -115,14 +117,16 @@ export function selectJevCandidates(
   };
 }
 
-function selectPrefetchCandidates(
+export function selectPrefetchCandidates(
   candidates: JevCandidate[],
   indexes: number[],
   allCandidates: JevCandidate[],
+  maxSelected = MAX_SELECTED,
 ) {
   const selected: number[] = [];
   const locations = new Set<string>();
   for (const index of indexes) {
+    if (selected.length >= maxSelected) break;
     const c = candidates[index];
     if (locations.has(c.path)) continue;
     const next = [...selected, index];
@@ -133,7 +137,6 @@ function selectPrefetchCandidates(
     if (Buffer.byteLength(block) > MAX_CONTEXT_BYTES) continue;
     selected.push(index);
     locations.add(c.path);
-    if (selected.length === MAX_SELECTED) break;
   }
   return selected;
 }
@@ -144,6 +147,7 @@ export async function buildJevPrefetch(
   entries: { symbol: string; callSites: string[] }[],
   options: {
     mode: JevPrefetchMode;
+    maxSelected?: number;
     prepared?: {
       candidates: JevCandidate[];
       task: string;
@@ -263,6 +267,7 @@ export async function buildJevPrefetch(
       request.candidates,
       request.candidates.map((_, i) => i),
       candidates,
+      options.maxSelected,
     );
     let selected: number[];
     if (options.mode === 'deterministic') {
@@ -276,7 +281,7 @@ export async function buildJevPrefetch(
       let cached = false;
       if (value !== undefined) {
         try {
-          selectJevCandidates(value, request.candidates, candidates);
+          selectJevCandidates(value, request.candidates, candidates, options.maxSelected);
           cached = true;
         } catch {
           value = undefined;
@@ -315,7 +320,12 @@ export async function buildJevPrefetch(
           throw new Error('invalid-response');
         }
       }
-      const result = selectJevCandidates(value, request.candidates, candidates);
+      const result = selectJevCandidates(
+        value,
+        request.candidates,
+        candidates,
+        options.maxSelected,
+      );
       if (!cached)
         await options.judgmentCache?.set('jev-v1:' + stats.requestHash, {
           model: JEV_MODEL,

@@ -1,6 +1,9 @@
+import type { NativeEvidenceStore } from './native-evidence.ts';
+import { measureReviewPrompt, reviewPromptBudget } from './review-plan.ts';
 import {
   commandCodeToolOutcome,
   parseCommandCodeUsage,
+  parseCommandCodeBenchmark,
   createCommandCodeProgress,
   type CommandCodeProgress,
 } from './commandcode-progress.ts';
@@ -11,10 +14,12 @@ import {
   mkdtempSync,
   mkdirSync,
   rmSync,
+  readFileSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { opendir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -132,6 +137,7 @@ export function writeCommandCodeReadOnlySettings(home: string, workspace?: strin
 export interface CommandCodeRuntime {
   home: string;
   tools: boolean;
+  evidence?: NativeEvidenceStore;
   onProgress?: (label: string, model: string, progress: CommandCodeProgress) => void;
 }
 
@@ -304,32 +310,44 @@ export async function runCommandCodeReview(
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
-  if (!options.guidelineSweep) return result;
-  const sweep = options.guidelineSweep;
-  const sweepLabel = `guideline-sweep-${label}`;
-  return appendGuidelineSweep(
-    result,
-    sweep,
-    sweepLabel,
-    deadlineAt,
-    async (timeoutMs) => {
-      if (!sessionId) throw new Error('CommandCode main review returned no session ID.');
-      const { finalText } = await runCommandCodePrompt(
-        workspace,
-        model,
-        assembleGuidelineSweepPrompt(sweep.guidelines),
-        sweepLabel,
-        log,
-        timeoutMs,
-        options.onTokenUsage,
-        options.runtime,
-        options.effort,
-        sessionId,
-      );
-      return parseReview(finalText, sweepLabel, log, { strict: true }).findings;
-    },
-    log,
-  );
+  if (options.guidelineSweep) {
+    const sweep = options.guidelineSweep;
+    const sweepLabel = `guideline-sweep-${label}`;
+    result = await appendGuidelineSweep(
+      result,
+      sweep,
+      sweepLabel,
+      deadlineAt,
+      async (timeoutMs) => {
+        if (!sessionId) throw new Error('CommandCode main review returned no session ID.');
+        const { finalText } = await runCommandCodePrompt(
+          workspace,
+          model,
+          assembleGuidelineSweepPrompt(sweep.guidelines),
+          sweepLabel,
+          log,
+          timeoutMs,
+          options.onTokenUsage,
+          options.runtime,
+          options.effort,
+          sessionId,
+        );
+        return parseReview(finalText, sweepLabel, log, { strict: true }).findings;
+      },
+      log,
+    );
+  }
+  if (options.runtime?.evidence && sessionId) {
+    try {
+      const path = await commandCodeTranscriptPath(options.runtime.home, sessionId);
+      if (!path || statSync(path).size > 16 * 1024 * 1024) throw new Error('unavailable');
+      const stats = await options.runtime.evidence.observe(readFileSync(path, 'utf8'));
+      log(`Packed handoff observed (${label}): ${JSON.stringify(stats)}`);
+    } catch {
+      log(`Packed handoff observed (${label}): unavailable`);
+    }
+  }
+  return result;
 }
 
 async function runCommandCodeAuxReview(
@@ -455,6 +473,39 @@ export async function runCommandCodeFindingVerification(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
+  const started = Date.now();
+  // Reserve 30 seconds for verification after the 1.5-second optional preparation.
+  if (runtime?.evidence && (timeoutMs === undefined || timeoutMs > 31_500)) {
+    try {
+      const { packet, stats } = await runtime.evidence.prepare(findings, prContext);
+      const enriched = packet ? `${prContext}\n\n${packet}` : prContext;
+      const fits = measureReviewPrompt(
+        withCommandCodeToolsDirective(
+          assembleFindingVerificationPrompt(enriched, findings),
+          workspace,
+        ),
+        reviewPromptBudget(
+          'commandcode',
+          COMMANDCODE_MODEL_LIMITS[model.replace(/^commandcode\//, '').toLowerCase()],
+        ),
+      ).fits;
+      if (fits) prContext = enriched;
+      log(
+        `Packed handoff verification: ${JSON.stringify({
+          ...stats,
+          injectedBytes: fits ? stats.bytes : 0,
+          prepareMs: Date.now() - started,
+          status: fits ? (packet ? 'applied' : 'empty') : 'prompt-budget',
+        })}`,
+      );
+    } catch {
+      log('Packed handoff verification: unavailable; continuing with cited source.');
+    }
+  }
+  if (timeoutMs !== undefined) {
+    timeoutMs = Math.max(0, timeoutMs - (Date.now() - started));
+    if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
+  }
   const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
@@ -610,21 +661,20 @@ function parseCommandCodeSessionEntryEstimatedCost(line: string): number | undef
   }
 }
 
+async function commandCodeTranscriptPath(home: string, sessionId: string) {
+  const directory = await opendir(join(home, '.commandcode', 'projects'), { recursive: true });
+  for await (const entry of directory)
+    if (entry.isFile() && entry.name === `${sessionId}.jsonl`)
+      return join(entry.parentPath, entry.name);
+  return undefined;
+}
+
 export async function commandCodeSessionEstimatedCost(
   home: string,
   sessionId: string,
 ): Promise<number | undefined> {
   try {
-    const root = join(home, '.commandcode', 'projects');
-    const filename = `${sessionId}.jsonl`;
-    const directory = await opendir(root, { recursive: true });
-    let transcript: string | undefined;
-    for await (const entry of directory) {
-      if (entry.isFile() && entry.name === filename) {
-        transcript = join(entry.parentPath, entry.name);
-        break;
-      }
-    }
+    const transcript = await commandCodeTranscriptPath(home, sessionId);
     if (!transcript) return undefined;
 
     let total: number | undefined;
@@ -657,6 +707,13 @@ async function runCommandCodePrompt(
   const repairHome =
     runtime?.tools && repair ? mkdtempSync(join(runtime.home, 'repair-')) : undefined;
   const home = repairHome ?? runtime?.home;
+  let benchmarkDir: string | undefined;
+  try {
+    benchmarkDir = mkdtempSync(join(home ?? tmpdir(), 'benchmark-'));
+    args.push('--benchmark-output', join(benchmarkDir, 'metrics.json'));
+  } catch {
+    log(`CommandCode benchmark (${label}): unavailable`);
+  }
   const input =
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
@@ -733,6 +790,26 @@ async function runCommandCodePrompt(
     complete = true;
     return { finalText: parsed.finalText, sessionId: parsed.sessionId };
   } finally {
+    if (benchmarkDir) {
+      try {
+        const path = join(benchmarkDir, 'metrics.json');
+        const benchmark =
+          statSync(path).size <= 4 * 1024 * 1024
+            ? parseCommandCodeBenchmark(JSON.parse(readFileSync(path, 'utf8')))
+            : undefined;
+        log(
+          `CommandCode benchmark (${label}): ${benchmark ? JSON.stringify(benchmark) : 'unavailable'}`,
+        );
+      } catch {
+        log(`CommandCode benchmark (${label}): unavailable`);
+      } finally {
+        try {
+          rmSync(benchmarkDir, { recursive: true, force: true });
+        } catch {
+          log(`CommandCode benchmark (${label}): cleanup failed`);
+        }
+      }
+    }
     if (repairHome) rmSync(repairHome, { recursive: true, force: true });
     clearInterval(heartbeat);
     progress.finish();
