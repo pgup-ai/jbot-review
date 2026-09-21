@@ -8,6 +8,7 @@ import { OpenCode, type OpenCodeClient } from '@opencode/client';
 import {
   buildConfig,
   modelOptionsByModel,
+  verificationRecoveryModel,
   providerKeyVariables,
   type ModelEntry,
   type ModelOptionsByModel,
@@ -311,6 +312,7 @@ export interface OpencodeRuntime {
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
   verifyFork?: boolean;
+  verificationRecoveryModel?: string;
   onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   reviewerAgent?: boolean;
   stop(): void;
@@ -328,6 +330,7 @@ export interface StartOpencodeOptions {
   scrubEnv?: boolean;
   transcriptDir?: string;
   verifyFork?: boolean;
+  verificationRecoveryModel?: string;
   onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   reviewerAgent?: boolean;
   runStats?: boolean;
@@ -406,6 +409,12 @@ export async function startOpencode(
     stopServer();
     throw error;
   }
+  const recovery = verificationRecoveryModel(options.verificationRecoveryModel, models);
+  const recoveryModel = recovery && modelLimits[recovery] ? recovery : undefined;
+  if (options.verificationRecoveryModel && !recoveryModel)
+    log(
+      'Verification recovery disabled: choose an available non-free OpenCode model with configured OpenCode credentials.',
+    );
   log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
   const stopProgress = startProgressLogger(client, log);
   // Stats are fire-and-forget before the kill: stop() stays synchronous for the runner.
@@ -431,6 +440,7 @@ export async function startOpencode(
     sessionOptionsFile,
     transcriptDir: options.transcriptDir,
     verifyFork: options.verifyFork,
+    verificationRecoveryModel: recoveryModel,
     onSourceRead: options.onSourceRead,
     reviewerAgent: options.reviewerAgent,
     stop,

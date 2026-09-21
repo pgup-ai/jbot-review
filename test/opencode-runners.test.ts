@@ -13,7 +13,7 @@ import {
   runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
-import { permissionRules } from '../src/shared/opencode-config.ts';
+import { DENY_ALL, permissionRules } from '../src/shared/opencode-config.ts';
 import { CONTINUATION_NUDGE_PROMPT, NO_TOOLS_REVIEW_DIRECTIVE } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 import {
@@ -217,6 +217,108 @@ describe('auxiliary runners on V2', () => {
 });
 
 describe('runFindingVerification on V2', () => {
+  it('recovers unusable output once in a tool-less fork without replacing completed judgments', async () => {
+    for (const first of [
+      '{}',
+      '{"verdicts":[{"index":0,"verdict":"refuted","reason":"already checked"}]}',
+    ]) {
+      const fake = fakeOpencodeServer((session) => ({
+        text:
+          session.agent === 'jbot-plain'
+            ? '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"},{"index":1,"verdict":"uncertain","reason":"unfinished"}]}'
+            : first,
+      }));
+      const rt = runtime(fake, { verificationRecoveryModel: 'opencode-go/mimo-v2.6-flash' });
+      const result = await runFindingVerification(
+        rt,
+        'opencode/mimo-v2.6-flash-free',
+        'ctx',
+        [finding, finding],
+        log,
+        300_000,
+      );
+      assert.deepEqual(
+        result?.map((v) => v.verdict),
+        [first === '{}' ? 'uncertain' : 'refuted', 'uncertain'],
+      );
+      const [main, repair] = [...fake.sessions.values()];
+      assert.equal(repair.forkedFrom, main.id);
+      assert.equal(repair.agent, 'jbot-plain');
+      assert.deepEqual(repair.permissions, DENY_ALL);
+      assert.deepEqual(repair.model, { providerID: 'opencode-go', id: 'mimo-v2.6-flash' });
+      assert.equal(fake.prompts.length, 2);
+      assert.match(fake.prompts[1].body.text, /Use uncertain/);
+    }
+  });
+
+  it('interrupts a timed-out verifier before recovering its collected evidence', async (t) => {
+    const fake = fakeOpencodeServer((session) =>
+      session.agent === 'jbot-plain'
+        ? { text: '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"}]}' }
+        : {
+            hang: true,
+            tools: [{ name: 'read', input: { filePath: 'a.ts' }, output: 'collected source' }],
+          },
+    );
+    const wait = fake.client.session.wait.bind(fake.client.session);
+    let calls = 0;
+    t.mock.method(fake.client.session, 'wait', (...args) => {
+      if (++calls === 1)
+        throw new Error('opencode finding-verification prompt did not finish within 240s');
+      return wait(...args);
+    });
+    const rt = runtime(fake, { verificationRecoveryModel: 'opencode-go/mimo-v2.6-flash' });
+    const result = await runFindingVerification(
+      rt,
+      'opencode/mimo-v2.6-flash-free',
+      'ctx',
+      [finding],
+      log,
+      300_000,
+    );
+    const [main, repair] = [...fake.sessions.values()];
+    assert.equal(main.interrupted, 1);
+    assert.match(JSON.stringify(repair.messages), /collected source/);
+    assert.equal(result?.[0].verdict, 'uncertain');
+  });
+
+  it('keeps recovery optional and preserves partial verdicts when recovery fails', async () => {
+    for (const enabled of [false, true]) {
+      const fake = fakeOpencodeServer((session) =>
+        session.agent === 'jbot-plain'
+          ? { error: 'recovery unavailable' }
+          : { text: '{"verdicts":[{"index":0,"verdict":"refuted","reason":"checked"}]}' },
+      );
+      const rt = runtime(fake, {
+        verificationRecoveryModel: enabled ? 'opencode-go/mimo-v2.6-flash' : undefined,
+      });
+      const result = await runFindingVerification(
+        rt,
+        'opencode/mimo-v2.6-flash-free',
+        'ctx',
+        [finding, finding],
+        log,
+        300_000,
+      );
+      assert.equal(result?.length, 1);
+      assert.equal(result?.[0].verdict, 'refuted');
+      assert.equal(fake.prompts.length, enabled ? 2 : 1);
+    }
+    const denied = fakeOpencodeServer(() => ({ error: 'usage limit' }));
+    await assert.rejects(
+      runFindingVerification(
+        runtime(denied, { verificationRecoveryModel: 'opencode-go/mimo-v2.6-flash' }),
+        'opencode/mimo-v2.6-flash-free',
+        'ctx',
+        [finding],
+        log,
+        300_000,
+      ),
+      /usage limit/,
+    );
+    assert.equal(denied.prompts.length, 1);
+  });
+
   it("cites each finding's evidence quote in the verifier prompt", async () => {
     const fake = fakeOpencodeServer(() => ({ text: verdicts }));
     await runFindingVerification(

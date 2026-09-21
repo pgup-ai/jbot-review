@@ -48,6 +48,17 @@ export interface ModelEntry {
   verificationModelOptions?: Record<string, unknown>;
 }
 
+export function verificationRecoveryModel(requested: string | undefined, models: ModelEntry[]) {
+  const model = requested?.trim();
+  if (!model || !/^opencode(?:-go)?\/[^\s]+$/.test(model) || model.endsWith('-free'))
+    return undefined;
+  return models.some(
+    (entry) => ['opencode', 'opencode-go'].includes(entry.providerID) && entry.apiKey,
+  )
+    ? model
+    : undefined;
+}
+
 export interface ProviderKeyConfig {
   providerID: string;
   apiKey: string;
