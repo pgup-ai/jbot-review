@@ -1175,10 +1175,11 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');
   });
 
-  it('uses the bounded default for omitted or zero session caps', () => {
+  it('uses the bounded default for omitted or nonpositive session caps', () => {
     assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 3);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: -1 }).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 5 }).maxConcurrentSessions, 5);
   });
 
@@ -1785,7 +1786,10 @@ it('binds confirmation quotes to each candidate and only its delivered evidence'
     body: 'Does the caller pass more than 100 jobs?',
   };
   const quotes = ['return jobs.slice(0, 100);', 'callBatch(201);', 'invented source'];
-  const targets = quotes.map((_, i) => ({ ...candidate, path: `batch${i}.ts` }));
+  const targets = Array.from({ length: 4 }, (_, i) => ({
+    ...candidate,
+    path: `batch${i}.ts`,
+  }));
   for (const oversized of [false, true]) {
     let calls = 0;
     const budget = { ...reviewPromptBudget('test'), transportBytes: 40000 };
@@ -1812,7 +1816,7 @@ it('binds confirmation quotes to each candidate and only its delivered evidence'
               ...candidate,
               kind: 'bug' as const,
               severity: 'P1' as const,
-              evidence: index === 2 ? quotes[0] : quotes[index],
+              evidence: index === 2 ? quotes[0] : quotes[Math.min(index, 2)],
             },
           }));
         },
@@ -1821,7 +1825,7 @@ it('binds confirmation quotes to each candidate and only its delivered evidence'
     assert.equal(calls, 1);
     assert.deepEqual(
       verdicts.map((v) => v.verdict),
-      ['confirmed', oversized ? 'uncertain' : 'confirmed', 'uncertain'],
+      ['confirmed', oversized ? 'uncertain' : 'confirmed', 'uncertain', 'uncertain'],
     );
   }
 });

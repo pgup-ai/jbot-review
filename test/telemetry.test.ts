@@ -150,12 +150,13 @@ describe('phase and tool telemetry', () => {
       'diff-recovery',
     );
     assert.equal(classifyReadonlyTool('exec', { command: 'git diff --stat' }), 'diff-recovery');
-    assert.equal(
-      classifyReadonlyTool('exec', {
-        command: 'git --literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts',
-      }),
-      'diff-recovery',
-    );
+    for (const flags of ['', '--no-pager '])
+      assert.equal(
+        classifyReadonlyTool('exec', {
+          command: `git ${flags}--literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts`,
+        }),
+        'diff-recovery',
+      );
     assert.equal(
       countDiffFileHeaders([
         {

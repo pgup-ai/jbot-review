@@ -1020,8 +1020,9 @@ notice. They still prevent automatic approval and an all-clear result. This rule
 adds no model pass, repository scan or configuration flag. Concrete investigation
 candidates still enter the existing verification batches. Confirmation promotes
 one only when the verifier supplies a factual title, classification, severity,
-trigger/impact explanation and an evidence quote present in the supplied source.
-Code preserves the candidate location. Uncertainty and provider/budget
+trigger/impact explanation and a quote present in source supplied for that candidate.
+Prepared evidence counts only when it fits and reaches the verifier. Code preserves
+the candidate location. Uncertainty and provider/budget
 failures remain withheld, with different diagnostic labels.
 
 The dogfood workflow uploads `unverified-findings.json` alongside telemetry. Its
@@ -1327,17 +1328,13 @@ up to 60 seconds to finish, bounded by the run budget with verification and post
 time reserved. Auxiliary pages prioritize higher-risk code using the same path
 ranking as diff context. Findings from completed pages survive the cutoff, and
 unfinished auxiliary coverage is reported. Main review still covers every hunk.
-Before a cancellation, OpenCode and Pi sessions are asked to wrap up: in the
-last fifth of the grace (at most 90 seconds, and only when the model keeps at
-least 45 seconds to answer) the turn is interrupted, tools are dropped, and the
-model reports what it had already established; a main review shard gets the
-same treatment in the last fifth of its own deadline. Those
-findings are posted, the pass is listed as cut short with partial findings
-included, and a wrapped-up shard is never cached. Sessions that still do not
-finish are cancelled and reported as incomplete coverage, and the review footer
-names the cutoff (cut off after the main review, timed out, or failed). The run
-deadline also applies while queued; expiry requests backend cancellation, and
-completed main findings survive.
+OpenCode and Pi can request a tool-free wrap-up near a session's own deadline
+when the reserved fifth of its budget leaves at least 45 seconds for the response.
+The 60-second auxiliary grace cannot fund that reserve, so unfinished pages are
+cancelled.
+Completed auxiliary findings remain eligible for verification. A partial main
+page fails the run before posting; it is never cached as a completed review.
+Deadlines also apply while queued. Coverage logs record any cutoff or failure.
 
 The changes-since summary and addressed-thread check use low-priority slots.
 Their results are kept if they have finished when main review completes;

@@ -265,15 +265,20 @@ test('single-page diff-first keeps the trust boundary before author-controlled c
     diffFirst: true,
     shards: shards.slice(0, 1),
   });
-  assert.ok(plans[0].context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
-  assert.equal(plans[0].context.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2);
-  assert.ok(plans[0].context.indexOf('## Diff hunks') < plans[0].context.indexOf('CORE'));
+  for (const context of [plans[0].context, plans[0].baseContext]) {
+    assert.ok(context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
+    assert.equal(context.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2);
+    assert.ok(context.indexOf('## Diff hunks') < context.indexOf('CORE'));
+  }
   const paged = buildShardPlans({ ...base, diffFirst: true, shards });
   assert.equal(
     paged[0].context.split('## Your assigned files')[0],
     paged[1].context.split('## Your assigned files')[0],
   );
+  const prefix = paged[0].context.split('## Your assigned files')[0];
+  assert.ok(prefix.includes('CORE') && prefix.includes('C7'));
   assert.ok(paged[0].context.indexOf('CORE') < paged[0].context.indexOf('## Diff hunks'));
+  assert.doesNotMatch(prefix, /reviewer [12]\b/);
 });
 
 test('queued pages respect session concurrency and a failed page cannot count as complete delivery', async () => {

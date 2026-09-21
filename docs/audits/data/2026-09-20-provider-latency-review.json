@@ -1,0 +1,890 @@
+{
+  "protocol": {
+    "base": "2d8f9239424ba6644dcc36e0d45433eb74640974",
+    "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+    "diffSha256": "5920c8b6c80887dfd3bd073347340c4df805a109c549bc24fbeb602fff6cdb32",
+    "controlRuntime": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+    "treatmentRuntime": "75e4e24ae6c222adfe812d9210b309dcc88b3ee1",
+    "tools": {
+      "opencode": "2.0.5",
+      "commandcode": "1.56.2"
+    }
+  },
+  "limitations": [
+    "One control-first pair per provider; caches uncontrolled; other-provider trials overlapped.",
+    "Complete main delivery is not equivalent-recall evidence; auxiliary work intentionally decreases.",
+    "CommandCode tool and turn telemetry is unavailable.",
+    "Auxiliary and verifier pages share labels; their final turn-count snapshots are not aggregate counts and are omitted.",
+    "posted-inline and orphaned dispositions describe dry-run routing; no GitHub finding was posted."
+  ],
+  "currentBranchInput": {
+    "head": "75e4e24ae6c222adfe812d9210b309dcc88b3ee1",
+    "base": "2d8f9239424ba6644dcc36e0d45433eb74640974",
+    "worktreeDiffSha256": "d1fdd082d3639014e36f57d37a77ad804dd9169f28da8142464f929a1fc46c65",
+    "uncommittedPaths": ["README.md", "test/review-plan.test.ts", "test/runner.test.ts"]
+  },
+  "rows": [
+    {
+      "name": "commandcode-control",
+      "manifest": {
+        "runtime": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "base": "origin/main",
+        "model": "commandcode/meta/muse-spark-1.3-contributor",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 538466,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 5712,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 4005252,
+          "durationMs": 333895,
+          "stopReason": "completed",
+          "outputBytes": 1050
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 186264,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 4466
+        },
+        {
+          "phase": "verification",
+          "durationMs": 12576,
+          "stopReason": "completed",
+          "outputBytes": 4081
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 4081
+        },
+        {
+          "phase": "posting",
+          "durationMs": 0,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 14,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 385,
+        "deliveredHunks": 385,
+        "expectedTasks": 53,
+        "completedTasks": 53,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 93,
+      "sessionKinds": {
+        "main": 53,
+        "review-interactions": 38,
+        "finding-verification": 2
+      },
+      "completedAuxiliaryPages": 38,
+      "reportedTokens": {
+        "inputTokens": 2962451,
+        "outputTokens": 175064,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 539322
+      },
+      "exploration": null,
+      "explorationByRole": null,
+      "findings": [
+        {
+          "path": "src/shared/backend-selection.ts",
+          "line": 73,
+          "title": "`backendCanReadWorkspace()` drops the new model gate",
+          "severity": "P2",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/evidence.ts",
+          "line": 107,
+          "title": "`changedEvidenceLines` records `-` lines as new-side lines",
+          "severity": "P3",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/runner.ts",
+          "line": 2448,
+          "title": "Unverified concern: `reusedAux` filters lenses without reusing baseline findings",
+          "severity": "P3",
+          "uncertain": true
+        },
+        {
+          "path": "src/shared/runner.ts",
+          "line": 1047,
+          "title": "Unverified concern: `options.experiment` dereferenced without fallback breaks callers without it",
+          "severity": "P3",
+          "uncertain": true
+        }
+      ],
+      "findingDispositions": {
+        "withheld-unverified": 2,
+        "rescued": 1,
+        "posted-inline": 1,
+        "refuted": 1
+      },
+      "incompleteSessionCount": 0,
+      "hashes": {
+        "result": "e7d6d47069f70bc9dc9c98d74518b646d3b6656799e35b936adaf50ea4ff06f2",
+        "log": "8eaa3c40861a8685ba29e1aeca61a14719b5f3d5abedb0f12ef854639e01e438",
+        "manifest": "e8effbfe7c6ccce316d646da51c9cfed0911f49354f4d6a65229d81f5c052aec"
+      },
+      "auxiliaryPagesPlanned": 38
+    },
+    {
+      "name": "commandcode-treatment",
+      "manifest": {
+        "runtime": "75e4e24ae6c222adfe812d9210b309dcc88b3ee1",
+        "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "base": "origin/main",
+        "model": "commandcode/meta/muse-spark-1.3-contributor",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 370928,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 5812,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 4005252,
+          "durationMs": 305092,
+          "stopReason": "completed",
+          "outputBytes": 928
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 60001,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 857
+        },
+        {
+          "phase": "verification",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 2
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 2
+        },
+        {
+          "phase": "posting",
+          "durationMs": 3,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 14,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 385,
+        "deliveredHunks": 385,
+        "expectedTasks": 53,
+        "completedTasks": 53,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 60,
+      "sessionKinds": {
+        "main": 53,
+        "review-interactions": 6,
+        "finding-verification": 1
+      },
+      "completedAuxiliaryPages": 5,
+      "reportedTokens": {
+        "inputTokens": 1877015,
+        "outputTokens": 109543,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 535706
+      },
+      "exploration": null,
+      "explorationByRole": null,
+      "findings": [],
+      "findingDispositions": {
+        "refuted": 1
+      },
+      "incompleteSessionCount": 34,
+      "hashes": {
+        "result": "e38b3b008603030310f8eaede8031daa0a5d549e81c4688cb1fd49d907f794ed",
+        "log": "e98dd31362d201865f9f8904bd30b78d24df197f65aa15bd382bce0d3eebe53c",
+        "manifest": "f70454d650374ca517347b8e1ba5381cf69b50a6404aa669b6dd7a13d1c7e71e"
+      },
+      "auxiliaryPagesPlanned": 38
+    },
+    {
+      "name": "opencode-control",
+      "manifest": {
+        "runtime": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "base": "origin/main",
+        "model": "opencode/muse-spark-1.3",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 1190547,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 5318,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 4005966,
+          "durationMs": 885212,
+          "stopReason": "completed",
+          "outputBytes": 960
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 300005,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 855
+        },
+        {
+          "phase": "verification",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 855
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 855
+        },
+        {
+          "phase": "posting",
+          "durationMs": 4,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 1,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 385,
+        "deliveredHunks": 385,
+        "expectedTasks": 53,
+        "completedTasks": 53,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 95,
+      "sessionKinds": {
+        "main": 53,
+        "review-interactions": 36,
+        "finding-verification": 1,
+        "review-interactions-wrap-up": 5
+      },
+      "completedAuxiliaryPages": 31,
+      "reportedTokens": {
+        "inputTokens": 6552327,
+        "outputTokens": 103264,
+        "reasoningTokens": 249132,
+        "cacheReadTokens": 39668719
+      },
+      "exploration": {
+        "toolCalls": 1032,
+        "toolOutputBytes": 6803226,
+        "exactRepeatCalls": 162,
+        "unchangedRepeatDurationMs": 80047
+      },
+      "explorationByRole": {
+        "main": {
+          "toolCalls": 628,
+          "turnCount": 446,
+          "toolOutputBytes": 4277896
+        },
+        "auxiliary": {
+          "toolCalls": 400,
+          "turnCount": null,
+          "toolOutputBytes": 2517087
+        },
+        "verification": {
+          "toolCalls": 4,
+          "turnCount": null,
+          "toolOutputBytes": 8243
+        }
+      },
+      "findings": [
+        {
+          "path": "src/shared/runner.ts",
+          "line": 1747,
+          "title": "`sessionCap` fallback breaks the `0` unlimited setting",
+          "severity": "P2",
+          "uncertain": false
+        }
+      ],
+      "findingDispositions": {
+        "posted-inline": 1
+      },
+      "incompleteSessionCount": 7,
+      "hashes": {
+        "result": "b54963863f32e8f8206cf4c0cc73788a2825a5ee1ff2b82931dce26a878dd82e",
+        "log": "8cd0ca8014ff79d759ecef1b625ef043c15427ba253c2f511621974e9c7084ac",
+        "manifest": "5ca73333726a777d9574abbece1a17b462cfbeb51e4020a8dd4771019ecbdc5d"
+      },
+      "auxiliaryPagesPlanned": 40
+    },
+    {
+      "name": "opencode-treatment",
+      "manifest": {
+        "runtime": "75e4e24ae6c222adfe812d9210b309dcc88b3ee1",
+        "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "base": "origin/main",
+        "model": "opencode/muse-spark-1.3",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 801389,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 5427,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 4005966,
+          "durationMs": 727404,
+          "stopReason": "completed",
+          "outputBytes": 9026
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 60002,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 3,
+          "stopReason": "completed",
+          "outputBytes": 8018
+        },
+        {
+          "phase": "verification",
+          "durationMs": 8530,
+          "stopReason": "completed",
+          "outputBytes": 8018
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 8018
+        },
+        {
+          "phase": "posting",
+          "durationMs": 2,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 1,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 385,
+        "deliveredHunks": 385,
+        "expectedTasks": 53,
+        "completedTasks": 53,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 61,
+      "sessionKinds": {
+        "main": 53,
+        "review-interactions": 7,
+        "finding-verification": 1
+      },
+      "completedAuxiliaryPages": 3,
+      "reportedTokens": {
+        "inputTokens": 4286059,
+        "outputTokens": 75740,
+        "reasoningTokens": 173401,
+        "cacheReadTokens": 27148176
+      },
+      "exploration": {
+        "toolCalls": 714,
+        "toolOutputBytes": 5063873,
+        "exactRepeatCalls": 89,
+        "unchangedRepeatDurationMs": 44961
+      },
+      "explorationByRole": {
+        "main": {
+          "toolCalls": 592,
+          "turnCount": 409,
+          "toolOutputBytes": 4342191
+        },
+        "auxiliary": {
+          "toolCalls": 108,
+          "turnCount": null,
+          "toolOutputBytes": 572648
+        },
+        "verification": {
+          "toolCalls": 14,
+          "turnCount": null,
+          "toolOutputBytes": 149034
+        }
+      },
+      "findings": [
+        {
+          "path": "action.yml",
+          "line": 0,
+          "title": "`verify-findings` description still promises unverified advisories",
+          "severity": "P2",
+          "uncertain": false
+        },
+        {
+          "path": "docs/audits/2026-09-19-experiment-presets.md",
+          "line": 22,
+          "title": "`experiment-presets` omits `adaptive` and misstates preset composition",
+          "severity": "P2",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/evidence.ts",
+          "line": 308,
+          "title": "`sourceContext` mention extraction drops non-ASCII identifiers",
+          "severity": "P3",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/review-plan.ts",
+          "line": 291,
+          "title": "`targetedDiff` ignores the old-side range and misses deletion hunks",
+          "severity": "P2",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/review-plan.ts",
+          "line": 87,
+          "title": "`diffUnits` creates a phantom hunk for patchless files",
+          "severity": "P3",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/runner.ts",
+          "line": 1747,
+          "title": "`sessionCap` collapses explicit `0` to `3`",
+          "severity": "P2",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/runner.ts",
+          "line": 4006,
+          "title": "`checkConfirmationEvidence` ignores the enriched verification context",
+          "severity": "P2",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/tool-telemetry.ts",
+          "line": 155,
+          "title": "`unchangedResult` is `false` on first occurrence",
+          "severity": "P3",
+          "uncertain": false
+        },
+        {
+          "path": "src/shared/tool-telemetry.ts",
+          "line": 261,
+          "title": "`classifyReadonlyTool` misses `--no-pager` diffs",
+          "severity": "P3",
+          "uncertain": false
+        }
+      ],
+      "findingDispositions": {
+        "orphaned": 1,
+        "posted-inline": 8
+      },
+      "incompleteSessionCount": 39,
+      "hashes": {
+        "result": "e9fb528736f237f39d49489350a272a3dc7bf543250d60781622a9fac3658374",
+        "log": "a50ad3a3f0ea0e3847be021cf132171a7f141529e515dcba9b5548a3e5316987",
+        "manifest": "4e1e0a6e19f366499ff54ebb710059201ded7846ee90c18a9b7fcfc4df042d8e"
+      },
+      "auxiliaryPagesPlanned": 40
+    },
+    {
+      "name": "commandcode-current",
+      "manifest": {
+        "runtime": "75e4e24ae6c222adfe812d9210b309dcc88b3ee1",
+        "reviewedHead": "75e4e24ae6c222adfe812d9210b309dcc88b3ee1",
+        "base": "origin/main",
+        "model": "commandcode/meta/muse-spark-1.3-contributor",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 432695,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 5590,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 4225350,
+          "durationMs": 367076,
+          "stopReason": "completed",
+          "outputBytes": 2660
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 60002,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 2435
+        },
+        {
+          "phase": "verification",
+          "durationMs": 1,
+          "stopReason": "completed",
+          "outputBytes": 2294
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 2,
+          "stopReason": "completed",
+          "outputBytes": 2294
+        },
+        {
+          "phase": "posting",
+          "durationMs": 2,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 15,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 414,
+        "deliveredHunks": 414,
+        "expectedTasks": 56,
+        "completedTasks": 56,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 64,
+      "sessionKinds": {
+        "main": 56,
+        "review-interactions": 7,
+        "finding-verification": 1
+      },
+      "completedAuxiliaryPages": 5,
+      "reportedTokens": {
+        "inputTokens": 1980529,
+        "outputTokens": 123411,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 749933
+      },
+      "exploration": null,
+      "explorationByRole": null,
+      "findings": [
+        {
+          "path": "src/shared/jev-prefetch.ts",
+          "line": 17,
+          "title": "Unverified concern: `symbolPattern` only escapes `$`",
+          "severity": "P3",
+          "uncertain": true
+        },
+        {
+          "path": "src/shared/opencode-session.ts",
+          "line": 609,
+          "title": "Unverified concern: `recordTurn` cutoff call suppresses final turn recording",
+          "severity": "P3",
+          "uncertain": true
+        }
+      ],
+      "findingDispositions": {
+        "withheld-unverified": 2,
+        "refuted": 1
+      },
+      "incompleteSessionCount": 35,
+      "hashes": {
+        "result": "b0e4dbcd2cb1940c48a66b515643c1e777a915f06064613a1a24c8f55a374158",
+        "log": "7e66c85f5ee7c8883c80e8eb9669b2a500315a37f8ee98adfebafd428c27e2a9",
+        "manifest": "22d497a61df6910c0c73b0e871ed27c166036d5bfcb4285621d061b343191709"
+      },
+      "auxiliaryPagesPlanned": 40
+    },
+    {
+      "name": "commandcode-preflight",
+      "manifest": {
+        "runtime": "95a9d98c7c55aa4fff0d888a5ff6764c0d744037",
+        "reviewedHead": "d9901ffb676a3d8aff327ae37ebcf13a5b7e72be",
+        "base": "HEAD^",
+        "model": "commandcode/meta/muse-spark-1.3-contributor",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 15074,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 2053,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 24200,
+          "durationMs": 8228,
+          "stopReason": "completed",
+          "outputBytes": 672
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 2,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 596
+        },
+        {
+          "phase": "verification",
+          "durationMs": 4788,
+          "stopReason": "completed",
+          "outputBytes": 596
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 596
+        },
+        {
+          "phase": "posting",
+          "durationMs": 1,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 1,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 1,
+        "deliveredHunks": 1,
+        "expectedTasks": 1,
+        "completedTasks": 1,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 2,
+      "sessionKinds": {
+        "review": 1,
+        "finding-verification": 1
+      },
+      "completedAuxiliaryPages": 0,
+      "reportedTokens": {
+        "inputTokens": 35566,
+        "outputTokens": 1213,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 226
+      },
+      "exploration": null,
+      "explorationByRole": null,
+      "findings": [
+        {
+          "path": "batch.ts",
+          "line": 1,
+          "title": "`batches()` drops all jobs after first batch",
+          "severity": "P1",
+          "uncertain": false
+        }
+      ],
+      "findingDispositions": {
+        "posted-inline": 1
+      },
+      "incompleteSessionCount": 0,
+      "hashes": {
+        "result": "a90cc47386dfa299cb261c4dfb58eb2442eb28bd24c5636de5483f8cb450cda0",
+        "log": "ea455c91c26383619a0216594cac3d43934da67b26d9592067a4d46addf8e5b9",
+        "manifest": "9bb9ef3ecca01112fdb4757200b4de81123ef67512ff445e5e38a0507164e54f"
+      },
+      "auxiliaryPagesPlanned": null
+    },
+    {
+      "name": "opencode-preflight",
+      "manifest": {
+        "runtime": "95a9d98c7c55aa4fff0d888a5ff6764c0d744037",
+        "reviewedHead": "d9901ffb676a3d8aff327ae37ebcf13a5b7e72be",
+        "base": "HEAD^",
+        "model": "opencode/muse-spark-1.3",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 18993,
+      "phases": [
+        {
+          "phase": "context-assembly",
+          "durationMs": 1073,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "main-execution",
+          "inputBytes": 24200,
+          "durationMs": 11937,
+          "stopReason": "completed",
+          "outputBytes": 730
+        },
+        {
+          "phase": "grace-wait",
+          "durationMs": 3,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 647
+        },
+        {
+          "phase": "verification",
+          "durationMs": 5978,
+          "stopReason": "completed",
+          "outputBytes": 647
+        },
+        {
+          "phase": "filtering",
+          "durationMs": 0,
+          "stopReason": "completed",
+          "outputBytes": 647
+        },
+        {
+          "phase": "posting",
+          "durationMs": 1,
+          "stopReason": "completed"
+        },
+        {
+          "phase": "teardown",
+          "durationMs": 1,
+          "stopReason": "completed"
+        }
+      ],
+      "delivery": {
+        "expectedHunks": 1,
+        "deliveredHunks": 1,
+        "expectedTasks": 1,
+        "completedTasks": 1,
+        "incompleteTasks": 0
+      },
+      "sessionUsageRows": 2,
+      "sessionKinds": {
+        "review": 1,
+        "finding-verification": 1
+      },
+      "completedAuxiliaryPages": 0,
+      "reportedTokens": {
+        "inputTokens": 54641,
+        "outputTokens": 744,
+        "reasoningTokens": 553,
+        "cacheReadTokens": 82131
+      },
+      "exploration": {
+        "toolCalls": 5,
+        "toolOutputBytes": 1104,
+        "exactRepeatCalls": 2,
+        "unchangedRepeatDurationMs": 455
+      },
+      "explorationByRole": {
+        "main": {
+          "toolCalls": 3,
+          "turnCount": 3,
+          "toolOutputBytes": 641
+        },
+        "auxiliary": {
+          "toolCalls": 0,
+          "turnCount": null,
+          "toolOutputBytes": 0
+        },
+        "verification": {
+          "toolCalls": 2,
+          "turnCount": null,
+          "toolOutputBytes": 463
+        }
+      },
+      "findings": [
+        {
+          "path": "batch.ts",
+          "line": 1,
+          "title": "`batches()` drops all jobs after the first batch",
+          "severity": "P1",
+          "uncertain": false
+        }
+      ],
+      "findingDispositions": {
+        "posted-inline": 1
+      },
+      "incompleteSessionCount": 0,
+      "hashes": {
+        "result": "ba682c5a8db7cdfb154beb4eaf481ae3429a3ab2880f201ec2f2ac4caaa72fae",
+        "log": "8559946f9121f655718b7c52a39c846a0cb5f51323047728de929267ba41afda",
+        "manifest": "d637335a12b00800abe12f67731221679dc6fa76bf51cbb6301c7d865c84f9db"
+      },
+      "auxiliaryPagesPlanned": null
+    }
+  ],
+  "cleanup": {
+    "commentBlocks": 67,
+    "kept": 22,
+    "rewritten": 8,
+    "cut": 37,
+    "newTestsKept": 56,
+    "newTestsFolded": 0,
+    "newTestsCut": 0,
+    "renamedExistingTests": 5,
+    "inventorySha256": "c260079ba76f8aafb69a9a2b6952cd46f1bd652b2548cedcef8add6ddda5b4fd"
+  },
+  "driverSha256": "2a7e7f03f262474e838db8d6bdf2bfacbe359706c43b0558fa51603b4480d8c4"
+}

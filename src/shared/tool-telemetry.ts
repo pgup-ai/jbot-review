@@ -258,7 +258,7 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
       : undefined;
   if (
     typeof command === 'string' &&
-    /\bgit(?:\s+(?:--literal-pathspecs|-c\s+\S+))*\s+diff(?:\s|$)/i.test(command)
+    /\bgit(?:\s+(?:--literal-pathspecs|--no-pager|-c\s+\S+))*\s+diff(?:\s|$)/i.test(command)
   ) {
     return 'diff-recovery';
   }
