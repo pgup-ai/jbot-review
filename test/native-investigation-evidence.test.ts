@@ -1,11 +1,16 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { formatFindingSources } from '../src/shared/prompt.ts';
 import {
   investigationOverlap,
+  NativeEvidenceStore,
   nativeEvidenceCandidates,
   nativeInvestigationTrace,
-} from '../scripts/native-investigation-evidence.ts';
+} from '../src/shared/native-evidence.ts';
 
 it('hands off only snapshot-matching native source and counts overlapping lines once', () => {
   const sources = new Map([
@@ -183,4 +188,49 @@ it('hands off only snapshot-matching native source and counts overlapping lines 
   assert.deepEqual(fromSearch.paths, ['src/a.ts', 'src/b.ts']);
   assert.deepEqual(fromSearch.searchReads, [{ path: 'src/a.ts', lines: [1, 2] }]);
   assert.equal(investigationOverlap(fromSearch, verification).fullyOverlappingReadCalls, 2);
+});
+
+it('revalidates stored native evidence and subtracts only delivered source', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'jbot-native-evidence-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  const source = "import { b } from './b';\nexport const a = b;\n";
+  await writeFile(join(workspace, 'a.ts'), source);
+  await writeFile(join(workspace, 'b.ts'), 'export const b = 1;\n');
+  execFileSync('git', ['-C', workspace, 'add', '.']);
+  const transcript = [
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'b', name: 'read_file', input: { path: 'b.ts' } }],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'b', content: '1: export const b = 1;' }],
+      },
+    },
+  ]
+    .map((entry) => JSON.stringify(entry))
+    .join('\n');
+  const store = new NativeEvidenceStore(workspace, 'snapshot');
+  const finding = [{ path: 'a.ts', line: 2, body: 'Check the imported contract.' }];
+  assert.equal((await store.prepare(finding, '')).packet, '');
+  await store.observe(transcript);
+  const supplied = formatFindingSources(
+    [{ path: 'a.ts', line: 2, startLine: 1, lines: source.trimEnd().split('\n') }],
+    [],
+  );
+  const result = await store.prepare(finding, supplied);
+  assert.equal(result.stats.duplicateLines, 0);
+  assert.equal(result.stats.selected, 1);
+  assert.match(result.packet, /export const b = 1;/);
+  assert.doesNotMatch(result.packet, /export const a/);
+  await writeFile(join(workspace, 'b.ts'), 'export const b = 2;\n');
+  const stale = await store.prepare(finding, supplied);
+  assert.equal(stale.stats.staleFiles, 1);
+  assert.equal(stale.packet, '');
 });

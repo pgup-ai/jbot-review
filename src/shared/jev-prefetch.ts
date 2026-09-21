@@ -117,7 +117,7 @@ export function selectJevCandidates(
   };
 }
 
-function selectPrefetchCandidates(
+export function selectPrefetchCandidates(
   candidates: JevCandidate[],
   indexes: number[],
   allCandidates: JevCandidate[],

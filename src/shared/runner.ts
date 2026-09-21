@@ -1,3 +1,4 @@
+import { NativeEvidenceStore } from './native-evidence.ts';
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
   buildShardPlans,
@@ -1972,6 +1973,10 @@ async function runReviewPipeline(params: {
       workspace,
       {
         home: commandCodeHome,
+        evidence:
+          options.commandCodeTools && process.env.JBOT_PACKED_HANDOFF?.trim() !== 'false'
+            ? new NativeEvidenceStore(workspace, headSha ?? 'working tree')
+            : undefined,
         tools: options.commandCodeTools,
         onProgress: (session, model, commandCodeProgress) =>
           telemetry.recordProgress({

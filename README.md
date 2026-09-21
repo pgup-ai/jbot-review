@@ -637,6 +637,17 @@ Native tools own search syntax, read limits and continuation behavior; J-Bot
 records their completion/error counts and session token usage. JSON repairs use a
 fresh temporary home with tools denied, leaving other sessions unaffected.
 
+CommandCode verification receives packed source evidence from earlier native
+review reads by default. Only successfully observed, tracked source is eligible;
+files are revalidated before reuse, and lines already in cited-source context
+are removed. The packet is capped at 6 KB and omitted if the assembled prompt
+would exceed its budget. Verifiers can still use native tools. This handoff stays
+within one review run; it does not cache verdicts or enable Jev.
+Missing or unsupported journals fall back to the existing verification context.
+Set `JBOT_PACKED_HANDOFF=false` to disable it. Other harnesses are unchanged.
+Run logs report observed files, unsupported reads, duplicate lines, stale files,
+selected/omitted excerpts, preparation time and injected bytes.
+
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via

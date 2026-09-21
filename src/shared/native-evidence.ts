@@ -1,10 +1,15 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readTrackedSource } from './finding-context.ts';
+import { selectPrefetchCandidates } from './jev-prefetch.ts';
+import { formatJevPrefetch } from './prompt.ts';
 import { createHash } from 'node:crypto';
 import { relative, resolve } from 'node:path';
-import { indexEvidenceSource, resolveEvidenceImport } from '../src/shared/evidence.ts';
-import { findingSourceLocations } from '../src/shared/finding-context.ts';
-import type { JevCandidate } from '../src/shared/prompt.ts';
-import { isRecord } from '../src/shared/text.ts';
-import type { Finding } from '../src/shared/types.ts';
+import { indexEvidenceSource, resolveEvidenceImport } from './evidence.ts';
+import { findingSourceLocations } from './finding-context.ts';
+import type { JevCandidate } from './prompt.ts';
+import { isRecord } from './text.ts';
+import type { Finding } from './types.ts';
 
 export function nativeInvestigationTrace(
   transcript: string,
@@ -133,7 +138,7 @@ export function investigationOverlap(review: Trace, verification: Trace) {
 
 export function nativeEvidenceCandidates(
   review: Trace,
-  findings: Finding[],
+  findings: Pick<Finding, 'path' | 'line' | 'body'>[],
   sources: Map<string, string>,
   revision: string,
   suppliedContext = '',
@@ -147,7 +152,7 @@ export function nativeEvidenceCandidates(
   const references = findingSourceLocations(findings).locations;
   const relevant = new Set(references.map((r) => r.path));
   for (const path of relevant) {
-    if (!observed.has(path)) continue;
+    if (!sources.has(path)) continue;
     const text = sources.get(path)!;
     try {
       for (const imp of indexEvidenceSource(path, text).imports) {
@@ -207,4 +212,102 @@ export function nativeEvidenceCandidates(
     duplicateLines,
     omitted: candidates.filter((c) => !eligible.includes(c)).map((c) => c.path),
   };
+}
+
+export class NativeEvidenceStore {
+  private files = new Map<string, { source: string; lines: Set<number> }>();
+  private inventory?: Promise<Set<string>>;
+  constructor(
+    private workspace: string,
+    private revision: string,
+  ) {}
+
+  async observe(transcript: string) {
+    const signal = AbortSignal.timeout(1500);
+    this.inventory ??= promisify(execFile)('git', ['ls-files', '-z'], {
+      cwd: this.workspace,
+      signal,
+      maxBuffer: 2 * 1024 * 1024,
+    }).then(({ stdout }) => new Set(stdout.split('\0').filter(Boolean)));
+    const tracked = await this.inventory;
+    const sources = new Map<string, string>();
+    const paths = nativeInvestigationTrace(transcript, this.workspace, sources).paths;
+    let omitted = 0;
+    for (const path of paths) {
+      if (this.files.size >= 64 && !this.files.has(path)) {
+        omitted++;
+        continue;
+      }
+      const file = await readTrackedSource(this.workspace, path, signal, { tracked });
+      if (!file || file.truncated) {
+        omitted++;
+        continue;
+      }
+      sources.set(path, file.text);
+      this.files.set(
+        path,
+        this.files.get(path)?.source === file.text
+          ? this.files.get(path)!
+          : { source: file.text, lines: new Set() },
+      );
+    }
+    const trace = nativeInvestigationTrace(transcript, this.workspace, sources);
+    for (const read of [...trace.reads, ...trace.searchReads])
+      for (const line of read.lines) this.files.get(read.path)!.lines.add(line);
+    return { files: this.files.size, omitted, unsupportedReads: trace.unsupportedReads };
+  }
+
+  async prepare(findings: Pick<Finding, 'path' | 'line' | 'body'>[], supplied: string) {
+    const sources = new Map<string, string>();
+    const reads: { path: string; lines: number[] }[] = [];
+    const signal = AbortSignal.timeout(1500);
+    const tracked = await this.inventory;
+    let staleFiles = 0;
+    const snapshot = [...this.files];
+    if (tracked)
+      for (const [path, observed] of snapshot) {
+        const file = await readTrackedSource(this.workspace, path, signal, { tracked });
+        if (!file || file.truncated || file.text !== observed.source) {
+          staleFiles++;
+          continue;
+        }
+        sources.set(path, file.text);
+        reads.push({ path, lines: [...observed.lines] });
+      }
+    if (tracked)
+      for (const ref of findingSourceLocations(findings).locations.slice(0, 20)) {
+        if (sources.has(ref.path)) continue;
+        const file = await readTrackedSource(this.workspace, ref.path, signal, { tracked });
+        if (file && !file.truncated) sources.set(ref.path, file.text);
+      }
+    const evidence = nativeEvidenceCandidates(
+      { reads, searchReads: [], paths: [], searches: [], unsupportedReads: 0 },
+      findings,
+      sources,
+      this.revision,
+      supplied,
+    );
+    const candidates = evidence.candidates;
+    const selected = selectPrefetchCandidates(
+      candidates,
+      candidates.map((_, i) => i),
+      candidates,
+      candidates.length,
+    );
+    const packet = formatJevPrefetch(
+      selected.map((i) => candidates[i]),
+      candidates.filter((_, i) => !selected.includes(i)),
+    );
+    return {
+      packet,
+      stats: {
+        candidates: candidates.length,
+        selected: selected.length,
+        duplicateLines: evidence.duplicateLines,
+        staleFiles,
+        omitted: evidence.omitted.length + candidates.length - selected.length,
+        bytes: Buffer.byteLength(packet),
+      },
+    };
+  }
 }

@@ -33,7 +33,7 @@ import {
   investigationOverlap,
   nativeEvidenceCandidates,
   nativeInvestigationTrace,
-} from './native-investigation-evidence.ts';
+} from '../src/shared/native-evidence.ts';
 
 const plan = JSON.parse(readFileSync(process.argv[2], 'utf8')) as {
   workspace: string;
@@ -89,7 +89,7 @@ save('manifest', {
   sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   sourceDiffHash: hash(execFileSync('git', ['diff', 'HEAD'])),
   experimentHashes: Object.fromEntries(
-    ['native-handoff-experiment.ts', 'native-investigation-evidence.ts'].map((name) => [
+    ['native-handoff-experiment.ts', '../src/shared/native-evidence.ts'].map((name) => [
       name,
       hash(readFileSync(new URL(name, import.meta.url))),
     ]),

@@ -1,3 +1,5 @@
+import type { NativeEvidenceStore } from './native-evidence.ts';
+import { measureReviewPrompt, reviewPromptBudget } from './review-plan.ts';
 import {
   commandCodeToolOutcome,
   parseCommandCodeUsage,
@@ -135,6 +137,7 @@ export function writeCommandCodeReadOnlySettings(home: string, workspace?: strin
 export interface CommandCodeRuntime {
   home: string;
   tools: boolean;
+  evidence?: NativeEvidenceStore;
   onProgress?: (label: string, model: string, progress: CommandCodeProgress) => void;
 }
 
@@ -307,6 +310,16 @@ export async function runCommandCodeReview(
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  if (options.runtime?.evidence && sessionId) {
+    try {
+      const path = await commandCodeTranscriptPath(options.runtime.home, sessionId);
+      if (!path || statSync(path).size > 16 * 1024 * 1024) throw new Error('unavailable');
+      const stats = await options.runtime.evidence.observe(readFileSync(path, 'utf8'));
+      log(`Packed handoff observed (${label}): ${JSON.stringify(stats)}`);
+    } catch {
+      log(`Packed handoff observed (${label}): unavailable`);
+    }
+  }
   if (!options.guidelineSweep) return result;
   const sweep = options.guidelineSweep;
   const sweepLabel = `guideline-sweep-${label}`;
@@ -458,6 +471,38 @@ export async function runCommandCodeFindingVerification(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
+  const started = Date.now();
+  if (runtime?.evidence && (timeoutMs === undefined || timeoutMs > 1500)) {
+    try {
+      const { packet, stats } = await runtime.evidence.prepare(findings, prContext);
+      const enriched = packet ? `${prContext}\n\n${packet}` : prContext;
+      const fits = measureReviewPrompt(
+        withCommandCodeToolsDirective(
+          assembleFindingVerificationPrompt(enriched, findings),
+          workspace,
+        ),
+        reviewPromptBudget(
+          'commandcode',
+          COMMANDCODE_MODEL_LIMITS[model.replace(/^commandcode\//, '').toLowerCase()],
+        ),
+      ).fits;
+      if (fits) prContext = enriched;
+      log(
+        `Packed handoff verification: ${JSON.stringify({
+          ...stats,
+          injectedBytes: fits ? stats.bytes : 0,
+          prepareMs: Date.now() - started,
+          status: fits ? (packet ? 'applied' : 'empty') : 'prompt-budget',
+        })}`,
+      );
+    } catch {
+      log('Packed handoff verification: unavailable; continuing with cited source.');
+    }
+  }
+  if (timeoutMs !== undefined) {
+    timeoutMs = Math.max(0, timeoutMs - (Date.now() - started));
+    if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
+  }
   const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
@@ -613,21 +658,20 @@ function parseCommandCodeSessionEntryEstimatedCost(line: string): number | undef
   }
 }
 
+async function commandCodeTranscriptPath(home: string, sessionId: string) {
+  const directory = await opendir(join(home, '.commandcode', 'projects'), { recursive: true });
+  for await (const entry of directory)
+    if (entry.isFile() && entry.name === `${sessionId}.jsonl`)
+      return join(entry.parentPath, entry.name);
+  return undefined;
+}
+
 export async function commandCodeSessionEstimatedCost(
   home: string,
   sessionId: string,
 ): Promise<number | undefined> {
   try {
-    const root = join(home, '.commandcode', 'projects');
-    const filename = `${sessionId}.jsonl`;
-    const directory = await opendir(root, { recursive: true });
-    let transcript: string | undefined;
-    for await (const entry of directory) {
-      if (entry.isFile() && entry.name === filename) {
-        transcript = join(entry.parentPath, entry.name);
-        break;
-      }
-    }
+    const transcript = await commandCodeTranscriptPath(home, sessionId);
     if (!transcript) return undefined;
 
     let total: number | undefined;
