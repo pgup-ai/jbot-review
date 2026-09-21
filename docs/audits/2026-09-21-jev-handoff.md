@@ -6,6 +6,9 @@ variable improvement on a dependency-heavy synthetic fixture. Keep this local
 experiment offline while fixing evidence packing; neither result establishes a
 production default or a reason to publish unresolved claims.
 
+The [packing follow-up](2026-09-21-handoff-packing.md) removes duplicate delivered
+lines and tests both selection arms without the four-excerpt cap.
+
 ## Comparison
 
 CommandCode 1.56.2, `commandcode/meta/muse-spark-1.3-contributor`, low effort,

@@ -154,9 +154,9 @@ try {
   const findings = [...review.findings, ...plan.additionalCandidates];
   if (!findings.length) throw new Error('No candidates to verify');
   const preparedAt = Date.now();
-  const verifierContext = context + '\n\n' + (await buildFindingSourceContext(workspace, findings));
-  const handoff = nativeEvidenceCandidates(reviewTrace, findings, sources, head);
-  if (!handoff.candidates.length) throw new Error('No supported relevant native reads to hand off');
+  const suppliedContext = await buildFindingSourceContext(workspace, findings);
+  const verifierContext = context + '\n\n' + suppliedContext;
+  const handoff = nativeEvidenceCandidates(reviewTrace, findings, sources, head, suppliedContext);
   save('handoff', {
     ...handoff,
     findings,
@@ -176,6 +176,7 @@ try {
       const prepare = (mode: 'on' | 'deterministic') =>
         buildJevPrefetch(workspace, [], [], {
           mode,
+          maxSelected: Math.max(1, handoff.candidates.length),
           apiKey: process.env.TYPESAFE_API_KEY,
           timeoutMs: 5000,
           log,
@@ -194,7 +195,7 @@ try {
           },
         });
       let packet = arm === 'control' ? '' : await prepare(arm === 'jev' ? 'on' : 'deterministic');
-      const fallback = arm === 'jev' && !packet;
+      const fallback = arm === 'jev' && handoff.candidates.length > 0 && !packet;
       if (fallback) packet = await prepare('deterministic');
       const selectionMs = Date.now() - started;
       const input = [verifierContext, packet].filter(Boolean).join('\n\n');

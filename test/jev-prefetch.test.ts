@@ -84,6 +84,26 @@ test('ranking keeps source identities, stable ties, and bounded excerpts with om
   assert.match(block, /does not narrow review scope/);
   assert.equal(result.inputTokens, 1234);
   assert.deepEqual(selectJevCandidates(answer([0.1]), [candidate]).selected, []);
+  const many = Array.from({ length: 10 }, (_, i) => ({ ...candidate, path: `${i}.ts` }));
+  assert.equal(selectJevCandidates(answer(many.map(() => 0.9)), many).selected.length, 4);
+  const packed = selectJevCandidates(answer(many.map(() => 0.9)), many, many, many.length);
+  assert.equal(packed.selected.length, 10);
+  const oversized = many.map((c) => ({ ...c, text: '😀'.repeat(500) }));
+  const bounded = selectJevCandidates(
+    answer(many.map(() => 0.9)),
+    oversized,
+    oversized,
+    many.length,
+  );
+  assert.ok(bounded.selected.length < many.length);
+  assert.ok(
+    Buffer.byteLength(
+      formatJevPrefetch(
+        bounded.selected.map((i) => oversized[i]),
+        oversized.filter((_, i) => !bounded.selected.includes(i)),
+      ),
+    ) <= 6000,
+  );
   for (const malformed of [
     null,
     {},

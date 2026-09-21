@@ -136,6 +136,7 @@ export function nativeEvidenceCandidates(
   findings: Finding[],
   sources: Map<string, string>,
   revision: string,
+  suppliedContext = '',
 ) {
   const observed = new Map<string, Set<number>>();
   for (const read of [...review.reads, ...review.searchReads]) {
@@ -157,11 +158,24 @@ export function nativeEvidenceCandidates(
       // Unsupported syntax leaves relevance limited to the finding's citations.
     }
   }
+  const supplied = new Set<string>();
+  for (const block of suppliedContext.matchAll(
+    /^### (.+):[1-9]\d*\n((?:\d+: [^\n]*(?:\n|$))*)/gm,
+  )) {
+    const lines = sources.get(block[1])?.replace(/\n$/, '').split('\n');
+    for (const line of block[2].matchAll(/^(\d+): (.*)$/gm))
+      if (lines?.[Number(line[1]) - 1] === line[2]) supplied.add(`${block[1]}:${line[1]}`);
+  }
+  let duplicateLines = 0;
   const candidates: JevCandidate[] = [];
   for (const [path, observedLines] of observed) {
     const source = sources.get(path)!;
     const lines = source.replace(/\n$/, '').split('\n');
-    const numbers = [...observedLines].sort((a, b) => a - b);
+    const numbers = [...observedLines]
+      .filter((line) => !supplied.has(`${path}:${line}`))
+      .sort((a, b) => a - b);
+    duplicateLines += observedLines.size - numbers.length;
+    if (!numbers.length) continue;
     const focus = references.find((ref) => ref.path === path)?.line ?? numbers[0];
     let bytes = numbers.reduce(
       (total, line) => total + Buffer.byteLength(`${line}: ${lines[line - 1]}\n`),
@@ -190,6 +204,7 @@ export function nativeEvidenceCandidates(
   );
   return {
     candidates: eligible,
+    duplicateLines,
     omitted: candidates.filter((c) => !eligible.includes(c)).map((c) => c.path),
   };
 }

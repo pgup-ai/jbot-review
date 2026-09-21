@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { formatFindingSources } from '../src/shared/prompt.ts';
 import {
   investigationOverlap,
   nativeEvidenceCandidates,
@@ -115,6 +116,36 @@ it('hands off only snapshot-matching native source and counts overlapping lines 
   assert.ok(Buffer.byteLength(partial.candidates[0].text) <= 2048);
   assert.match(partial.candidates[0].text, /^21: /);
   assert.doesNotMatch(partial.candidates[0].text, /(?:^|\n)(?:1|81): /);
+  const supplied = formatFindingSources(
+    [
+      { path: 'src/a.ts', line: 2, startLine: 2, lines: ['export const a = b;'] },
+      { path: 'src/b.ts', line: 1, startLine: 1, lines: ['stale content'] },
+    ],
+    [],
+  );
+  const deduped = nativeEvidenceCandidates(review, findings, sources, 'head-sha', supplied);
+  assert.equal(deduped.duplicateLines, 1);
+  assert.equal(deduped.candidates[0].text, "1: import { b } from './b';");
+  assert.equal(deduped.candidates[0].completeFile, false);
+  assert.equal(deduped.candidates[1].text, '1: export const b = 1;');
+  const truncated = formatFindingSources(
+    [{ path: 'src/a.ts', line: 50, startLine: 1, lines: large }],
+    [],
+  );
+  const remaining = nativeEvidenceCandidates(
+    nativeInvestigationTrace(
+      transcript([{ ...read, text: large.map((line, i) => `${i + 1}: ${line}`).join('\n') }]),
+      '/repo',
+      largeSources,
+    ),
+    findings,
+    largeSources,
+    'head-sha',
+    truncated,
+  );
+  assert.ok(remaining.duplicateLines > 0 && remaining.duplicateLines < large.length);
+  for (const line of remaining.candidates[0].text.split('\n'))
+    assert.ok(!truncated.split('\n').includes(line));
   const newSources = new Map(sources).set('src/a.ts', 'changed\n');
   assert.equal(nativeInvestigationTrace(transcript([read]), '/repo', newSources).reads.length, 0);
   const search = [
