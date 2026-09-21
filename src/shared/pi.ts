@@ -1,6 +1,6 @@
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 
@@ -25,6 +25,7 @@ import {
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
+  buildPiDiffRecoveryNote,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
   WRAP_UP_PROMPT,
@@ -505,6 +506,7 @@ export async function startPi(
     additionalProviderKeys?: ProviderKeyConfig[];
     toolTelemetry?: ToolTelemetryAccumulator;
     embeddedFirstPrompt?: boolean;
+    reviewDiff?: string;
   } = {},
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
@@ -531,13 +533,16 @@ export async function startPi(
       agentDir: join(isolationDir, 'agent'),
       systemPromptOverride: () => systemPrompt,
     });
+  const diffPath = join(isolationDir, 'review.diff');
+  const recoveryNote = options.reviewDiff ? buildPiDiffRecoveryNote(diffPath) : '';
   let loader: PiResourceLoaderLike;
   let reviewLoader: PiResourceLoaderLike | undefined;
   try {
-    loader = buildLoader(PI_REVIEW_SYSTEM_PROMPT);
+    if (options.reviewDiff) writeFileSync(diffPath, options.reviewDiff, { mode: 0o600 });
+    loader = buildLoader(PI_REVIEW_SYSTEM_PROMPT + recoveryNote);
     await loader.reload();
     if (options.embeddedFirstPrompt) {
-      reviewLoader = buildLoader(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT);
+      reviewLoader = buildLoader(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT + recoveryNote);
       await reviewLoader.reload();
     }
   } catch (error) {

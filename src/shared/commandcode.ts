@@ -101,12 +101,12 @@ export function writeCommandCodeAuth(
   return path;
 }
 
-export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): string {
+export function writeCommandCodeReadOnlySettings(home: string, workspace?: string): string {
   const path = join(home, '.commandcode', 'settings.json');
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(
     path,
-    `${JSON.stringify({ tasteLearning: false, permissions: tools ? { defaultMode: 'plan' } : { deny: ['*'] } }, null, 2)}\n`,
+    `${JSON.stringify({ tasteLearning: false, permissions: workspace ? { defaultMode: 'plan', additionalDirectories: [workspace] } : { deny: ['*'] } }, null, 2)}\n`,
     {
       mode: 0o600,
     },
@@ -641,7 +641,6 @@ async function runCommandCodePrompt(
   const args = buildCommandCodeCliArgs({ model, effort });
   if (resumeSessionId) args.push('--resume', resumeSessionId);
   const repair = label.endsWith('-repair');
-  if (runtime?.tools && !repair) args.push('--add-dir', workspace);
   const repairHome =
     runtime?.tools && repair ? mkdtempSync(join(runtime.home, 'repair-')) : undefined;
   const home = repairHome ?? runtime?.home;
@@ -661,7 +660,7 @@ async function runCommandCodePrompt(
   heartbeat.unref();
   try {
     if (repairHome) {
-      writeCommandCodeReadOnlySettings(repairHome, false);
+      writeCommandCodeReadOnlySettings(repairHome);
       copyFileSync(commandCodeAuthPath(runtime!.home), commandCodeAuthPath(repairHome));
     }
     const result = await runCliProcess(COMMANDCODE_CLI_BIN, args, {
@@ -672,6 +671,12 @@ async function runCommandCodePrompt(
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
       onStdout: progress.feed,
     });
+    progress.finish();
+    if (progress.snapshot().stopReason === 'permission_denied') {
+      throw new Error(
+        `commandcode ${label}: native tool permission denied; check workspace permissions.`,
+      );
+    }
     if (result.exitCode !== 0) {
       throw new Error(
         formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
@@ -725,6 +730,7 @@ function formatCommandCodePromptFailure(
   exitCode: number | null,
   output: string,
 ): string {
+  output = output.replace(/^Reasoning effort set to .*\r?\n?/gm, '').trim();
   const kind = classifyCommandCodePromptFailure(output);
   const suffix = kind ? ` (${kind.replace('_', ' ')})` : '';
   return `commandcode ${label} exited ${exitCode}${suffix}: ${truncateForLog(output, 1000)}`;

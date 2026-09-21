@@ -10,6 +10,7 @@ import {
   reviewPromptBudget,
   reviewDelivery,
   REVIEW_EVIDENCE_BYTES,
+  COMPLETE_DIFF_OPTIONS,
   type ShardPlan,
 } from './review-plan.ts';
 import { catalogModelLimits } from './pi.ts';
@@ -1950,7 +1951,10 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
-      writeCommandCodeReadOnlySettings(commandCodeHome, options.commandCodeTools);
+      writeCommandCodeReadOnlySettings(
+        commandCodeHome,
+        options.commandCodeTools ? workspace : undefined,
+      );
     } catch (error) {
       await cleanupCliHomes();
       throw error;
@@ -2163,6 +2167,7 @@ async function runReviewPipeline(params: {
           additionalProviderKeys: auxNeedsOwnKey
             ? [{ providerID: auxProviderID, apiKey: auxApiKey }]
             : undefined,
+          reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
           toolTelemetry: backendToolTelemetry,
           embeddedFirstPrompt: options.embeddedFirstPrompt,
         },

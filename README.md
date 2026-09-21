@@ -479,8 +479,10 @@ config, skills, or prompt templates are loaded), get no shell (pi ships no
 sandbox, so read-only is enforced by withholding `bash` rather than by
 filtering it). Sessions use Pi's native `read`, `grep`, `find`, and `ls` tools,
 including their line limits, regex search and output truncation. J-Bot supplies
-every assigned diff hunk before investigation. Native tools are not a filesystem
-sandbox; use an isolated checkout/container for untrusted repositories.
+every assigned diff hunk before investigation. Verification can recover omitted
+patches and removed lines from a temporary canonical diff using native reads.
+Native tools can read outside the checkout. Disposable checkouts do not isolate
+host files or runtime credentials.
 The provider catalog supplies each model's context window. Repository investigation has
 no tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
 existing session deadlines and per-command process limits still apply. Pi manages
@@ -625,7 +627,9 @@ isolated temporary HOME only when the main or active auxiliary provider is
 `commandcode`, then removed after the run. Sessions start in an empty directory;
 repository and operator settings, hooks, mods, and skills are excluded.
 
-CommandCode uses its native CLI tools in plan mode by default. Set
+CommandCode uses its native CLI tools in plan mode by default. The isolated
+settings grant repository access through `permissions.additionalDirectories`;
+`--add-dir` alone does not grant access in the pinned headless CLI. Set
 `JBOT_COMMANDCODE_TOOLS=false` to use embedded evidence only. Local arena and
 benchmark runs use the `reviewConfig.commandCodeTools` manifest value.
 J-Bot loads no custom tool mod and continues embedding the complete assigned diff.

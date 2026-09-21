@@ -195,16 +195,21 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(commandCodeSessionEffort(omni, { reasoningEffort: 'xhigh' }, maxCtx), 'medium');
   });
 
-  it('denies all CommandCode tools when disabled', () => {
+  it('configures native workspace access and denies tools when disabled', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
-      const path = writeCommandCodeReadOnlySettings(home, false);
+      const path = writeCommandCodeReadOnlySettings(home);
 
       assert.equal(path, join(home, '.commandcode', 'settings.json'));
       assert.equal(statSync(path).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
         tasteLearning: false,
         permissions: { deny: ['*'] },
+      });
+      writeCommandCodeReadOnlySettings(home, '/github/workspace');
+      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).permissions, {
+        defaultMode: 'plan',
+        additionalDirectories: ['/github/workspace'],
       });
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -720,7 +725,7 @@ describe('CommandCode multi-key pick', () => {
 it('resumes each CommandCode review explicitly while verification stays fresh', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-resume-'));
   writeCommandCodeAuth('test-key', home);
-  writeCommandCodeReadOnlySettings(home, true);
+  writeCommandCodeReadOnlySettings(home, '/tmp/workspace');
   const cli = join(home, 'command-code');
   writeFileSync(
     cli,
@@ -737,6 +742,12 @@ process.stdin.on('end', async () => {
     console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'read_file',result:'PRIVATE_CONTENT'}}));
     console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
     setInterval(() => {}, 1000);
+    return;
+  }
+  if (model.startsWith('denied')) {
+    console.error('Reasoning effort set to low for model.');
+    console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText:'I will review.'}));
+    process.exitCode = model === 'denied' ? 9 : 0;
     return;
   }
   const repair = path.basename(process.env.HOME).startsWith('repair-');
@@ -767,6 +778,15 @@ process.stdin.on('end', async () => {
   const pathBefore = process.env.PATH;
   process.env.PATH = `${home}:${pathBefore}`;
   try {
+    for (const model of ['denied', 'denied-zero']) {
+      await assert.rejects(
+        runCommandCodeReview(home, `commandcode/${model}`, 'FULL_DIFF', '', () => {}, {
+          runtime: { home, tools: true },
+          timeoutMs: 5000,
+        }),
+        /native tool permission denied; check workspace permissions/,
+      );
+    }
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
         const coverage: Array<{ state: string }> = [];

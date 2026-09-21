@@ -67,3 +67,71 @@ The full live quality corpus and blind adjudication have **not** been run. Becau
 CommandCode tools become enabled by default, the repository's full-corpus gate
 is still required before merging or deploying this default change. Local smoke
 results do not satisfy that gate.
+
+## Dogfood permission failure and correction
+
+Run `35631540323`, job `106438663930`, denied 14 native file reads and eight
+searches. Three of five main tasks failed; the coverage guard withheld the
+review. The actual CLI stop reason was `permission_denied`; stderr misleadingly
+led with the reasoning-effort notice and reported continuation exhaustion.
+
+Reproduced with CommandCode 1.56.2 in the slim Docker image, DeepSeek V4 Flash
+Fast at low effort, an isolated home/launch directory and `/github/workspace`.
+Passing `--add-dir` left native session `additionalDirectories` empty. The control
+exited 9 after 4.5s, denying both `read_file` and `grep`. Setting the native
+`permissions.additionalDirectories` to the checkout completed both calls with
+no denials and exit 0 in 5.9s. Muse Spark 1.3 Contributor also completed native
+read/search with the setting and no `--add-dir` flag in 12.5s. No custom permission
+hook or repository tool was
+added. The ineffective flag was removed; repair homes still deny all tools.
+
+Progress now records the native stop reason from a fixed set of known values.
+Permission-stopped runs fail before JSON repair, including when the CLI returns
+text with a success-shaped frame. Other CLI errors omit the reasoning-setting
+notice. Directory telemetry uses the native `read_directory` name.
+
+Pi verification now has a temporary canonical diff file, removed with the
+runtime, for native read/grep recovery of omitted or deleted patch lines. A free
+Ling verification recovered the old and new guard from a 66,380-byte diff and
+confirmed the seeded bug in 10.5s with five native tool calls. This file supplies
+evidence; it does not replace mandatory full-diff delivery for main reviews.
+
+Review feedback: native Pi tools already bound text results through their own
+truncation/continuation logic. No replacement output wrapper was added. Existing
+tests cover native directory telemetry, denied-stop handling, workspace settings
+and unfinished Pi tool-event cleanup; no new standalone test cases were added.
+
+Native-tool access is deliberately retained. The filesystem/credential isolation
+comments remain unresolved: Pi's in-process tools are not path-confined, and
+CommandCode permits reads in its own configuration directory. A disposable
+checkout alone does not isolate credentials. No new sandbox or custom tool
+wrapper is claimed here. These limitations and the full-corpus gate remain
+outstanding; successful tool calls do not establish merge readiness.
+
+An initial full-branch local run used an 8-minute budget, three concurrent
+sessions and DeepSeek for both roles. It completed 99 native reads/searches with
+zero permission denials, but only five of eight main pages completed before the
+allocated main-review deadline (225s). That run is not a completion pass and is
+not comparable to CI's 30-minute budget and five-session limit.
+
+The small known-bug Docker pipeline completed main review and finding verification
+with DeepSeek V4 Flash Fast at low effort: 1/1 hunks delivered, bug retained,
+13.5s review time (15.5s including startup). Those sessions used embedded evidence;
+the separate explicit native read/search probes establish tool execution.
+
+With CI's selected main/aux pair (DeepSeek V4 Flash Fast / Muse Spark 1.3
+Contributor), low effort, five concurrent sessions, one requested shard group,
+two passes and a 30-minute budget, the full local branch review completed all
+five main pages: 103/103 hunks delivered. The last main page finished in 413s.
+This run includes the local fixes and differs from the original PR prompt, so
+it is a completion check, not a matched latency benchmark.
+
+That full run completed in 679.5s (681.4s including startup), including all four
+auxiliary pages and finding verification. Native tools completed 160 file reads,
+131 searches and one glob with zero read/search denials. Four shell attempts
+were denied by native plan mode and four were blocked by native hooks; sessions
+continued and completed. The verifier completed in 60.3s with seven reads and
+three searches. This confirms functional recovery, not a latency improvement.
+The local run found a stale `retrieval` entry in the configuration-matrix test;
+it was removed before pushing. Its claimed typecheck failure was not reproduced:
+all checks passed before that cleanup too.

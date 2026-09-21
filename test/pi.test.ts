@@ -867,6 +867,14 @@ describe('Pi review sessions', () => {
           isError: false,
           result: { content: [{ type: 'text', text: 'source' }] },
         });
+        listener({
+          type: 'tool_execution_start',
+          toolCallId: 'pending',
+          toolName: 'grep',
+          args: {},
+        });
+        listener({ type: 'agent_end' });
+        listener({ type: 'agent_end' });
         return prompt(...args);
       };
       return result;
@@ -880,8 +888,17 @@ describe('Pi review sessions', () => {
       .find((row) => row.kind === 'exploration');
     assert.equal(PI_TELEMETRY_CAPABILITY, 'observable');
     assert.equal(exploration.turnCount, 1);
-    assert.equal(exploration.toolCalls, 1);
+    assert.equal(exploration.toolCalls, 2);
     assert.equal(exploration.capability, 'observable');
+    const failures = recorder
+      .toJsonl()
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.kind === 'tool' && row.success === false);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].failureClass, 'unknown');
+    assert.equal(failures[0].outputBytesAfterCap, 0);
   });
 
   it('surfaces terminal provider errors without exposing hidden reasoning or attempting JSON repair', async () => {
