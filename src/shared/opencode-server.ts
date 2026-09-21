@@ -226,7 +226,7 @@ export async function waitForModels(
   workspace: string,
   models: string[],
   timeoutMs = MODELS_TIMEOUT_MS,
-): Promise<void> {
+): Promise<Record<string, { contextTokens: number; outputTokens: number }>> {
   const deadline = Date.now() + timeoutMs;
   let missing = models;
   let failure: unknown;
@@ -238,7 +238,15 @@ export async function waitForModels(
       );
       const listed = new Set((page.data ?? []).map((m) => `${m.providerID}/${m.id}`));
       missing = models.filter((model) => !listed.has(model));
-      if (missing.length === 0) return;
+      if (missing.length === 0)
+        return Object.fromEntries(
+          (page.data ?? [])
+            .filter((m) => m.limit?.context > 0)
+            .map((m) => [
+              `${m.providerID}/${m.id}`,
+              { contextTokens: m.limit.context, outputTokens: m.limit.output },
+            ]),
+        );
     } catch (error) {
       failure = error; // a server still booting answers with errors first
     }
@@ -298,6 +306,7 @@ export interface OpencodeRuntime {
   client: OpenCodeClient;
   workspace: string;
   modelOptions: ModelOptionsByModel;
+  modelLimits: Awaited<ReturnType<typeof waitForModels>>;
   sessionOptionsFile: string;
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
@@ -363,6 +372,7 @@ export async function startOpencode(
   };
   const stopServer = () => (spawned ? server?.close() : removeDataHome());
   let client: OpenCodeClient;
+  let modelLimits: Awaited<ReturnType<typeof waitForModels>>;
   try {
     writeFileSync(sessionOptionsFile, '{}');
     const env = childEnv({
@@ -386,7 +396,7 @@ export async function startOpencode(
       baseUrl: server.url,
       headers: { authorization: basicAuthHeader(server.password) },
     });
-    await waitForModels(
+    modelLimits = await waitForModels(
       client,
       workspace,
       models.map((m) => `${m.providerID}/${m.modelID}`),
@@ -417,6 +427,7 @@ export async function startOpencode(
     workspace,
     explorationExperiment,
     modelOptions: modelOptionsByModel(models),
+    modelLimits,
     sessionOptionsFile,
     transcriptDir: options.transcriptDir,
     verifyFork: options.verifyFork,

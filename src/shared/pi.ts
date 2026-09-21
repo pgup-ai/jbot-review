@@ -1,13 +1,10 @@
-import { repositorySearchArgs, REPOSITORY_SEARCH_PROPERTIES } from './repository-search.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 
-import { gitRepositoryPage, readRepositoryPage } from './repository-output.ts';
 import { supportedModelOptions } from './config.ts';
-import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
 import {
   formatTokenUsage,
@@ -28,18 +25,24 @@ import {
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
+  buildPiDiffRecoveryNote,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
-  REPOSITORY_SEARCH_DESCRIPTION,
   WRAP_UP_PROMPT,
 } from './prompt.ts';
 import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
-import { serializedBytes, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
+import {
+  classifyReadonlyTool,
+  toolIdentity,
+  serializedBytes,
+  type ToolTelemetryFinish,
+  type ToolTelemetryAccumulator,
+} from './tool-telemetry.ts';
 import { classifyTelemetryStopReason } from './telemetry.ts';
 
-export const PI_TELEMETRY_CAPABILITY = 'enforceable' as const;
+export const PI_TELEMETRY_CAPABILITY = 'observable' as const;
 const piTelemetryContext = new AsyncLocalStorage<{ session: string }>();
 const piSessionTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 
@@ -190,8 +193,6 @@ export function piThinkingLevel(modelOptions?: Record<string, unknown>): string 
   return typeof effort === 'string' && PI_THINKING_LEVELS.has(effort) ? effort : undefined;
 }
 
-// Pi's built-in file tools can escape the checkout; only confined replacements
-// are exposed to model sessions.
 export function resolveWithinWorkspace(
   workspace: string,
   requestedPath: string,
@@ -237,35 +238,6 @@ export function mapPiUsage(usage: unknown): PromptTokenUsage | undefined {
     cacheWrite: count(u.cacheWrite, u.cacheWriteTokens),
     ...(isFiniteNumber(cost) ? { costUsd: cost } : {}),
   };
-}
-
-interface PiDiffScope {
-  /** Merge-base (local mode) or PR base sha (GitHub paths). */
-  base: string;
-  /** Local mode diffs merge-base → working tree; GitHub paths are three-dot. */
-  worktree: boolean;
-  /**
-   * PR head sha for GitHub paths. The checkout HEAD may be a synthetic merge
-   * ref (actions/checkout pull_request default), so diff to the head sha the
-   * embedded diff and anchors use — not the checkout's HEAD. Absent in local
-   * mode (working tree) and as a defensive fallback.
-   */
-  head?: string;
-}
-
-/**
- * Reuses the pipeline's canonical GIT_DIFF_ARGS so this tool's hunks match the
- * embedded diff the model anchors findings against, and so no `.gitattributes`
- * textconv or external diff driver can run.
- */
-export function piGitDiffArgs(scope: PiDiffScope, path?: string): string[] {
-  const rev = scope.worktree ? scope.base : `${scope.base}...${scope.head ?? 'HEAD'}`;
-  const args = [...GIT_DIFF_ARGS, rev];
-  // `--` pins the model-supplied path as a pathspec; a flag-shaped value can
-  // never become a git option.
-  const trimmed = path?.trim();
-  if (trimmed) args.push('--', trimmed);
-  return args;
 }
 
 type PiMessageLike = {
@@ -379,6 +351,7 @@ interface PiResourceLoaderLike {
 interface PiAgentSessionLike {
   prompt(text: string, options?: { expandPromptTemplates?: boolean }): Promise<unknown>;
   abort(): Promise<void>;
+  subscribe?(listener: (event: Record<string, unknown>) => void): () => void;
   getActiveToolNames?(): string[];
   setActiveToolsByName?(names: string[]): void;
   dispose?: () => unknown;
@@ -394,240 +367,6 @@ interface PiSdkLike {
   DefaultResourceLoader: new (options: Record<string, unknown>) => PiResourceLoaderLike;
   SessionManager: { inMemory(): unknown };
   SettingsManager: { inMemory(settings: Record<string, unknown>): unknown };
-  defineTool(definition: Record<string, unknown>): unknown;
-}
-
-/**
- * Read-only replacement for the shell the pi engine deliberately lacks: the
- * omitted-hunks notes tell the model to "run the git diff command" when the
- * embedded diff overflows its byte budget, and without this tool a pi session
- * could never see removals or unembedded hunks (invariant 1). The base ref and
- * diff form are runner-supplied — the model only chooses an optional pathspec.
- */
-export function createPiGitDiffTool(
-  sdk: PiSdkLike,
-  workspace: string,
-  scope: PiDiffScope,
-  telemetry?: ToolTelemetryAccumulator,
-): unknown {
-  return sdk.defineTool({
-    name: 'git_diff',
-    description:
-      'Show the change under review (git diff against the PR base). Pass `path` to scope the diff to one file — do that whenever the full output is truncated.',
-    parameters: {
-      type: 'object',
-      properties: {
-        offset: {
-          type: 'integer',
-          minimum: 0,
-          description: 'Byte offset returned by the previous page.',
-        },
-        path: {
-          type: 'string',
-          description: 'Repo-relative file path to diff; omit for the whole change.',
-        },
-      },
-    },
-    execute: async (_id: unknown, params: unknown) => {
-      const path = isRecord(params) && typeof params.path === 'string' ? params.path : undefined;
-      const finish = telemetry?.startTool({
-        session: piTelemetryContext.getStore()?.session ?? 'unknown',
-        backend: 'pi',
-        capability: PI_TELEMETRY_CAPABILITY,
-        toolClass: 'diff-recovery',
-        inputBytes: serializedBytes(params),
-        ...(isRecord(params) && (params.offset || params.line)
-          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
-          : {}),
-        ...(path
-          ? { identity: path, identityKind: 'path' as const }
-          : { identity: 'whole-diff', identityKind: 'scope' as const }),
-        diffScope: path ? 'path' : 'whole',
-      });
-      let text: string;
-      try {
-        const page = await gitRepositoryPage(
-          workspace,
-          piGitDiffArgs(scope, path),
-          isRecord(params) ? params : {},
-        );
-        text = page.totalBytes ? page.text : '(no changes for this path)';
-        finish?.({
-          success: true,
-          outputBytesBeforeCap: page.totalBytes,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      } catch (error) {
-        // Surface the failure as tool output the model can react to; a throw
-        // here would fail the whole session over a bad pathspec.
-        text = `git diff failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
-        finish?.({
-          success: false,
-          failureClass:
-            (isRecord(error) && error.killed === true) ||
-            classifyTelemetryStopReason(error) === 'timeout'
-              ? 'timeout'
-              : 'execution',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
-}
-
-/**
- * Repo-confined replacement for pi's built-in `read` (which accepts absolute
- * and `..` paths with no sandbox). Refuses anything resolving outside the
- * workspace, so a prompt-injected diff cannot read host files.
- */
-export function createPiReadTool(
-  sdk: PiSdkLike,
-  workspace: string,
-  telemetry?: ToolTelemetryAccumulator,
-): unknown {
-  return sdk.defineTool({
-    name: 'read_file',
-    description:
-      'Read a UTF-8 file from the repository under review. `path` is repo-relative; paths outside the repo are refused.',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Repo-relative file path.' },
-        line: {
-          type: 'integer',
-          minimum: 1,
-          description: 'Start at this 1-based line; omit when continuing with offset.',
-        },
-        offset: {
-          type: 'integer',
-          minimum: 0,
-          description: 'Byte offset returned by the previous page.',
-        },
-      },
-      required: ['path'],
-    },
-    execute: async (_id: unknown, params: unknown) => {
-      const requested = isRecord(params) && typeof params.path === 'string' ? params.path : '';
-      const finish = telemetry?.startTool({
-        session: piTelemetryContext.getStore()?.session ?? 'unknown',
-        backend: 'pi',
-        capability: PI_TELEMETRY_CAPABILITY,
-        toolClass: 'file-read',
-        inputBytes: serializedBytes(params),
-        ...(isRecord(params) && (params.offset || params.line)
-          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
-          : {}),
-        ...(requested ? { identity: requested, identityKind: 'path' as const } : {}),
-      });
-      const target = requested ? resolveWithinWorkspace(workspace, requested) : undefined;
-      if (!target) {
-        const text = `Refused: "${requested}" is outside the repository.`;
-        finish?.({
-          success: false,
-          failureClass:
-            requested && existsSync(resolve(workspace, requested)) ? 'denied' : 'invalid-input',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-        return {
-          content: [{ type: 'text', text }],
-          details: {},
-        };
-      }
-      let text: string;
-      try {
-        const page = await readRepositoryPage(
-          createReadStream(target, { encoding: 'utf8' }),
-          isRecord(params) ? params : {},
-        );
-        text = page.text;
-        finish?.({
-          success: true,
-          outputBytesBeforeCap: page.totalBytes,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      } catch (error) {
-        text = `read failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
-        finish?.({
-          success: false,
-          failureClass: 'execution',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
-}
-
-export function createPiSearchTool(
-  sdk: PiSdkLike,
-  workspace: string,
-  telemetry?: ToolTelemetryAccumulator,
-): unknown {
-  return sdk.defineTool({
-    name: 'search_repo',
-    description: REPOSITORY_SEARCH_DESCRIPTION,
-    parameters: {
-      type: 'object',
-      properties: {
-        ...REPOSITORY_SEARCH_PROPERTIES,
-        offset: { type: 'integer', minimum: 0 },
-      },
-      required: ['query'],
-    },
-    execute: async (_id: unknown, params: unknown) => {
-      const finish = telemetry?.startTool({
-        session: piTelemetryContext.getStore()?.session ?? 'unknown',
-        backend: 'pi',
-        capability: PI_TELEMETRY_CAPABILITY,
-        toolClass: 'search',
-        inputBytes: serializedBytes(params),
-        ...(isRecord(params) && (params.offset || params.line)
-          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
-          : {}),
-        identity: JSON.stringify(
-          isRecord(params) ? { query: params.query, paths: params.paths } : params,
-        ),
-        identityKind: 'query',
-      });
-      let text: string;
-      try {
-        const page = await gitRepositoryPage(
-          workspace,
-          [
-            '--no-pager',
-            'grep',
-            '--no-index',
-            '--exclude-standard',
-            '--no-color',
-            '-n',
-            '-I',
-            '--no-textconv',
-            ...repositorySearchArgs(params),
-          ],
-          isRecord(params) ? params : {},
-        );
-        text = page.totalBytes ? page.text : '(no matches in non-ignored files)';
-        finish?.({
-          success: true,
-          outputBytesBeforeCap: page.totalBytes,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      } catch (error) {
-        text = `search failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
-        finish?.({
-          success: false,
-          failureClass: 'execution',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
 }
 
 /**
@@ -708,9 +447,6 @@ export interface PiRuntime {
   thinkingLevel?: string;
   /** For sessions on a model other than `mainModel` (the aux default). */
   auxThinkingLevel?: string;
-  gitDiffTool?: unknown;
-  readTool: unknown;
-  searchTool: unknown;
   toolTelemetry?: ToolTelemetryAccumulator;
   /**
    * Created-but-not-disposed sessions; teardown aborts them so a prompt
@@ -768,9 +504,9 @@ export async function startPi(
     /** Thinking level for sessions on a model other than the main one. */
     auxThinkingLevel?: string;
     additionalProviderKeys?: ProviderKeyConfig[];
-    diffScope?: PiDiffScope;
     toolTelemetry?: ToolTelemetryAccumulator;
     embeddedFirstPrompt?: boolean;
+    reviewDiff?: string;
   } = {},
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
@@ -797,13 +533,16 @@ export async function startPi(
       agentDir: join(isolationDir, 'agent'),
       systemPromptOverride: () => systemPrompt,
     });
+  const diffPath = join(isolationDir, 'review.diff');
+  const recoveryNote = options.reviewDiff ? buildPiDiffRecoveryNote(diffPath) : '';
   let loader: PiResourceLoaderLike;
   let reviewLoader: PiResourceLoaderLike | undefined;
   try {
-    loader = buildLoader(PI_REVIEW_SYSTEM_PROMPT);
+    if (options.reviewDiff) writeFileSync(diffPath, options.reviewDiff, { mode: 0o600 });
+    loader = buildLoader(PI_REVIEW_SYSTEM_PROMPT + recoveryNote);
     await loader.reload();
     if (options.embeddedFirstPrompt) {
-      reviewLoader = buildLoader(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT);
+      reviewLoader = buildLoader(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT + recoveryNote);
       await reviewLoader.reload();
     }
   } catch (error) {
@@ -853,23 +592,11 @@ export async function startPi(
     ...(reviewLoader ? { reviewLoader } : {}),
     workspace,
     mainModel: `${providerID}/${modelID}`,
-    readTool: createPiReadTool(sdk, workspace, options.toolTelemetry),
-    searchTool: createPiSearchTool(sdk, workspace, options.toolTelemetry),
     ...(options.toolTelemetry ? { toolTelemetry: options.toolTelemetry } : {}),
     activeSessions: new Set(),
     stopped: false,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(options.auxThinkingLevel ? { auxThinkingLevel: options.auxThinkingLevel } : {}),
-    ...(options.diffScope
-      ? {
-          gitDiffTool: createPiGitDiffTool(
-            sdk,
-            workspace,
-            options.diffScope,
-            options.toolTelemetry,
-          ),
-        }
-      : {}),
   };
   return {
     runtime,
@@ -881,19 +608,6 @@ export async function startPi(
       removeIsolationDir();
     },
   };
-}
-
-/** The session's tool allowlist + custom tools — only our confined tools. */
-function piCustomToolConfig(runtime: PiRuntime): {
-  tools: string[];
-  customTools: unknown[];
-} {
-  const entries: Array<{ name: string; tool: unknown }> = [
-    { name: 'read_file', tool: runtime.readTool },
-    { name: 'search_repo', tool: runtime.searchTool },
-    ...(runtime.gitDiffTool ? [{ name: 'git_diff', tool: runtime.gitDiffTool }] : []),
-  ];
-  return { tools: entries.map((e) => e.name), customTools: entries.map((e) => e.tool) };
 }
 
 async function createPiSession(
@@ -916,9 +630,7 @@ async function createPiSession(
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
-    // Naming custom tools in `tools` is required for registration; built-ins
-    // remain unavailable because Pi does not sandbox them.
-    ...(singleShot ? { noTools: 'all' } : piCustomToolConfig(runtime)),
+    ...(singleShot ? { noTools: 'all' } : { tools: ['read', 'grep', 'find', 'ls'] }),
     modelRuntime: runtime.modelRuntime,
     resourceLoader: reviewSession && runtime.reviewLoader ? runtime.reviewLoader : runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
@@ -932,7 +644,44 @@ async function createPiSession(
     byLabel.set(label, labeled);
     labeled.add(session);
   }
-  if (runtime.toolTelemetry) piSessionTelemetry.set(session, runtime.toolTelemetry);
+  if (runtime.toolTelemetry) {
+    piSessionTelemetry.set(session, runtime.toolTelemetry);
+    const pending = new Map<string, (finish: ToolTelemetryFinish) => void>();
+    session.subscribe?.((event) => {
+      const id = String(event.toolCallId ?? '');
+      if (event.type === 'tool_execution_start') {
+        const toolClass = classifyReadonlyTool(String(event.toolName), event.args);
+        pending.set(
+          id,
+          runtime.toolTelemetry!.startTool({
+            session: piTelemetryContext.getStore()?.session ?? label ?? 'unknown',
+            backend: 'pi',
+            capability: PI_TELEMETRY_CAPABILITY,
+            toolClass,
+            inputBytes: serializedBytes(event.args),
+            ...toolIdentity(toolClass, event.args),
+          }),
+        );
+      } else if (event.type === 'tool_execution_end') {
+        const bytes = serializedBytes(event.result);
+        pending.get(id)?.({
+          success: !event.isError,
+          outputBytesBeforeCap: bytes,
+          outputBytesAfterCap: bytes,
+        });
+        pending.delete(id);
+      } else if (event.type === 'agent_end') {
+        for (const finish of pending.values())
+          finish({
+            success: false,
+            failureClass: 'unknown',
+            outputBytesBeforeCap: 0,
+            outputBytesAfterCap: 0,
+          });
+        pending.clear();
+      }
+    });
+  }
   // stop() may have swept the registry while createAgentSession was pending
   // (an abandoned caller racing teardown): abort the newborn session and fail
   // the call into the aux fail-open path rather than prompting post-teardown.

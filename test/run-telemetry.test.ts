@@ -42,7 +42,7 @@ test('configuration fingerprints policy changes while excluding credentials and 
   );
   assert.notEqual(
     first.configurationHash,
-    runConfiguration({ ...options, commandCodeTools: true }, 'opencode/a').configurationHash,
+    runConfiguration({ ...options, commandCodeTools: false }, 'opencode/a').configurationHash,
   );
   assert.notEqual(
     first.configurationHash,
@@ -88,7 +88,7 @@ test('configuration fingerprints policy changes while excluding credentials and 
       exploration: { ...linked.exploration, readEvidencePhase: 'verification' },
     }).configurationHash,
   );
-  for (const key of ['retrieval', 'checkpoints', 'readEvidence', 'batchDiffRecovery'] as const)
+  for (const key of ['checkpoints', 'readEvidence', 'batchDiffRecovery'] as const)
     assert.notEqual(
       configuration({
         ...custom,

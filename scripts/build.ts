@@ -37,12 +37,6 @@ await esbuild.build({
 
 await esbuild.build({
   ...shared,
-  entryPoints: ['src/shared/commandcode-mod.ts'],
-  outfile: 'dist/commandcode-mod.js',
-});
-
-await esbuild.build({
-  ...shared,
   entryPoints: ['src/workflow/index.ts'],
   outfile: 'dist/workflow/index.js',
 });

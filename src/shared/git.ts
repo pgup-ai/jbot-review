@@ -64,17 +64,9 @@ async function runGitConfigCommand(args: string[]): Promise<string> {
 }
 
 /**
- * The exact `git` invocation for every diff the review pipeline reads (the
- * local driver's merge-base→worktree diff and the pi engine's git_diff tool),
- * exported so tests can run REAL git against hostile config. The `-c` pins
- * neutralize user gitconfig that changes the output shape parseGitDiff depends
- * on: `diff.noprefix`, `diff.mnemonicPrefix`, and (git ≥2.45)
- * `diff.srcPrefix`/`dstPrefix` all rewrite the `a/`/`b/` path prefixes;
- * `core.quotePath` escapes non-ASCII paths. `--no-ext-diff` and `--no-textconv`
- * keep hunks raw: GitHub's `patch` field applies neither an external diff
- * driver nor a `.gitattributes` textconv, so what the model reads must not
- * either. Older gits ignore unknown `-c` keys. Append a revspec (and nothing
- * else) to select the diff sides.
+ * Pin diff formatting so user gitconfig cannot break parseGitDiff's a/b paths
+ * or escape non-ASCII filenames. Disable external/textconv drivers to match
+ * GitHub patches. Older Git versions ignore unknown config keys.
  */
 export const GIT_DIFF_ARGS = [
   '-c',

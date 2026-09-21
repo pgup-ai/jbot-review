@@ -25,6 +25,7 @@ import {
   formatReviewedWith,
   normalizeOptions,
   startLensPasses,
+  startGuidelineComplianceCheck,
   renderReviewMetadataBlock,
   settleWithinGrace,
   takeSettledAuxiliary,
@@ -45,6 +46,7 @@ import { completedReviewHead } from '../src/shared/github.ts';
 import { auxiliaryBaselines } from '../src/shared/auxiliary-reuse.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
+import { IncompleteReviewError } from '../src/shared/types.ts';
 import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
 import { assembleFindingVerificationPrompt } from '../src/shared/prompt.ts';
 
@@ -1196,9 +1198,9 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions(undefined).shardCachePath, '');
   });
 
-  it('keeps embedded-first prompts on and CommandCode investigation opt-in', () => {
-    assert.equal(normalizeOptions(undefined).commandCodeTools, false);
-    assert.equal(normalizeOptions({ commandCodeTools: true }).commandCodeTools, true);
+  it('enables embedded-first prompts and native CommandCode tools with explicit opt-outs', () => {
+    assert.equal(normalizeOptions(undefined).commandCodeTools, true);
+    assert.equal(normalizeOptions({ commandCodeTools: false }).commandCodeTools, false);
     assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, true);
     assert.equal(normalizeOptions({ embeddedFirstPrompt: false }).embeddedFirstPrompt, false);
   });
@@ -1443,13 +1445,14 @@ it('does not let optional bookkeeping delay posting, but keeps settled results',
 });
 
 it('keeps finished lens-page findings when another page outlives the grace', async () => {
-  const finding = {
+  const finding: Finding = {
     path: 'a.ts',
     line: 1,
     severity: 'P1',
     title: 'Bug',
     body: 'A concrete defect.',
   };
+  const partialFinding: Finding = { ...finding, line: 2 };
   let release!: () => void;
   const pending = new Promise<void>((resolve) => {
     release = resolve;
@@ -1462,6 +1465,8 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
       name: 'fake',
       runReview: async (_m: string, context: string) => {
         if (context === 'failed') throw new Error('page launch failed');
+        if (context === 'denied')
+          throw new IncompleteReviewError('permission denied', [partialFinding]);
         if (context === 'pending') await pending;
         return { summary: '', findings: context === 'ready' ? [finding] : [] };
       },
@@ -1471,7 +1476,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     guidelinesForPrompt: '',
     lensKeys: ['interactions'],
     plans: () =>
-      ['ready', 'pending', 'failed'].map((context) => ({
+      ['ready', 'pending', 'failed', 'denied'].map((context) => ({
         label: context,
         context,
         baseContext: context,
@@ -1498,7 +1503,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     1,
     release,
   );
-  assert.deepEqual(result, [finding]);
+  assert.deepEqual(result, [finding, partialFinding]);
   assert.ok(
     logs.some((line) => line.includes('review-interactions-page-3 failed: page launch failed')),
   );
@@ -1622,6 +1627,50 @@ it('dispatches each auxiliary page with its planned guidelines', async () => {
   assert.ok(rows.includes('guideline-compliance:completed'));
 });
 
+it('retains and clamps denied guideline candidates without claiming completed coverage', async () => {
+  const finding: Finding = { path: 'a.ts', line: 1, severity: 'P2', title: 'Bug', body: 'Defect' };
+  const collected: Finding[] = [];
+  const coverage: string[] = [];
+  const result = await startGuidelineComplianceCheck({
+    backend: {
+      runGuidelineComplianceCheck: async (_model: string, context: string) => {
+        if (context === 'a.ts')
+          throw new IncompleteReviewError('permission denied', [
+            finding,
+            { ...finding, path: 'b.ts' },
+          ]);
+        return [];
+      },
+    } as unknown as ReviewBackend,
+    model: 'fake/model',
+    prContext: '',
+    guidelinesForPrompt: 'rules',
+    hasGuidelines: true,
+    enabled: true,
+    plans: () =>
+      ['a.ts', 'b.ts'].map((path) => ({
+        label: path,
+        context: path,
+        baseContext: path,
+        assignedFiles: [path],
+        diffCoverage: {
+          assignedFiles: 1,
+          completeFiles: 1,
+          truncatedFiles: 0,
+          omittedFiles: 0,
+          bytes: 1,
+        },
+      })),
+    onFindings: (findings) => collected.push(...findings),
+    onCoverage: (row) => coverage.push(`${row.session}:${row.state}`),
+    log: () => {},
+  });
+  assert.deepEqual(result, [finding]);
+  assert.deepEqual(collected, [finding]);
+  assert.ok(coverage.includes('guideline-compliance-page-1:failed'));
+  assert.ok(coverage.includes('guideline-compliance:partial'));
+});
+
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
   assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
   assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);
@@ -1661,7 +1710,8 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.match(body, /Review incomplete/);
   assert.match(body, /Review interactions/);
   assert.match(body, /Main review completed/);
-  assert.match(body, /Findings from completed passes are included/);
+  assert.match(body, /any recovered auxiliary findings were retained/);
+  assert.doesNotMatch(body, /retained for verification/);
   assert.doesNotMatch(body, /unverified concerns/);
   assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
   const blocked = buildBody(
@@ -1680,7 +1730,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   );
   assert.match(blocked, /Needs changes before approval/);
   assert.match(blocked, /Review incomplete/);
-  assert.match(blocked, /incomplete verification are marked as unverified concerns/);
+  assert.match(blocked, /Candidates with incomplete verification remain in run diagnostics/);
   assert.match(blocked, /Address the P0\/P1\/P2 findings/);
   const uncertain = buildBody(
     '',

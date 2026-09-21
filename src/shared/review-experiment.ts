@@ -9,7 +9,6 @@ export interface ReviewExperiment {
   reuse: EvidenceReuseOptions;
   docsPath?: string;
   exploration: {
-    retrieval: boolean;
     checkpoints: boolean;
     readEvidence: boolean | 'linked';
     readEvidencePhase: 'all' | 'review' | 'verification';
@@ -30,7 +29,6 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
     verificationEvidence: 'off',
     reuse: { shared: false, handoff: false, prefetch: false },
     exploration: {
-      retrieval: false,
       checkpoints: false,
       readEvidence: preset === 'linked' ? 'linked' : false,
       readEvidencePhase: preset === 'linked' ? 'review' : 'all',

@@ -141,7 +141,8 @@ describe('phase and tool telemetry', () => {
     );
     assert.doesNotMatch(recorder.toJsonl(), /secret/);
   });
-  it('classifies external documentation tools before generic searches', () => {
+  it('classifies native tools and prioritizes external documentation over searches', () => {
+    assert.equal(classifyReadonlyTool('ls'), 'list');
     assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_read_doc'), 'external-docs');
@@ -586,7 +587,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
       complete: false,
       observedEvents: 1,
       droppedFrames: 0,
-      toolOutcomes: { 'jbot_read_file:tool_completed': 1 },
+      toolOutcomes: { 'read_file:tool_completed': 1 },
     });
     const updated = rec
       .toJsonl()

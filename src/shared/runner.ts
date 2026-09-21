@@ -10,6 +10,7 @@ import {
   reviewPromptBudget,
   reviewDelivery,
   REVIEW_EVIDENCE_BYTES,
+  COMPLETE_DIFF_OPTIONS,
   type ShardPlan,
 } from './review-plan.ts';
 import { catalogModelLimits } from './pi.ts';
@@ -186,6 +187,7 @@ import { createDevinCliBackend } from './devin-cli.ts';
 import { resolveOpencodeApiKeys } from './opencode-usage.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
+  COMMANDCODE_MODEL_LIMITS,
   COMMANDCODE_TELEMETRY_CAPABILITY,
   commandCodeSessionEffort,
   fetchCommandCodePlanUsageLine,
@@ -323,6 +325,7 @@ import {
 } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
+import { IncompleteReviewError } from './types.ts';
 
 const VERIFICATION_BATCH_SIZE = 10;
 
@@ -1950,7 +1953,10 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
-      writeCommandCodeReadOnlySettings(commandCodeHome, options.commandCodeTools);
+      writeCommandCodeReadOnlySettings(
+        commandCodeHome,
+        options.commandCodeTools ? workspace : undefined,
+      );
     } catch (error) {
       await cleanupCliHomes();
       throw error;
@@ -1959,7 +1965,7 @@ async function runReviewPipeline(params: {
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     log(
       options.commandCodeTools
-        ? 'CommandCode repository read/search tools enabled; launch configuration isolated.'
+        ? 'CommandCode native tools enabled in plan mode; launch configuration isolated.'
         : 'CommandCode reviews run with skills and tools disabled.',
     );
     commandCodeBackend = createCommandCodeBackend(
@@ -2163,19 +2169,11 @@ async function runReviewPipeline(params: {
           additionalProviderKeys: auxNeedsOwnKey
             ? [{ providerID: auxProviderID, apiKey: auxApiKey }]
             : undefined,
+          reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
           toolTelemetry: backendToolTelemetry,
           embeddedFirstPrompt: options.embeddedFirstPrompt,
-          // Shell-less pi sessions recover omitted/truncated hunks through the
-          // read-only git_diff tool (invariant 1); base and diff form mirror
-          // the run's diff scope.
-          diffScope: baseSha
-            ? { base: baseSha, worktree: !!localDiff, ...(headSha ? { head: headSha } : {}) }
-            : undefined,
         },
       );
-      if (!baseSha) {
-        log('pi git_diff tool unavailable (no base sha); large diffs may be reviewed truncated.');
-      }
     } catch (error) {
       await cleanupCliHomes();
       throw error;
@@ -2298,12 +2296,24 @@ async function runReviewPipeline(params: {
           : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
-    (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
+    (mainBaseBackend.name === 'opencode'
+      ? opencodeRuntime?.modelLimits[`${providerID}/${modelID}`]
+      : undefined) ??
+      (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
+      (providerID === COMMANDCODE_PROVIDER_ID
+        ? COMMANDCODE_MODEL_LIMITS[modelID.toLowerCase()]
+        : undefined) ??
       (await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined)),
   );
   const auxPromptBudget = reviewPromptBudget(
     auxBaseBackend.name,
-    (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
+    (auxBaseBackend.name === 'opencode'
+      ? opencodeRuntime?.modelLimits[`${auxProviderID}/${auxModelID}`]
+      : undefined) ??
+      (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
+      (auxProviderID === COMMANDCODE_PROVIDER_ID
+        ? COMMANDCODE_MODEL_LIMITS[auxModelID.toLowerCase()]
+        : undefined) ??
       (await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(
         () => undefined,
       )),
@@ -3626,7 +3636,7 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
-    commandCodeTools: options?.commandCodeTools ?? false,
+    commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     sharedPrefixPrompt: options?.sharedPrefixPrompt ?? false,
     auxModel: options?.auxModel ?? '',
@@ -3788,7 +3798,13 @@ export function startLensPasses(params: {
                   state: 'failed',
                   error,
                 });
-                return { findings: [], partial: true };
+                const findings = clampFindingsToFiles(
+                  error instanceof IncompleteReviewError ? error.findings : [],
+                  plan.assignedFiles,
+                  changed,
+                );
+                params.onFindings?.(`review-${key}`, findings);
+                return { findings, partial: true };
               }
             }),
           );
@@ -4776,7 +4792,7 @@ function startChangesSinceLastReviewSummary(params: {
     });
 }
 
-function startGuidelineComplianceCheck(params: {
+export function startGuidelineComplianceCheck(params: {
   backend: ReviewBackend;
   model: string;
   prContext: string;
@@ -4836,7 +4852,13 @@ function startGuidelineComplianceCheck(params: {
               `${session}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
             );
             params.onCoverage?.({ session: `${session}-page-${page + 1}`, state: 'failed', error });
-            return [];
+            const findings = clampFindingsToFiles(
+              error instanceof IncompleteReviewError ? error.findings : [],
+              plan.assignedFiles,
+              changed,
+            );
+            params.onFindings?.(findings);
+            return findings;
           }
         }),
       );

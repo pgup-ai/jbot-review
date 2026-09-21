@@ -12,13 +12,11 @@ import {
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT7_REASON_BUDGET,
-  EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
-  PI_REVIEW_SYSTEM_PROMPT,
   QODER_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
@@ -903,29 +901,5 @@ describe('buildContextTrimNotice', () => {
       buildContextTrimNotice(['blast radius', 'summary scope']),
       /blast radius, summary scope/,
     );
-  });
-});
-
-describe('PI_REVIEW_SYSTEM_PROMPT', () => {
-  it('pins no-shell, read-only, the two confined tools, and git-diff routing', () => {
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /no shell/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /read_file/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff/);
-    // Confinement stated to the model; git_diff described as conditional since
-    // it only exists when a base revision is known.
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /when available/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /where instructions mention running/);
-  });
-
-  it('permits targeted investigation and continuation while retaining confinement', () => {
-    assert.match(
-      EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
-      /investigate related code wherever needed/,
-    );
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /Continue paginated results/);
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /search_repo/);
   });
 });

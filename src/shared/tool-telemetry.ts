@@ -274,7 +274,12 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
   if (normalized.includes('grep') || normalized.includes('search') || normalized === 'find') {
     return 'search';
   }
-  if (normalized.includes('glob') || normalized.includes('list') || normalized.includes('tree')) {
+  if (
+    normalized === 'ls' ||
+    normalized.includes('glob') ||
+    normalized.includes('list') ||
+    normalized.includes('tree')
+  ) {
     return 'list';
   }
   return 'other-readonly';

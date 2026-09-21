@@ -17,7 +17,15 @@ async function loadPlugin(
   const hooks: Record<string, Hook> = {};
   await mod.default.setup({
     tool,
-    session: { hook: async (name: string, fn: Hook) => (hooks[`session.${name}`] = fn) },
+    session: {
+      hook: async (name: string, fn: Hook) => {
+        const previous = hooks[`session.${name}`];
+        hooks[`session.${name}`] = (event) => {
+          previous?.(event);
+          return fn(event);
+        };
+      },
+    },
     permission: { hook: async (name: string, fn: Hook) => (hooks[`permission.${name}`] = fn) },
   });
   return { context: hooks['session.context']!, evaluate: hooks['permission.evaluate']! };
@@ -60,12 +68,11 @@ describe('jbot opencode plugin', () => {
     });
     const warnings = t.mock.method(console, 'warn', () => {});
     const tool = {
-      transform: t.mock.fn(async () => {
+      hook: t.mock.fn(async () => {
         throw new Error('retrieval registration failed');
       }),
-      hook: async () => {},
     };
-    for (const config of ['invalid JSON', '{"retrieval":true}']) {
+    for (const config of ['invalid JSON', '{"checkpoints":true}']) {
       process.env.JBOT_EXPLORATION_CONFIG = config;
       const { context, evaluate } = await loadPlugin(tool);
       const event = { agent: 'plan', tools: tools() };
@@ -76,7 +83,7 @@ describe('jbot opencode plugin', () => {
       assert.equal(permission.effect, 'deny');
     }
     assert.equal(warnings.mock.callCount(), 2);
-    assert.equal(tool.transform.mock.callCount(), 1);
+    assert.equal(tool.hook.mock.callCount(), 1);
     assert.doesNotMatch(
       JSON.stringify(warnings.mock.calls.map((c) => c.arguments)),
       /invalid JSON|TypeError/,

@@ -63,7 +63,7 @@ export default {
     });
     try {
       const experiment = JSON.parse(process.env.JBOT_EXPLORATION_CONFIG || '{}');
-      if (experiment.retrieval || experiment.checkpoints || experiment.readEvidence) {
+      if (experiment.checkpoints || experiment.readEvidence) {
         const { installReviewRetrieval } = await import(RETRIEVAL_MODULE);
         await installReviewRetrieval(ctx, process.env.JBOT_RETRIEVAL_WORKSPACE, process.env.JBOT_EXPLORATION_STATS_DIR, experiment, (id) => sessionOptions(id)?.jbotSessionLabel);
       }

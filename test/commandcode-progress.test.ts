@@ -10,7 +10,7 @@ it('retains only safe observed metadata across chunk boundaries and incomplete o
     type: 'event',
     event: {
       type: 'tool_completed',
-      toolName: 'jbot_read_file',
+      toolName: 'read_directory',
       result: 'SECRET_CONTENT',
       input: '/secret/path',
     },
@@ -32,6 +32,7 @@ it('retains only safe observed metadata across chunk boundaries and incomplete o
       event: {
         type: 'run_end',
         result: {
+          stopReason: 'permission_denied',
           usage: {
             inputTokens: 12,
             outputTokens: 3,
@@ -46,12 +47,13 @@ it('retains only safe observed metadata across chunk boundaries and incomplete o
   now = 150;
   const snapshot = progress.snapshot();
   assert.equal(snapshot.complete, false);
+  assert.equal(snapshot.stopReason, 'permission_denied');
   assert.equal(snapshot.observedEvents, 3);
   assert.equal(snapshot.droppedFrames, 2);
   assert.equal(snapshot.lastEventAgeMs, 50);
-  assert.equal(snapshot.lastCompletedTool, 'jbot_read_file');
+  assert.equal(snapshot.lastCompletedTool, 'read_directory');
   assert.deepEqual(snapshot.toolOutcomes, {
-    'jbot_read_file:tool_completed': 1,
+    'read_directory:tool_completed': 1,
     'other:tool_errored': 1,
   });
   assert.doesNotMatch(JSON.stringify(snapshot), /SECRET|\/secret/);

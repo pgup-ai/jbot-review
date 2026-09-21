@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -14,6 +15,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { REVIEW_LENSES } from '../src/shared/prompt.ts';
+import { IncompleteReviewError } from '../src/shared/types.ts';
 
 import {
   buildCommandCodeCliArgs,
@@ -194,16 +196,21 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(commandCodeSessionEffort(omni, { reasoningEffort: 'xhigh' }, maxCtx), 'medium');
   });
 
-  it('denies all CommandCode tools when disabled', () => {
+  it('configures native workspace access and denies tools when disabled', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
-      const path = writeCommandCodeReadOnlySettings(home, false);
+      const path = writeCommandCodeReadOnlySettings(home);
 
       assert.equal(path, join(home, '.commandcode', 'settings.json'));
       assert.equal(statSync(path).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
         tasteLearning: false,
         permissions: { deny: ['*'] },
+      });
+      writeCommandCodeReadOnlySettings(home, '/github/workspace');
+      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).permissions, {
+        defaultMode: 'plan',
+        additionalDirectories: ['/github/workspace'],
       });
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -282,7 +289,7 @@ describe('CommandCode CLI provider helpers', () => {
         JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
         JSON.stringify({
           type: 'event',
-          event: { type: 'tool_completed', toolName: 'jbot_read_file', result: 'private content' },
+          event: { type: 'tool_completed', toolName: 'read_file', result: 'private content' },
         }),
         JSON.stringify({
           type: 'event',
@@ -307,7 +314,7 @@ describe('CommandCode CLI provider helpers', () => {
     assert.deepEqual(result, {
       finalText: '{"summary":"ok","findings":[]}',
       sessionId: 'session-1',
-      toolOutcomes: { 'jbot_read_file:tool_completed': 1, 'other:tool_hook_blocked': 1 },
+      toolOutcomes: { 'read_file:tool_completed': 1, 'other:tool_hook_blocked': 1 },
       usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
     });
 
@@ -718,7 +725,8 @@ describe('CommandCode multi-key pick', () => {
 
 it('resumes each CommandCode review explicitly while verification stays fresh', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-resume-'));
-  writeCommandCodeReadOnlySettings(home, true);
+  writeCommandCodeAuth('test-key', home);
+  writeCommandCodeReadOnlySettings(home, '/tmp/workspace');
   const cli = join(home, 'command-code');
   writeFileSync(
     cli,
@@ -732,19 +740,25 @@ let input = '';
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', async () => {
   if (model === 'abort') {
-    console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'jbot_read_file',result:'PRIVATE_CONTENT'}}));
+    console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'read_file',result:'PRIVATE_CONTENT'}}));
     console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
     setInterval(() => {}, 1000);
     return;
   }
-  const repair = process.env.JBOT_COMMANDCODE_REPAIR === 'true';
-  if (repair) {
-    const mod = await import(args[args.indexOf('--mod') + 1]);
-    let names, hook;
-    await mod.default({setActiveTools(value) { names = value; }, hooks(value) { hook = value.beforeToolCall; }});
-    if (names.length || !hook({toolName:'read_file'}).block || args.includes('--add-dir')) throw new Error('Repair tools are not disabled');
+  if (model.startsWith('denied')) {
+    console.error('Reasoning effort set to low for model.');
+    const finalText = model === 'denied-findings'
+      ? JSON.stringify({findings:[{path:'a.ts',line:1,severity:'P1',title:'Bug',body:'Concrete defect'}]})
+      : 'I will review.';
+    console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText}));
+    process.exitCode = model === 'denied' ? 9 : 0;
+    return;
   }
-  fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, repair, args, input, cwd: process.cwd()}) + '\n');
+  const repair = path.basename(process.env.HOME).startsWith('repair-');
+  if (repair && JSON.parse(fs.readFileSync(path.join(process.env.HOME,'.commandcode','settings.json'),'utf8')).permissions.deny[0] !== '*') throw new Error('Repair tools enabled');
+  if (args.includes('--mod')) throw new Error('Custom mod loaded');
+  if (repair && args.includes('--add-dir')) throw new Error('Repair has workspace access');
+  fs.appendFileSync(path.join(repair ? path.dirname(process.env.HOME) : process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, repair, args, input, cwd: process.cwd()}) + '\n');
   const sessionId = resume || model + (repair ? '-repair-session' : '-session');
   const dir = path.join(process.env.HOME, '.commandcode', 'projects');
   fs.mkdirSync(dir, {recursive: true});
@@ -768,6 +782,20 @@ process.stdin.on('end', async () => {
   const pathBefore = process.env.PATH;
   process.env.PATH = `${home}:${pathBefore}`;
   try {
+    for (const model of ['denied', 'denied-zero', 'denied-findings']) {
+      await assert.rejects(
+        runCommandCodeReview(home, `commandcode/${model}`, 'FULL_DIFF', '', () => {}, {
+          runtime: { home, tools: true },
+          timeoutMs: 5000,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof IncompleteReviewError);
+          assert.match(error.message, /native tool permission denied; check workspace permissions/);
+          assert.equal(error.findings.length, model === 'denied-findings' ? 1 : 0);
+          return true;
+        },
+      );
+    }
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
         const coverage: Array<{ state: string }> = [];
@@ -826,10 +854,17 @@ process.stdin.on('end', async () => {
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
     for (const call of calls) {
       if (call === lensCall) continue;
-      assert.equal(call.cwd, realpathSync(join(home, 'launch')));
+      if (!call.repair) assert.equal(call.cwd, realpathSync(join(home, 'launch')));
+      else assert.ok(call.cwd.startsWith(realpathSync(home) + '/repair-'));
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
-      assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));
+      assert.equal(call.args.includes('--mod'), false);
       if (call.repair) {
+        assert.equal(existsSync(call.cwd), false);
+        assert.equal(
+          JSON.parse(readFileSync(join(home, '.commandcode', 'settings.json'), 'utf8')).permissions
+            .defaultMode,
+          'plan',
+        );
         assert.equal(call.resume, undefined);
         assert.match(call.input, /Tool use disabled/);
       }
@@ -910,7 +945,7 @@ process.stdin.on('end', async () => {
     assert.equal(partial.length, 1);
     assert.equal((partial[0] as { complete: boolean }).complete, false);
     assert.deepEqual((partial[0] as { toolOutcomes: unknown }).toolOutcomes, {
-      'jbot_read_file:tool_completed': 1,
+      'read_file:tool_completed': 1,
     });
     assert.equal((partialUsage[0] as { input: number }).input, 12);
     assert.match(logs.join('\n'), /final progress/);

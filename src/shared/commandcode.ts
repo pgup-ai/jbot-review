@@ -4,12 +4,19 @@ import {
   createCommandCodeProgress,
   type CommandCodeProgress,
 } from './commandcode-progress.ts';
-import { chmodSync, createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  createReadStream,
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { parseModelName } from '@symma/protocol';
@@ -44,12 +51,25 @@ import {
   percentLabel,
 } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+import { IncompleteReviewError } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
+
+// Context windows from the pinned CommandCode 1.56.2 catalog.
+export const COMMANDCODE_MODEL_LIMITS: Record<string, { contextTokens: number }> = {
+  'meta/muse-spark-1.3-contributor': { contextTokens: 1_048_576 },
+  'meta/muse-spark-1.3': { contextTokens: 1_048_576 },
+  'gpt-5.6-luna': { contextTokens: 1_050_000 },
+  'qwen/qwen3.8-omni-flash': { contextTokens: 1_000_000 },
+  'z-ai/glm-5.3-flashx': { contextTokens: 1_000_000 },
+  'deepseek/deepseek-v4-flash-fast': { contextTokens: 1_000_000 },
+  'deepseek/deepseek-v4-flash': { contextTokens: 1_000_000 },
+  'deepseek/deepseek-v4.1-flash': { contextTokens: 1_000_000 },
+};
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
 export const COMMANDCODE_TELEMETRY_CAPABILITY = 'opaque' as const;
@@ -94,41 +114,18 @@ export function writeCommandCodeAuth(
   return path;
 }
 
-export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): string {
+export function writeCommandCodeReadOnlySettings(home: string, workspace?: string): string {
   const path = join(home, '.commandcode', 'settings.json');
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(
     path,
-    `${JSON.stringify({ tasteLearning: false, permissions: tools ? { defaultMode: 'plan' } : { deny: ['*'] } }, null, 2)}\n`,
+    `${JSON.stringify({ tasteLearning: false, permissions: workspace ? { defaultMode: 'plan', additionalDirectories: [workspace] } : { deny: ['*'] } }, null, 2)}\n`,
     {
       mode: 0o600,
     },
   );
   chmodCommandCodeFile(path);
   mkdirSync(join(home, 'launch'), { mode: 0o700, recursive: true });
-  if (tools) {
-    const bundled = new URL('../commandcode-mod.js', import.meta.url);
-    const mod = existsSync(fileURLToPath(bundled))
-      ? bundled
-      : new URL('./commandcode-mod.ts', import.meta.url);
-    // CommandCode normally swallows mod-load failures. Stop before any unguarded tool can run.
-    writeFileSync(
-      join(home, 'review.mjs'),
-      `export default async function(cmd) {
-  try {
-    if (process.env.JBOT_COMMANDCODE_REPAIR === 'true') {
-      cmd.setActiveTools([]);
-      cmd.hooks({ beforeToolCall() { return { block: true }; } });
-      return;
-    }
-    const mod = await import(${JSON.stringify(mod.href)}); await mod.default(cmd);
-  }
-  catch { console.error('CommandCode repository tools failed to initialize.'); process.exit(1); }
-}
-`,
-      { mode: 0o600 },
-    );
-  }
   return path;
 }
 
@@ -657,10 +654,9 @@ async function runCommandCodePrompt(
   const args = buildCommandCodeCliArgs({ model, effort });
   if (resumeSessionId) args.push('--resume', resumeSessionId);
   const repair = label.endsWith('-repair');
-  if (runtime?.tools) {
-    if (!repair) args.push('--add-dir', workspace);
-    args.push('--mod', join(runtime.home, 'review.mjs'));
-  }
+  const repairHome =
+    runtime?.tools && repair ? mkdtempSync(join(runtime.home, 'repair-')) : undefined;
+  const home = repairHome ?? runtime?.home;
   const input =
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
@@ -676,22 +672,32 @@ async function runCommandCodePrompt(
   }, 60_000);
   heartbeat.unref();
   try {
+    if (repairHome) {
+      writeCommandCodeReadOnlySettings(repairHome);
+      copyFileSync(commandCodeAuthPath(runtime!.home), commandCodeAuthPath(repairHome));
+    }
     const result = await runCliProcess(COMMANDCODE_CLI_BIN, args, {
-      cwd: runtime ? join(runtime.home, 'launch') : workspace,
+      cwd: home ? join(home, 'launch') : workspace,
       input,
-      env: {
-        ...(commandCodeEnvForHome(runtime?.home) ?? process.env),
-        ...(runtime?.tools
-          ? {
-              JBOT_COMMANDCODE_WORKSPACE: repair ? '' : workspace,
-              JBOT_COMMANDCODE_REPAIR: String(repair),
-            }
-          : {}),
-      },
+      env: commandCodeEnvForHome(home) ?? process.env,
       timeoutMs,
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
       onStdout: progress.feed,
     });
+    progress.finish();
+    if (progress.snapshot().stopReason === 'permission_denied') {
+      let findings: Finding[] = [];
+      try {
+        const parsed = parseCommandCodeJsonOutput(result.stdout);
+        findings = parseReview(parsed.finalText, label, log, { strict: true }).findings;
+      } catch {
+        // A denied run often ends with prose; never repair it into findings.
+      }
+      throw new IncompleteReviewError(
+        `commandcode ${label}: native tool permission denied; check workspace permissions.`,
+        findings,
+      );
+    }
     if (result.exitCode !== 0) {
       throw new Error(
         formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
@@ -704,7 +710,7 @@ async function runCommandCodePrompt(
       log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
     const estimatedCostUsd =
       runtime && parsed.sessionId && !resumeSessionId
-        ? await commandCodeSessionEstimatedCost(runtime.home, parsed.sessionId)
+        ? await commandCodeSessionEstimatedCost(home!, parsed.sessionId)
         : undefined;
     usage = parsed.usage
       ? {
@@ -727,6 +733,7 @@ async function runCommandCodePrompt(
     complete = true;
     return { finalText: parsed.finalText, sessionId: parsed.sessionId };
   } finally {
+    if (repairHome) rmSync(repairHome, { recursive: true, force: true });
     clearInterval(heartbeat);
     progress.finish();
     usage ??= progress.usage();
@@ -744,6 +751,7 @@ function formatCommandCodePromptFailure(
   exitCode: number | null,
   output: string,
 ): string {
+  output = output.replace(/^Reasoning effort set to .*\r?\n?/gm, '').trim();
   const kind = classifyCommandCodePromptFailure(output);
   const suffix = kind ? ` (${kind.replace('_', ' ')})` : '';
   return `commandcode ${label} exited ${exitCode}${suffix}: ${truncateForLog(output, 1000)}`;

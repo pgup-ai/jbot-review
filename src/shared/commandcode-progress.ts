@@ -14,7 +14,7 @@ export function parseCommandCodeUsage(value: unknown): PromptTokenUsage | undefi
   return { input, output, reasoning: 0, cacheRead, cacheWrite };
 }
 
-const TOOL_NAMES = ['jbot_read_file', 'jbot_search', 'jbot_list_files'];
+const TOOL_NAMES = ['read_file', 'grep', 'glob', 'shell_command', 'read_directory'];
 const OUTCOMES = ['tool_completed', 'tool_errored', 'tool_denied', 'tool_hook_blocked'];
 
 export function commandCodeToolOutcome(frame: unknown): string | undefined {
@@ -34,6 +34,7 @@ export interface CommandCodeProgress {
   observedEvents: number;
   droppedFrames: number;
   toolOutcomes: Record<string, number>;
+  stopReason?: string;
   lastCompletedTool?: string;
   lastEventAgeMs?: number;
 }
@@ -42,6 +43,7 @@ export function createCommandCodeProgress(now = Date.now) {
   const started = now();
   let buffer = '';
   let usage: PromptTokenUsage | undefined;
+  let stopReason: string | undefined;
   let dropping = false;
   let observedEvents = 0;
   let droppedFrames = 0;
@@ -58,10 +60,22 @@ export function createCommandCodeProgress(now = Date.now) {
       return;
     }
     if (!isRecord(parsed)) return;
-    if (parsed.type === 'result') usage = parseCommandCodeUsage(parsed.usage) ?? usage;
+    const result =
+      parsed.type === 'result'
+        ? parsed
+        : isRecord(parsed.event) && parsed.event.type === 'run_end' && isRecord(parsed.event.result)
+          ? parsed.event.result
+          : undefined;
+    if (result) {
+      usage = parseCommandCodeUsage(result.usage) ?? usage;
+      if (
+        ['end_turn', 'permission_denied', 'max_turns', 'aborted', 'error'].includes(
+          String(result.stopReason),
+        )
+      )
+        stopReason = String(result.stopReason);
+    }
     if (parsed.type !== 'event' || !isRecord(parsed.event)) return;
-    if (parsed.event.type === 'run_end' && isRecord(parsed.event.result))
-      usage = parseCommandCodeUsage(parsed.event.result.usage) ?? usage;
     observedEvents++;
     lastEventAt = now();
     const outcome = commandCodeToolOutcome(parsed);
@@ -102,6 +116,7 @@ export function createCommandCodeProgress(now = Date.now) {
         observedEvents,
         droppedFrames,
         toolOutcomes: { ...toolOutcomes },
+        ...(stopReason ? { stopReason } : {}),
         ...(lastCompletedTool ? { lastCompletedTool } : {}),
         ...(lastEventAt !== undefined ? { lastEventAgeMs: now() - lastEventAt } : {}),
       };

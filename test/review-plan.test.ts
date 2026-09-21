@@ -29,6 +29,7 @@ import {
   CLINE_MAX_ARGV_BYTES,
   CLINE_MODEL_LIMITS,
 } from '../src/shared/cline.ts';
+import { COMMANDCODE_MODEL_LIMITS } from '../src/shared/commandcode.ts';
 import { runShardedReview } from '../src/shared/runner.ts';
 import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
 import {
@@ -109,6 +110,25 @@ test('uses known free-model capacity for fewer complete pages and ranks auxiliar
       Buffer.byteLength(buildClinePromptArg(renderPrompt(plan.context))) <= CLINE_MAX_ARGV_BYTES,
     );
   assert.equal(reviewDelivery(plans, new Set(plans.map((p) => p.label))).deliveredHunks, 2);
+  const commandCodeFallback = buildShardPlans({
+    ...base,
+    budget: reviewPromptBudget('commandcode'),
+    shards: [files],
+  });
+  for (const limits of Object.values(COMMANDCODE_MODEL_LIMITS)) {
+    const nativeBudget = reviewPromptBudget('commandcode', limits);
+    const nativePlans = buildShardPlans({ ...base, budget: nativeBudget, shards: [files] });
+    assert.ok(nativePlans.length < commandCodeFallback.length);
+    assert.ok(
+      nativePlans.every(
+        (plan) => measureReviewPrompt(renderPrompt(plan.context), nativeBudget).fits,
+      ),
+    );
+    assert.equal(
+      reviewDelivery(nativePlans, new Set(nativePlans.map((p) => p.label))).deliveredHunks,
+      2,
+    );
+  }
   const ranked = prioritizeAuxiliaryPlans(small);
   assert.ok(ranked[0].assignedFiles.includes('src/api/orders.ts'));
   assert.deepEqual(new Set(ranked), new Set(small));

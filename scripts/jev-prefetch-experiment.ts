@@ -40,7 +40,6 @@ type Arm = {
   handoff?: boolean;
   prefetch?: boolean;
   persistent?: boolean;
-  retrieval?: boolean;
   checkpoints?: boolean;
   readEvidence?: boolean | 'linked';
   readEvidencePhase?: 'all' | 'review' | 'verification';
@@ -54,7 +53,6 @@ type Plan = {
   evidence?: boolean;
   docs?: string;
   reuse?: boolean;
-  retrieval?: boolean;
   readEvidence?: boolean | 'linked';
   experiment?: 'phases' | 'diff-batches';
 };
@@ -63,6 +61,7 @@ const planPath = process.argv[2];
 if (!planPath) throw new Error('Usage: tsx scripts/jev-prefetch-experiment.ts <plan.json>');
 const plan: Plan = JSON.parse(readFileSync(planPath, 'utf8'));
 if (!plan.seed || !plan.model || !plan.cases.length) throw new Error('Expected a seeded plan');
+if ('retrieval' in plan) throw new Error('The custom retrieval tool experiment has been removed.');
 const out = resolve(dirname(planPath), 'runs');
 if (existsSync(out))
   throw new Error('Run directory already exists; preserve it and use a fresh plan directory');
@@ -154,58 +153,46 @@ const arms: Arm[] =
                 ]
               : []),
           ]
-        : plan.retrieval
+        : plan.reuse
           ? [
-              { id: 'baseline', exploration: 'off', verification: 'off' },
-              { id: 'retrieval', exploration: 'off', verification: 'off', retrieval: true },
+              { id: 'baseline', exploration: 'off', verification: 'deterministic' },
+              { id: 'shared', exploration: 'off', verification: 'deterministic', shared: true },
               {
-                id: 'checkpoints',
+                id: 'handoff',
                 exploration: 'off',
-                verification: 'off',
-                retrieval: true,
-                checkpoints: true,
+                verification: 'deterministic',
+                shared: true,
+                handoff: true,
+              },
+              {
+                id: 'prefetch',
+                exploration: 'off',
+                verification: 'deterministic',
+                shared: true,
+                handoff: true,
+                prefetch: true,
+              },
+              {
+                id: 'jev',
+                exploration: 'off',
+                verification: 'on',
+                shared: true,
+                handoff: true,
+                prefetch: true,
+              },
+              {
+                id: 'persistent',
+                exploration: 'off',
+                verification: 'on',
+                shared: true,
+                handoff: true,
+                prefetch: true,
+                persistent: true,
               },
             ]
-          : plan.reuse
-            ? [
-                { id: 'baseline', exploration: 'off', verification: 'deterministic' },
-                { id: 'shared', exploration: 'off', verification: 'deterministic', shared: true },
-                {
-                  id: 'handoff',
-                  exploration: 'off',
-                  verification: 'deterministic',
-                  shared: true,
-                  handoff: true,
-                },
-                {
-                  id: 'prefetch',
-                  exploration: 'off',
-                  verification: 'deterministic',
-                  shared: true,
-                  handoff: true,
-                  prefetch: true,
-                },
-                {
-                  id: 'jev',
-                  exploration: 'off',
-                  verification: 'on',
-                  shared: true,
-                  handoff: true,
-                  prefetch: true,
-                },
-                {
-                  id: 'persistent',
-                  exploration: 'off',
-                  verification: 'on',
-                  shared: true,
-                  handoff: true,
-                  prefetch: true,
-                  persistent: true,
-                },
-              ]
-            : ['off', 'deterministic', 'on'].map(
-                (id) => ({ id, exploration: id, verification: id }) as Arm,
-              );
+          : ['off', 'deterministic', 'on'].map(
+              (id) => ({ id, exploration: id, verification: id }) as Arm,
+            );
 const schedule = Array.from({ length: plan.repetitions ?? 5 }, (_, repetition) =>
   plan.cases
     .flatMap((c) => arms.map(({ id }) => ({ caseId: c.id, arm: id, repetition: repetition + 1 })))
@@ -257,7 +244,7 @@ for (const key of Object.keys(env)) {
     delete env[key];
 }
 if (env.OPENCODE_API_KEY) env.OPENCODE_API_KEY = env.OPENCODE_API_KEY.split(',')[0].trim();
-if (!plan.experiment && !plan.retrieval && !plan.readEvidence && !env.TYPESAFE_API_KEY)
+if (!plan.experiment && !plan.readEvidence && !env.TYPESAFE_API_KEY)
   throw new Error('TYPESAFE_API_KEY is required for the on arm');
 const results: unknown[] = [];
 const cacheRoot = plan.reuse
@@ -303,7 +290,7 @@ try {
       ...reviewExperiment({}),
       preset: 'custom',
       jevPrefetch:
-        plan.experiment || plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence
+        plan.experiment || plan.evidence || plan.reuse || plan.readEvidence
           ? 'off'
           : evidenceMode(run.arm),
       explorationEvidence: evidenceMode(
@@ -320,7 +307,6 @@ try {
       },
       docsPath: plan.docs ? resolve(plan.docs) : undefined,
       exploration: {
-        retrieval: !!arm.retrieval,
         checkpoints: !!arm.checkpoints,
         readEvidence: arm.readEvidence ?? false,
         readEvidencePhase: arm.readEvidencePhase ?? 'all',
