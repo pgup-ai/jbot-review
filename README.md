@@ -510,10 +510,12 @@ together. It checks transport bytes separately from a conservative UTF-8-byte
 bound on text tokens, reserving output and harness headroom (including backend
 tool directives). PR metadata and prior-review context shrink with an omission
 notice when needed to preserve room for the mandatory diff. Known SDK models use
-the installed offline catalog limits; opaque CLI models log an unknown model
-limit and use a conservative 128,000-token policy ceiling. This is not an exact
+the installed offline catalog limits; Cline's free Muse, DeepSeek v4.1 Flash and
+Solar Pro 4 use limits from the pinned CLI catalog. Unknown CLI models log an
+unknown model limit and use a conservative 128,000-token policy ceiling. This is not an exact
 provider tokenizer or a guarantee about a CLI's hidden prompt. Cline still has
-a final 120 KiB argv check. No task contains more than 96 KiB of input text.
+a final 120 KiB argv check, with 2 KiB reserved for its wrapper. No task contains
+more than 120 KiB of input text.
 
 All pages use the shared concurrency queue. Lens and guideline checks are paged
 too; oversized verification batches shrink and receive relevant diff pages plus
@@ -1319,9 +1321,11 @@ handles findings that describe the same defect from different perspectives.
 
 Main review and verification take priority in the session queue. Pending pages
 from different finder passes take turns so one pass cannot monopolize the queue.
-After main review completes, finding-producing auxiliary passes get up to five
-minutes to finish, bounded by the run budget with verification and posting time
-reserved. Findings from completed pages survive if another page times out.
+After main review completes, queued finder pages are cancelled; active pages get
+up to 60 seconds to finish, bounded by the run budget with verification and posting
+time reserved. Auxiliary pages prioritize higher-risk code using the same path
+ranking as diff context. Findings from completed pages survive the cutoff, and
+unfinished auxiliary coverage is reported. Main review still covers every hunk.
 Before a cancellation, OpenCode and Pi sessions are asked to wrap up: in the
 last fifth of the grace (at most 90 seconds, and only when the model keeps at
 least 45 seconds to answer) the turn is interrupted, tools are dropped, and the
