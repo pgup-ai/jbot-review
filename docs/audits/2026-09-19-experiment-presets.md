@@ -1,10 +1,14 @@
 # One experiment selector and the production decision
 
-## Decision
+## Decision at the time of this audit
 
-Use `JBOT_REVIEW_EXPERIMENT=off` in production. None of these experiments has
-demonstrated a repeatable total-review speedup with sufficient quality evidence
-to recommend broad enablement. `diff-batches` is the strongest candidate for a
+This decision predates the branch default changing to `diff-batches`. For current
+controls, see the [README](../../README.md#review-experiment-preset). The required
+full-corpus gate for that default change remains a separate merge requirement.
+
+The recommendation was `JBOT_REVIEW_EXPERIMENT=off` in production. None of these
+experiments had demonstrated a repeatable total-review speedup with sufficient quality evidence
+to recommend broad enablement. `diff-batches` was the strongest candidate for a
 controlled canary because it reduced delivered text while preserving the seeded
 defect on the tested workload. That is not proof of faster reviews.
 
