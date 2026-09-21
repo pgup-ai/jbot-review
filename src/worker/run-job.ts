@@ -99,7 +99,6 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         enhancedContext: true,
         reviewPasses: 1,
         verifyFindings: true,
-        // Start with one group; the runner pages oversized diffs within the shared session cap.
         reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: defaultModelOptions(parseModelName(job.model).providerID),

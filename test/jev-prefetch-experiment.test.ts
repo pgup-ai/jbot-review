@@ -29,7 +29,6 @@ test('failed trials and log failures preserve their results and exit nonzero', a
   );
   const head = git('rev-parse', 'HEAD');
   const findings = join(dir, 'findings.json');
-  // Malformed input fails before the verifier starts a provider session.
   writeFileSync(findings, '{');
   for (const failure of ['none', 'write', 'flush']) {
     const trial = join(dir, failure);

@@ -1175,10 +1175,10 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');
   });
 
-  it('caps sessions at 3 by default and preserves zero for default dispatch', () => {
+  it('uses the bounded default for omitted or zero session caps', () => {
     assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
-    assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 0);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 5 }).maxConcurrentSessions, 5);
   });
 
@@ -1370,7 +1370,7 @@ describe('settleWithinGrace', () => {
   });
 });
 
-it('caps auxiliary grace at five minutes while reserving verification and posting time', () => {
+it('caps auxiliary grace at one minute while reserving verification and posting time', () => {
   assert.equal(computeAuxiliaryGraceMs(30, 90_000), 60_000);
   assert.equal(computeAuxiliaryGraceMs(10, 120_000), 60_000);
   assert.equal(computeAuxiliaryGraceMs(5, 0), 0);
@@ -1708,17 +1708,14 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
       onCoverage: (row) => coverage.push(row.state),
     });
     assert.deepEqual(invoked.flat(), targets.slice(0, 6));
-    assert.deepEqual(prepared, invoked);
+    assert.deepEqual(prepared.flat(), invoked.flat());
     assert.deepEqual(
       verdicts.filter((v) => !v.unavailable).map((v) => v.index),
       [0, 1, 2, 3, 4, 5],
     );
     assert.deepEqual(coverage, ['failed']);
     assert.equal(verdicts.find((v) => v.index === 6)?.unavailable, true);
-    assert.equal(
-      logs.some((message) => /Optional verification evidence omitted/.test(message)),
-      evidenceBytes === 100000,
-    );
+    assert.ok(logs.some((message) => /Optional verification evidence omitted/.test(message)));
   }
 });
 
@@ -1777,7 +1774,7 @@ it('verifies every batch and preserves successful verdicts when another batch fa
   }
 });
 
-it('rejects invented confirmation quotes without another verification call', async () => {
+it('binds confirmation quotes to each candidate and only its delivered evidence', async () => {
   const candidate: Finding = {
     path: 'batch.ts',
     line: 1,
@@ -1787,30 +1784,44 @@ it('rejects invented confirmation quotes without another verification call', asy
     title: 'Possible loss',
     body: 'Does the caller pass more than 100 jobs?',
   };
-  for (const evidence of ['return jobs.slice(0, 100);', 'invented source']) {
+  const quotes = ['return jobs.slice(0, 100);', 'callBatch(201);', 'invented source'];
+  const targets = quotes.map((_, i) => ({ ...candidate, path: `batch${i}.ts` }));
+  for (const oversized of [false, true]) {
     let calls = 0;
+    const budget = { ...reviewPromptBudget('test'), transportBytes: 40000 };
     const verdicts = await requestFindingVerdicts({
       workspace: '/unused',
       model: 'test/model',
-      prContext: 'invented source',
-      targets: [candidate],
+      prContext: quotes[2],
+      targets,
+      promptBudget: budget,
       log: () => {},
-      sourceContext: async () => '1: return jobs.slice(0, 100);',
+      sourceContext: async ([target]) => (target === targets[0] ? quotes[0] : ''),
+      prepareEvidence: async ([target]) =>
+        target === targets[1] ? quotes[1] + (oversized ? 'x'.repeat(40000) : '') : '',
       backend: {
-        async runFindingVerification() {
+        async runFindingVerification(_model, context, findings) {
           calls++;
-          return [
-            {
-              index: 0,
-              verdict: 'confirmed',
-              reason: '201 jobs become 100.',
-              finding: { ...candidate, kind: 'bug', confidence: 'high', severity: 'P1', evidence },
+          assert.deepEqual(findings, targets);
+          assert.equal(context.includes(quotes[1]), !oversized);
+          return targets.map((_, index) => ({
+            index,
+            verdict: 'confirmed' as const,
+            reason: '201 jobs become 100.',
+            finding: {
+              ...candidate,
+              kind: 'bug' as const,
+              severity: 'P1' as const,
+              evidence: index === 2 ? quotes[0] : quotes[index],
             },
-          ];
+          }));
         },
       },
     });
     assert.equal(calls, 1);
-    assert.equal(verdicts[0].verdict, evidence === 'invented source' ? 'uncertain' : 'confirmed');
+    assert.deepEqual(
+      verdicts.map((v) => v.verdict),
+      ['confirmed', oversized ? 'uncertain' : 'confirmed', 'uncertain'],
+    );
   }
 });

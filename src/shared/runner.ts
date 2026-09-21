@@ -1763,7 +1763,7 @@ async function runReviewPipeline(params: {
   const remoteAcp = routedAgents.length > 0 ? remoteAcpConfigFromEnv() : undefined;
   // A missing main endpoint is fatal; an auxiliary-only endpoint fails open.
   // Cap sessions at the companion's available capacity.
-  let sessionCap = options.maxConcurrentSessions ?? 3;
+  let sessionCap = options.maxConcurrentSessions;
   let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
     const mainGatewayAgent =
@@ -1772,7 +1772,7 @@ async function runReviewPipeline(params: {
       auxCliBackend && routedAgents.includes(auxCliBackend) ? auxCliBackend : undefined;
     if (mainGatewayAgent) {
       const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, mainGatewayAgent);
-      if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
+      if (freeSessions < sessionCap) sessionCap = freeSessions;
     }
     if (auxGatewayAgent && auxGatewayAgent !== mainGatewayAgent) {
       const ready = await checkAuxGatewayEndpointReady(remoteAcp, auxGatewayAgent);
@@ -1784,7 +1784,7 @@ async function runReviewPipeline(params: {
             ready.error instanceof Error ? ready.error.message : String(ready.error)
           }`,
         );
-      } else if (sessionCap === 0 || ready.freeSessions < sessionCap) {
+      } else if (ready.freeSessions < sessionCap) {
         sessionCap = ready.freeSessions;
       }
     }
@@ -1792,8 +1792,8 @@ async function runReviewPipeline(params: {
       `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
     );
   }
-  const sessionSlots = sessionCap > 0 ? new Semaphore(sessionCap) : undefined;
-  if (sessionCap > 0) log(`Model session concurrency capped at ${sessionCap}.`);
+  const sessionSlots = new Semaphore(sessionCap);
+  log(`Model session concurrency capped at ${sessionCap}.`);
   const providerLimiters = createProviderSessionLimiters(
     [providerID, auxProviderID],
     providerSessionConcurrency,
@@ -3629,7 +3629,7 @@ export function normalizeOptions(
     skipUnchanged: options?.skipUnchanged ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
     // Throttled tiers serialize upstream; a cap keeps queued work out of session deadlines.
-    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
+    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0) || 3,
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     reviewTelemetry: options?.reviewTelemetry ?? true,
     evidenceQuotes: options?.evidenceQuotes ?? true,
@@ -3972,6 +3972,7 @@ export async function requestFindingVerdicts(params: {
     try {
       let context: string;
       let sourceContext: string;
+      const preparedSources = new Map<Finding, string>();
       for (;;) {
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
@@ -3995,25 +3996,29 @@ export async function requestFindingVerdicts(params: {
         params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
       );
       if (params.prepareEvidence && evidenceTimeoutMs > 0) {
-        try {
-          const evidence = await params.prepareEvidence(targets, evidenceTimeoutMs);
-          if (evidence) {
-            const enriched = joinContext(context, evidence);
-            if (
-              !params.promptBudget ||
-              measureReviewPrompt(
-                assembleFindingVerificationPrompt(enriched, targets),
-                params.promptBudget,
-              ).fits
-            )
-              context = enriched;
-            else
-              params.log(
-                'Optional verification evidence omitted: assembled prompt exceeds budget.',
-              );
+        const prepared = await Promise.allSettled(
+          targets.map((target) => params.prepareEvidence!([target], evidenceTimeoutMs)),
+        );
+        for (const [index, result] of prepared.entries()) {
+          if (result.status === 'rejected') {
+            params.log('Verification evidence unavailable; continuing with cited source.');
+            continue;
           }
-        } catch {
-          params.log('Verification evidence unavailable; continuing with cited source.');
+          if (!result.value) continue;
+          const enriched = joinContext(context, result.value);
+          if (
+            !params.promptBudget ||
+            measureReviewPrompt(
+              assembleFindingVerificationPrompt(enriched, targets),
+              params.promptBudget,
+            ).fits
+          ) {
+            context = enriched;
+            sourceContext = joinContext(sourceContext, result.value);
+            preparedSources.set(targets[index], result.value);
+          } else {
+            params.log('Optional verification evidence omitted: assembled prompt exceeds budget.');
+          }
         }
       } else if (params.prepareEvidence) {
         params.log('Skipping optional evidence preparation to preserve verification time.');
@@ -4033,12 +4038,24 @@ export async function requestFindingVerdicts(params: {
         params.modelOptions,
       );
       if (!batch) throw new Error('Finding verification output unusable.');
-      verdicts.push(
-        ...batch.map((verdict) => ({
-          ...checkConfirmationEvidence(verdict, sourceContext),
-          index: verdict.index + offset,
-        })),
+      const checked = await Promise.all(
+        batch.map(async (verdict) => {
+          let result = checkConfirmationEvidence(verdict, sourceContext);
+          const target = targets[verdict.index];
+          if (result.verdict === 'confirmed' && result.finding && target) {
+            result = checkConfirmationEvidence(
+              result,
+              joinContext(
+                await (params.sourceContext?.([target]) ??
+                  buildFindingSourceContext(params.workspace, [target])),
+                preparedSources.get(target) ?? '',
+              ),
+            );
+          }
+          return { ...result, index: verdict.index + offset };
+        }),
       );
+      verdicts.push(...checked);
       if (batch.length < targets.length)
         failure ??= new Error('Finding verification returned incomplete verdicts.');
     } catch (error) {
