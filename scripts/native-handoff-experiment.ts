@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   COMMANDCODE_MODEL_LIMITS,
   runCommandCodeFindingVerification,
@@ -61,6 +61,18 @@ const assertSnapshot = () => {
     throw new Error('Experiment requires the unchanged, clean requested checkout');
 };
 assertSnapshot();
+const out = resolve(plan.output);
+const outputPath = relative(workspace, out);
+if (
+  !outputPath ||
+  (!isAbsolute(outputPath) && outputPath !== '..' && !outputPath.startsWith('../'))
+) {
+  try {
+    git('check-ignore', '--quiet', '--', `${outputPath}/`);
+  } catch {
+    throw new Error('Output must be outside the fixture or in a Git-ignored directory');
+  }
+}
 const key = process.env.COMMANDCODE_ACCESS_KEY?.split(',')[0].trim();
 if (!key) throw new Error('COMMANDCODE_ACCESS_KEY is required');
 if (!process.env.TYPESAFE_API_KEY) throw new Error('TYPESAFE_API_KEY is required for the Jev arm');
@@ -76,7 +88,6 @@ const checkBudget = (prompt: string) => {
     throw new Error('Complete assembled fixture prompt exceeds the single-page budget');
 };
 checkBudget(assembleReviewPrompt(context, '', '', false, true, { toolsAvailable: true }));
-const out = resolve(plan.output);
 mkdirSync(out, { mode: 0o700 });
 const save = (name: string, data: unknown) =>
   writeFileSync(join(out, `${name}.json`), JSON.stringify(data, null, 2), { mode: 0o600 });

@@ -81,7 +81,8 @@ protocol and broader results.
 `scripts/native-handoff-experiment.ts` takes a local JSON plan with `workspace`,
 `base`, `head`, `model`, `effort`, `repetitions`, `timeoutMs`, `output`, and
 `additionalCandidates` (an array of ordinary Finding objects, or `[]`). Point it
-at a clean checkout of the requested head and a new output directory:
+at a clean checkout of the requested head and a new output directory outside
+the fixture or ignored by Git:
 
 ```sh
 node --env-file=.env --import tsx scripts/native-handoff-experiment.ts plan.json

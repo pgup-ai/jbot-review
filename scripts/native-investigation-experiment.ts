@@ -31,10 +31,12 @@ const plan = JSON.parse(readFileSync(process.argv[2], 'utf8')) as {
 if (
   !Number.isInteger(plan.repetitions) ||
   plan.repetitions < 1 ||
+  !Array.isArray(plan.arms) ||
   !plan.arms.length ||
+  new Set(plan.arms).size !== plan.arms.length ||
   plan.arms.some((arm) => !['control', 'reuse'].includes(arm))
 )
-  throw new Error('Expected positive repetitions and control/reuse arms');
+  throw new Error('Expected positive repetitions and unique control/reuse arms');
 const workspace = resolve(plan.workspace);
 const git = (...args: string[]) =>
   execFileSync('git', ['-C', workspace, ...args], { encoding: 'utf8' }).trimEnd();

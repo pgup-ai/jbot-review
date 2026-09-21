@@ -126,6 +126,7 @@ export function selectPrefetchCandidates(
   const selected: number[] = [];
   const locations = new Set<string>();
   for (const index of indexes) {
+    if (selected.length >= maxSelected) break;
     const c = candidates[index];
     if (locations.has(c.path)) continue;
     const next = [...selected, index];
@@ -136,7 +137,6 @@ export function selectPrefetchCandidates(
     if (Buffer.byteLength(block) > MAX_CONTEXT_BYTES) continue;
     selected.push(index);
     locations.add(c.path);
-    if (selected.length === maxSelected) break;
   }
   return selected;
 }

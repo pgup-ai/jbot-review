@@ -310,6 +310,33 @@ export async function runCommandCodeReview(
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  if (options.guidelineSweep) {
+    const sweep = options.guidelineSweep;
+    const sweepLabel = `guideline-sweep-${label}`;
+    result = await appendGuidelineSweep(
+      result,
+      sweep,
+      sweepLabel,
+      deadlineAt,
+      async (timeoutMs) => {
+        if (!sessionId) throw new Error('CommandCode main review returned no session ID.');
+        const { finalText } = await runCommandCodePrompt(
+          workspace,
+          model,
+          assembleGuidelineSweepPrompt(sweep.guidelines),
+          sweepLabel,
+          log,
+          timeoutMs,
+          options.onTokenUsage,
+          options.runtime,
+          options.effort,
+          sessionId,
+        );
+        return parseReview(finalText, sweepLabel, log, { strict: true }).findings;
+      },
+      log,
+    );
+  }
   if (options.runtime?.evidence && sessionId) {
     try {
       const path = await commandCodeTranscriptPath(options.runtime.home, sessionId);
@@ -320,32 +347,7 @@ export async function runCommandCodeReview(
       log(`Packed handoff observed (${label}): unavailable`);
     }
   }
-  if (!options.guidelineSweep) return result;
-  const sweep = options.guidelineSweep;
-  const sweepLabel = `guideline-sweep-${label}`;
-  return appendGuidelineSweep(
-    result,
-    sweep,
-    sweepLabel,
-    deadlineAt,
-    async (timeoutMs) => {
-      if (!sessionId) throw new Error('CommandCode main review returned no session ID.');
-      const { finalText } = await runCommandCodePrompt(
-        workspace,
-        model,
-        assembleGuidelineSweepPrompt(sweep.guidelines),
-        sweepLabel,
-        log,
-        timeoutMs,
-        options.onTokenUsage,
-        options.runtime,
-        options.effort,
-        sessionId,
-      );
-      return parseReview(finalText, sweepLabel, log, { strict: true }).findings;
-    },
-    log,
-  );
+  return result;
 }
 
 async function runCommandCodeAuxReview(
@@ -472,7 +474,8 @@ export async function runCommandCodeFindingVerification(
   effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
   const started = Date.now();
-  if (runtime?.evidence && (timeoutMs === undefined || timeoutMs > 1500)) {
+  // Reserve 30 seconds for verification after the 1.5-second optional preparation.
+  if (runtime?.evidence && (timeoutMs === undefined || timeoutMs > 31_500)) {
     try {
       const { packet, stats } = await runtime.evidence.prepare(findings, prContext);
       const enriched = packet ? `${prContext}\n\n${packet}` : prContext;
@@ -790,10 +793,13 @@ async function runCommandCodePrompt(
     if (benchmarkDir) {
       try {
         const path = join(benchmarkDir, 'metrics.json');
-        if (statSync(path).size <= 4 * 1024 * 1024) {
-          const benchmark = parseCommandCodeBenchmark(JSON.parse(readFileSync(path, 'utf8')));
-          if (benchmark) log(`CommandCode benchmark (${label}): ${JSON.stringify(benchmark)}`);
-        }
+        const benchmark =
+          statSync(path).size <= 4 * 1024 * 1024
+            ? parseCommandCodeBenchmark(JSON.parse(readFileSync(path, 'utf8')))
+            : undefined;
+        log(
+          `CommandCode benchmark (${label}): ${benchmark ? JSON.stringify(benchmark) : 'unavailable'}`,
+        );
       } catch {
         log(`CommandCode benchmark (${label}): unavailable`);
       } finally {

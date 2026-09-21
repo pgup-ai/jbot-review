@@ -133,6 +133,24 @@ it('hands off only snapshot-matching native source and counts overlapping lines 
   assert.equal(deduped.candidates[0].text, "1: import { b } from './b';");
   assert.equal(deduped.candidates[0].completeFile, false);
   assert.equal(deduped.candidates[1].text, '1: export const b = 1;');
+  const fullySupplied = nativeEvidenceCandidates(
+    review,
+    findings,
+    sources,
+    'head-sha',
+    formatFindingSources(
+      ['src/a.ts', 'src/b.ts'].map((path) => ({
+        path,
+        line: 1,
+        startLine: 1,
+        lines: sources.get(path)!.trimEnd().split('\n'),
+      })),
+      [],
+    ),
+  );
+  assert.deepEqual(fullySupplied.candidates, []);
+  assert.equal(fullySupplied.duplicateLines, 3);
+  assert.deepEqual(fullySupplied.omitted, ['src/unrelated.ts']);
   const truncated = formatFindingSources(
     [{ path: 'src/a.ts', line: 50, startLine: 1, lines: large }],
     [],

@@ -86,6 +86,7 @@ test('ranking keeps source identities, stable ties, and bounded excerpts with om
   assert.deepEqual(selectJevCandidates(answer([0.1]), [candidate]).selected, []);
   const many = Array.from({ length: 10 }, (_, i) => ({ ...candidate, path: `${i}.ts` }));
   assert.equal(selectJevCandidates(answer(many.map(() => 0.9)), many).selected.length, 4);
+  assert.deepEqual(selectJevCandidates(answer([0.9]), [candidate], [candidate], 0).selected, []);
   const packed = selectJevCandidates(answer(many.map(() => 0.9)), many, many, many.length);
   assert.equal(packed.selected.length, 10);
   const oversized = many.map((c) => ({ ...c, text: '😀'.repeat(500) }));

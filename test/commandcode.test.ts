@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { NativeEvidenceStore } from '../src/shared/native-evidence.ts';
 import { REVIEW_LENSES } from '../src/shared/prompt.ts';
 import { IncompleteReviewError } from '../src/shared/types.ts';
 
@@ -800,6 +801,12 @@ process.stdin.on('end', async () => {
     }
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
+        const observed: string[] = [];
+        const evidence = new NativeEvidenceStore(home, 'head');
+        evidence.observe = async (transcript) => {
+          observed.push(transcript);
+          return { files: 0, omitted: 0, unsupportedReads: 0 };
+        };
         const coverage: Array<{ state: string }> = [];
         const usage: Array<{ estimatedCostUsd?: number; promptBytes?: number }> = [];
         const result = await runCommandCodeReview(
@@ -809,7 +816,7 @@ process.stdin.on('end', async () => {
           '',
           () => {},
           {
-            runtime: { home, tools: true },
+            runtime: { home, tools: true, evidence },
             guidelineSweep: {
               guidelines: 'FULL_GUIDELINES',
               onCoverage: (row) => coverage.push(row),
@@ -819,6 +826,8 @@ process.stdin.on('end', async () => {
           },
         );
         const completed = ['first', 'second', 'repair'].includes(model);
+        assert.equal(observed.length, model === 'missing' ? 0 : 1);
+        if (completed) assert.match(observed[0], /0\.125/);
         assert.equal(result.summary, 'main');
         assert.equal(result.findings.length, completed ? 2 : 1);
         assert.equal(coverage[0].state, completed ? 'completed' : 'failed');
@@ -836,6 +845,12 @@ process.stdin.on('end', async () => {
       lensAddendum: REVIEW_LENSES.interactions,
       timeoutMs: 5000,
     });
+    const evidence = new NativeEvidenceStore(home, 'head');
+    let preparations = 0;
+    evidence.prepare = async () => {
+      preparations++;
+      throw new Error('Unexpected optional preparation');
+    };
     await runCommandCodeFindingVerification(
       home,
       'commandcode/verifier',
@@ -844,8 +859,9 @@ process.stdin.on('end', async () => {
       () => {},
       5000,
       undefined,
-      { home, tools: true },
+      { home, tools: true, evidence },
     );
+    assert.equal(preparations, 0);
     const calls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
       .trim()
       .split('\n')
