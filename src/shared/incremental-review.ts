@@ -223,6 +223,15 @@ export async function planIncrementalReview(input: {
         )
       )
         return full('unsupported-module-dependencies');
+      // String-keyed wiring (events, message patterns, queues, injection tokens) is invisible to the symbol graph.
+      if (
+        texts.some((text) =>
+          /@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)\(\s*['"`]|\.emit(?:Async)?\(\s*['"`]/.test(
+            text,
+          ),
+        )
+      )
+        return full('string-keyed-dependencies');
       if (
         texts.some((text) =>
           indexEvidenceSource(file.filename, text).imports.some((binding) =>

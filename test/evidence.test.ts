@@ -663,6 +663,47 @@ test('rich index records members, types, re-exports, injected services and this-
     { exported: '*', imported: '*', from: './types' },
     { exported: 'ns', imported: '*', from: './ns' },
   ]);
+  const outer = indexEvidenceSource(
+    'outer.ts',
+    'class Outer { make() { return class { run() {} }; } }',
+    { rich: true },
+  );
+  assert.deepEqual(
+    outer.declarations.map((d) => `${d.owner ?? ''}.${d.symbol}`),
+    ['.Outer', 'Outer.make'],
+  );
+  const chained = indexEvidenceSource(
+    'q.ts',
+    [
+      'class Q {',
+      '  #repo: R;',
+      '  run() {',
+      '    return this.#repo',
+      '      .find();',
+      '  }',
+      '  go() { return this.repo?.save(); }',
+      '}',
+    ].join('\n'),
+    { rich: true },
+  );
+  assert.deepEqual(chained.memberCalls, [
+    { target: 'repo', member: 'find', line: 5 },
+    { target: '', member: 'repo', line: 4 },
+    { target: 'repo', member: 'save', line: 7 },
+    { target: '', member: 'repo', line: 7 },
+  ]);
+  assert.equal(
+    indexEvidenceSource('h.ts', 'class H { handle = () => 1; }', { rich: true }).declarations.find(
+      (d) => d.symbol === 'handle',
+    )?.kind,
+    'method',
+  );
+  const computedKey = indexEvidenceSource(
+    'c.ts',
+    'const KEY = "x"; class C { [KEY]() { return 1; } }',
+    { rich: true },
+  );
+  assert.ok(!computedKey.declarations.some((d) => d.owner === 'C' && d.symbol === 'KEY'));
   assert.deepEqual(Object.keys(indexEvidenceSource('ledger.service.ts', text)), [
     'definitions',
     'imports',
@@ -699,4 +740,31 @@ test('resolves tsconfig path aliases to tracked files only', () => {
   assert.equal(resolveEvidenceImport(from, '@evil/passwd', tracked, aliases), undefined);
   assert.equal(resolveEvidenceImport(from, '@app/shared/utils/money', tracked), undefined);
   assert.throws(() => parseTsconfigPaths('{'));
+  // The longer, more specific wildcard prefix wins over a shorter overlapping one, like tsc.
+  const overlapping = parseTsconfigPaths(`{
+    "compilerOptions": {
+      "paths": {
+        "@app/*": ["libs/app/*"],
+        "@app/shared/*": ["libs/shared/src/*"]
+      }
+    }
+  }`);
+  const overlappingTracked = new Set([
+    'libs/shared/src/utils/money.ts',
+    'libs/app/shared/utils/money.ts',
+  ]);
+  assert.equal(
+    resolveEvidenceImport(from, '@app/shared/utils/money', overlappingTracked, overlapping),
+    'libs/shared/src/utils/money.ts',
+  );
+  assert.deepEqual(parseTsconfigPaths('﻿{}'), []);
+  const many = Object.fromEntries(
+    Array.from({ length: 300 }, (_, i) => [
+      `@a${i}/*`,
+      Array.from({ length: 20 }, (_, j) => `lib${i}/${j}/*`),
+    ]),
+  );
+  const capped = parseTsconfigPaths(JSON.stringify({ compilerOptions: { paths: many } }));
+  assert.equal(capped.length, 256);
+  assert.ok(capped.every((alias) => alias.targets.length === 8));
 });

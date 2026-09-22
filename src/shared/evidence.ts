@@ -41,7 +41,7 @@ const name = (value: unknown) => {
   const n = ast(value);
   return typeof n?.name === 'string' ? n.name : typeof n?.value === 'string' ? n.value : '';
 };
-export type SourceIndex = {
+type SourceIndex = {
   definitions: { symbol: string; start: number; end: number }[];
   imports: { local: string; imported: string; from: string; line: number }[];
   uses: { symbol: string; line: number }[];
@@ -133,6 +133,12 @@ export function indexEvidenceSource(
           ...(memberOf ? { owner: memberOf } : {}),
         });
     };
+    // A computed key only has a static name when it's a string literal (e.g. ['status.in']);
+    // [SOME_CONST] or [dynamicKey] must not be recorded under the computing expression's own name.
+    const keyName = (key: unknown, computed: unknown) => {
+      const k = ast(key);
+      return computed && k?.type !== 'StringLiteral' ? '' : name(key) || name(k?.id);
+    };
     const member = MEMBER_KIND[n.type];
     if (n.type === 'FunctionDeclaration') declare(name(n.id), 'function');
     else if (n.type === 'ClassDeclaration') declare(name(n.id), 'class');
@@ -143,7 +149,7 @@ export function indexEvidenceSource(
       n.type === 'ObjectMethod' ||
       (n.type === 'ObjectProperty' && FUNCTION_VALUE.has(ast(n.value)?.type ?? ''))
     )
-      declare(name(n.key), 'function');
+      declare(keyName(n.key, n.computed), 'function');
     else if (member && owner && n.kind === 'constructor') {
       declare('constructor', 'constructor', owner);
       for (const param of (n.params as Ast[] | undefined) ?? []) {
@@ -152,8 +158,12 @@ export function indexEvidenceSource(
         if (parameter && type?.type === 'Identifier')
           result.injected.push({ owner, name: name(parameter), type: name(type) });
       }
-    } else if (member && owner) declare(name(n.key) || name(ast(n.key)?.id), member, owner);
-    else if (
+    } else if (member && owner) {
+      // An arrow/function-valued class property (`handle = () => {}`) is a method, not data.
+      const kind =
+        member === 'property' && FUNCTION_VALUE.has(ast(n.value)?.type ?? '') ? 'method' : member;
+      declare(keyName(n.key, n.computed), kind, owner);
+    } else if (
       FUNCTION_VALUE.has(n.type) &&
       ['CallExpression', 'NewExpression'].includes(parent?.type ?? '')
     )
@@ -167,19 +177,26 @@ export function indexEvidenceSource(
           imported: s.type === 'ExportNamespaceSpecifier' ? '*' : name(s.local),
           from: name(n.source),
         });
-    else if (n.type === 'MemberExpression' && !n.computed) {
+    else if (
+      (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') &&
+      !n.computed
+    ) {
       const object = ast(n.object);
+      // A private name (#repo) has no .name/.value of its own; fall back to its inner id.
+      const propertyName = (p: unknown) => name(p) || name(ast(p)?.id);
+      // The property's own line, not `this`'s, so a chain broken across lines matches changed lines.
+      const line = ast(n.property)?.loc?.start.line ?? start;
       if (object?.type === 'ThisExpression')
-        result.memberCalls.push({ target: '', member: name(n.property), line: start });
+        result.memberCalls.push({ target: '', member: propertyName(n.property), line });
       else if (
-        object?.type === 'MemberExpression' &&
+        (object?.type === 'MemberExpression' || object?.type === 'OptionalMemberExpression') &&
         !object.computed &&
         ast(object.object)?.type === 'ThisExpression'
       )
         result.memberCalls.push({
-          target: name(object.property),
-          member: name(n.property),
-          line: start,
+          target: propertyName(object.property),
+          member: propertyName(n.property),
+          line,
         });
     }
   }
@@ -205,7 +222,8 @@ export function indexEvidenceSource(
     }
     if (n.type === 'Identifier' && n.loc)
       result.uses.push({ symbol: name(n), line: n.loc.start.line });
-    const scope = n.type === 'ClassDeclaration' && symbol ? symbol : owner;
+    const scope =
+      n.type === 'ClassDeclaration' || n.type === 'ClassExpression' ? symbol || undefined : owner;
     for (const [key, value] of Object.entries(n)) {
       if (
         [
@@ -249,20 +267,21 @@ export interface PathAlias {
   targets: string[];
 }
 
-/** tsconfig `compilerOptions.paths`, tolerating comments and trailing commas. */
+/** tsconfig `compilerOptions.paths`, tolerating a leading BOM, comments and trailing commas. */
 export function parseTsconfigPaths(text: string): PathAlias[] {
+  const source = text.replace(/^﻿/, '');
   let json = '';
-  for (let i = 0, quoted = false; i < text.length; i++) {
-    const c = text[i];
+  for (let i = 0, quoted = false; i < source.length; i++) {
+    const c = source[i];
     if (quoted) {
       json += c;
-      if (c === '\\') json += text[++i] ?? '';
+      if (c === '\\') json += source[++i] ?? '';
       else if (c === '"') quoted = false;
-    } else if (c === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++;
+    } else if (c === '/' && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n') i++;
       json += '\n';
-    } else if (c === '/' && text[i + 1] === '*') {
-      i = text.indexOf('*/', i + 2);
+    } else if (c === '/' && source[i + 1] === '*') {
+      i = source.indexOf('*/', i + 2);
       if (i < 0) break;
       i++;
     } else {
@@ -276,11 +295,15 @@ export function parseTsconfigPaths(text: string): PathAlias[] {
     }
   ).compilerOptions;
   const baseUrl = options?.baseUrl ?? '.';
-  return Object.entries(options?.paths ?? {}).map(([key, targets]) => ({
-    prefix: key.replace(/\*$/, ''),
-    wildcard: key.endsWith('*'),
-    targets: targets.map((target) => posix.normalize(posix.join(baseUrl, target))),
-  }));
+  // Cap entries and targets per entry: a hostile PR's tsconfig must not be able to blow up alias-matching CPU.
+  return Object.entries(options?.paths ?? {})
+    .slice(0, 256)
+    .map(([key, targets]) => ({
+      prefix: key.replace(/\*$/, ''),
+      wildcard: key.endsWith('*'),
+      targets: targets.slice(0, 8).map((target) => posix.normalize(posix.join(baseUrl, target))),
+    }))
+    .sort((a, b) => Number(a.wildcard) - Number(b.wildcard) || b.prefix.length - a.prefix.length);
 }
 
 const IMPORT_SUFFIXES = [
@@ -307,7 +330,7 @@ export function resolveEvidenceImport(
     : aliases.flatMap(({ prefix, wildcard, targets }) =>
         wildcard
           ? specifier.startsWith(prefix)
-            ? targets.map((target) => target.replace('*', specifier.slice(prefix.length)))
+            ? targets.map((target) => target.replace('*', () => specifier.slice(prefix.length)))
             : []
           : specifier === prefix
             ? targets
