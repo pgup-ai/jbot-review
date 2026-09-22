@@ -1224,6 +1224,7 @@ export function selectResolvedJbotReviewsToFinalize(
 
 export function compactJbotReviewBody(body: string, threadCount: number): string {
   if (hasInternalMarker(body, COMPACTED_REVIEW_MARKER)) return body;
+  const incrementalHead = completedReviewHead(body, 'incremental');
   const linkedCommentIds = parseLinkedCommentIds(body);
   const original = stripLinkedCommentsFooter(body)
     .replaceAll(REVIEW_MARKER, '')
@@ -1249,8 +1250,9 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
           '',
           COMPACTED_REVIEW_MARKER,
         ].join('\n'),
-        completedReviewHead(body),
+        incrementalHead ?? completedReviewHead(body),
         true,
+        incrementalHead ? 'incremental' : 'full',
       ),
     ),
     linkedCommentIds,

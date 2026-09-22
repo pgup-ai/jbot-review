@@ -217,18 +217,22 @@ export async function planIncrementalReview(input: {
       // These forms defeat the simple declaration/reference expansion.
       if (
         texts.some((text) =>
-          /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*[*{]|eval\s*\()/.test(text),
-        )
-      )
-        return full('dynamic-or-reexported-dependencies');
-      if (
-        texts.some((text) =>
-          indexEvidenceSource(file.filename, text).imports.some(
-            (binding) => binding.imported === 'default' && !binding.from.startsWith('.'),
+          /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
+            text,
           ),
         )
       )
-        return full('unresolved-default-import');
+        return full('unsupported-module-dependencies');
+      if (
+        texts.some((text) =>
+          indexEvidenceSource(file.filename, text).imports.some((binding) =>
+            binding.from.startsWith('.')
+              ? !resolveEvidenceImport(file.filename, binding.from, paths)
+              : binding.imported === 'default',
+          ),
+        )
+      )
+        return full('unresolved-import');
       sources.set(file.filename, texts);
     }
     const files = impactedReviewFiles(input.files, changed, sources);

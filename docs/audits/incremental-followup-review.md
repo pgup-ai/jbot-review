@@ -42,7 +42,7 @@ Quality was manually checked by root cause, not by matching titles:
 
 ## Limits and fallback behavior
 
-This first implementation accepts only bounded modifications to existing JavaScript/TypeScript files. It widens through declarations, static relative imports and same-directory files in both snapshots. Unknown syntax/dependencies, references outside the PR, added/deleted/renamed files, contract edits, broad impact, missing history, policy/base changes, open findings and tool-less reviewers fall back to full review. Impact lookup has a five-second Git budget and a two-MiB source budget.
+This first implementation accepts only bounded modifications to existing JavaScript/TypeScript files. It widens through declarations, static relative imports and same-directory files in both snapshots. Unknown syntax/dependencies, default exports, unresolved relative imports, references outside the PR, added/deleted/renamed files, contract edits, broad impact, missing history, policy/base changes, open findings and tool-less reviewers fall back to full review. Impact lookup has a five-second Git budget and a two-MiB source budget.
 
 Reports identify incremental scope and file counts. A separate completion marker prevents existing full-review skip and compaction paths from treating incremental coverage as full coverage. Run telemetry includes the baseline, reason, selected/total files and patch bytes, and planning time. Incomplete or unverified results cannot become a baseline. Quiet clean reviews leave the last posted baseline in place, so the next review includes intervening commits.
 
@@ -106,3 +106,28 @@ from Action, environment, workflow, app, runner and telemetry configuration;
 those configuration files now match main. No test cases or code comments were
 added in this follow-up. The removed toggle assertions describe a contract that
 no longer exists; baseline selection and fallback assertions remain.
+
+## Review feedback validation
+
+The follow-up fixes require verification to be enabled before emitting a reusable
+baseline, preserve incremental markers during resolved-review compaction, and
+fall back to full review for default exports or unresolved relative imports. The
+bounded file map now keeps complete UTF-8 filenames. Comparison manifests record
+the implementation HEAD and dirty-worktree status.
+
+Native `opencode/mimo-v2.6-flash-free` validation on the updated worktree:
+
+- Normal incremental follow-up: **34.6s**, 2/8 files selected, the cross-file bug
+  found and verified, all assigned hunks delivered, reusable baseline emitted.
+- Verification disabled: **24.1s**, full review after the policy change, two
+  candidates returned, verification recorded as skipped, **no baseline emitted**.
+
+Artifacts: `.jbot-review/incremental-feedback-smoke/`. Its manifest records
+`84ff078776247d3c9ed0a40bed46f4a8a49726e1` with `dirty: true`, since validation
+preceded the feedback commit. The later filename-boundary adjustment was checked
+deterministically and does not affect this fixture's short file map.
+
+All 1,123 tests, typecheck, lint and build passed. Self-review found no remaining
+P1/P2 issue. No new comment blocks or test cases were added; regression assertions
+were folded into the existing provenance, impact and fallback cases. No new
+policy layer, dependency resolver or public option was added.

@@ -4,7 +4,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { withReviewCoverage, completedReviewHead, type PrFile } from '../src/shared/github.ts';
+import {
+  withReviewCoverage,
+  completedReviewHead,
+  compactJbotReviewBody,
+  type PrFile,
+} from '../src/shared/github.ts';
 import {
   impactedReviewFiles,
   planIncrementalReview,
@@ -30,6 +35,10 @@ test('incremental baselines require driver metadata and completed coverage', () 
   assert.deepEqual(reviewBaseline(incremental), { head, base, policy });
   assert.equal(completedReviewHead(incremental), undefined);
   assert.equal(completedReviewHead(incremental, 'incremental'), head);
+  const compacted = compactJbotReviewBody(incremental, 1);
+  assert.deepEqual(reviewBaseline(compacted), { head, base, policy });
+  assert.equal(completedReviewHead(compacted), undefined);
+  assert.equal(compactJbotReviewBody(compacted, 1), compacted);
 
   for (const invalid of [
     body(head, base).replace('completed-head:', 'incomplete-head:'),
@@ -72,6 +81,46 @@ test('impact expansion includes aliased callers and callees from earlier PR file
   );
   assert.match(context, /other\/unrelated.ts/);
   assert.match(context, /ALL their base-to-head hunks/);
+  const longPaths = Array.from({ length: 40 }, (_, i) => ({
+    filename: `${i}/${'界'.repeat(70)}.ts`,
+  }));
+  const bounded = buildIncrementalReviewContext(
+    { mode: 'incremental', reason: 'bounded-followup', files: [] },
+    longPaths,
+  );
+  assert.doesNotMatch(bounded, /\uFFFD/);
+  const listed = bounded
+    .split('Previously reviewed PR files outside this follow-up:\n')[1]
+    .split('\n[')[0];
+  assert.ok(Buffer.byteLength(listed) <= 8192);
+  assert.ok(listed.split('\n').every((path) => longPaths.some((file) => file.filename === path)));
+  assert.match(bounded, /Remaining file names omitted/);
+  for (const declaration of ['interface Contract', 'type Contract =']) {
+    const types = new Map([
+      [
+        'core/shape.ts',
+        [
+          `export ${declaration} {\n value: string;\n}`,
+          `export ${declaration} {\n value: number;\n}`,
+        ],
+      ],
+      [
+        'worker/job.ts',
+        [
+          'import { Contract as Input } from "@shapes";\nexport function run(value: Input) { return value.value; }',
+        ],
+      ],
+      ['other/unrelated.ts', ['export const unrelated = 0;']],
+    ]);
+    const typeFiles = [...types.keys()].map((filename) => ({
+      filename,
+      patch: '@@ -2 +2 @@\n- value: string;\n+ value: number;',
+    }));
+    assert.deepEqual(
+      impactedReviewFiles(typeFiles, ['core/shape.ts'], types).map((file) => file.filename),
+      ['core/shape.ts', 'worker/job.ts'],
+    );
+  }
 });
 
 test('incremental planning uses a successful ancestor and falls back on uncertain follow-ups', async () => {
@@ -157,6 +206,51 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         })
       ).reason,
       'references-outside-pr',
+    );
+    for (const target of [
+      'core/store.mjs',
+      'core/store.cjs',
+      'pkg/index.mjs',
+      'pkg/index.mts',
+      'pkg/index.cts',
+      'pkg/index.jsx',
+    ]) {
+      git('checkout', '-q', '--detach', head);
+      const specifier = target.startsWith('pkg/') ? '../pkg' : '../core/store';
+      write(
+        'worker/job.ts',
+        `import make from '${specifier}';\nexport function job() { return make(); }\n`,
+      );
+      write(target, 'export default function implementation() {\n return 1;\n}\n');
+      const prior = commit();
+      write(target, 'export default function implementation() {\n return 0;\n}\n');
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBody: body(prior, base),
+        files: [...files, { filename: target, patch: '@@ -2 +2 @@\n- return 1;\n+ return 0;' }],
+      });
+      assert.equal(plan.mode, 'full', target);
+      assert.equal(plan.reason, 'unresolved-import', target);
+    }
+    git('checkout', '-q', '--detach', head);
+    write('pkg/index.ts', 'export default function implementation() {\n return 1;\n}\n');
+    write('outside.ts', 'import make from "./pkg";\nmake();\n');
+    const defaultBaseline = commit();
+    write('pkg/index.ts', 'export default function implementation() {\n return 0;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBody: body(defaultBaseline, base),
+          files: [
+            ...files,
+            { filename: 'pkg/index.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 0;' },
+          ],
+        })
+      ).reason,
+      'unsupported-module-dependencies',
     );
     git('checkout', '-q', '--detach', head);
     write('core/limit.ts', 'export function limit() {\n  return 10;\n}\n');

@@ -1925,7 +1925,9 @@ export function buildIncrementalReviewContext(
     .filter((file) => !selected.has(file.filename))
     .map((file) => file.filename);
   const map = prior.join('\n');
-  const bounded = Buffer.from(map).subarray(0, 8192).toString('utf8');
+  const bytes = Buffer.from(map);
+  const end = bytes.length > 8192 ? Math.max(0, bytes.lastIndexOf('\n', 8192)) : bytes.length;
+  const bounded = bytes.toString('utf8', 0, end);
   return [
     '## Incremental review scope',
     `The last completed review covered head ${scope.baseline}.`,

@@ -3352,6 +3352,7 @@ async function runReviewPipeline(params: {
       diagnosticsUrl,
       reviewScope: scopeStats,
       baseline:
+        verificationEnabled &&
         headSha &&
         baseSha &&
         incompleteSessions.length === 0 &&

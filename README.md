@@ -417,7 +417,8 @@ modifications to existing JavaScript/TypeScript files. It expands the selected
 files through declarations, references and their directories, delivering each
 selected file's **complete PR patch**, not only its latest edit. It falls back to
 full review for uncertain history or dependencies, references outside the PR,
-contract changes, broad changes, open findings, tool-less reviewers, explicit
+contract changes, default-export modules, unresolved relative imports, broad
+changes, open findings, tool-less reviewers, explicit
 reruns and auto-approval. Verification stays enabled according to its existing
 setting. Reports identify incremental reviews; telemetry records the baseline,
 selected/total files and fallback reason. Quiet clean runs keep the last posted

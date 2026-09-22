@@ -2,12 +2,24 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runPrReview } from '../src/shared/runner.ts';
 import { reviewBaseline } from '../src/shared/incremental-review.ts';
 import { reviewExperiment } from '../src/shared/review-experiment.ts';
 import type { PrFile } from '../src/shared/github.ts';
 
 const output = resolve(process.argv[2] ?? '.jbot-review/incremental-comparison');
+const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
+const treatmentCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+  cwd: sourceRoot,
+  encoding: 'utf8',
+}).trim();
+const dirty = Boolean(
+  execFileSync('git', ['status', '--porcelain'], {
+    cwd: sourceRoot,
+    encoding: 'utf8',
+  }).trim(),
+);
 mkdirSync(output, { recursive: true });
 const workspace = mkdtempSync(join(tmpdir(), 'jbot-incremental-comparison-'));
 const git = (...args: string[]) =>
@@ -67,7 +79,15 @@ const baselineHead = commit();
 writeFileSync(
   join(output, 'manifest.json'),
   JSON.stringify(
-    { workspace, base, baselineHead, model: 'opencode/mimo-v2.6-flash-free', repetitions: 3 },
+    {
+      treatmentCommit,
+      dirty,
+      workspace,
+      base,
+      baselineHead,
+      model: 'opencode/mimo-v2.6-flash-free',
+      repetitions: 3,
+    },
     null,
     2,
   ),
