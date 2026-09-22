@@ -488,12 +488,13 @@ export async function addContextPack(params: {
             reason = 'overflow';
           }
         }
+        const buildMs = Date.now() - started;
         if (reason) await params.fallback(plan);
         const result: ContextPackResult = {
           label: plan.label,
           state: reason ? 'fallback' : pack!.state,
           ...(reason ? { reason } : { pack }),
-          buildMs: Date.now() - started,
+          buildMs,
           roomBytes,
         };
         results[index] = result;
@@ -501,7 +502,7 @@ export async function addContextPack(params: {
           `Context pack (${plan.label}): ${JSON.stringify({
             state: result.state,
             reason,
-            buildMs: result.buildMs,
+            buildMs,
             roomBytes,
             bytes: reason ? 0 : Buffer.byteLength(pack!.text),
             omitted: reason ? 0 : pack!.omitted,

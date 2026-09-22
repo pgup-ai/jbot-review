@@ -578,17 +578,19 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     omitted: 0,
     slices: {},
   };
-  const plans = [page(), page(), page()];
-  const fallbacks: string[] = [];
+  const plans = [page(), page(), page(), page()];
+  const before = { context: plans[3].context, baseContext: plans[3].baseContext };
+  const fallbacks: typeof plans = [];
   const results = await addContextPack({
     plans,
     build: async (plan) => {
       if (plan === plans[1]) return { ...pack, text: '' };
       if (plan === plans[2]) throw new Error('boom');
+      if (plan === plans[3]) return { ...pack, text: '## Context pack\n' + 'x'.repeat(300_000) };
       return pack;
     },
     fallback: async (plan) => {
-      fallbacks.push(plan.label);
+      fallbacks.push(plan);
     },
     renderPrompt,
     budget,
@@ -600,14 +602,17 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
       ['complete', undefined],
       ['fallback', 'empty'],
       ['fallback', 'error'],
+      ['fallback', 'overflow'],
     ],
   );
-  assert.ok(plans[0].context.indexOf('PACKED') < plans[0].context.indexOf('return n * 100'));
+  assert.match(plans[0].context, /PACKED\n\n## Diff hunks/);
   assert.ok(plans[0].baseContext.includes('PACKED'));
   assert.ok(!plans[1].context.includes('PACKED'));
+  assert.deepEqual({ context: plans[3].context, baseContext: plans[3].baseContext }, before);
   assert.deepEqual(
     plans.map((plan) => plan.contextPack),
-    [true, undefined, undefined],
+    [true, undefined, undefined, undefined],
   );
-  assert.equal(fallbacks.length, 2);
+  assert.equal(fallbacks.length, 3);
+  assert.ok(fallbacks.includes(plans[3]));
 });

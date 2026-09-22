@@ -454,16 +454,20 @@ export class EvidenceStore {
       const tracked = await this.tracked(AbortSignal.timeout(4000));
       // Nx-style repos keep `paths` in tsconfig.base.json.
       for (const file of ['tsconfig.json', 'tsconfig.base.json']) {
-        const config = await this.read(file, AbortSignal.timeout(1000), tracked);
         try {
+          const config = await this.read(file, AbortSignal.timeout(1000), tracked);
           const aliases = config ? parseTsconfigPaths(config.text) : [];
           if (aliases.length) return { tracked, aliases };
         } catch {
-          // An invalid config keeps relative imports only.
+          // An unreadable or invalid config keeps relative imports only.
         }
       }
       return { tracked, aliases: [] };
-    })();
+    })().catch((error) => {
+      // The next page retries instead of every page falling back for the rest of the run.
+      this.packInventory = undefined;
+      throw error;
+    });
     const { tracked, aliases } = await waitForEvidence(this.packInventory, signal);
     let files = 0;
     let bytes = 0;
@@ -495,14 +499,15 @@ export class EvidenceStore {
         const scope = paths?.map((path) => `:(literal)${path}`) ?? PACK_SOURCE_GLOBS;
         const { stdout } = await exec(
           'git',
-          ['grep', '-n', '-w', '-F', '-e', symbol, '--', ...scope],
+          ['grep', '-n', '-z', '-w', '-F', '-e', symbol, '--', ...scope],
           { cwd: this.workspace, signal, maxBuffer: 4 * 1024 * 1024 },
         ).catch((error) => {
           if (error.code === 1) return { stdout: '' };
           throw error;
         });
+        // -z prints paths verbatim and ends both the path and the line number with NUL.
         return stdout.split('\n').flatMap((row) => {
-          const match = /^(.+?):(\d+):/.exec(row);
+          const match = /^([^\0]*)\0(\d+)\0/.exec(row);
           return match ? [{ path: match[1], line: Number(match[2]) }] : [];
         });
       },
