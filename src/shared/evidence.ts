@@ -41,6 +41,11 @@ const name = (value: unknown) => {
   const n = ast(value);
   return typeof n?.name === 'string' ? n.name : typeof n?.value === 'string' ? n.value : '';
 };
+// Falls back to an inner .id (e.g. a PrivateName like #repo lacks its own .name/.value).
+const keyOrPrivateName = (value: unknown) => name(value) || name(ast(value)?.id);
+// A computed key only counts when it's a string literal, e.g. ['status.in'].
+const keyName = (key: unknown, computed: unknown) =>
+  computed && ast(key)?.type !== 'StringLiteral' ? '' : keyOrPrivateName(key);
 type SourceIndex = {
   definitions: { symbol: string; start: number; end: number }[];
   imports: { local: string; imported: string; from: string; line: number }[];
@@ -133,12 +138,6 @@ export function indexEvidenceSource(
           ...(memberOf ? { owner: memberOf } : {}),
         });
     };
-    // A computed key only has a static name when it's a string literal (e.g. ['status.in']);
-    // [SOME_CONST] or [dynamicKey] must not be recorded under the computing expression's own name.
-    const keyName = (key: unknown, computed: unknown) => {
-      const k = ast(key);
-      return computed && k?.type !== 'StringLiteral' ? '' : name(key) || name(k?.id);
-    };
     const member = MEMBER_KIND[n.type];
     if (n.type === 'FunctionDeclaration') declare(name(n.id), 'function');
     else if (n.type === 'ClassDeclaration') declare(name(n.id), 'class');
@@ -182,20 +181,18 @@ export function indexEvidenceSource(
       !n.computed
     ) {
       const object = ast(n.object);
-      // A private name (#repo) has no .name/.value of its own; fall back to its inner id.
-      const propertyName = (p: unknown) => name(p) || name(ast(p)?.id);
       // The property's own line, not `this`'s, so a chain broken across lines matches changed lines.
       const line = ast(n.property)?.loc?.start.line ?? start;
       if (object?.type === 'ThisExpression')
-        result.memberCalls.push({ target: '', member: propertyName(n.property), line });
+        result.memberCalls.push({ target: '', member: keyOrPrivateName(n.property), line });
       else if (
         (object?.type === 'MemberExpression' || object?.type === 'OptionalMemberExpression') &&
         !object.computed &&
         ast(object.object)?.type === 'ThisExpression'
       )
         result.memberCalls.push({
-          target: propertyName(object.property),
-          member: propertyName(n.property),
+          target: keyOrPrivateName(object.property),
+          member: keyOrPrivateName(n.property),
           line,
         });
     }
@@ -295,7 +292,7 @@ export function parseTsconfigPaths(text: string): PathAlias[] {
     }
   ).compilerOptions;
   const baseUrl = options?.baseUrl ?? '.';
-  // Cap entries and targets per entry: a hostile PR's tsconfig must not be able to blow up alias-matching CPU.
+  // Cap entries/targets: a hostile tsconfig must not blow up alias-matching CPU.
   return Object.entries(options?.paths ?? {})
     .slice(0, 256)
     .map(([key, targets]) => ({

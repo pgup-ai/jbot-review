@@ -252,6 +252,28 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    for (const [decorator, tripped] of [
+      ["@OnEvent('ledger.posted')", true],
+      ["@MessagePattern({ cmd: 'sum' })", true],
+      ['@OnEvent(LedgerEvents.Posted)', false],
+    ] as const) {
+      git('checkout', '-q', '--detach', head);
+      const listener = (returned: number) =>
+        `import { OnEvent } from '@nestjs/event-emitter';\nexport class L {\n  ${decorator}\n  handle() {\n    return ${returned};\n  }\n}\n`;
+      write('ledger/listener.ts', listener(1));
+      const prior = commit();
+      write('ledger/listener.ts', listener(2));
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBody: body(prior, base),
+        files: [
+          ...files,
+          { filename: 'ledger/listener.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 2;' },
+        ],
+      });
+      assert.equal(plan.reason === 'string-keyed-dependencies', tripped, decorator);
+    }
     git('checkout', '-q', '--detach', head);
     write('core/limit.ts', 'export function limit() {\n  return 10;\n}\n');
     assert.equal(
@@ -268,59 +290,6 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       (await planIncrementalReview({ ...input, head: commit() })).reason,
       'added-removed-or-renamed-file',
     );
-  } finally {
-    rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('an otherwise-eligible follow-up touching string-keyed NestJS wiring still requires a full review', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'jbot-incremental-string-keyed-'));
-  const git = (...args: string[]) =>
-    execFileSync('git', args, { cwd: workspace, encoding: 'utf8' }).trim();
-  const write = (path: string, text: string) => {
-    mkdirSync(join(workspace, path, '..'), { recursive: true });
-    writeFileSync(join(workspace, path), text);
-  };
-  const commit = () => {
-    git('add', '.');
-    git(
-      '-c',
-      'user.name=Fixture',
-      '-c',
-      'user.email=fixture@example.test',
-      'commit',
-      '-qm',
-      'fixture',
-    );
-    return git('rev-parse', 'HEAD');
-  };
-  try {
-    git('init', '-q');
-    const listener = (returned: number) =>
-      [
-        "import { OnEvent } from '@nestjs/event-emitter';",
-        'export class LedgerListener {',
-        "  @OnEvent('ledger.posted')",
-        '  handle() {',
-        `    return ${returned};`,
-        '  }',
-        '}',
-      ].join('\n') + '\n';
-    write('ledger/listener.ts', listener(1));
-    const base = commit();
-    write('ledger/listener.ts', listener(2));
-    const head = commit();
-    const files: PrFile[] = [{ filename: 'ledger/listener.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
-    const result = await planIncrementalReview({
-      workspace,
-      files,
-      head,
-      base,
-      policy,
-      priorBody: body(base, base),
-    });
-    assert.equal(result.mode, 'full');
-    assert.equal(result.reason, 'string-keyed-dependencies');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
