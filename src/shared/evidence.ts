@@ -52,7 +52,12 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
   if (!JS_SOURCE.test(path)) return result;
   const tree = parse(text, {
     sourceType: 'unambiguous',
-    plugins: ['typescript', 'jsx'],
+    // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
+    // decorators-legacy (not the stage-3 "decorators" plugin) is required: NestJS-style
+    // parameter decorators (e.g. constructor(@Inject(TOKEN) ...)) only parse under the legacy proposal.
+    plugins: /\.[cm]?ts$/i.test(path)
+      ? ['typescript', 'decorators-legacy']
+      : ['typescript', 'jsx', 'decorators-legacy'],
     attachComment: false,
   });
   function walk(n: Ast) {
@@ -670,7 +675,7 @@ export class EvidenceStore {
     const digest = evidenceHash(source.text);
     const old = this.cache.get(path);
     if (old?.digest === digest && old.truncated === source.truncated) return old;
-    const key = JSON.stringify(['index-v2-babel-7.29.9', path, digest, source.truncated]);
+    const key = JSON.stringify(['index-v3-babel-7.29.9', path, digest, source.truncated]);
     const persisted = await this.disk.get(key);
     let index: SourceIndex;
     const fromDisk = validSourceIndex(persisted);

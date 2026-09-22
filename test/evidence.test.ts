@@ -584,3 +584,30 @@ test('persistent cache reuses indexes and exact judgments with zero rebilling; c
     undefined,
   );
 });
+
+test('indexes decorated NestJS sources and generic arrows in .ts files', () => {
+  const service = indexEvidenceSource(
+    'ledger.service.ts',
+    [
+      '@Injectable()',
+      'export class LedgerService {',
+      '  constructor(@Inject(TOKEN) private readonly repo: LedgerRepository) {}',
+      // A dotted field name needs quoting, not `[...]`: Babel's decorators-legacy plugin (like TS's
+      // own experimentalDecorators) parses a decorator as a greedy LeftHandSideExpression, so
+      // `@Transform(trim) ['status.in']` reads as one expression (a computed member access on the
+      // decorator call) and fails to parse. Real NestJS/class-transformer DTOs write it unbracketed.
+      "  @Transform(trim) 'status.in'?: string[];",
+      '  post(id: string) {',
+      '    return this.repo.save(id);',
+      '  }',
+      '}',
+      'export const first = <T>(items: T[]) => items[0];',
+    ].join('\n'),
+  );
+  assert.ok(service.definitions.some((d) => d.symbol === 'LedgerService'));
+  assert.ok(service.definitions.some((d) => d.symbol === 'first'));
+  assert.ok(service.uses.some((u) => u.symbol === 'repo' && u.line === 6));
+  assert.ok(
+    indexEvidenceSource('view.tsx', 'export const View = () => <div />;').definitions.length,
+  );
+});
