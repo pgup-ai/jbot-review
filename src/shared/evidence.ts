@@ -223,10 +223,7 @@ export function indexEvidenceSource(
       } else if (ast(value)?.type) walk(value as Ast, n, scope);
     }
   }
-  if (JS_SOURCE.test(path)) {
-    const tree = parseSource(path, text);
-    walk(tree as unknown as Ast);
-  }
+  if (JS_SOURCE.test(path)) walk(parseSource(path, text) as unknown as Ast);
   if (options.rich) return result;
   const { definitions, imports, uses } = result;
   return { definitions, imports, uses };

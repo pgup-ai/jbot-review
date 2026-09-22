@@ -593,10 +593,7 @@ test('indexes decorated NestJS sources and generic arrows in .ts files', () => {
       '@Injectable()',
       'export class LedgerService {',
       '  constructor(@Inject(TOKEN) private readonly repo: LedgerRepository) {}',
-      // A dotted field name needs quoting, not `[...]`: Babel's decorators-legacy plugin (like TS's
-      // own experimentalDecorators) parses a decorator as a greedy LeftHandSideExpression, so
-      // `@Transform(trim) ['status.in']` reads as one expression (a computed member access on the
-      // decorator call) and fails to parse. Real NestJS/class-transformer DTOs write it unbracketed.
+      // Quoted: with a parameter decorator in the file, neither decorator plugin parses a decorated [computed] key.
       "  @Transform(trim) 'status.in'?: string[];",
       '  post(id: string) {',
       '    return this.repo.save(id);',
