@@ -405,6 +405,32 @@ the review itself is unaffected._
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
 
+Incremental follow-ups are experimental and off by default. Set
+`incremental-review: true` on the Action (or `JBOT_INCREMENTAL_REVIEW=true` in the
+webhook app); set it back to `false` to restore full reviews. The dogfood workflow
+reads `vars.JBOT_INCREMENTAL_REVIEW`. The public `jbot-review-action` wrapper must
+mirror the new input before production workflows can use it. Dynamic fan-out is
+already enabled by default.
+
+A follow-up can reuse the last posted, completed review when its base, model,
+guidelines and review settings still match. The first version handles small
+modifications to existing JavaScript/TypeScript files. It expands the selected
+files through declarations, references and their directories, delivering each
+selected file's **complete PR patch**, not only its latest edit. It falls back to
+full review for uncertain history or dependencies, references outside the PR,
+contract changes, broad changes, open findings, tool-less reviewers, explicit
+reruns and auto-approval. Verification stays enabled according to its existing
+setting. Reports identify incremental reviews; telemetry records the baseline,
+selected/total files and fallback reason. Quiet clean runs keep the last posted
+baseline, so their changes remain included in the next follow-up.
+
+This is conservative impact detection, not proof that every possible runtime
+relationship is known. Keep full review for final approval. Compare locally with
+`node --env-file=.env --import tsx scripts/incremental-review-compare.ts`; it runs
+paired full/incremental reviews with OpenCode's free MiMo Flash model, without
+posting to GitHub.
+See the [comparison results and limitations](docs/audits/incremental-followup-review.md).
+
 CommandCode MiMo v2.6 Flash, Pro and Pro UltraSpeed have no adjustable reasoning
 effort in CLI 1.62.0 or 1.62.1. J-Bot omits `--effort` and logs `effort=not-configurable`;
 the global low default does not control these models. Other models without a

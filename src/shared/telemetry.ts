@@ -209,6 +209,16 @@ export interface RunTelemetryMeta {
 }
 
 export interface RunExecutionTelemetry {
+  reviewScope?: {
+    mode: 'full' | 'incremental';
+    reason: string;
+    files: number;
+    totalFiles: number;
+    patchBytes: number;
+    totalPatchBytes: number;
+    planningMs: number;
+    baseline?: string;
+  };
   reviewPasses: number;
   reviewShards: number;
   lensKeys: string[];

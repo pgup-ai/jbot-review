@@ -30,6 +30,7 @@ const POLICY_KEYS = [
   'verifyOverlapGrace',
   'sharedPrefixPrompt',
   'reviewPasses',
+  'incrementalReview',
   'verifyFindings',
   'timeBudgetMinutes',
   'reviewShards',

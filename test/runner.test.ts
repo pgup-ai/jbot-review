@@ -1158,6 +1158,9 @@ describe('normalizeOptions defaults', () => {
   it('keeps the experiment arms off and the widen policy conservative by default', () => {
     const defaults = normalizeOptions(undefined);
     assert.equal(defaults.guidelineWiden, 'auto');
+    assert.equal(defaults.dynamicFanout, true);
+    assert.equal(defaults.incrementalReview, false);
+    assert.equal(normalizeOptions({ incrementalReview: true }).incrementalReview, true);
     assert.equal(defaults.verifierSlimContext, false);
     assert.equal(defaults.verifyOverlapGrace, false);
     assert.equal(defaults.sharedPrefixPrompt, false);
@@ -1699,6 +1702,24 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   const head = 'a'.repeat(40);
   const complete = buildBody('', '', [], [], 'model', 'owner', 'repo', head);
   assert.equal(completedReviewHead(complete), head);
+  const incremental = buildBody(
+    '',
+    '',
+    [],
+    [],
+    'model',
+    'owner',
+    'repo',
+    head,
+    undefined,
+    undefined,
+    undefined,
+    [],
+    { auxiliaryBaselines: [], reviewScope: { mode: 'incremental', files: 2, totalFiles: 8 } },
+  );
+  assert.match(incremental, /2 of 8 PR files re-reviewed/);
+  assert.equal(completedReviewHead(incremental), undefined);
+  assert.equal(completedReviewHead(incremental, 'incremental'), head);
   assert.equal(
     completedReviewHead(
       complete + '\n\n<!-- jbot-review:review -->\n<!-- jbot-review:threads:0 -->',

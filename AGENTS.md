@@ -39,13 +39,19 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 
 ## Invariants — do not break these
 
-1. **Full-diff scope, always.** Every review run covers the complete
+1. **Full-diff scope by default.** Every full review run covers the complete
    base...head diff — as one session or as the UNION of parallel shards
    (`shardFilesForReview` assigns file groups; `buildShardPlans` partitions every
    hunk into budgeted pages, with byte-conserving splits for oversized hunks).
    Every mandatory page must complete; repository access alone is not delivery.
-   Findings remain clamped to assigned files in code. Never reintroduce delta-only review scope; "what changed
-   since the last run" applies to the summary TEXT (`buildSummaryScopeBlock`).
+   Findings remain clamped to assigned files in code. The opt-in
+   `incremental-review` experiment may select affected files after a completed,
+   matching baseline; every selected file still receives its complete base...head
+   patch. Earlier PR files remain available as context, and findings there may
+   still be reported. Missing history, changed policy/base, uncertain dependencies,
+   explicit reruns and auto-approval require a full review. Never silently narrow
+   scope via summary instructions. Incremental scope must be visible in the report
+   and telemetry; incomplete or unverified runs cannot establish a new baseline.
    The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
    documentation-only follow-ups with unchanged base and policy; the main review
    still covers the full PR and verification remains enabled. Repeat-comment noise is handled downstream by

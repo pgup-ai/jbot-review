@@ -112,6 +112,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         options: {
           enhancedContext: true,
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
+          incrementalReview: parseEnvBoolean('JBOT_INCREMENTAL_REVIEW', false),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
           modelPool: cfg.modelPool,
