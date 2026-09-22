@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { CONTEXT_PACK_MAX_BYTES, type ContextPack } from './context-pack.ts';
 import type { PrFile } from './github.ts';
 import type { EvidenceStore } from './evidence.ts';
 import { findingSourceLocations } from './finding-context.ts';
@@ -85,12 +86,27 @@ export interface ShardPlan {
   units?: DiffUnit[];
   promptBytes?: number;
   guidelines?: string;
+  /** The page's embedded diff block; a context pack goes right before it. */
+  diffText?: string;
+  /** The page got a context pack, so its session uses the pack prompt. */
+  contextPack?: boolean;
 }
 
 export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
   const score = (plan: ShardPlan) =>
     Math.max(0, ...(plan.units ?? []).map((unit) => diffRiskScore(unit.file)));
   return [...plans].sort((a, b) => score(b) - score(a));
+}
+
+/** A page's hunks regrouped into one patch per file. */
+export function planPageFiles(units: DiffUnit[]): PrFile[] {
+  return [...new Set(units.map((unit) => unit.file.filename))].map((filename) => ({
+    ...units.find((unit) => unit.file.filename === filename)!.file,
+    patch: units
+      .filter((unit) => unit.file.filename === filename)
+      .map((unit) => unit.file.patch)
+      .join('\n'),
+  }));
 }
 
 function diffUnits(file: PrFile): DiffUnit[] {
@@ -158,13 +174,7 @@ export function buildShardPlans(params: {
     : params.coreContext;
   const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
     const assignedFiles = [...new Set(units.map((u) => u.file.filename))];
-    const pageFiles = assignedFiles.map((filename) => ({
-      ...units.find((u) => u.file.filename === filename)!.file,
-      patch: units
-        .filter((u) => u.file.filename === filename)
-        .map((u) => u.file.patch)
-        .join('\n'),
-    }));
+    const pageFiles = planPageFiles(units);
     const diff = buildDiffHunksBlockWithMetadata(pageFiles, COMPLETE_DIFF_OPTIONS);
     const assignment = buildShardAssignmentBlock(
       assignedFiles,
@@ -193,6 +203,7 @@ export function buildShardPlans(params: {
       context,
       baseContext,
       assignedFiles,
+      diffText: diff.text,
       diffCoverage: {
         ...diffHunksCoverage(pageFiles, diff),
         completeFiles: assignedFiles.filter((path) =>
@@ -425,4 +436,86 @@ export async function addReviewEvidence(
       }
     }),
   );
+}
+
+export interface ContextPackResult {
+  label: string;
+  state: 'complete' | 'partial' | 'fallback';
+  reason?: 'empty' | 'error' | 'overflow';
+  buildMs: number;
+  roomBytes: number;
+  pack?: ContextPack;
+}
+
+/** Puts each page's context pack before its diff; pages it cannot serve get `fallback` instead. */
+export async function addContextPack(params: {
+  plans: ShardPlan[];
+  build: (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) => Promise<ContextPack>;
+  fallback: (plan: ShardPlan) => Promise<void>;
+  /** Main-page prompt; `contextPack` selects the pack-aware instructions. */
+  renderPrompt: (context: string, contextPack: boolean) => string;
+  budget: ReviewPromptBudget;
+  log: (message: string) => void;
+}): Promise<ContextPackResult[]> {
+  const { plans, renderPrompt, budget } = params;
+  const signal = AbortSignal.timeout(5000);
+  const results: ContextPackResult[] = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, plans.length) }, async () => {
+      while (next < plans.length) {
+        const index = next++;
+        const plan = plans[index];
+        const started = Date.now();
+        const roomBytes = Math.max(
+          0,
+          inputCapacity(budget) - Buffer.byteLength(renderPrompt(plan.context, false)) - 1024,
+        );
+        const pack = await params
+          .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
+          .catch(() => undefined);
+        let reason: ContextPackResult['reason'] = !pack ? 'error' : pack.text ? undefined : 'empty';
+        if (pack && !reason) {
+          const previous = { context: plan.context, baseContext: plan.baseContext };
+          plan.context = withContextPack(plan.context, plan.diffText, pack.text);
+          plan.baseContext = withContextPack(plan.baseContext, plan.diffText, pack.text);
+          const measured = measureReviewPrompt(renderPrompt(plan.context, true), budget);
+          if (measured.fits) {
+            plan.promptBytes = measured.promptBytes;
+            plan.contextPack = true;
+          } else {
+            Object.assign(plan, previous);
+            reason = 'overflow';
+          }
+        }
+        if (reason) await params.fallback(plan);
+        const result: ContextPackResult = {
+          label: plan.label,
+          state: reason ? 'fallback' : pack!.state,
+          ...(reason ? { reason } : { pack }),
+          buildMs: Date.now() - started,
+          roomBytes,
+        };
+        results[index] = result;
+        params.log(
+          `Context pack (${plan.label}): ${JSON.stringify({
+            state: result.state,
+            reason,
+            buildMs: result.buildMs,
+            roomBytes,
+            bytes: reason ? 0 : Buffer.byteLength(pack!.text),
+            omitted: reason ? 0 : pack!.omitted,
+          })}.`,
+        );
+      }
+    }),
+  );
+  return results;
+}
+
+function withContextPack(context: string, diffText: string | undefined, pack: string): string {
+  const at = diffText ? context.lastIndexOf(diffText) : -1;
+  return at < 0
+    ? `${context}\n\n${pack}`
+    : `${context.slice(0, at)}${pack}\n\n${context.slice(at)}`;
 }

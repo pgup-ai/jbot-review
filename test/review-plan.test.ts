@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { Semaphore } from '../src/shared/opencode.ts';
 import { test } from 'node:test';
 import {
+  addContextPack,
   buildShardPlans,
   buildAuxiliaryPlans,
   prioritizeAuxiliaryPlans,
@@ -545,4 +546,68 @@ test('auxiliary planning frees guideline space for a long changed line without d
       }),
     /one diff line/,
   );
+});
+
+test('the context pack sits before the page diff, and pages it cannot serve fall back', async () => {
+  const budget = reviewPromptBudget('opencode', { contextTokens: 200_000 });
+  const renderPrompt = (context: string, contextPack = false) =>
+    assembleReviewPrompt(context, '', '', false, true, { contextPack });
+  const file = {
+    filename: 'money.ts',
+    patch:
+      '@@ -1,3 +1,3 @@\n export function total(n: number) {\n-  return n;\n+  return n * 100;\n }',
+  };
+  const page = () =>
+    buildShardPlans({
+      coreContext: '## Pull request\nTitle: money',
+      context7Block: '',
+      shards: [[file]],
+      renderPrompt: (context) => renderPrompt(context),
+      budget,
+      evidenceReserveBytes: 8192,
+    })[0];
+  const pack = {
+    text: '## Context pack\nPACKED',
+    supplied: {
+      ranges: new Map(),
+      lines: new Map(),
+      symbols: new Set<string>(),
+      directories: new Set<string>(),
+    },
+    state: 'complete' as const,
+    omitted: 0,
+    slices: {},
+  };
+  const plans = [page(), page(), page()];
+  const fallbacks: string[] = [];
+  const results = await addContextPack({
+    plans,
+    build: async (plan) => {
+      if (plan === plans[1]) return { ...pack, text: '' };
+      if (plan === plans[2]) throw new Error('boom');
+      return pack;
+    },
+    fallback: async (plan) => {
+      fallbacks.push(plan.label);
+    },
+    renderPrompt,
+    budget,
+    log: () => {},
+  });
+  assert.deepEqual(
+    results.map((result) => [result.state, result.reason]),
+    [
+      ['complete', undefined],
+      ['fallback', 'empty'],
+      ['fallback', 'error'],
+    ],
+  );
+  assert.ok(plans[0].context.indexOf('PACKED') < plans[0].context.indexOf('return n * 100'));
+  assert.ok(plans[0].baseContext.includes('PACKED'));
+  assert.ok(!plans[1].context.includes('PACKED'));
+  assert.deepEqual(
+    plans.map((plan) => plan.contextPack),
+    [true, undefined, undefined],
+  );
+  assert.equal(fallbacks.length, 2);
 });
