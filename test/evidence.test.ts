@@ -13,6 +13,7 @@ import {
   changedEvidenceLines,
   resolveEvidenceImport,
   evidenceMode,
+  parseTsconfigPaths,
 } from '../src/shared/evidence.ts';
 import { normalizeOptions, requestFindingVerdicts } from '../src/shared/runner.ts';
 import { EvidenceDiskCache, evidenceHash } from '../src/shared/evidence-cache.ts';
@@ -665,4 +666,35 @@ test('rich index records members, types, re-exports, injected services and this-
     'imports',
     'uses',
   ]);
+});
+
+test('resolves tsconfig path aliases to tracked files only', () => {
+  const aliases = parseTsconfigPaths(`{
+    // comment with "quotes"
+    "compilerOptions": {
+      "paths": {
+        "@app/shared": ["libs/shared/src"],
+        "@app/shared/*": ["libs/shared/src/*"], /* trailing */
+        "@evil/*": ["../../etc/*"],
+      },
+    },
+  }`);
+  const tracked = new Set([
+    'libs/shared/src/index.ts',
+    'libs/shared/src/utils/money.ts',
+    'apps/a/src/b.ts',
+  ]);
+  const from = 'apps/a/src/c.ts';
+  assert.equal(
+    resolveEvidenceImport(from, '@app/shared', tracked, aliases),
+    'libs/shared/src/index.ts',
+  );
+  assert.equal(
+    resolveEvidenceImport(from, '@app/shared/utils/money', tracked, aliases),
+    'libs/shared/src/utils/money.ts',
+  );
+  assert.equal(resolveEvidenceImport(from, './b.js', tracked, aliases), 'apps/a/src/b.ts');
+  assert.equal(resolveEvidenceImport(from, '@evil/passwd', tracked, aliases), undefined);
+  assert.equal(resolveEvidenceImport(from, '@app/shared/utils/money', tracked), undefined);
+  assert.throws(() => parseTsconfigPaths('{'));
 });

@@ -238,20 +238,83 @@ export function changedEvidenceLines(patch: string): number[] {
   return [...new Set(lines)];
 }
 
+export interface PathAlias {
+  /** Specifier prefix; wildcard aliases stop at the `*`. */
+  prefix: string;
+  wildcard: boolean;
+  targets: string[];
+}
+
+/** tsconfig `compilerOptions.paths`, tolerating comments and trailing commas. */
+export function parseTsconfigPaths(text: string): PathAlias[] {
+  let json = '';
+  for (let i = 0, quoted = false; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      json += c;
+      if (c === '\\') json += text[++i] ?? '';
+      else if (c === '"') quoted = false;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      json += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      i = text.indexOf('*/', i + 2);
+      if (i < 0) break;
+      i++;
+    } else {
+      quoted = c === '"';
+      json += c;
+    }
+  }
+  const options = (
+    JSON.parse(json.replace(/,(\s*[}\]])/g, '$1')) as {
+      compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> };
+    }
+  ).compilerOptions;
+  const baseUrl = options?.baseUrl ?? '.';
+  return Object.entries(options?.paths ?? {}).map(([key, targets]) => ({
+    prefix: key.replace(/\*$/, ''),
+    wildcard: key.endsWith('*'),
+    targets: targets.map((target) => posix.normalize(posix.join(baseUrl, target))),
+  }));
+}
+
+const IMPORT_SUFFIXES = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mts',
+  '.cts',
+  '/index.ts',
+  '/index.tsx',
+  '/index.js',
+];
+
+/** Only tracked paths resolve, so an alias in a PR's tsconfig cannot point reads outside the repo. */
 export function resolveEvidenceImport(
   path: string,
   specifier: string,
   paths: Set<string>,
+  aliases: PathAlias[] = [],
 ): string | undefined {
-  if (!specifier.startsWith('.')) return undefined;
-  const base = posix.normalize(posix.join(posix.dirname(path), specifier));
-  const stem = base.replace(/\.[cm]?js$/, '');
-  return [
-    base,
-    ...['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '/index.ts', '/index.tsx', '/index.js'].map(
-      (ext) => stem + ext,
-    ),
-  ].find((p) => paths.has(p));
+  const bases = specifier.startsWith('.')
+    ? [posix.normalize(posix.join(posix.dirname(path), specifier))]
+    : aliases.flatMap(({ prefix, wildcard, targets }) =>
+        wildcard
+          ? specifier.startsWith(prefix)
+            ? targets.map((target) => target.replace('*', specifier.slice(prefix.length)))
+            : []
+          : specifier === prefix
+            ? targets
+            : [],
+      );
+  for (const base of bases) {
+    const stem = base.replace(/\.[cm]?js$/, '');
+    const hit = [base, ...IMPORT_SUFFIXES.map((suffix) => stem + suffix)].find((p) => paths.has(p));
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 export function evidenceMode(value: string | undefined): JevPrefetchMode {
