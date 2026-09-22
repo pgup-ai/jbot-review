@@ -132,3 +132,17 @@ test('a source the provider cannot deliver makes the pack partial', async () => 
   assert.equal(pack.state, 'partial');
   assert.match(pack.text, /- 1 item\(s\) not collected before the pack deadline/);
 });
+
+test('used definitions follow imports, path aliases, re-exports and injected services', async () => {
+  const pack = await buildContextPack(PAGE, CHANGED, provider(), 64 * 1024);
+  assert.match(
+    pack.text,
+    /### Definitions used by the change\n\n#### apps\/api\/src\/format\.ts:1-3 \(formatId\)\n1: export function formatId/,
+  );
+  assert.match(
+    pack.text,
+    /#### libs\/ledger\/src\/ledger\.repository\.ts:2-4 \(LedgerRepository\.save\)\n2: {3}save\(id: string\) \{/,
+  );
+  // Task 9 adds caller symbols to the same set, so check membership only.
+  assert.ok(pack.supplied.symbols.has('formatId') && pack.supplied.symbols.has('save'));
+});

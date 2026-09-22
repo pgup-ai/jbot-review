@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import {
   changedEvidenceLines,
+  resolveEvidenceImport,
   type DeclarationKind,
   type PathAlias,
   type RichSourceIndex,
@@ -29,6 +30,8 @@ const ENCLOSING = new Set<DeclarationKind>([
   'property',
   'type',
 ]);
+const MAX_REEXPORT_HOPS = 3;
+const FUNCTION_LIKE = new Set<DeclarationKind>(['function', 'method', 'constructor']);
 
 export interface PackSource {
   lines: string[];
@@ -53,6 +56,8 @@ export interface ContextPack {
 }
 
 type Lines = Map<string, Set<number>>;
+type Declaration = RichSourceIndex['declarations'][number];
+type Located = { path: string; symbol: string; owner?: string };
 
 class PackReader {
   readonly sources = new Map<string, PackSource | undefined>();
@@ -80,6 +85,7 @@ const range = (start: number, end: number) =>
   Array.from({ length: Math.max(0, end - start + 1) }, (_, i) => start + i);
 const qualified = (d: { symbol: string; owner?: string }) =>
   d.owner ? `${d.owner}.${d.symbol}` : d.symbol;
+const packageOf = (path: string) => path.split('/').slice(0, 2).join('/');
 
 /** New-side lines the page's hunks already show. */
 function diffLines(patch: string): Set<number> {
@@ -206,6 +212,175 @@ function surroundingEntries(
   return entries;
 }
 
+/** First line of a declaration that is not a decorator. */
+function signatureLine(source: PackSource, d: { start: number; end: number }): number {
+  for (let line = d.start; line <= d.end; line++)
+    if (!source.lines[line - 1]?.trim().startsWith('@')) return line;
+  return d.start;
+}
+
+/** A module-level declaration: not a member and not local to a function. */
+function topLevel(index: RichSourceIndex, symbol: string): Declaration | undefined {
+  return index.declarations.find(
+    (d) =>
+      !d.owner &&
+      d.symbol === symbol &&
+      !index.declarations.some(
+        (o) => o !== d && FUNCTION_LIKE.has(o.kind) && o.start <= d.start && d.end <= o.end,
+      ),
+  );
+}
+
+/** Follows re-exports from `path` to the module that declares `symbol`. */
+async function exported(
+  reader: PackReader,
+  path: string,
+  symbol: string,
+  hops = 0,
+): Promise<Located | undefined> {
+  const source = await reader.load(path);
+  if (!source) return undefined;
+  if (topLevel(source.index, symbol)) return { path, symbol };
+  if (hops >= MAX_REEXPORT_HOPS) return undefined;
+  for (const next of source.index.reexports) {
+    if (next.exported !== symbol && next.exported !== '*') continue;
+    const target = resolveEvidenceImport(
+      path,
+      next.from,
+      reader.provider.tracked,
+      reader.provider.aliases,
+    );
+    const found =
+      target &&
+      (await exported(reader, target, next.exported === '*' ? symbol : next.imported, hops + 1));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** Where `symbol`, as written in `path`, is declared: in that file or through a named import. */
+async function declaredFrom(
+  reader: PackReader,
+  path: string,
+  source: PackSource,
+  symbol: string,
+): Promise<Located | undefined> {
+  if (topLevel(source.index, symbol)) return { path, symbol };
+  const binding = source.index.imports.find((i) => i.local === symbol);
+  if (!binding || binding.imported === '*' || binding.imported === 'default') return undefined;
+  const target = resolveEvidenceImport(
+    path,
+    binding.from,
+    reader.provider.tracked,
+    reader.provider.aliases,
+  );
+  return target ? exported(reader, target, binding.imported) : undefined;
+}
+
+function definitionLines(source: PackSource, d: Declaration): number[] {
+  if (d.kind === 'class') {
+    const header =
+      source.lines.findIndex((text, i) => i >= d.start - 1 && text.includes(`class ${d.symbol}`)) +
+      1;
+    return [
+      ...range(d.start, Math.max(d.start, header)),
+      ...source.index.declarations
+        .filter((m) => m.owner === d.symbol)
+        .map((m) => signatureLine(source, m)),
+    ];
+  }
+  if (d.kind === 'type') return range(d.start, Math.min(d.end, d.start + 59));
+  if (d.kind === 'variable' || d.kind === 'property')
+    return range(d.start, Math.min(d.end, d.start + 9));
+  return range(d.start, d.end - d.start < 40 ? d.end : d.start + 19);
+}
+
+/** Definitions the changed lines use, via imports, aliases, re-exports and injected members. */
+async function definitionEntries(
+  files: PrFile[],
+  reader: PackReader,
+  diff: Lines,
+  shown: Lines,
+): Promise<ContextPackEntry[]> {
+  const wanted = new Map<string, Located & { from: string; uses: number }>();
+  const want = (found: Located | undefined, from: string) => {
+    if (!found) return;
+    const key = `${found.path}\0${qualified(found)}`;
+    wanted.set(key, { ...found, from, uses: (wanted.get(key)?.uses ?? 0) + 1 });
+  };
+  for (const file of files) {
+    const source = reader.sources.get(file.filename);
+    if (!source || !file.patch) continue;
+    const changed = new Set(changedEvidenceLines(file.patch));
+    const { declarations, uses, memberCalls, injected } = source.index;
+    for (const use of uses) {
+      if (!changed.has(use.line)) continue;
+      const scope = innermost(
+        declarations.filter((d) => FUNCTION_LIKE.has(d.kind)),
+        use.line,
+      );
+      // Locals of the enclosing function are already in the surrounding code.
+      if (
+        scope &&
+        declarations.some(
+          (d) => d.symbol === use.symbol && scope.start < d.start && d.end <= scope.end,
+        )
+      )
+        continue;
+      want(await declaredFrom(reader, file.filename, source, use.symbol), file.filename);
+    }
+    for (const call of memberCalls) {
+      if (!changed.has(call.line)) continue;
+      if (!call.target) {
+        const owner = innermost(
+          declarations.filter((d) => d.kind === 'class'),
+          call.line,
+        )?.symbol;
+        if (owner && declarations.some((d) => d.owner === owner && d.symbol === call.member))
+          want({ path: file.filename, symbol: call.member, owner }, file.filename);
+        continue;
+      }
+      const type = injected.find((i) => i.name === call.target)?.type;
+      const found = type ? await declaredFrom(reader, file.filename, source, type) : undefined;
+      const target = found && (await reader.load(found.path));
+      if (
+        found &&
+        target?.index.declarations.some((d) => d.owner === found.symbol && d.symbol === call.member)
+      )
+        want({ path: found.path, symbol: call.member, owner: found.symbol }, file.filename);
+    }
+  }
+  const ranked = [...wanted.values()].sort(
+    (a, b) =>
+      b.uses - a.uses ||
+      Number(packageOf(b.path) === packageOf(b.from)) -
+        Number(packageOf(a.path) === packageOf(a.from)) ||
+      a.path.localeCompare(b.path),
+  );
+  const entries: ContextPackEntry[] = [];
+  for (const found of ranked) {
+    const source = await reader.load(found.path);
+    // Overloads and accessors declare a member more than once; the widest is the implementation.
+    const declaration = source?.index.declarations
+      .filter((d) => d.symbol === found.symbol && d.owner === found.owner)
+      .sort((a, b) => b.end - b.start - (a.end - a.start))[0];
+    if (!source || !declaration) continue;
+    const hidden = shown.get(found.path);
+    const item = entry(
+      'definitions',
+      found.path,
+      source,
+      definitionLines(source, declaration).filter((line) => !hidden?.has(line)),
+      qualified(declaration),
+      { end: declaration.end, inDiff: diff.get(found.path) },
+    );
+    if (!item) continue;
+    entries.push(item);
+    markShown(shown, item);
+  }
+  return entries;
+}
+
 /** Each changed file's directory: its tracked files and immediate subdirectories. */
 function directoryEntries(
   files: PrFile[],
@@ -242,7 +417,12 @@ export async function buildContextPack(
   const diff: Lines = new Map(files.map((file) => [file.filename, diffLines(file.patch ?? '')]));
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
   const surrounding = surroundingEntries(files, reader, diff, shown);
-  const ordered = [...surrounding, ...directoryEntries(files, changed, provider.tracked)];
+  const definitions = await definitionEntries(files, reader, diff, shown);
+  const ordered = [
+    ...surrounding,
+    ...definitions,
+    ...directoryEntries(files, changed, provider.tracked),
+  ];
   const kept: ContextPackEntry[] = [];
   const omitted: ContextPackEntry[] = [];
   const render = () =>
