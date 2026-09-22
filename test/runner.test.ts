@@ -1513,6 +1513,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
 
 it('never launches a staggered lens that was abandoned while it waited', async () => {
   const calls: string[] = [];
+  const queued: string[] = [];
   const backend = {
     name: 'fake',
     runReview: async (
@@ -1536,6 +1537,7 @@ it('never launches a staggered lens that was abandoned while it waited', async (
         lensKeys: ['interactions'],
         launchDelayMs: () => 5,
         isAbandoned,
+        onQueued: (label) => queued.push(label),
         log: () => {},
       }),
     );
@@ -1543,8 +1545,10 @@ it('never launches a staggered lens that was abandoned while it waited', async (
   // outlive the abandonment that already recorded the lens as failed.
   assert.deepEqual(await start(() => true), [[]]);
   assert.deepEqual(calls, []);
+  assert.deepEqual(queued, ['review-interactions']);
   assert.deepEqual(await start(() => false), [[]]);
   assert.deepEqual(calls, ['review-interactions']);
+  assert.deepEqual(queued, ['review-interactions', 'review-interactions']);
 });
 
 it('records a lens that wrapped up on its own deadline as partial coverage', async () => {

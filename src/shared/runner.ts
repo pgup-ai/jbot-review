@@ -1144,6 +1144,7 @@ async function runReviewPipeline(params: {
   // terminal state: the abort settles the underlying promise promptly, whose
   // own catch handler would otherwise append a second, conflicting row.
   const abandonedAuxLabels = new Set<string>();
+  let auxiliaryStopped = false;
   const completedAuxFindings = new Map<string, Finding[]>();
   const collectAuxFindings = (label: string, findings: Finding[]) => {
     if (abandonedAuxLabels.has(label)) return;
@@ -2881,7 +2882,7 @@ async function runReviewPipeline(params: {
     const addressedPriorCheck = trackAux(
       'addressed-prior-comments',
       bookkeepingReady.then(() =>
-        abandonedAuxLabels.has('addressed-prior-comments')
+        auxiliaryStopped || abandonedAuxLabels.has('addressed-prior-comments')
           ? []
           : startAddressedPriorCommentsCheck({
               backend: auxBackend,
@@ -2961,7 +2962,8 @@ async function runReviewPipeline(params: {
           enabled:
             shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
             auxSessionsEnabled,
-          isAbandoned: () => abandonedAuxLabels.has('changes-since-last-review'),
+          isAbandoned: () =>
+            auxiliaryStopped || abandonedAuxLabels.has('changes-since-last-review'),
           timeoutMs: finderTimeoutMs,
           log,
           onTokenUsage: recordTokenUsage,
@@ -3675,6 +3677,7 @@ async function runReviewPipeline(params: {
     postingDone();
     finishTelemetry('completed');
   } finally {
+    auxiliaryStopped = true;
     const teardownDone = phases.start({ phase: 'teardown', scope: 'run' });
     let teardownCompleted = false;
     try {
