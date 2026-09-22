@@ -757,7 +757,7 @@ test('resolves tsconfig path aliases to tracked files only', () => {
     resolveEvidenceImport(from, '@app/shared/utils/money', overlappingTracked, overlapping),
     'libs/shared/src/utils/money.ts',
   );
-  assert.deepEqual(parseTsconfigPaths('﻿{}'), []);
+  assert.deepEqual(parseTsconfigPaths('\uFEFF{}'), []);
   const many = Object.fromEntries(
     Array.from({ length: 300 }, (_, i) => [
       `@a${i}/*`,

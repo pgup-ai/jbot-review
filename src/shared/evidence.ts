@@ -269,7 +269,7 @@ export interface PathAlias {
 
 /** tsconfig `compilerOptions.paths`, tolerating a leading BOM, comments and trailing commas. */
 export function parseTsconfigPaths(text: string): PathAlias[] {
-  const source = text.replace(/^﻿/, '');
+  const source = text.replace(/^\uFEFF/, '');
   let json = '';
   for (let i = 0, quoted = false; i < source.length; i++) {
     const c = source[i];
