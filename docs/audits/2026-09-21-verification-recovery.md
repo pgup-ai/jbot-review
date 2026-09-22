@@ -45,8 +45,12 @@ Earlier tool-less tests rejected MiMo Free and Muse Free requests. Switching to 
 paid recovery model worked but added configuration and changed billing. That
 design and the later free-model exclusion have both been removed.
 
-All 1,119 tests passed, along with typecheck, lint and build. Four added tests
+All 1,120 tests passed, along with typecheck, lint and build. Five added tests
 cover recovery history/permissions, completed-judgment preservation, timeout
-interruption, fail-open behavior, and expiry during fork setup. The quality corpus
+interruption, fail-open behavior, expiry during setup, short budgets and settled-without-message recovery. The quality corpus
 was skipped as previously requested; these checks do not establish general recall
 or precision. Raw local results remain under `.jbot-review/mimo-verification/`.
+
+After review fixes, a MiMo Free interrupted-session replay returned all three
+expected verdicts in 15.1s, including 10.0s in native recovery. Recovery failure
+logs include the model and error; initial session setup now shares the deadline.

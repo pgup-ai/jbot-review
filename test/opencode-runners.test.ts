@@ -219,6 +219,7 @@ describe('auxiliary runners on V2', () => {
 describe('runFindingVerification on V2', () => {
   it('recovers unusable output once in a native read-only fork without replacing completed judgments', async () => {
     for (const first of [
+      '',
       '{}',
       '{"verdicts":[{"index":0,"verdict":"refuted","reason":"already checked"}]}',
     ]) {
@@ -238,7 +239,7 @@ describe('runFindingVerification on V2', () => {
       );
       assert.deepEqual(
         result?.map((v) => v.verdict),
-        [first === '{}' ? 'uncertain' : 'refuted', 'uncertain'],
+        [first === '' || first === '{}' ? 'uncertain' : 'refuted', 'uncertain'],
       );
       const [main, repair] = [...fake.sessions.values()];
       assert.equal(repair.forkedFrom, main.id);
@@ -250,56 +251,110 @@ describe('runFindingVerification on V2', () => {
     }
   });
 
-  it('interrupts a timed-out verifier before recovering its collected evidence', async (t) => {
-    const fake = fakeOpencodeServer((session) =>
-      session.forkedFrom
-        ? { text: '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"}]}' }
-        : {
-            hang: true,
-            tools: [{ name: 'read', input: { filePath: 'a.ts' }, output: 'collected source' }],
-          },
-    );
-    const wait = fake.client.session.wait.bind(fake.client.session);
-    let calls = 0;
-    t.mock.method(fake.client.session, 'wait', (...args) => {
-      if (++calls === 1)
-        throw new Error('opencode finding-verification prompt did not finish within 240s');
-      return wait(...args);
-    });
-    const rt = runtime(fake);
-    const result = await runFindingVerification(
-      rt,
-      'opencode/mimo-v2.6-flash-free',
-      'ctx',
-      [finding],
-      log,
-      300_000,
-    );
-    const [main, repair] = [...fake.sessions.values()];
-    assert.equal(main.interrupted, 1);
-    assert.match(JSON.stringify(repair.messages), /collected source/);
-    assert.equal(result?.[0].verdict, 'uncertain');
-  });
-
-  it('preserves partial verdicts on recovery failure and skips recovery without a deadline', async () => {
-    for (const mode of ['no-deadline', 'recovery']) {
+  it('interrupts an incomplete verifier before recovering its collected evidence', async (t) => {
+    for (const failure of [
+      'did not finish within 240s',
+      'settled without a completed assistant message',
+    ]) {
       const fake = fakeOpencodeServer((session) =>
         session.forkedFrom
-          ? { error: 'recovery unavailable' }
-          : { text: '{"verdicts":[{"index":0,"verdict":"refuted","reason":"checked"}]}' },
+          ? { text: '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"}]}' }
+          : {
+              hang: true,
+              tools: [{ name: 'read', input: { filePath: 'a.ts' }, output: 'collected source' }],
+            },
       );
+      const wait = fake.client.session.wait.bind(fake.client.session);
+      let calls = 0;
+      t.mock.method(fake.client.session, 'wait', (...args) => {
+        if (++calls === 1) throw new Error(`opencode finding-verification prompt ${failure}`);
+        return wait(...args);
+      });
       const rt = runtime(fake);
       const result = await runFindingVerification(
         rt,
         'opencode/mimo-v2.6-flash-free',
         'ctx',
-        [finding, finding],
+        [finding],
         log,
+        300_000,
+      );
+      const [main, repair] = [...fake.sessions.values()];
+      assert.equal(main.interrupted, 1);
+      assert.match(JSON.stringify(repair.messages), /collected source/);
+      assert.equal(result?.[0].verdict, 'uncertain');
+    }
+  });
+
+  it('honors short budgets during setup and before recovery', async (t) => {
+    for (const phase of ['setup', 'near-deadline', 'recovery']) {
+      let now = 100_000;
+      t.mock.method(Date, 'now', () => now);
+      const logs: string[] = [];
+      const fake = fakeOpencodeServer(() => {
+        if (phase === 'near-deadline') now += 4_500;
+        return { text: '{}' };
+      });
+      const create = fake.client.session.create.bind(fake.client.session);
+      t.mock.method(fake.client.session, 'create', async (...args) => {
+        const session = await create(...args);
+        if (phase === 'setup') now += 5_000;
+        return session;
+      });
+      const run = runFindingVerification(
+        runtime(fake),
+        'opencode/mimo-v2.6-flash-free',
+        'ctx',
+        [finding],
+        (message) => logs.push(message),
+        5_000,
+      );
+      if (phase === 'setup') {
+        await assert.rejects(run, /Session setup budget exhausted/);
+        assert.equal(fake.calls.length, 1);
+      } else {
+        assert.equal(await run, undefined);
+        assert.equal(fake.prompts.length, phase === 'recovery' ? 2 : 1);
+        if (phase === 'recovery') assert.match(logs.join('\n'), /remainingMs=5000/);
+      }
+    }
+  });
+
+  it('preserves partial verdicts on recovery failure and skips recovery without a deadline', async () => {
+    for (const mode of ['no-deadline', 'recovery', 'empty', 'no-verdicts']) {
+      const fake = fakeOpencodeServer((session) =>
+        session.forkedFrom
+          ? mode === 'empty' || mode === 'no-verdicts'
+            ? { text: '{}' }
+            : { error: 'recovery unavailable' }
+          : {
+              text:
+                mode === 'no-verdicts'
+                  ? '{}'
+                  : '{"verdicts":[{"index":0,"verdict":"refuted","reason":"checked"}]}',
+            },
+      );
+      const rt = runtime(fake);
+      const logs: string[] = [];
+      const result = await runFindingVerification(
+        rt,
+        'opencode/mimo-v2.6-flash-free',
+        'ctx',
+        [finding, finding],
+        (message) => logs.push(message),
         mode === 'no-deadline' ? undefined : 300_000,
       );
-      assert.equal(result?.length, 1);
-      assert.equal(result?.[0].verdict, 'refuted');
-      assert.equal(fake.prompts.length, mode === 'recovery' ? 2 : 1);
+      if (mode === 'no-verdicts') assert.equal(result, undefined);
+      else {
+        assert.equal(result?.length, 1);
+        assert.equal(result?.[0].verdict, 'refuted');
+      }
+      assert.equal(fake.prompts.length, mode === 'no-deadline' ? 1 : 2);
+      if (mode === 'recovery')
+        assert.match(
+          logs.join('\n'),
+          /recovery failed: model=opencode\/mimo-v2.6-flash-free .*recovery unavailable/,
+        );
     }
     const denied = fakeOpencodeServer(() => ({ error: 'usage limit' }));
     await assert.rejects(

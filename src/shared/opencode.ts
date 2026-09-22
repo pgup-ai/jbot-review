@@ -449,6 +449,7 @@ export async function runFindingVerification(
   const sessionID = await createReviewSession(runtime, {
     model,
     label: 'finding-verification',
+    deadline,
     tier: modelOptions ? 'verify' : 'main',
     forkFrom,
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
@@ -471,7 +472,12 @@ export async function runFindingVerification(
     verdicts = parseFindingVerdicts(raw, findings.length, log);
     if (verdicts?.length === findings.length) return verdicts;
   } catch (error) {
-    if (!(error instanceof Error) || !/prompt did not finish within \d+s/.test(error.message))
+    if (
+      !(error instanceof Error) ||
+      !/^opencode finding-verification prompt (?:did not finish within \d+s|settled without a completed assistant message)$/.test(
+        error.message,
+      )
+    )
       throw error;
     failure = error;
   }
@@ -513,7 +519,7 @@ export async function runFindingVerification(
     return completed.size ? [...completed.values()] : undefined;
   } catch (error) {
     log(
-      `Finding verification recovery failed after ${Date.now() - started}ms; preserving existing verdicts.`,
+      `Finding verification recovery failed: model=${model} elapsedMs=${Date.now() - started} error=${error instanceof Error ? error.message : String(error)}; preserving existing verdicts.`,
     );
     if (verdicts?.length) return verdicts;
     throw failure ?? error;
