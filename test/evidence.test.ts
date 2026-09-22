@@ -611,6 +611,11 @@ test('indexes decorated NestJS sources and generic arrows in .ts files', () => {
   assert.ok(
     indexEvidenceSource('view.tsx', 'export const View = () => <div />;').definitions.length,
   );
+  const dto = indexEvidenceSource(
+    'query.dto.ts',
+    "export class QueryDto {\n  @Transform(trim)\n  ['status.in']?: string[];\n}",
+  );
+  assert.ok(dto.definitions.some((d) => d.symbol === 'QueryDto'));
 });
 
 test('rich index records members, types, re-exports, injected services and this-member calls', () => {

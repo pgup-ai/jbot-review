@@ -1,4 +1,4 @@
-import { parse } from '@babel/parser';
+import { parse, type ParserPlugin } from '@babel/parser';
 import { execFile } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -81,6 +81,22 @@ const TYPE_DECLARATION = new Set([
   'TSTypeAliasDeclaration',
   'TSEnumDeclaration',
 ]);
+
+/** NestJS parameter decorators need the legacy plugin; only the modern one reads a decorated computed key. */
+function parseSource(path: string, text: string) {
+  // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
+  const plugins: ParserPlugin[] = /\.[cm]?ts$/i.test(path) ? ['typescript'] : ['typescript', 'jsx'];
+  const options = (decorators: ParserPlugin) => ({
+    sourceType: 'unambiguous' as const,
+    plugins: [...plugins, decorators],
+    attachComment: false,
+  });
+  try {
+    return parse(text, options('decorators-legacy'));
+  } catch {
+    return parse(text, options('decorators'));
+  }
+}
 
 export function indexEvidenceSource(path: string, text: string): SourceIndex;
 export function indexEvidenceSource(
@@ -208,16 +224,7 @@ export function indexEvidenceSource(
     }
   }
   if (JS_SOURCE.test(path)) {
-    const tree = parse(text, {
-      sourceType: 'unambiguous',
-      // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
-      // decorators-legacy (not the stage-3 "decorators" plugin) is required: NestJS-style
-      // parameter decorators (e.g. constructor(@Inject(TOKEN) ...)) only parse under the legacy proposal.
-      plugins: /\.[cm]?ts$/i.test(path)
-        ? ['typescript', 'decorators-legacy']
-        : ['typescript', 'jsx', 'decorators-legacy'],
-      attachComment: false,
-    });
+    const tree = parseSource(path, text);
     walk(tree as unknown as Ast);
   }
   if (options.rich) return result;
