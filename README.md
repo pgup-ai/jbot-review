@@ -1370,7 +1370,23 @@ conservative fallback budget.
 Guideline selection uses the full PR's changed paths. Explicitly scoped `.mdc`
 rules that do not match are excluded; global rules and unknown scopes remain.
 Use the existing `.pr-governance/review/rules-for-diff.yaml` to prioritize relevant
-governance sections. No additional routing file or flag is needed. Logs report
+governance sections. A `docs` entry can select an exact Markdown heading with
+`path.md#Heading title` (case-sensitive, including its child sections):
+
+```yaml
+entries:
+  - name: backend
+    paths: ['src/**']
+    docs: ['AGENTS.md#Code hygiene', 'docs/backend.md#API contracts']
+```
+
+Matched headings from the same file are combined. A whole-file entry wins over
+section entries; mixing named headings with numbered-rule routes also keeps the
+whole file. A missing or ambiguous heading falls back to the whole file.
+Omitted sections are disclosed. Files without a matched section route retain
+normal discovery, and all guideline byte limits still apply.
+
+No additional routing file or flag is needed. Logs report
 scope exclusions, guideline parts, prompt bytes, and page completion. The existing
 guideline discovery limits and omission notices still apply.
 
@@ -1389,8 +1405,11 @@ queued pages. With `time-budget-minutes: 0`, there is no post-main cutoff.
 Auxiliary pages prioritize higher-risk code using the same path ranking as diff
 context. Findings from completed pages survive a deadline, and unfinished coverage
 is reported. Main review still covers every hunk.
-OpenCode and Pi can request a tool-free wrap-up near a session's own deadline
+OpenCode and Pi can request a wrap-up near a session's own deadline
 when the reserved fifth of its budget leaves at least 45 seconds for the response.
+OpenCode keeps native read-only tools available for model compatibility while
+asking for a final answer without further investigation; Pi's wrap-up is tool-free.
+The remaining deadline still bounds the turn. Repair and formatting remain tool-less.
 Completed auxiliary findings remain eligible for verification. A partial main
 page fails the run before posting; it is never cached as a completed review.
 Deadlines also apply while queued. Coverage logs record any cutoff or failure.

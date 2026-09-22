@@ -381,3 +381,51 @@ describe('rendered guideline block byte caps', () => {
     }
   });
 });
+
+it('routes named headings before references, preserves unmatched guidance and falls back on bad selectors', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'jbot-heading-routes-'));
+  try {
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    writeFileSync(
+      join(root, 'AGENTS.md'),
+      '# Guide\n## Build\nDEVELOPER_ONLY [setup](setup.md)\n## Rules\nREVIEW_RULE\n### Nested\nNESTED_RULE\n## Style\nSTYLE_RULE',
+    );
+    writeFileSync(join(root, 'setup.md'), 'SETUP_ONLY');
+    writeFileSync(join(root, 'REVIEW.md'), 'GLOBAL_RULE');
+    symlinkSync(join(root, 'AGENTS.md'), join(root, 'alias.md'));
+    const route = (docs: string[]) =>
+      writeFileSync(
+        join(root, '.pr-governance/review/rules-for-diff.yaml'),
+        `entries:\n  - name: source\n    paths: ["src/**"]\n    docs: ${JSON.stringify(docs)}\n`,
+      );
+    route(['AGENTS.md#Rules', 'alias.md#Style']);
+    const scoped = formatGuidelines(await discoverGuidelineDocs(root, ['src/a.ts']));
+    assert.match(scoped, /REVIEW_RULE/);
+    assert.match(scoped, /NESTED_RULE/);
+    assert.match(scoped, /STYLE_RULE/);
+    assert.match(scoped, /GLOBAL_RULE/);
+    assert.match(scoped, /other text omitted/);
+    assert.doesNotMatch(scoped, /DEVELOPER_ONLY|SETUP_ONLY/);
+    const unmatched = formatGuidelines(await discoverGuidelineDocs(root, ['docs/a.md']));
+    assert.match(unmatched, /DEVELOPER_ONLY/);
+    assert.match(unmatched, /SETUP_ONLY/);
+    for (const docs of [['AGENTS.md#Missing'], ['AGENTS.md#Rules', 'alias.md']]) {
+      route(docs);
+      assert.match(
+        formatGuidelines(await discoverGuidelineDocs(root, ['src/a.ts'])),
+        /DEVELOPER_ONLY/,
+      );
+    }
+    writeFileSync(join(root, '.pr-governance/README.md'), '- `R-<n>` maps to `../AGENTS.md`');
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      'entries:\n  - name: mixed\n    paths: ["src/**"]\n    docs: ["AGENTS.md#Rules"]\n    rules: [R-1]\n',
+    );
+    assert.match(
+      formatGuidelines(await discoverGuidelineDocs(root, ['src/a.ts'])),
+      /DEVELOPER_ONLY/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -61,6 +61,26 @@ export interface GuidelineDoc {
   globs?: string[];
 }
 
+export function selectGuidelineSections(text: string, titles: string[]): string | undefined {
+  const lines = text.split('\n');
+  const headings = markdownHeadings(lines);
+  const included = new Set<number>();
+  for (const title of titles) {
+    const matches = headings.filter((heading) => heading.title === title);
+    if (matches.length !== 1) return undefined;
+    const heading = matches[0];
+    const end =
+      headings.find((next) => next.line > heading.line && next.level <= heading.level)?.line ??
+      lines.length;
+    for (let line = heading.line; line < end; line++) included.add(line);
+  }
+  const omitted = headings.filter((heading) => !included.has(heading.line)).map((h) => h.title);
+  return [
+    lines.filter((_, line) => included.has(line)).join('\n'),
+    `[Only routed sections loaded; other text omitted: ${boundedJoin(omitted, MAX_OMISSION_NOTE_BYTES)}.]`,
+  ].join('\n\n');
+}
+
 /**
  * Cursor `.mdc` frontmatter: the one discovered-guideline source that declares
  * its own path scope. Returns the effective globs — empty for `alwaysApply`
@@ -737,6 +757,7 @@ export async function discoverGuidelineDocs(
   const docs: GuidelineDoc[] = [];
   const seen = new Set<string>();
   const seenRealPaths = new Set<string>();
+  const routedSections = new Map<string, string[]>();
   const referencedDocs = new Map<string, string>();
   const workspaceRoot = await realpath(cwd);
   let remainingCandidateBytes = MAX_GUIDELINE_CANDIDATE_BYTES;
@@ -818,7 +839,26 @@ export async function discoverGuidelineDocs(
     if (!resolved) return undefined;
     if (seen.has(resolved.absolutePath) || seenRealPaths.has(resolved.realPath)) return undefined;
     try {
-      const text = await readBoundedGuidelineFile(resolved.realPath);
+      let text: string | undefined;
+      const sections = routedSections.get(resolved.realPath);
+      if (sections?.length) {
+        const source = await readWholeBounded(resolved.realPath);
+        const selected = !source.truncated && selectGuidelineSections(source.text, sections);
+        if (selected) {
+          const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingCandidateBytes);
+          const notice = '\n[Selected guidance truncated to fit the byte budget.]';
+          if (cap < Buffer.byteLength(notice)) {
+            markBudgetExhausted();
+            return undefined;
+          }
+          text =
+            Buffer.byteLength(selected) <= cap
+              ? selected
+              : truncateUtf8(selected, cap - Buffer.byteLength(notice)) + notice;
+          remainingCandidateBytes -= Buffer.byteLength(text);
+        }
+      }
+      text ??= await readBoundedGuidelineFile(resolved.realPath);
       if (!text) return undefined;
       const trimmed = text.trim();
       if (!trimmed) return undefined;
@@ -1081,19 +1121,36 @@ export async function discoverGuidelineDocs(
       const readmeText = await readGovernanceFile('README.md');
       const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
       const wholeDocRealPaths = new Set<string>();
+      const routedDocs = new Set<string>();
       for (const doc of matched.docs) {
-        const resolved = await resolveExistingInsideWorkspace(resolve(cwd, doc));
-        if (resolved) wholeDocRealPaths.add(resolved.realPath);
+        const hash = doc.indexOf('#');
+        const path = hash < 0 ? doc : doc.slice(0, hash);
+        const title = hash < 0 ? '' : doc.slice(hash + 1);
+        const resolved = await resolveExistingInsideWorkspace(resolve(cwd, path));
+        if (!resolved) continue;
+        routedDocs.add(path);
+        if (!title) wholeDocRealPaths.add(resolved.realPath);
+        else
+          routedSections.set(resolved.realPath, [
+            ...(routedSections.get(resolved.realPath) ?? []),
+            title,
+          ]);
       }
+      for (const path of wholeDocRealPaths) routedSections.delete(path);
       const sectionsByDoc = new Map<string, string[]>();
       for (const id of matched.ruleIds) {
         const parsed = splitRuleId(id);
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
         if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
       }
+      // Mixed heading and numbered-rule routes keep the whole file so neither loses rules.
+      for (const doc of sectionsByDoc.keys()) {
+        const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, doc));
+        if (resolved) routedSections.delete(resolved.realPath);
+      }
       // `docs:` outranks section extraction of the same real path (including
       // symlinks) and loads first so section candidates cannot consume its budget.
-      for (const doc of [...matched.docs].sort())
+      for (const doc of [...routedDocs].sort())
         await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
       for (const [doc, sections] of [...sectionsByDoc].sort(([a], [b]) => a.localeCompare(b))) {
         const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, doc));

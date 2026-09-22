@@ -3,7 +3,6 @@ import {
   withReviewBaseline,
   type ReviewBaseline,
 } from './incremental-review.ts';
-import { buildIncrementalReviewContext } from './prompt.ts';
 import { NativeEvidenceStore } from './native-evidence.ts';
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
@@ -154,6 +153,7 @@ import {
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
+  buildIncrementalReviewContext,
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   GUIDELINE_REVIEW_LENS,

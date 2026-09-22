@@ -94,7 +94,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
    escapes the env allowlist), the jbot plugin's `context` hook (removes
    write/edit/patch/apply_patch/multiedit/question/subagent/task from every
-   request and every tool for the wrap-up and single-shot agents), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
+   request and every tool for the single-shot agent; wrap-up retains native
+   read-only tools for model compatibility), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
    the server child so the reviewed repo's committed `.opencode/` (plugins,
    config) never loads — that code runs at server start OUTSIDE the tool
    sandbox. Sessions are hermetic on both sides: the operator's global config

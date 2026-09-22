@@ -1,0 +1,10 @@
+entries:
+  - name: review-contracts
+    paths: ['**']
+    docs:
+      [
+        'AGENTS.md#Invariants — do not break these',
+        'AGENTS.md#Review-quality gate',
+        'AGENTS.md#Conventions',
+        'AGENTS.md#Code hygiene',
+      ]

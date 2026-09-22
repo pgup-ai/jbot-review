@@ -32,7 +32,7 @@ export function reviewBaseline(body: string): ReviewBaseline | undefined {
     if (row.head === head && /^[a-f0-9]{40}$/.test(row.base) && /^[a-f0-9]{64}$/.test(row.policy))
       return row;
   } catch {
-    /* An invalid baseline requires a full review. */
+    return undefined;
   }
 }
 

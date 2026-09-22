@@ -315,41 +315,50 @@ describe('promptInSession', () => {
     assert.equal(fake.sessions.get(id)!.interrupted, 1);
   });
 
-  it('interrupts on timeout when no wrap-up is possible', async () => {
-    const fake = fakeOpencodeServer(() => ({
-      hang: true,
-      tools: [{ name: 'read', input: { path: 'guard.ts' } }],
-    }));
-    const rt = runtime(fake);
-    const recorder = createTelemetryRecorder(true);
-    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
-    const usage: object[] = [];
-    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
-    await assert.rejects(
-      promptInSession(rt, id, {
+  it('interrupts ordinary and wrap-up turns at their deadline without a nested wrap-up', async () => {
+    for (const agent of ['plan', 'jbot-wrapup']) {
+      const fake = fakeOpencodeServer(() => ({
+        hang: true,
+        tools: [{ name: 'read', input: { path: 'guard.ts' } }],
+      }));
+      const rt = runtime(fake);
+      const recorder = createTelemetryRecorder(true);
+      configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+      const usage: object[] = [];
+      const id = await createReviewSession(rt, {
+        label: 'review',
         model: 'openai/gpt-5',
-        text: 'x',
-        label: 'verify',
-        timeoutMs: 100,
-        log,
-        onTokenUsage: (row) => usage.push(row),
-      }),
-      /did not finish within/,
-    );
-    assert.equal(fake.sessions.get(id)!.interrupted, 1);
-    const row = recorder
-      .toJsonl()
-      .split('\n')
-      .map((line) => JSON.parse(line))
-      .find((row) => row.kind === 'exploration');
-    assert.equal(row.toolCalls, 1);
-    assert.equal(row.stopReason, 'failed');
-    assert.equal((usage[0] as { input: number }).input, 10);
+        agent,
+      });
+      await assert.rejects(
+        promptInSession(rt, id, {
+          model: 'openai/gpt-5',
+          text: 'x',
+          label: 'verify',
+          timeoutMs: 100,
+          outcome: agent === 'jbot-wrapup' ? { wrappedUp: false } : undefined,
+          wrapUpReserveMs: 90,
+          log,
+          onTokenUsage: (row) => usage.push(row),
+        }),
+        /did not finish within/,
+      );
+      assert.equal(fake.sessions.get(id)!.interrupted, 1);
+      assert.equal(fake.prompts.length, 1);
+      const row = recorder
+        .toJsonl()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .find((row) => row.kind === 'exploration');
+      assert.equal(row.toolCalls, 1);
+      assert.equal(row.stopReason, 'failed');
+      assert.equal((usage[0] as { input: number }).input, 10);
+    }
   });
 });
 
 describe('wrap-up capability', () => {
-  it('follows the agent: every tool-bearing turn can be finalized, a tool-less one never reserves', async () => {
+  it('follows the agent: review turns can be finalized, a tool-less one never reserves', async () => {
     const fake = fakeOpencodeServer((session) =>
       session.agent === 'jbot-wrapup' ? { text: 'done' } : { hang: true },
     );
