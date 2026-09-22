@@ -514,8 +514,9 @@ async function callerEntries(
     let excerpts = 0;
     for (const hit of callers) {
       const hidden = shown.get(hit.path);
+      // An earlier excerpt may already show this call.
       if (hidden?.has(hit.line)) continue;
-      if (excerpts === CALLERS_PER_SYMBOL) {
+      if (excerpts >= CALLERS_PER_SYMBOL) {
         rest.push(`${hit.path}:${hit.line}`);
         continue;
       }
