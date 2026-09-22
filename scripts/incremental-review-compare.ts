@@ -103,10 +103,13 @@ async function review(name: string, incremental: boolean, priorReview?: string) 
     baseRef: base,
     baseSha: base,
     headSha: git('rev-parse', 'HEAD'),
-    localDiff: { files: filesAtHead(), commits: [], priorReview },
+    localDiff: {
+      files: filesAtHead(),
+      commits: [],
+      priorReview: incremental ? priorReview : undefined,
+    },
     options: {
       dryRun: true,
-      incrementalReview: incremental,
       sdkEngine: 'opencode',
       reviewPasses: 2,
       dynamicFanout: true,

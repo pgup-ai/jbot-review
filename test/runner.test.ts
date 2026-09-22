@@ -1159,8 +1159,6 @@ describe('normalizeOptions defaults', () => {
     const defaults = normalizeOptions(undefined);
     assert.equal(defaults.guidelineWiden, 'auto');
     assert.equal(defaults.dynamicFanout, true);
-    assert.equal(defaults.incrementalReview, false);
-    assert.equal(normalizeOptions({ incrementalReview: true }).incrementalReview, true);
     assert.equal(defaults.verifierSlimContext, false);
     assert.equal(defaults.verifyOverlapGrace, false);
     assert.equal(defaults.sharedPrefixPrompt, false);

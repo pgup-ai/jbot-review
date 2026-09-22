@@ -918,7 +918,6 @@ export interface ReviewRunOptions {
    * deduped, so extra passes raise recall at roughly one session each.
    */
   reviewPasses?: number;
-  incrementalReview?: boolean;
   /** Adversarially verify blocking findings before posting (precision gate). */
   verifyFindings?: boolean;
   /**
@@ -1532,19 +1531,18 @@ async function runReviewPipeline(params: {
     title: pullTitle,
     body: pullBody,
     reviewer: runIdentity(process.env).reviewerRevision,
-    configuration: runConfiguration({ ...options, incrementalReview: false }, model)
-      .configurationHash,
+    configuration: runConfiguration(options, model).configurationHash,
   });
   const scopeStartedAt = Date.now();
   const reviewScope = await planIncrementalReview({
     workspace,
     files,
-    enabled: options.incrementalReview,
     head: headSha,
     base: baseSha,
     policy: scopePolicy,
     priorBody: localDiff?.priorReview ?? priorJbotReviewGroups.at(-1)?.body,
     forceFull:
+      !options.skipUnchanged ||
       options.autoApprove ||
       !priorThreadStateKnown ||
       allPriorJbotThreads.some((thread) => !thread.isResolved) ||
@@ -3734,7 +3732,6 @@ export function normalizeOptions(
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),
-    incrementalReview: options?.incrementalReview ?? false,
     verifyFindings: options?.verifyFindings ?? true,
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),

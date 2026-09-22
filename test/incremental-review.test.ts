@@ -114,7 +114,6 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     const input = {
       workspace,
       files,
-      enabled: true,
       head,
       base,
       policy,
@@ -127,7 +126,6 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ['core/limit.ts', 'worker/job.ts'],
     );
     for (const [overrides, reason] of [
-      [{ enabled: false }, 'disabled'],
       [{ forceFull: true }, 'explicit-or-incomplete-review'],
       [{ priorBody: '' }, 'no-completed-baseline'],
       [{ base: head }, 'base-changed'],

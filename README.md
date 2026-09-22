@@ -393,7 +393,7 @@ the review itself is unaffected._
 | ------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auto-approve`            | `false`            | Approve the exact reviewed head when the run produces no findings before display filters, all prior jbot threads are resolved, and GitHub reports the PR open, non-draft, and mergeable. Existing same-head jbot approvals are not duplicated. GitHub branch protection still decides whether the PR can merge.                                                                                                                                                                                                                                                                                                                                             |
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                         |
+| `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                                   |
 | `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain candidates remain in diagnostics and are withheld from PR comments.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `review-shards`           | `1`                | Initial file groups: `1`, `0` for automatic grouping, or `N`. Oversized groups and files are automatically paged against the full prompt budget. Every page must complete; additional pages wait under the session concurrency limit.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). See [review scheduling](#review-scheduling) for finder deadlines, verification reserves and incomplete coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -405,12 +405,11 @@ the review itself is unaffected._
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
 
-Incremental follow-ups are experimental and off by default. Set
-`incremental-review: true` on the Action (or `JBOT_INCREMENTAL_REVIEW=true` in the
-webhook app); set it back to `false` to restore full reviews. The dogfood workflow
-reads `vars.JBOT_INCREMENTAL_REVIEW`. The public `jbot-review-action` wrapper must
-mirror the new input before production workflows can use it. Dynamic fan-out is
-already enabled by default.
+Follow-up reviews automatically select affected files when a completed baseline
+and the impact checks allow it. No new input or environment variable is needed.
+The first review and uncertain follow-ups use full review. Dynamic fan-out is
+already enabled by default. An explicit review request or the existing
+`skip-unchanged: false` setting forces full review.
 
 A follow-up can reuse the last posted, completed review when its base, model,
 guidelines and review settings still match. The first version handles small
@@ -1318,7 +1317,8 @@ labelled; absent usage remains unavailable. Progress contains metadata only.
 CommandCode's generic exploration row has unavailable tool counts; use the
 `commandcode-progress.toolOutcomes` counts to assess its tool activity.
 
-Re-runs select candidate lenses from the complete PR diff. A prior reviewed-head
+Candidate lenses use the selected review scope: the full PR on a full review,
+or the affected files on an incremental follow-up. A prior reviewed-head
 marker never suppresses an auxiliary pass: it does not prove that pass completed.
 The unchanged-diff shortcut requires an explicit completion footer on the latest
 posted review; older and incomplete reports rerun conservatively.
@@ -1330,7 +1330,7 @@ soon as main review returns; new auxiliary findings receive a later verification
 batch. Other consumers can select the same environment settings.
 
 `review-interactions` investigates cross-file regressions and inconsistent
-contracts across the full PR diff. `addressed-prior-comments` separately checks
+contracts across the selected scope and relevant callers. `addressed-prior-comments` separately checks
 whether old findings have been fixed; deterministic checks control thread
 resolution and review compaction. All recall lenses use focused
 prompts with the shared evidence, severity, and output rules. They retain the
@@ -1432,7 +1432,7 @@ reviews stay deterministic and bounded.
   deployment-config changes.
 
 The playbooks narrow attention, not scope: every selected reviewer still covers
-the complete PR diff and must report only concrete, code-grounded findings.
+all assigned diff content and must report only concrete, code-grounded findings.
 
 ## Project structure
 

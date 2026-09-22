@@ -4,9 +4,9 @@ Date: 2026-09-22. Model: `opencode/mimo-v2.6-flash-free`, native OpenCode 2.0.5.
 
 ## Decision
 
-Keep incremental follow-ups opt-in. The small matched comparison preserved both seeded root causes and reduced average wall time, but the cross-file case was slower in two of three pairs. This is evidence for a canary, not a production default change.
+Follow-up reviews automatically select incremental scope when the baseline and impact checks pass, as requested. The small matched comparison preserved both seeded root causes and reduced average wall time, but the cross-file case was slower in two of three pairs. This does not establish a universal speedup or production recall.
 
-Dynamic fan-out remains enabled by default. The new `incremental-review` input defaults to `false`; the app equivalent is `JBOT_INCREMENTAL_REVIEW`. Explicit reruns and auto-approval always use full review.
+Dynamic fan-out remains enabled by default. No new Action input, environment variable or runner option is needed. First reviews, explicit reruns, auto-approval and the existing `skip-unchanged: false` setting use full review.
 
 ## Method
 
@@ -46,7 +46,7 @@ This first implementation accepts only bounded modifications to existing JavaScr
 
 Reports identify incremental scope and file counts. A separate completion marker prevents existing full-review skip and compaction paths from treating incremental coverage as full coverage. Run telemetry includes the baseline, reason, selected/total files and patch bytes, and planning time. Incomplete or unverified results cannot become a baseline. Quiet clean reviews leave the last posted baseline in place, so the next review includes intervening commits.
 
-This is a small synthetic follow-up experiment, not the full quality corpus or a production FMS performance benchmark. The advisory corpus was not run; the production default remains full review. The public `jbot-review-action` wrapper needs the new input mirrored before a production canary.
+This is a small synthetic follow-up experiment, not the full quality corpus or a production FMS performance benchmark. The full quality corpus was not run, following the earlier request to defer it; the repository normally requires that gate for default-policy changes. The matched runs below are narrower evidence, not a substitute for that gate. No public Action wrapper change is needed.
 
 ## Reproduce
 
@@ -84,3 +84,25 @@ remaining comment blocks were adjudicated: three kept for non-obvious fallback
 reasons, one cut. Three new tests were kept: baseline/marker provenance, aliased
 cross-file impact, and real-Git fallback behavior. Defaults and report rendering
 assertions were added to existing cases.
+
+## Automatic-default smoke test
+
+After removing the toggle, a fresh full baseline completed in 84.5s. The native
+MiMo runs used the same model/settings as above, with no incremental option:
+
+| Case            | Full review                                                                      | Automatic incremental review                      |
+| --------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Cross-file bug  | Main timed out at 135.0s; auxiliary found the bug, but mandatory coverage failed | 29.0s; 2/8 files selected; bug found and verified |
+| Clean follow-up | 82.5s; 8/8 files; zero findings                                                  | 30.2s; 1/8 files; zero findings                   |
+
+Both incremental runs completed all assigned hunks with no incomplete sessions
+or withheld candidates. The failed control is not counted as a successful latency
+comparison. No timeout or model setting was changed for the continuation.
+Artifacts: `.jbot-review/incremental-default-smoke/` and
+`.jbot-review/incremental-default-continue/`.
+
+All 1,123 tests and typecheck/lint/build passed again. De-slop removed the toggle
+from Action, environment, workflow, app, runner and telemetry configuration;
+those configuration files now match main. No test cases or code comments were
+added in this follow-up. The removed toggle assertions describe a contract that
+no longer exists; baseline selection and fallback assertions remain.

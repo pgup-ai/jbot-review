@@ -126,7 +126,6 @@ export function impactedReviewFiles(
 export async function planIncrementalReview(input: {
   workspace: string;
   files: PrFile[];
-  enabled: boolean;
   head?: string;
   base?: string;
   policy: string;
@@ -139,7 +138,6 @@ export async function planIncrementalReview(input: {
     reason,
     files: input.files,
   });
-  if (!input.enabled) return full('disabled');
   if (input.forceFull) return full('explicit-or-incomplete-review');
   const baseline = reviewBaseline(input.priorBody ?? '');
   if (!baseline) return full('no-completed-baseline');

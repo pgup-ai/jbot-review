@@ -62,9 +62,6 @@ async function main(): Promise<void> {
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
     reviewPasses: parseNumberInput('review-passes', 1),
-    incrementalReview:
-      parseBooleanInput('incremental-review', false) &&
-      ['pull_request', 'pull_request_target'].includes(github.context.eventName),
     verifyFindings: parseBooleanInput('verify-findings', true),
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
     reviewShards: parseNumberInput('review-shards', 1),
