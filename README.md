@@ -405,6 +405,14 @@ the review itself is unaffected._
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
 
+CommandCode MiMo v2.6 Flash, Pro and Pro UltraSpeed have no adjustable reasoning
+effort in CLI 1.62.0 or 1.62.1. J-Bot omits `--effort` and logs `effort=not-configurable`;
+the global low default does not control these models. Other models without a
+mapped effort log `effort=cli-default`.
+Xiaomi's [Responses API documentation](https://mimo.mi.com/docs/en-US/api/chat/responses)
+accepts effort labels but says all non-`none` levels enable thinking with the same
+behavior; setting `low` there does not select a lower reasoning budget.
+
 Incomplete auxiliary passes are named in the review report, including reruns with
 no findings. These runs retain findings from completed passes but do not receive
 an automatic approval or review-done reaction. CommandCode cancellation stops its

@@ -169,13 +169,8 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   return args;
 }
 
-// Probed on CLI 1.53.0 (2026-09-11; v4-flash 2026-08-22): `--effort` validates
-// per model and exits nonzero on values outside the model's set; longcat has
-// no adjustable effort. Ladders match the `reasoningEfforts` arrays baked into
-// the pinned CLI bundle. Unflagged, v4.1-flash reasons like `high` (~2× its
-// `low` output) and v4-flash-fast like `low`; `fallback` is where a built-in
-// default the model lacks lands: the lowest tier, because a tool-less review
-// gains nothing from deeper reasoning (v4-flash has no `low`, so `high`).
+// The CLI rejects efforts outside its model catalog. Unsupported built-in
+// defaults use the lowest supported tier; empty tiers mean no effort control.
 const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fallback?: string }> = {
   'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], fallback: 'high' },
   'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
@@ -185,6 +180,10 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
   'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'qwen/qwen3.8-omni-flash': { tiers: ['low', 'medium', 'xhigh'] },
+  // CLI 1.62.0 exposes no adjustable effort for MiMo v2.6.
+  'xiaomi/mimo-v2.6-flash': { tiers: [] },
+  'xiaomi/mimo-v2.6-pro': { tiers: [] },
+  'xiaomi/mimo-v2.6-pro-ultraspeed': { tiers: [] },
   'z-ai/glm-5.3-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
   'z-ai/glm-5.3-flashx': { tiers: ['low', 'high', 'max'], fallback: 'low' },
   'zai-org/glm-5.3': { tiers: ['low', 'high', 'max'], fallback: 'low' },
@@ -719,9 +718,12 @@ async function runCommandCodePrompt(
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
       : withNoToolsReviewDirective(prompt);
-  log(
-    `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
-  );
+  const effortLabel =
+    effort ??
+    (COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers.length === 0
+      ? 'not-configurable'
+      : 'cli-default');
+  log(`Calling ${label} prompt (agent=commandcode-cli, model=${model}, effort=${effortLabel})`);
   let usage: PromptTokenUsage | undefined;
   const progress = createCommandCodeProgress();
   let complete = false;
