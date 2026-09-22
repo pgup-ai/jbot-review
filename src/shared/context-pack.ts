@@ -45,7 +45,10 @@ export interface PackSource {
   index: RichSourceIndex;
 }
 
-/** Bounded, tracked-only head reads for one page. A rejection counts as an uncollected item. */
+/**
+ * Bounded, tracked-only head reads for one page; any rejection counts as an uncollected item.
+ * `load` rejects at the deadline or the page's file or byte cap; an unusable file gives undefined.
+ */
 export interface PackSourceProvider {
   tracked: Set<string>;
   aliases: PathAlias[];
@@ -300,11 +303,12 @@ async function declaredFrom(
 function definitionLines(source: PackSource, d: Declaration): number[] {
   if (d.kind === 'class') {
     const header =
-      source.lines.findIndex((text, i) => i >= d.start - 1 && text.includes(`class ${d.symbol}`)) +
-      1;
+      source.lines.findIndex(
+        (text, i) => i >= d.start - 1 && i < d.end && text.includes(`class ${d.symbol}`),
+      ) + 1;
     // A wrapped `extends` or `implements` runs on to the opening brace.
     let open = Math.max(d.start, header);
-    const last = open + 4;
+    const last = Math.min(open + 4, d.end);
     while (open < last && !source.lines[open - 1].includes('{')) open++;
     return [
       ...range(d.start, open),
@@ -493,21 +497,25 @@ async function callerEntries(
 ): Promise<ContextPackEntry[]> {
   const entries: ContextPackEntry[] = [];
   for (const target of changedSymbols(files, reader)) {
-    // Rank a copy of the cached hits before capping, so the most useful are kept and load first.
-    const hits = [
-      ...(target.owner
-        ? await memberReferences(reader, target)
-        : await reader.references(target.symbol)),
-    ]
+    const pkg = packageOf(target.path);
+    // Rank before capping, so the most useful hits are kept and load first.
+    const hits = (
+      target.owner ? await memberReferences(reader, target) : await reader.references(target.symbol)
+    )
+      .map((hit) => ({
+        hit,
+        test: PATH_PATTERNS.tests.test(hit.path),
+        near: packageOf(hit.path) === pkg,
+      }))
       .sort(
         (a, b) =>
-          Number(PATH_PATTERNS.tests.test(a.path)) - Number(PATH_PATTERNS.tests.test(b.path)) ||
-          Number(packageOf(b.path) === packageOf(target.path)) -
-            Number(packageOf(a.path) === packageOf(target.path)) ||
-          a.path.localeCompare(b.path) ||
-          a.line - b.line,
+          Number(a.test) - Number(b.test) ||
+          Number(b.near) - Number(a.near) ||
+          a.hit.path.localeCompare(b.hit.path) ||
+          a.hit.line - b.hit.line,
       )
-      .slice(0, MAX_REFERENCES);
+      .slice(0, MAX_REFERENCES)
+      .map(({ hit }) => hit);
     const callers: { path: string; line: number }[] = [];
     const unverified: string[] = [];
     for (const hit of hits) {
