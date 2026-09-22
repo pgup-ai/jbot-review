@@ -73,3 +73,36 @@ export function reviewReadLocations(
   }
   return locations.slice(0, 64);
 }
+
+/** What a page's context pack delivered: line ranges by path, symbols, and listed directories. */
+export interface SuppliedContext {
+  ranges: Map<string, [number, number][]>;
+  symbols: Set<string>;
+  directories: Set<string>;
+}
+
+/** Whether a tool call re-reads or re-searches what the session's context pack already supplied. */
+export function suppliedOverlap(
+  workspace: string,
+  tool: string,
+  input: Record<string, unknown>,
+  supplied: SuppliedContext,
+): 'read' | 'search' | false {
+  for (const location of reviewReadLocations(workspace, tool, input))
+    if (
+      supplied.ranges
+        .get(location.path)
+        ?.some(([start, end]) => location.line <= end && location.endLine >= start)
+    )
+      return 'read';
+  const query =
+    tool === 'grep' || tool === 'search'
+      ? input.pattern
+      : ['shell', 'bash'].includes(tool) && /\b(?:grep|rg)\b/.test(String(input.command))
+        ? input.command
+        : undefined;
+  return typeof query === 'string' &&
+    (query.match(/[A-Za-z_$][\w$]{2,}/g) ?? []).some((token) => supplied.symbols.has(token))
+    ? 'search'
+    : false;
+}

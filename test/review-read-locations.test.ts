@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewReadLocations } from '../src/shared/review-read-locations.ts';
+import { reviewReadLocations, suppliedOverlap } from '../src/shared/review-read-locations.ts';
 
 test('literal shell reads preserve their directory and range without evaluating shell syntax', () => {
   const reads = (command: string, extra = {}) =>
@@ -45,4 +45,27 @@ test('literal shell reads preserve their directory and range without evaluating 
     'cat a.ts && git diff',
   ])
     assert.deepEqual(reads(command), [], command);
+});
+
+test('supplied overlap separates re-reads and searches of context-pack content', () => {
+  const supplied = {
+    ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
+    symbols: new Set(['LedgerService']),
+    directories: new Set<string>(),
+  };
+  const read = (input: Record<string, unknown>) => suppliedOverlap('/w', 'read', input, supplied);
+  assert.equal(read({ filePath: '/w/src/a.ts', offset: 10, limit: 5 }), 'read');
+  assert.equal(read({ filePath: '/w/src/a.ts', offset: 1, limit: 5 }), false);
+  assert.equal(
+    suppliedOverlap('/w', 'grep', { pattern: 'LedgerService|other' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'grep -rn LedgerService src' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'sed -n 15,16p src/a.ts' }, supplied),
+    'read',
+  );
 });
