@@ -4898,7 +4898,7 @@ function startAddressedPriorCommentsCheck(params: {
  * Fail-open: any failure (git, backend, parse) resolves to '' so the block is
  * simply omitted. Enabled only on a re-review with a real delta.
  */
-function startChangesSinceLastReviewSummary(params: {
+export function startChangesSinceLastReviewSummary(params: {
   backend: ReviewBackend;
   model: string;
   workspace: string;
@@ -4912,6 +4912,7 @@ function startChangesSinceLastReviewSummary(params: {
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
 }): Promise<string> {
+  if (params.isAbandoned()) return Promise.resolve('');
   const session = 'changes-since-last-review';
   if (!params.enabled || !params.reviewedHead || !params.headSha) {
     params.onCoverage?.({ session, state: 'skipped' });

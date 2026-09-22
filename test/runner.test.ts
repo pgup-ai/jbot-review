@@ -26,6 +26,7 @@ import {
   normalizeOptions,
   startLensPasses,
   startGuidelineComplianceCheck,
+  startChangesSinceLastReviewSummary,
   renderReviewMetadataBlock,
   settleWithinGrace,
   takeSettledAuxiliary,
@@ -1956,6 +1957,38 @@ it('binds confirmation quotes to each candidate and only its delivered evidence'
       ['confirmed', oversized ? 'uncertain' : 'confirmed', 'uncertain', 'uncertain'],
     );
   }
+});
+
+it('does not prepare or report a summary released after abandonment', async () => {
+  const events: string[] = [];
+  let abandoned = false;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const summary = ready.then(() =>
+    startChangesSinceLastReviewSummary({
+      backend: {
+        runChangesSinceLastReview: async () => {
+          events.push('model');
+          return 'summary';
+        },
+      } as unknown as ReviewBackend,
+      model: 'fake/model',
+      workspace: '/nonexistent/jbot-summary-fixture',
+      embedDiff: true,
+      reviewedHead: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      enabled: true,
+      isAbandoned: () => abandoned,
+      log: (message) => events.push(message),
+      onCoverage: () => events.push('coverage'),
+    }),
+  );
+  abandoned = true;
+  release();
+  assert.equal(await summary, '');
+  assert.deepEqual(events, []);
 });
 
 it('queues finder pages before bookkeeping without waiting for finder results', async () => {
