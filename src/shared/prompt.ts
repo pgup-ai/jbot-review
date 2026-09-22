@@ -731,7 +731,7 @@ export interface ContextPackEntry {
 const CONTEXT_PACK_NOTE = `## Context pack
 
 These excerpts were read before this review started: code around the changes on
-this page, the definitions those lines use, and import-linked call sites of the
+this page, the definitions the changes use, and import-linked call sites of the
 changed symbols. They cover only the ranges shown; anything not shown, including
 Omitted items, has not been read. Treat the shown ranges as already read and do
 not re-read them. Line numbers match the new side of the diff. Callers are
@@ -747,7 +747,6 @@ const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
 
 const CONTEXT_PACK_OMITTED_BYTES = 2048;
 
-/** An item's displayed line span: rows may stop before a truncated `end`. Shared by the header and the Omitted list so they always agree. */
 function contextPackSpan(item: ContextPackEntry): [first: number, last: number] {
   const first = item.rows[0][0];
   return [first, Math.max(item.rows.at(-1)![0], item.end ?? 0)];
@@ -782,19 +781,17 @@ export function formatContextPackItem(item: ContextPackEntry): string {
   return lines.join('\n');
 }
 
-/** Adds whole Omitted-list entries while the section stays within budget, then folds the rest into one final line — no mid-entry truncation. */
+/** Whole entries only, so a cut never leaves a partial path or range. */
 function formatOmittedList(entries: string[]): string {
   const lines = ['### Omitted'];
   let bytes = Buffer.byteLength(lines[0], 'utf8');
-  let shown = 0;
   for (const entry of entries) {
     const size = Buffer.byteLength(entry, 'utf8') + 1;
     if (bytes + size > CONTEXT_PACK_OMITTED_BYTES) break;
     lines.push(entry);
     bytes += size;
-    shown += 1;
   }
-  const remaining = entries.length - shown;
+  const remaining = entries.length - (lines.length - 1);
   if (remaining > 0) lines.push(`- +${remaining} more`);
   return lines.join('\n');
 }
@@ -810,7 +807,7 @@ export function formatContextPack(pack: {
       ? [[CONTEXT_PACK_TITLES[slice], ...items.map(formatContextPackItem)].join('\n\n')]
       : [];
   });
-  // The uncollected count goes first so the budget above can never cut it.
+  // The uncollected count goes first so the Omitted cap never drops it.
   const omitted = [
     ...(pack.uncollected
       ? [`- ${pack.uncollected} item(s) not collected before the pack deadline`]
@@ -1419,7 +1416,7 @@ export function assembleReviewPrompt(
      * reminder stays last (invariant #5).
      */
     contextFirst?: boolean;
-    /** JBOT_REVIEW_EXPERIMENT=context-pack main pages; implies the embedded-first base and overrides embeddedFirstPrompt=false (lens prompts ignore it). */
+    /** context-pack main pages; overrides embeddedFirstPrompt=false. Lens prompts ignore it. */
     contextPack?: boolean;
   } = {},
 ): string {

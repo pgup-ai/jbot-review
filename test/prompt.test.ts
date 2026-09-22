@@ -970,7 +970,6 @@ describe('context pack prompt', () => {
     assert.match(pack, /^## Context pack/);
     assert.match(pack, /do\s+not re-read them/);
     assert.match(pack, /not evidence that none\s+exist/);
-    // The uncollected count goes first, so it survives the Omitted cap below.
     assert.match(
       pack,
       /### Omitted\n- 1 item\(s\) not collected before the pack deadline\n- b\.ts:9-9 \(callers\)/,

@@ -81,13 +81,13 @@ export interface SuppliedContext {
   ranges: Map<string, [number, number][]>;
   symbols: Set<string>;
   directories: Set<string>;
+  /** Line counts of the files in ranges. */
+  lines: Map<string, number>;
 }
 
 /**
- * The pattern argument of the first `grep`, `rg`, or `git grep` command word in a
- * shell command: the argument after `-e`, or the first non-option word after the
- * command word. Matching the exact word "grep" (never a `--grep=...` flag) means
- * `git log --grep` is never mistaken for a search.
+ * The pattern of the first grep, rg or git grep in a shell command
+ * (`git log --grep` is not one).
  */
 function shellSearchPattern(command: string): string | undefined {
   const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(
@@ -97,15 +97,17 @@ function shellSearchPattern(command: string): string | undefined {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
     for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
+      if (/^(?:\|\|?|&&|;)$/.test(tokens[j])) break;
       if (tokens[j] === '-e') return tokens[j + 1];
-      if (!tokens[j].startsWith('-')) return tokens[j];
+      // These flags take a value, which is not the pattern.
+      if (/^-[ABCmtgf]$|^--(?:include|exclude|glob|type)$/.test(tokens[j])) j++;
+      else if (!tokens[j].startsWith('-')) return tokens[j];
     }
-    return undefined;
   }
   return undefined;
 }
 
-/** Identifier tokens (3+ chars) in a search pattern; collapses `\X` escapes first so `\bFoo\b` still yields `Foo`. */
+/** Identifiers in a pattern; escapes are blanked so `\bFoo\b` yields `Foo`. */
 function searchTokens(pattern: string): string[] {
   return pattern.replace(/\\[\s\S]/g, ' ').match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
 }
@@ -118,18 +120,19 @@ export function suppliedOverlap(
   supplied: SuppliedContext,
 ): 'read' | 'search' | false {
   for (const location of reviewReadLocations(workspace, tool, input)) {
-    // Whole-file reads (endLine at MAX) and default 2000-line reads of a mostly
-    // unsupplied file must not count merely for touching a supplied line.
-    const size = location.endLine - location.line + 1;
-    if (size > 2000) continue;
-    const ranges = supplied.ranges.get(location.path) ?? [];
+    const ranges = supplied.ranges.get(location.path);
+    const total = supplied.lines.get(location.path);
+    // Clamp whole-file and default-window reads to the file, so only mostly-supplied reads count.
+    const last = Math.min(location.endLine, total ?? 0);
+    if (!ranges || last < location.line) continue;
     let covered = 0;
-    for (let line = location.line; line <= location.endLine; line++)
+    for (let line = location.line; line <= last; line++)
       if (ranges.some(([start, end]) => line >= start && line <= end)) covered++;
-    if (covered * 2 >= size) return 'read';
+    if (covered * 2 >= last - location.line + 1) return 'read';
   }
-  const dirInput = input.path ?? input.filePath ?? input.directory;
+  const dirInput = input.path ?? input.filePath;
   if (
+    tool === 'read' &&
     typeof dirInput === 'string' &&
     supplied.directories.has(relative(workspace, resolve(workspace, dirInput)))
   )
