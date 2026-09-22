@@ -191,10 +191,8 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
 };
 
 /**
- * The `--effort` value for a session; undefined omits the flag. The built-in
- * defaults (main medium, aux low) deliver where the model declares that tier
- * and otherwise take the entry's fallback. An explicit effort clamps to the
- * nearest declared tier (one knob: "low" means "as low as this model goes").
+ * Unknown models keep the CLI default. Unsupported built-in efforts use the
+ * catalog fallback; explicit efforts clamp to the nearest declared tier.
  */
 function commandCodeReasoningEffort(
   model: string,

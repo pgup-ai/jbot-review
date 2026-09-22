@@ -119,18 +119,12 @@ function reasoningOptions(providerID: string, effort: string): Record<string, un
 }
 
 export function defaultModelOptions(providerID: string): Record<string, unknown> {
-  return reasoningOptions(providerID, 'medium');
+  return reasoningOptions(providerID, 'low');
 }
 
 /**
- * Auxiliary sessions are recall supplements that land on the tail of the run,
- * and these models spend most of their output budget reasoning — one lens was
- * observed emitting 15,762 reasoning tokens and 53 of content, producing
- * nothing while costing minutes. They get a lower effort than the deep pass.
- *
- * Reaches an aux session only when it runs a model of its own: options are
- * scoped per model id, so an aux model that IS the main model shares its entry
- * and its effort.
+ * Options are scoped per model id: auxiliary sessions using the main model
+ * share its effort, including explicit overrides.
  */
 export function defaultAuxModelOptions(providerID: string): Record<string, unknown> {
   return reasoningOptions(providerID, 'low');
