@@ -48,8 +48,8 @@ export interface PackSourceProvider {
   tracked: Set<string>;
   aliases: PathAlias[];
   load(path: string): Promise<PackSource | undefined>;
-  /** Word matches as path and 1-based line. */
-  references(symbol: string): Promise<{ path: string; line: number }[]>;
+  /** Word matches as path and 1-based line; `paths` limits the search to those files. */
+  references(symbol: string, paths?: string[]): Promise<{ path: string; line: number }[]>;
 }
 
 export interface ContextPack {
@@ -66,6 +66,7 @@ type Located = { path: string; symbol: string; owner?: string };
 
 class PackReader {
   readonly sources = new Map<string, PackSource | undefined>();
+  private readonly matches = new Map<string, Promise<{ path: string; line: number }[]>>();
   failures = 0;
 
   constructor(readonly provider: PackSourceProvider) {}
@@ -81,11 +82,17 @@ class PackReader {
     return this.sources.get(path);
   }
 
-  references(symbol: string): Promise<{ path: string; line: number }[]> {
-    return this.provider.references(symbol).catch(() => {
-      this.failures++;
-      return [];
-    });
+  references(symbol: string, paths?: string[]): Promise<{ path: string; line: number }[]> {
+    const key = [symbol, ...(paths ?? [])].join('\0');
+    if (!this.matches.has(key))
+      this.matches.set(
+        key,
+        this.provider.references(symbol, paths).catch(() => {
+          this.failures++;
+          return [];
+        }),
+      );
+    return this.matches.get(key)!;
   }
 }
 
@@ -173,12 +180,10 @@ function surroundingEntries(
     if (!source || !file.patch) continue;
     const changed = changedEvidenceLines(file.patch);
     const { declarations, callbacks } = source.index;
+    const enclosing = declarations.filter((d) => ENCLOSING.has(d.kind));
     const ranges: { start: number; end: number; label: string }[] = [];
     for (const line of changed) {
-      const named = innermost(
-        declarations.filter((d) => ENCLOSING.has(d.kind)),
-        line,
-      );
+      const named = innermost(enclosing, line);
       const outer = named ?? innermost(callbacks, line);
       if (!outer) continue;
       const label = named ? qualified(named) : '';
@@ -346,40 +351,47 @@ async function definitionEntries(
     const key = `${found.path}\0${qualified(found)}`;
     wanted.set(key, { ...found, from, uses: (wanted.get(key)?.uses ?? 0) + 1 });
   };
+  // Uses repeat symbols, so each (path, symbol) resolves once.
+  const resolved = new Map<string, Promise<Located | undefined>>();
+  const declared = (path: string, source: PackSource, symbol: string) => {
+    const key = `${path}\0${symbol}`;
+    if (!resolved.has(key)) resolved.set(key, declaredFrom(reader, path, source, symbol));
+    return resolved.get(key)!;
+  };
   for (const file of files) {
     const source = reader.sources.get(file.filename);
     if (!source || !file.patch) continue;
     const changed = new Set(changedEvidenceLines(file.patch));
     const { declarations, uses, memberCalls, injected } = source.index;
+    const functions = declarations.filter((d) => FUNCTION_LIKE.has(d.kind));
+    const classes = declarations.filter((d) => d.kind === 'class');
+    const bySymbol = new Map<string, Declaration[]>();
+    for (const d of declarations) {
+      const same = bySymbol.get(d.symbol);
+      if (same) same.push(d);
+      else bySymbol.set(d.symbol, [d]);
+    }
     for (const use of uses) {
       if (!changed.has(use.line)) continue;
-      const scope = innermost(
-        declarations.filter((d) => FUNCTION_LIKE.has(d.kind)),
-        use.line,
-      );
+      const scope = innermost(functions, use.line);
       // Locals of the enclosing function are already in the surrounding code.
       if (
         scope &&
-        declarations.some(
-          (d) => d.symbol === use.symbol && scope.start < d.start && d.end <= scope.end,
-        )
+        bySymbol.get(use.symbol)?.some((d) => scope.start < d.start && d.end <= scope.end)
       )
         continue;
-      want(await declaredFrom(reader, file.filename, source, use.symbol), file.filename);
+      want(await declared(file.filename, source, use.symbol), file.filename);
     }
     for (const call of memberCalls) {
       if (!changed.has(call.line)) continue;
       if (!call.target) {
-        const owner = innermost(
-          declarations.filter((d) => d.kind === 'class'),
-          call.line,
-        )?.symbol;
-        if (owner && declarations.some((d) => d.owner === owner && d.symbol === call.member))
+        const owner = innermost(classes, call.line)?.symbol;
+        if (owner && bySymbol.get(call.member)?.some((d) => d.owner === owner))
           want({ path: file.filename, symbol: call.member, owner }, file.filename);
         continue;
       }
       const type = injected.find((i) => i.name === call.target)?.type;
-      const found = type ? await declaredFrom(reader, file.filename, source, type) : undefined;
+      const found = type ? await declared(file.filename, source, type) : undefined;
       const target = found && (await reader.load(found.path));
       if (
         found &&
@@ -489,20 +501,11 @@ async function linked(
 
 /** Member names collide often, so only files that name the class are searched. */
 async function memberReferences(reader: PackReader, target: Located) {
-  const paths = new Set([
+  const files = new Set([
     target.path,
     ...(await reader.references(target.owner!)).map((hit) => hit.path),
   ]);
-  const escaped = target.symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const word = new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`);
-  const hits: { path: string; line: number }[] = [];
-  for (const path of paths) {
-    const source = await reader.load(path);
-    source?.lines.forEach((text, i) => {
-      if (hits.length < MAX_REFERENCES && word.test(text)) hits.push({ path, line: i + 1 });
-    });
-  }
-  return hits;
+  return (await reader.references(target.symbol, [...files])).slice(0, MAX_REFERENCES);
 }
 
 async function callerEntries(
@@ -513,9 +516,19 @@ async function callerEntries(
 ): Promise<ContextPackEntry[]> {
   const entries: ContextPackEntry[] = [];
   for (const target of changedSymbols(files, reader)) {
-    const hits = target.owner
-      ? await memberReferences(reader, target)
-      : (await reader.references(target.symbol)).slice(0, MAX_REFERENCES);
+    // High-value files load first, so the provider's file cap cuts the rest.
+    const hits = (
+      target.owner
+        ? await memberReferences(reader, target)
+        : (await reader.references(target.symbol)).slice(0, MAX_REFERENCES)
+    ).sort(
+      (a, b) =>
+        Number(isTest(a.path)) - Number(isTest(b.path)) ||
+        Number(packageOf(b.path) === packageOf(target.path)) -
+          Number(packageOf(a.path) === packageOf(target.path)) ||
+        a.path.localeCompare(b.path) ||
+        a.line - b.line,
+    );
     const callers: { path: string; line: number }[] = [];
     const unverified: string[] = [];
     for (const hit of hits) {
@@ -530,14 +543,6 @@ async function callerEntries(
       if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
       else unverified.push(`${hit.path}:${hit.line}`);
     }
-    callers.sort(
-      (a, b) =>
-        Number(isTest(a.path)) - Number(isTest(b.path)) ||
-        Number(packageOf(b.path) === packageOf(target.path)) -
-          Number(packageOf(a.path) === packageOf(target.path)) ||
-        a.path.localeCompare(b.path) ||
-        a.line - b.line,
-    );
     const subject = qualified(target);
     const rest: string[] = [];
     let excerpts = 0;

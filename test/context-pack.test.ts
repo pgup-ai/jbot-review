@@ -83,14 +83,16 @@ function provider(files = REPO): PackSourceProvider {
             lines: files[path].split('\n'),
             index: indexEvidenceSource(path, files[path], { rich: true }),
           },
-    references: async (symbol) =>
-      Object.entries(files).flatMap(([path, text]) =>
-        text
-          .split('\n')
-          .flatMap((line, i) =>
-            new RegExp(`\\b${symbol}\\b`).test(line) ? [{ path, line: i + 1 }] : [],
-          ),
-      ),
+    references: async (symbol, paths) =>
+      Object.entries(files)
+        .filter(([path]) => !paths || paths.includes(path))
+        .flatMap(([path, text]) =>
+          text
+            .split('\n')
+            .flatMap((line, i) =>
+              new RegExp(`\\b${symbol}\\b`).test(line) ? [{ path, line: i + 1 }] : [],
+            ),
+        ),
   };
 }
 
@@ -130,7 +132,7 @@ test('a source the provider cannot deliver makes the pack partial', async () => 
   const failing = { ...provider(), load: async () => Promise.reject(new Error('timeout')) };
   const pack = await buildContextPack(PAGE, CHANGED, failing, 64 * 1024);
   assert.equal(pack.state, 'partial');
-  assert.match(pack.text, /- 1 item\(s\) not collected before the pack deadline/);
+  assert.match(pack.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
 });
 
 test('used definitions follow imports, path aliases, re-exports and injected services', async () => {
@@ -183,4 +185,16 @@ test('callers need an import link, and other name matches stay listed as unverif
     /#### apps\/api\/src\/ledger\.service\.ts:10-18 \(LedgerService\.post, calls formatId\)/,
   );
   assert.doesNotMatch(formatPack.text, /ledger\.service\.ts:1-/);
+  const controller = REPO['apps/api/src/ledger.controller.ts'].replace(
+    '    return',
+    '    this.service.post(id);\n'.repeat(3) + '    return',
+  );
+  const clustered = await buildContextPack(
+    PAGE,
+    CHANGED,
+    provider({ ...REPO, 'apps/api/src/ledger.controller.ts': controller }),
+    64 * 1024,
+  );
+  assert.equal(clustered.text.match(/calls LedgerService\.post\)/g)?.length, 1);
+  assert.doesNotMatch(clustered.text, /Other import-linked callers/);
 });

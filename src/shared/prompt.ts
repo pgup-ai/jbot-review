@@ -810,7 +810,7 @@ export function formatContextPack(pack: {
   // The uncollected count goes first so the Omitted cap never drops it.
   const omitted = [
     ...(pack.uncollected
-      ? [`- ${pack.uncollected} item(s) not collected before the pack deadline`]
+      ? [`- ${pack.uncollected} item(s) not collected within the pack's time and file limits`]
       : []),
     ...pack.omitted.map((item) => {
       if (item.list) return `- ${item.list.subject} (${item.slice})`;

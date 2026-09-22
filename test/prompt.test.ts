@@ -972,7 +972,7 @@ describe('context pack prompt', () => {
     assert.match(pack, /not evidence that none\s+exist/);
     assert.match(
       pack,
-      /### Omitted\n- 1 item\(s\) not collected before the pack deadline\n- b\.ts:9-9 \(callers\)/,
+      /### Omitted\n- 1 item\(s\) not collected within the pack's time and file limits\n- b\.ts:9-9 \(callers\)/,
     );
     const capped = formatContextPack({
       items: [],
