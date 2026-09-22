@@ -45,10 +45,9 @@ const FRONTEND_WORKFLOW_PATTERNS = [
   /(^|\/)(apps?\/web|ui|frontend|components?|pages?|views?|hooks?|stores?)\//i,
   // Explicit client-app roots avoid nested backend SDK/API client directories.
   /^(?:src\/|apps\/|packages\/)?client\//i,
-  // Frontend-named .ts/.tsx file. The keyword must sit at a token boundary
-  // (start, path slash, `.`, `-`, `_`) so a substring inside a larger word —
-  // `re`+`view`, `web`+`hook` — does NOT false-match in a backend repo.
-  /(^|[/._-])(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
+  // Match keyword boundaries, not "review"/"webhook". Module names such as
+  // agent-view.module.ts need a frontend path or UI extension.
+  /(^|[/._-])(?![^/]*\.module\.[cm]?[jt]s$)(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
   // React hook convention: a `useX` file is frontend even as plain `.ts`. Not
   // case-insensitive — `use[A-Z]` must stay uppercase so `user.ts` is excluded.
   /(^|\/)use[A-Z][^/]*\.[cm]?[jt]sx?$/,

@@ -131,6 +131,12 @@ describe('CommandCode CLI provider helpers', () => {
         effortOf('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }, explicit),
         undefined,
       );
+      for (const variant of ['flash', 'pro', 'pro-ultraspeed']) {
+        const model = `commandcode/xiaomi/mimo-v2.6-${variant}`;
+        const effort = effortOf(model, { reasoningEffort: 'low' }, explicit);
+        assert.equal(effort, undefined);
+        assert.ok(!buildCommandCodeCliArgs({ model, effort }).includes('--effort'));
+      }
     }
     assert.equal(effortOf(deepseek, {}), undefined);
     assert.equal(effortOf(deepseek, undefined), undefined);
