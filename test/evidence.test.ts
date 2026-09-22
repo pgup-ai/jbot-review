@@ -4,7 +4,16 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdtemp, writeFile, rm, symlink, readFile, readdir, utimes } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  writeFile,
+  rm,
+  symlink,
+  readFile,
+  readdir,
+  utimes,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -767,4 +776,40 @@ test('resolves tsconfig path aliases to tracked files only', () => {
   const capped = parseTsconfigPaths(JSON.stringify({ compilerOptions: { paths: many } }));
   assert.equal(capped.length, 256);
   assert.ok(capped.every((alias) => alias.targets.length === 8));
+});
+
+test('pack provider reads tracked head sources with tsconfig aliases and word references', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'pack-provider-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  await mkdir(join(workspace, 'libs/money/src'), { recursive: true });
+  await writeFile(
+    join(workspace, 'tsconfig.json'),
+    '{ // aliases\n "compilerOptions": { "paths": { "@app/money": ["libs/money/src"] } } }',
+  );
+  await writeFile(join(workspace, 'libs/money/src/index.ts'), "export * from './total';");
+  await writeFile(
+    join(workspace, 'libs/money/src/total.ts'),
+    'export function total(n: number) {\n  return n;\n}',
+  );
+  await writeFile(join(workspace, 'libs/money/src/broken.ts'), 'export function (');
+  await writeFile(join(workspace, 'untracked.ts'), 'export const total = 1;');
+  execFileSync('git', ['add', 'tsconfig.json', 'libs'], { cwd: workspace });
+  const provider = await new EvidenceStore(workspace, []).packProvider(AbortSignal.timeout(4000));
+  assert.deepEqual(provider.aliases, [
+    { prefix: '@app/money', wildcard: false, targets: ['libs/money/src'] },
+  ]);
+  assert.equal(
+    (await provider.load('libs/money/src/total.ts'))?.index.declarations[0]?.symbol,
+    'total',
+  );
+  assert.equal(await provider.load('untracked.ts'), undefined);
+  assert.equal(await provider.load('libs/money/src/broken.ts'), undefined);
+  assert.deepEqual(await provider.references('total'), [
+    { path: 'libs/money/src/index.ts', line: 1 },
+    { path: 'libs/money/src/total.ts', line: 1 },
+  ]);
+  assert.deepEqual(await provider.references('total', ['libs/money/src/total.ts']), [
+    { path: 'libs/money/src/total.ts', line: 1 },
+  ]);
 });

@@ -26,10 +26,12 @@ import {
   formatEvidenceCoverage,
   type JevCandidate,
 } from './prompt.ts';
+import type { PackSource, PackSourceProvider } from './context-pack.ts';
 import type { PrFile } from './github.ts';
 import type { Finding } from './types.ts';
 
 const exec = promisify(execFile);
+const PACK_SOURCE_GLOBS = ['*.ts', '*.tsx', '*.js', '*.jsx', '*.mts', '*.cts', '*.mjs', '*.cjs'];
 export const JS_SOURCE = /\.[cm]?[jt]sx?$/i;
 type Ast = {
   type: string;
@@ -442,6 +444,69 @@ export class EvidenceStore {
       if (this.observations.size >= 64) break;
       this.observations.set(`${ref.path}:${ref.line}`, ref);
     }
+  }
+
+  private packInventory?: Promise<{ tracked: Set<string>; aliases: PathAlias[] }>;
+
+  /** Head-source access for one page's context pack; inventory and aliases load once per run. */
+  async packProvider(signal: AbortSignal): Promise<PackSourceProvider> {
+    this.packInventory ??= (async () => {
+      const tracked = await this.tracked(AbortSignal.timeout(4000));
+      // Nx-style repos keep `paths` in tsconfig.base.json.
+      for (const file of ['tsconfig.json', 'tsconfig.base.json']) {
+        const config = await this.read(file, AbortSignal.timeout(1000), tracked);
+        try {
+          const aliases = config ? parseTsconfigPaths(config.text) : [];
+          if (aliases.length) return { tracked, aliases };
+        } catch {
+          // An invalid config keeps relative imports only.
+        }
+      }
+      return { tracked, aliases: [] };
+    })();
+    const { tracked, aliases } = await waitForEvidence(this.packInventory, signal);
+    let files = 0;
+    let bytes = 0;
+    return {
+      tracked,
+      aliases,
+      load: async (path): Promise<PackSource | undefined> => {
+        signal.throwIfAborted();
+        if (!JS_SOURCE.test(path)) return undefined;
+        // A cap miss counts as uncollected, like a deadline miss.
+        if (files >= 64 || bytes >= 2 * 1024 * 1024) throw new Error('context pack file cap');
+        const source = await this.read(path, signal, tracked);
+        // The tracked reader swallows aborts, so a deadline surfaces here as a rejection.
+        signal.throwIfAborted();
+        // A file cut at the read cap cannot be parsed or cited by line.
+        if (!source || source.truncated) return undefined;
+        files++;
+        bytes += Buffer.byteLength(source.text);
+        let index: RichSourceIndex;
+        try {
+          index = indexEvidenceSource(path, source.text, { rich: true });
+        } catch {
+          // Syntax Babel rejects is a missing source, not a missed deadline.
+          return undefined;
+        }
+        return { lines: source.text.split(/\r?\n/), index };
+      },
+      references: async (symbol, paths) => {
+        const scope = paths?.map((path) => `:(literal)${path}`) ?? PACK_SOURCE_GLOBS;
+        const { stdout } = await exec(
+          'git',
+          ['grep', '-n', '-w', '-F', '-e', symbol, '--', ...scope],
+          { cwd: this.workspace, signal, maxBuffer: 4 * 1024 * 1024 },
+        ).catch((error) => {
+          if (error.code === 1) return { stdout: '' };
+          throw error;
+        });
+        return stdout.split('\n').flatMap((row) => {
+          const match = /^(.+?):(\d+):/.exec(row);
+          return match ? [{ path: match[1], line: Number(match[2]) }] : [];
+        });
+      },
+    };
   }
 
   private async tracked(signal: AbortSignal): Promise<Set<string>> {
