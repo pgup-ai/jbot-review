@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+import { extractChangedExportedSymbols } from './blast-radius.ts';
 import {
   changedEvidenceLines,
   resolveEvidenceImport,
@@ -32,6 +33,10 @@ const ENCLOSING = new Set<DeclarationKind>([
 ]);
 const MAX_REEXPORT_HOPS = 3;
 const FUNCTION_LIKE = new Set<DeclarationKind>(['function', 'method', 'constructor']);
+const MAX_CHANGED_SYMBOLS = 20;
+const CALLERS_PER_SYMBOL = 3;
+const CALLER_CONTEXT_LINES = 4;
+const MAX_REFERENCES = 50;
 
 export interface PackSource {
   lines: string[];
@@ -75,6 +80,13 @@ class PackReader {
     }
     return this.sources.get(path);
   }
+
+  references(symbol: string): Promise<{ path: string; line: number }[]> {
+    return this.provider.references(symbol).catch(() => {
+      this.failures++;
+      return [];
+    });
+  }
 }
 
 const within = (span: { start: number; end: number }, line: number) =>
@@ -86,6 +98,8 @@ const range = (start: number, end: number) =>
 const qualified = (d: { symbol: string; owner?: string }) =>
   d.owner ? `${d.owner}.${d.symbol}` : d.symbol;
 const packageOf = (path: string) => path.split('/').slice(0, 2).join('/');
+const isTest = (path: string) =>
+  /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec|e2e-spec)\./.test(path);
 
 /** New-side lines the page's hunks already show. */
 function diffLines(patch: string): Set<number> {
@@ -381,6 +395,144 @@ async function definitionEntries(
   return entries;
 }
 
+/** Declarations the page changes that other code can call, heaviest change first. */
+function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?: Declaration })[] {
+  const found = new Map<string, Located & { span?: Declaration; weight: number }>();
+  for (const file of files) {
+    const source = reader.sources.get(file.filename);
+    if (!source || !file.patch) continue;
+    const changed = changedEvidenceLines(file.patch);
+    const { declarations } = source.index;
+    for (const d of declarations) {
+      const inside = changed.filter((line) => within(d, line));
+      if (!inside.length || d.kind === 'constructor') continue;
+      if (
+        !d.owner &&
+        declarations.some(
+          (o) => o !== d && FUNCTION_LIKE.has(o.kind) && o.start <= d.start && d.end <= o.end,
+        )
+      )
+        continue;
+      // A class counts only when a change sits outside its members, such as its header.
+      if (
+        d.kind === 'class' &&
+        inside.every((line) => declarations.some((m) => m.owner === d.symbol && within(m, line)))
+      )
+        continue;
+      found.set(`${file.filename}\0${qualified(d)}`, {
+        path: file.filename,
+        symbol: d.symbol,
+        owner: d.owner,
+        span: d,
+        weight: inside.length,
+      });
+    }
+  }
+  for (const symbol of extractChangedExportedSymbols(files))
+    if (![...found.values()].some((s) => s.symbol === symbol))
+      found.set(`\0${symbol}`, { path: '', symbol, weight: 0 });
+  return [...found.values()].sort((a, b) => b.weight - a.weight).slice(0, MAX_CHANGED_SYMBOLS);
+}
+
+/** Whether `path` imports the target, or for a member its class, from the declaring module. */
+async function linked(
+  reader: PackReader,
+  path: string,
+  source: PackSource,
+  target: Located,
+): Promise<boolean> {
+  if (path === target.path) return true;
+  const name = target.owner ?? target.symbol;
+  for (const binding of source.index.imports) {
+    if (binding.imported !== name) continue;
+    // A removed export has no declaring module left, so any import of the name is affected.
+    if (!target.path) return true;
+    const resolved = resolveEvidenceImport(
+      path,
+      binding.from,
+      reader.provider.tracked,
+      reader.provider.aliases,
+    );
+    if (resolved && (await exported(reader, resolved, name))?.path === target.path) return true;
+  }
+  return false;
+}
+
+/** Member names collide often, so only files that name the class are searched. */
+async function memberReferences(reader: PackReader, target: Located) {
+  const paths = new Set([
+    target.path,
+    ...(await reader.references(target.owner!)).map((hit) => hit.path),
+  ]);
+  const word = new RegExp(`\\b${target.symbol.replace(/\$/g, '\\$')}\\b`);
+  const hits: { path: string; line: number }[] = [];
+  for (const path of paths) {
+    const source = await reader.load(path);
+    source?.lines.forEach((text, i) => {
+      if (hits.length < MAX_REFERENCES && word.test(text)) hits.push({ path, line: i + 1 });
+    });
+  }
+  return hits;
+}
+
+async function callerEntries(
+  files: PrFile[],
+  reader: PackReader,
+  diff: Lines,
+  shown: Lines,
+): Promise<ContextPackEntry[]> {
+  const entries: ContextPackEntry[] = [];
+  for (const target of changedSymbols(files, reader)) {
+    const hits = target.owner
+      ? await memberReferences(reader, target)
+      : (await reader.references(target.symbol)).slice(0, MAX_REFERENCES);
+    const callers: { path: string; line: number }[] = [];
+    const unverified: string[] = [];
+    for (const hit of hits) {
+      if (
+        (hit.path === target.path && target.span && within(target.span, hit.line)) ||
+        shown.get(hit.path)?.has(hit.line)
+      )
+        continue;
+      const source = await reader.load(hit.path);
+      if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
+      else unverified.push(`${hit.path}:${hit.line}`);
+    }
+    callers.sort(
+      (a, b) =>
+        Number(isTest(a.path)) - Number(isTest(b.path)) ||
+        Number(packageOf(b.path) === packageOf(target.path)) -
+          Number(packageOf(a.path) === packageOf(target.path)) ||
+        a.path.localeCompare(b.path) ||
+        a.line - b.line,
+    );
+    const subject = qualified(target);
+    for (const hit of callers.slice(0, CALLERS_PER_SYMBOL)) {
+      const source = reader.sources.get(hit.path)!;
+      const caller = innermost(
+        source.index.declarations.filter((d) => FUNCTION_LIKE.has(d.kind)),
+        hit.line,
+      );
+      const hidden = shown.get(hit.path);
+      const lines = [
+        ...(caller ? [signatureLine(source, caller)] : []),
+        ...range(hit.line - CALLER_CONTEXT_LINES, hit.line + CALLER_CONTEXT_LINES),
+      ].filter((line) => !hidden?.has(line));
+      const item = entry('callers', hit.path, source, lines, caller ? qualified(caller) : '', {
+        calls: subject,
+        inDiff: diff.get(hit.path),
+      });
+      if (!item) continue;
+      entries.push(item);
+      markShown(shown, item);
+    }
+    const rest = callers.slice(CALLERS_PER_SYMBOL).map((hit) => `${hit.path}:${hit.line}`);
+    if (rest.length) entries.push(listEntry('callers', 'other-callers', subject, rest));
+    if (unverified.length) entries.push(listEntry('callers', 'unverified', subject, unverified));
+  }
+  return entries;
+}
+
 /** Each changed file's directory: its tracked files and immediate subdirectories. */
 function directoryEntries(
   files: PrFile[],
@@ -418,9 +570,11 @@ export async function buildContextPack(
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
   const surrounding = surroundingEntries(files, reader, diff, shown);
   const definitions = await definitionEntries(files, reader, diff, shown);
+  const callers = await callerEntries(files, reader, diff, shown);
   const ordered = [
     ...surrounding,
     ...definitions,
+    ...callers,
     ...directoryEntries(files, changed, provider.tracked),
   ];
   const kept: ContextPackEntry[] = [];

@@ -146,3 +146,17 @@ test('used definitions follow imports, path aliases, re-exports and injected ser
   // Task 9 adds caller symbols to the same set, so check membership only.
   assert.ok(pack.supplied.symbols.has('formatId') && pack.supplied.symbols.has('save'));
 });
+
+test('callers need an import link, and other name matches stay listed as unverified', async () => {
+  const pack = await buildContextPack(PAGE, CHANGED, provider(), 64 * 1024);
+  assert.match(
+    pack.text,
+    /### Callers of changed symbols\n\n#### apps\/api\/src\/ledger\.controller\.ts:3-9 \(LedgerController\.create, calls LedgerService\.post\)\n3: export class LedgerController \{/,
+  );
+  assert.match(
+    pack.text,
+    /Unverified name matches for `LedgerService\.post` \(no import link found\): apps\/api\/src\/legacy\.ts:2, apps\/api\/src\/legacy\.ts:3/,
+  );
+  assert.deepEqual(pack.supplied.ranges.get('apps/api/src/ledger.controller.ts'), [[3, 9]]);
+  assert.equal(pack.supplied.symbols.has('post'), true);
+});
