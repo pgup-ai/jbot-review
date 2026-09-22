@@ -1630,15 +1630,13 @@ async function runReviewPipeline(params: {
     ? planReviewFanout({
         requestedPasses: options.reviewPasses,
         requestedGuidelinePass: options.guidelinePass,
+        followup: Boolean(localDiff?.priorReview || priorJbotReviewGroups.length),
         files,
         shape: changeShape,
       })
     : null;
   const effectiveReviewPasses = fanout?.reviewPasses ?? options.reviewPasses;
-  const effectiveGuidelinePass =
-    reviewScope.mode === 'incremental'
-      ? options.guidelinePass
-      : (fanout?.guidelinePass ?? options.guidelinePass);
+  const effectiveGuidelinePass = fanout?.guidelinePass ?? options.guidelinePass;
   if (fanout?.tier === 'minimal') {
     log(
       `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,

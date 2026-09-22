@@ -25,6 +25,18 @@ describe('planReviewFanout', () => {
     assert.equal(result.tier, 'minimal');
     assert.equal(result.reviewPasses, 1);
     assert.equal(result.guidelinePass, false);
+    for (const requestedGuidelinePass of [true, false]) {
+      const files = [added(1)];
+      const followup = planReviewFanout({
+        requestedPasses: 3,
+        requestedGuidelinePass,
+        files,
+        shape: classifyChangeShape(files),
+        followup: true,
+      });
+      assert.equal(followup.guidelinePass, requestedGuidelinePass);
+      assert.equal(followup.reviewPasses, 1);
+    }
   });
 
   it('keeps the requested ceiling for a sensitive path', () => {

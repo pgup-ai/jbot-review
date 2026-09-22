@@ -30,6 +30,7 @@ export function planReviewFanout(input: {
   requestedGuidelinePass: boolean;
   files: PrFile[];
   shape: ChangeShape;
+  followup?: boolean;
 }): FanoutPlan {
   const { requestedPasses, requestedGuidelinePass, files, shape } = input;
   const added = diffLineCounts(files).added;
@@ -53,7 +54,7 @@ export function planReviewFanout(input: {
   }
   return {
     reviewPasses: Math.min(requestedPasses, 1),
-    guidelinePass: false,
+    guidelinePass: requestedGuidelinePass && !!input.followup,
     tier: 'minimal',
     reason: `low-risk diff (${files.length} files, +${added} lines, no sensitive paths)`,
   };
