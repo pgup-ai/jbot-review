@@ -111,7 +111,7 @@ test('surrounding code adds the enclosing method and constructor lines the diff 
   );
   assert.deepEqual(pack.supplied.ranges.get('apps/api/src/ledger.service.ts'), [
     [7, 8],
-    [10, 11],
+    [10, 17],
   ]);
   assert.deepEqual([...pack.supplied.directories], ['apps/api/src']);
 });

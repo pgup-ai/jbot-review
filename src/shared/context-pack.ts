@@ -184,15 +184,17 @@ function surroundingEntries(
       const label = named ? qualified(named) : '';
       if (outer.end - outer.start < WHOLE_DEFINITION_LINES)
         ranges.push({ start: outer.start, end: outer.end, label });
-      else
+      else {
+        const first = signatureLine(source, outer);
         ranges.push(
-          { start: outer.start, end: outer.start, label },
+          { start: first, end: first, label },
           {
             start: Math.max(outer.start, line - WINDOW_LINES),
             end: Math.min(outer.end, line + WINDOW_LINES),
             label,
           },
         );
+      }
     }
     const classes = declarations.filter(
       (d) => d.kind === 'class' && changed.some((line) => within(d, line)),
@@ -205,7 +207,10 @@ function surroundingEntries(
           end: Math.min(member.end, member.start + CONSTRUCTOR_LINES - 1),
           label: qualified(member),
         });
-      else if (member.kind === 'property' && member.end - member.start < FIELD_LINES)
+      else if (
+        member.kind === 'property' &&
+        member.end - signatureLine(source, member) < FIELD_LINES
+      )
         ranges.push({ start: member.start, end: member.end, label: '' });
     }
     const visible = diff.get(file.filename) ?? new Set<number>();
@@ -228,21 +233,31 @@ function surroundingEntries(
 
 /** First line of a declaration that is not a decorator. */
 function signatureLine(source: PackSource, d: { start: number; end: number }): number {
-  for (let line = d.start; line <= d.end; line++)
-    if (!source.lines[line - 1]?.trim().startsWith('@')) return line;
+  let depth = 0;
+  for (let line = d.start; line <= d.end; line++) {
+    const text = source.lines[line - 1];
+    if (!depth && !text.trim().startsWith('@')) return line;
+    depth += text.split('(').length - text.split(')').length;
+  }
   return d.start;
 }
 
-/** A module-level declaration: not a member and not local to a function. */
-function topLevel(index: RichSourceIndex, symbol: string): Declaration | undefined {
-  return index.declarations.find(
-    (d) =>
-      !d.owner &&
-      d.symbol === symbol &&
-      !index.declarations.some(
-        (o) => o !== d && FUNCTION_LIKE.has(o.kind) && o.start <= d.start && d.end <= o.end,
-      ),
+/** Inside a function-like declaration, or strictly inside a callback or any other declaration. */
+function local(index: RichSourceIndex, d: Declaration): boolean {
+  const contains = (o: { start: number; end: number }) => o.start <= d.start && d.end <= o.end;
+  // An equal span is the declaration's own value, such as `const x = wrap(() => {})`.
+  const strictly = (o: { start: number; end: number }) =>
+    contains(o) && (o.start < d.start || d.end < o.end);
+  return (
+    index.declarations.some(
+      (o) => o !== d && (FUNCTION_LIKE.has(o.kind) ? contains(o) : strictly(o)),
+    ) || index.callbacks.some(strictly)
   );
+}
+
+/** A module-level declaration: not a member and not local. */
+function topLevel(index: RichSourceIndex, symbol: string): Declaration | undefined {
+  return index.declarations.find((d) => !d.owner && d.symbol === symbol && !local(index, d));
 }
 
 /** Follows re-exports from `path` to the module that declares `symbol`. */
@@ -256,8 +271,12 @@ async function exported(
   if (!source) return undefined;
   if (topLevel(source.index, symbol)) return { path, symbol };
   if (hops >= MAX_REEXPORT_HOPS) return undefined;
-  for (const next of source.index.reexports) {
-    if (next.exported !== symbol && next.exported !== '*') continue;
+  const { reexports } = source.index;
+  // `export * as ns` binds a namespace, never `symbol` itself.
+  for (const next of [
+    ...reexports.filter((r) => r.exported === symbol && r.imported !== '*'),
+    ...reexports.filter((r) => r.exported === '*'),
+  ]) {
     const target = resolveEvidenceImport(
       path,
       next.from,
@@ -296,10 +315,15 @@ function definitionLines(source: PackSource, d: Declaration): number[] {
     const header =
       source.lines.findIndex((text, i) => i >= d.start - 1 && text.includes(`class ${d.symbol}`)) +
       1;
+    // A wrapped `extends` or `implements` runs on to the opening brace.
+    let open = Math.max(d.start, header);
+    const last = open + 4;
+    while (open < last && !source.lines[open - 1].includes('{')) open++;
     return [
-      ...range(d.start, Math.max(d.start, header)),
+      ...range(d.start, open),
       ...source.index.declarations
         .filter((m) => m.owner === d.symbol)
+        .slice(0, 40)
         .map((m) => signatureLine(source, m)),
     ];
   }
@@ -374,11 +398,14 @@ async function definitionEntries(
   const entries: ContextPackEntry[] = [];
   for (const found of ranked) {
     const source = await reader.load(found.path);
+    if (!source) continue;
     // Overloads and accessors declare a member more than once; the widest is the implementation.
-    const declaration = source?.index.declarations
-      .filter((d) => d.symbol === found.symbol && d.owner === found.owner)
-      .sort((a, b) => b.end - b.start - (a.end - a.start))[0];
-    if (!source || !declaration) continue;
+    const declaration = found.owner
+      ? source.index.declarations
+          .filter((d) => d.symbol === found.symbol && d.owner === found.owner)
+          .sort((a, b) => b.end - b.start - (a.end - a.start))[0]
+      : topLevel(source.index, found.symbol);
+    if (!declaration) continue;
     const hidden = shown.get(found.path);
     const item = entry(
       'definitions',
@@ -405,18 +432,16 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
     const { declarations } = source.index;
     for (const d of declarations) {
       const inside = changed.filter((line) => within(d, line));
-      if (!inside.length || d.kind === 'constructor') continue;
-      if (
-        !d.owner &&
-        declarations.some(
-          (o) => o !== d && FUNCTION_LIKE.has(o.kind) && o.start <= d.start && d.end <= o.end,
-        )
-      )
+      if (!inside.length || d.kind === 'constructor' || (!d.owner && local(source.index, d)))
         continue;
-      // A class counts only when a change sits outside its members, such as its header.
+      // A class counts only when code outside its members changes, such as its header.
       if (
         d.kind === 'class' &&
-        inside.every((line) => declarations.some((m) => m.owner === d.symbol && within(m, line)))
+        inside.every(
+          (line) =>
+            /^(?:\/[/*]|\*|$)/.test(source.lines[line - 1].trim()) ||
+            declarations.some((m) => m.owner === d.symbol && within(m, line)),
+        )
       )
         continue;
       found.set(`${file.filename}\0${qualified(d)}`, {
@@ -429,7 +454,7 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
     }
   }
   for (const symbol of extractChangedExportedSymbols(files))
-    if (![...found.values()].some((s) => s.symbol === symbol))
+    if (![...found.values()].some((s) => !s.owner && s.symbol === symbol))
       found.set(`\0${symbol}`, { path: '', symbol, weight: 0 });
   return [...found.values()].sort((a, b) => b.weight - a.weight).slice(0, MAX_CHANGED_SYMBOLS);
 }
@@ -445,15 +470,19 @@ async function linked(
   const name = target.owner ?? target.symbol;
   for (const binding of source.index.imports) {
     if (binding.imported !== name) continue;
-    // A removed export has no declaring module left, so any import of the name is affected.
-    if (!target.path) return true;
     const resolved = resolveEvidenceImport(
       path,
       binding.from,
       reader.provider.tracked,
       reader.provider.aliases,
     );
-    if (resolved && (await exported(reader, resolved, name))?.path === target.path) return true;
+    // A removed or re-exported name has no declaring module here, so any in-repo import counts.
+    if (
+      target.path
+        ? resolved && (await exported(reader, resolved, name))?.path === target.path
+        : resolved || binding.from.startsWith('.')
+    )
+      return true;
   }
   return false;
 }
@@ -560,12 +589,12 @@ function directoryEntries(
         const [name, ...rest] = path.slice(prefix.length).split('/');
         names.add(rest.length ? `${name}/` : changed.has(path) ? `${name}*` : name);
       }
-      return listEntry(
-        'directories',
-        'directory',
-        directory,
-        [...names].sort().slice(0, MAX_DIRECTORY_NAMES),
-      );
+      const sorted = [...names].sort();
+      const more = sorted.length - MAX_DIRECTORY_NAMES;
+      return listEntry('directories', 'directory', directory, [
+        ...sorted.slice(0, MAX_DIRECTORY_NAMES),
+        ...(more > 0 ? [`+${more} more`] : []),
+      ]);
     });
 }
 
@@ -585,7 +614,8 @@ export async function buildContextPack(
   const ordered = [
     ...surrounding,
     ...definitions,
-    ...callers,
+    ...callers.filter((e) => !e.list),
+    ...callers.filter((e) => e.list),
     ...directoryEntries(files, changed, provider.tracked),
   ];
   const kept: ContextPackEntry[] = [];
@@ -623,16 +653,18 @@ export async function buildContextPack(
     else if (item.list) supplied.symbols.add(item.list.subject.split('.').pop()!);
     if (item.slice === 'definitions') supplied.symbols.add(item.label.split('.').pop()!);
     if (item.calls) supplied.symbols.add(item.calls.split('.').pop()!);
+    if (!item.rows.length) continue;
+    const rows = new Set(item.rows.map(([line]) => line));
     const ranges = supplied.ranges.get(item.path) ?? [];
-    for (const [line] of item.rows) {
+    // Gap markers cite the page's diff lines inside the item's span, so those count as shown.
+    for (const line of range(item.rows[0][0], Math.max(item.rows.at(-1)![0], item.end ?? 0))) {
+      if (!rows.has(line) && !item.inDiff?.has(line)) continue;
       const last = ranges.at(-1);
       if (last && line === last[1] + 1) last[1] = line;
       else ranges.push([line, line]);
     }
-    if (ranges.length) {
-      supplied.ranges.set(item.path, ranges);
-      supplied.lines.set(item.path, reader.sources.get(item.path)!.lines.length);
-    }
+    supplied.ranges.set(item.path, ranges);
+    supplied.lines.set(item.path, reader.sources.get(item.path)!.lines.length);
   }
   return {
     text,
