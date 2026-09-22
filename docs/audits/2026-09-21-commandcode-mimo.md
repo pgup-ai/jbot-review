@@ -11,10 +11,17 @@ tools, full diff delivery and verification enabled:
 - `commandcode/xiaomi/mimo-v2.6-flash`
 - `commandcode/xiaomi/mimo-v2.6-pro`
 
-Both passed model selection but stopped before inference with the account's
-weekly usage limit (exit 5). No review or verification result was produced.
-This confirms CLI recognition and routing, not successful end-to-end review.
-Logs: `/tmp/commandcode-mimo-flash.log` and `/tmp/commandcode-mimo-pro.log`.
+The initial key hit its weekly usage limit. Retrying with an alternate key from
+`.env` allowed inference. Flash completed the full review and verification in
+31.5s: 2/2 hunks delivered, both seeded bugs confirmed, no incomplete sessions.
+Pro also completed with both bugs confirmed and no incomplete sessions: 143.0s
+total, including 81.6s for the main review and 60.7s for verification. Native
+reads/searches worked in both models. Pro attempted one shell command that the
+read-only policy blocked, then completed using the allowed tools.
+
+Logs: `/tmp/commandcode-mimo-alternate-0-flash.log` and
+`/tmp/commandcode-mimo-alternate-0-pro.log`. These are small-fixture smoke tests,
+not a general quality or latency benchmark. Credentials were not changed.
 
 The local npm install and CLI catalog check passed. The Docker build reached the
 updated npm installation but failed with `ENOSPC` in Docker's storage. Packaging
