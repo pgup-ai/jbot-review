@@ -272,7 +272,11 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
           { filename: 'ledger/listener.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 2;' },
         ],
       });
-      assert.equal(plan.reason === 'string-keyed-dependencies', tripped, decorator);
+      assert.equal(
+        plan.reason,
+        tripped ? 'string-keyed-dependencies' : 'bounded-followup',
+        decorator,
+      );
     }
     git('checkout', '-q', '--detach', head);
     write('core/limit.ts', 'export function limit() {\n  return 10;\n}\n');
