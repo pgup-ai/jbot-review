@@ -482,7 +482,7 @@ async function memberReferences(reader: PackReader, target: Located) {
     target.path,
     ...(await reader.references(target.owner!)).map((hit) => hit.path),
   ]);
-  return (await reader.references(target.symbol, [...files])).slice(0, MAX_REFERENCES);
+  return reader.references(target.symbol, [...files]);
 }
 
 async function callerEntries(
@@ -493,19 +493,21 @@ async function callerEntries(
 ): Promise<ContextPackEntry[]> {
   const entries: ContextPackEntry[] = [];
   for (const target of changedSymbols(files, reader)) {
-    // High-value files load first, so the provider's file cap cuts the rest.
-    const hits = (
-      target.owner
+    // Rank a copy of the cached hits before capping, so the most useful are kept and load first.
+    const hits = [
+      ...(target.owner
         ? await memberReferences(reader, target)
-        : (await reader.references(target.symbol)).slice(0, MAX_REFERENCES)
-    ).sort(
-      (a, b) =>
-        Number(PATH_PATTERNS.tests.test(a.path)) - Number(PATH_PATTERNS.tests.test(b.path)) ||
-        Number(packageOf(b.path) === packageOf(target.path)) -
-          Number(packageOf(a.path) === packageOf(target.path)) ||
-        a.path.localeCompare(b.path) ||
-        a.line - b.line,
-    );
+        : await reader.references(target.symbol)),
+    ]
+      .sort(
+        (a, b) =>
+          Number(PATH_PATTERNS.tests.test(a.path)) - Number(PATH_PATTERNS.tests.test(b.path)) ||
+          Number(packageOf(b.path) === packageOf(target.path)) -
+            Number(packageOf(a.path) === packageOf(target.path)) ||
+          a.path.localeCompare(b.path) ||
+          a.line - b.line,
+      )
+      .slice(0, MAX_REFERENCES);
     const callers: { path: string; line: number }[] = [];
     const unverified: string[] = [];
     for (const hit of hits) {
