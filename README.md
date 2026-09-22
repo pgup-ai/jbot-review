@@ -1407,8 +1407,9 @@ context. Findings from completed pages survive a deadline, and unfinished covera
 is reported. Main review still covers every hunk.
 OpenCode and Pi can request a wrap-up near a session's own deadline
 when the reserved fifth of its budget leaves at least 45 seconds for the response.
-OpenCode keeps native read-only tools available for model compatibility while
-asking for a final answer without further investigation; Pi's wrap-up is tool-free.
+OpenCode retains native read/search tools for model compatibility and denies shell
+access during wrap-up. Its prompt requests a final answer without further
+investigation. Pi's wrap-up is tool-free.
 The remaining deadline still bounds the turn. Repair and formatting remain tool-less.
 Completed auxiliary findings remain eligible for verification. A partial main
 page fails the run before posting; it is never cached as a completed review.

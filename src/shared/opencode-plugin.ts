@@ -56,7 +56,7 @@ export default {
       }
     });
     await ctx.permission.hook('evaluate', (event) => {
-      if (event.effect === 'ask') {
+      if (event.effect === 'ask' || (event.agent === 'jbot-wrapup' && event.action === 'shell')) {
         event.effect = 'deny';
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }

@@ -46,8 +46,9 @@ when main-review finalization switched to a tool-less agent:
 
 That run did not use Pi. Free-model exclusion from Pi remains unchanged.
 
-OpenCode's wrap-up agent now retains the same native read-only tools and permission
-rules as review sessions. Its prompt still requests a final answer without further
+OpenCode's wrap-up agent retains native tool schemas for model compatibility.
+Its permission-evaluation hook denies shell execution during finalization.
+Its prompt still requests a final answer without further
 investigation. The remaining deadline is enforced and wrap-up cannot recursively
 reserve another wrap-up. Single-shot repair and formatting remain tool-less.
 No alternate model, new setting or custom tool was added.
@@ -94,3 +95,48 @@ adjudicated: three kept for non-obvious fallback behavior and three removed.
 All five new tests were retained for distinct failures: baseline provenance,
 aliased impact, real-Git fallback behavior, heading parsing and routed discovery.
 No remaining P1/P2 issue was found.
+
+## Dogfood run 35748828510
+
+The [job](https://github.com/pgup-ai/jbot-review/actions/runs/35748828510/job/106817286213)
+on `583dca5` succeeded, but its posted review correctly reports incomplete
+auxiliary coverage:
+
+- CommandCode Muse completed main review in 195.4s with all 22 files and 50/50
+  mandatory hunks delivered. It returned no candidates. Native tools ran in
+  batches of up to three, with no repeated tool calls recorded.
+- Both Cline DeepSeek V4 Flash interaction pages failed at 428.9s and 550.6s with
+  “Model reached the maximum output token limit before completing the turn.”
+  Guideline compliance shared these pages, so it was incomplete too.
+- Total review time was 562.1s, including 356.0s waiting after main review.
+  This was not the configured timeout: 1,267 seconds of auxiliary budget
+  remained when main finished. The adapter does not report Cline token usage,
+  so the artifact cannot distinguish reasoning from visible-output consumption.
+- `unverified-findings.json` contained no candidates. Verification was skipped
+  because there was nothing to verify, not because findings were hidden.
+- Guideline input was 16,091 bytes as expected. Scope was full because the latest
+  prior review was incomplete. No new reusable baseline was emitted. Neither
+  OpenCode nor MiMo ran, so this job did not exercise their wrap-up change.
+
+The shell-access review comment was applied to wrap-up only: the existing
+OpenCode permission hook denies shell execution while preserving native tool schemas.
+The runner extraction suggestion was declined; scope planning already lives in
+`incremental-review.ts`, and moving collected configuration and telemetry into
+another wrapper would not correct an observed defect.
+
+Follow-up validation of the shell restriction:
+
+- Removing the shell schema, or denying it through configured session permissions,
+  reproduced the free-tier rejection with both MiMo and Muse. Those approaches
+  were discarded. The native permission-evaluation hook preserves the schema and
+  rejects execution instead.
+- Both free models completed a real review interrupted after 10 seconds, with a
+  90-second wrap-up allowance: MiMo in 30.4s total and Muse in 12.7s. Both returned
+  valid JSON marked partial. This checks recovery compatibility, not review recall.
+- A separate native Muse wrap-up attempted `pwd`; the SDK tool event recorded
+  `permission.rejected` before execution.
+- All 1,125 tests passed. The existing permission-hook test now covers wrap-up
+  shell denial while preserving normal review shell access and wrap-up reads. No
+  new test case or code comment was added. The full quality corpus remains deferred.
+
+Local evidence: `.jbot-review/wrapup-shell-hook-validation/`.

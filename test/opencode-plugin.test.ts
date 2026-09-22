@@ -144,5 +144,16 @@ describe('jbot opencode plugin', () => {
     const allow = { effect: 'allow', message: '' };
     evaluate(allow);
     assert.equal(allow.effect, 'allow');
+    const wrapShell = { agent: 'jbot-wrapup', action: 'shell', effect: 'allow', message: '' };
+    evaluate(wrapShell);
+    assert.equal(wrapShell.effect, 'deny');
+    assert.equal(wrapShell.message, PERMISSION_DENIED_MESSAGE);
+    for (const event of [
+      { agent: 'plan', action: 'shell', effect: 'allow' },
+      { agent: 'jbot-wrapup', action: 'read', effect: 'allow' },
+    ]) {
+      evaluate(event);
+      assert.equal(event.effect, 'allow');
+    }
   });
 });
