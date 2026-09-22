@@ -641,9 +641,9 @@ OpenCode verification reserves time for one recovery attempt using its current
 model, settings and native read-only agent. Recovery forks the collected history
 and asks for only the missing checks needed to finish verdicts. Completed verdicts
 are preserved; insufficient evidence remains uncertain. It runs after a timeout
-or incomplete output within the existing budget. A five-minute budget reserves
-its last minute; unbounded runs skip recovery. Logs report the model, reason,
-time used and verdict count. No separate model flag or paid fallback is needed.
+or incomplete output within the existing budget. Recovery reserves part of the
+time left after setup (about a minute from five minutes); unbounded runs skip
+recovery. Logs report the model, reason, time used and verdict count. No separate model flag or paid fallback is needed.
 JSON repair and formatting remain tool-less.
 
 CommandCode verification receives packed source evidence from earlier native

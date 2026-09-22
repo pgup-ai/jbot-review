@@ -444,7 +444,6 @@ export async function runFindingVerification(
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
   const prompt = assembleFindingVerificationPrompt(prContext, findings, isSingleShotModel(model));
   const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-  const reserve = timeoutMs === undefined ? 0 : wrapUpReserveMs(timeoutMs);
   log('Creating finding-verification session');
   const sessionID = await createReviewSession(runtime, {
     model,
@@ -455,6 +454,7 @@ export async function runFindingVerification(
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
   });
   log(`finding-verification session created: ${sessionID}`);
+  const reserve = deadline === undefined ? 0 : wrapUpReserveMs(deadline - Date.now());
   let verdicts: FindingVerdict[] | undefined;
   let failure: unknown;
   try {

@@ -287,18 +287,19 @@ describe('runFindingVerification on V2', () => {
   });
 
   it('honors short budgets during setup and before recovery', async (t) => {
-    for (const phase of ['setup', 'near-deadline', 'recovery']) {
+    for (const phase of ['setup', 'slow-setup', 'near-deadline', 'recovery']) {
       let now = 100_000;
       t.mock.method(Date, 'now', () => now);
       const logs: string[] = [];
       const fake = fakeOpencodeServer(() => {
         if (phase === 'near-deadline') now += 4_500;
-        return { text: '{}' };
+        return { text: phase === 'slow-setup' ? verdicts : '{}' };
       });
       const create = fake.client.session.create.bind(fake.client.session);
       t.mock.method(fake.client.session, 'create', async (...args) => {
         const session = await create(...args);
         if (phase === 'setup') now += 5_000;
+        if (phase === 'slow-setup') now += 250_000;
         return session;
       });
       const run = runFindingVerification(
@@ -307,13 +308,15 @@ describe('runFindingVerification on V2', () => {
         'ctx',
         [finding],
         (message) => logs.push(message),
-        5_000,
+        phase === 'slow-setup' ? 300_000 : 5_000,
       );
       if (phase === 'setup') {
         await assert.rejects(run, /Session setup budget exhausted/);
         assert.equal(fake.calls.length, 1);
       } else {
-        assert.equal(await run, undefined);
+        const result = await run;
+        if (phase === 'slow-setup') assert.equal(result?.[0].verdict, 'confirmed');
+        else assert.equal(result, undefined);
         assert.equal(fake.prompts.length, phase === 'recovery' ? 2 : 1);
         if (phase === 'recovery') assert.match(logs.join('\n'), /remainingMs=5000/);
       }

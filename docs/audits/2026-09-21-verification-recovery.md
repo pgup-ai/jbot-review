@@ -6,7 +6,8 @@ reuse prior reads, answer only concrete unresolved questions, and return verdict
 Completed judgments cannot be overwritten. Insufficient evidence stays uncertain;
 a failed recovery preserves any completed verdicts.
 
-A five-minute verification budget reserves its final minute for recovery. Early
+Recovery reserves part of the time left after session setup (about a minute
+from five minutes), so a slow setup cannot consume a preallocated reserve. Early
 format repair uses at most that minute too. Recovery session setup shares that
 deadline. Unbounded runs skip recovery. There is no model-name exclusion, separate
 model flag, automatic paid fallback, or custom tool implementation. JSON repair
@@ -20,7 +21,7 @@ quota and generic provider errors do not trigger recovery.
 
 The fixture contains two seeded bugs (100x overcharge and owner/tenant confusion)
 and a false claim that an audit call is absent. OpenCode CLI/SDK was 2.0.5,
-CommandCode 1.56.2 (the Docker version), and Cline 3.0.62.
+CommandCode 1.56.2 (the Docker version at the time), and Cline 3.0.62.
 
 | Model                                         | Test                                                                    | Result                                                                                                         |
 | --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -34,7 +35,8 @@ then interrupted them and forked their history for recovery. Both recovered with
 native reads (six for MiMo and ten for Muse) and no tool-less rejection. These are targeted recovery checks,
 not a comparison of ordinary review latency. CommandCode and Cline do not execute
 the new OpenCode recovery path; the Cline result is a compatibility check, and
-CommandCode remains unverified live.
+that Contributor run remains unverified live. Later MiMo validation is recorded
+in [the CommandCode audit](2026-09-21-commandcode-mimo.md).
 
 Ordinary full local pipeline runs also completed: MiMo in 22.9s and Muse in
 30.4s. Both delivered 2/2 hunks, found and verified both seeded bugs, and needed
@@ -52,5 +54,5 @@ was skipped as previously requested; these checks do not establish general recal
 or precision. Raw local results remain under `.jbot-review/mimo-verification/`.
 
 After review fixes, a MiMo Free interrupted-session replay returned all three
-expected verdicts in 15.1s, including 10.0s in native recovery. Recovery failure
+expected verdicts in 12.0s, including 6.9s in native recovery after the setup-budget fix. Recovery failure
 logs include the model and error; initial session setup now shares the deadline.
