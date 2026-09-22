@@ -611,3 +611,58 @@ test('indexes decorated NestJS sources and generic arrows in .ts files', () => {
     indexEvidenceSource('view.tsx', 'export const View = () => <div />;').definitions.length,
   );
 });
+
+test('rich index records members, types, re-exports, injected services and this-member calls', () => {
+  const text = [
+    '@Injectable()',
+    'export class LedgerService {',
+    '  private readonly limit = 5;',
+    '  constructor(private readonly repo: LedgerRepository, plain: number) {}',
+    '  post(id: string) {',
+    '    return [id].map((x) => this.repo.save(x));',
+    '  }',
+    '}',
+    'export interface Entry { id: string }',
+    "export { LedgerRepository as Repo } from './repo';",
+    "export * from './types';",
+    "export * as ns from './ns';",
+    'const handlers = { run() { return 1; }, go: () => 2 };',
+  ].join('\n');
+  const index = indexEvidenceSource('ledger.service.ts', text, { rich: true });
+  const declared = (symbol: string) => index.declarations.find((d) => d.symbol === symbol);
+  assert.deepEqual(declared('LedgerService'), {
+    symbol: 'LedgerService',
+    start: 1,
+    end: 8,
+    kind: 'class',
+  });
+  assert.deepEqual(declared('post'), {
+    symbol: 'post',
+    start: 5,
+    end: 7,
+    kind: 'method',
+    owner: 'LedgerService',
+  });
+  assert.deepEqual(
+    ['limit', 'constructor', 'Entry', 'run', 'go', 'handlers'].map((s) => declared(s)?.kind),
+    ['property', 'constructor', 'type', 'function', 'function', 'variable'],
+  );
+  assert.deepEqual(index.injected, [
+    { owner: 'LedgerService', name: 'repo', type: 'LedgerRepository' },
+  ]);
+  assert.deepEqual(index.memberCalls, [
+    { target: 'repo', member: 'save', line: 6 },
+    { target: '', member: 'repo', line: 6 },
+  ]);
+  assert.deepEqual(index.callbacks, [{ start: 6, end: 6 }]);
+  assert.deepEqual(index.reexports, [
+    { exported: 'Repo', imported: 'LedgerRepository', from: './repo' },
+    { exported: '*', imported: '*', from: './types' },
+    { exported: 'ns', imported: '*', from: './ns' },
+  ]);
+  assert.deepEqual(Object.keys(indexEvidenceSource('ledger.service.ts', text)), [
+    'definitions',
+    'imports',
+    'uses',
+  ]);
+});

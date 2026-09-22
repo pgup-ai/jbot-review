@@ -41,26 +41,133 @@ const name = (value: unknown) => {
   const n = ast(value);
   return typeof n?.name === 'string' ? n.name : typeof n?.value === 'string' ? n.value : '';
 };
-type SourceIndex = {
+export type SourceIndex = {
   definitions: { symbol: string; start: number; end: number }[];
   imports: { local: string; imported: string; from: string; line: number }[];
   uses: { symbol: string; line: number }[];
 };
 
-export function indexEvidenceSource(path: string, text: string): SourceIndex {
-  const result: SourceIndex = { definitions: [], imports: [], uses: [] };
-  if (!JS_SOURCE.test(path)) return result;
-  const tree = parse(text, {
-    sourceType: 'unambiguous',
-    // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
-    // decorators-legacy (not the stage-3 "decorators" plugin) is required: NestJS-style
-    // parameter decorators (e.g. constructor(@Inject(TOKEN) ...)) only parse under the legacy proposal.
-    plugins: /\.[cm]?ts$/i.test(path)
-      ? ['typescript', 'decorators-legacy']
-      : ['typescript', 'jsx', 'decorators-legacy'],
-    attachComment: false,
-  });
-  function walk(n: Ast) {
+export type DeclarationKind =
+  'function' | 'class' | 'variable' | 'type' | 'method' | 'property' | 'constructor';
+
+/** Context-pack index: `SourceIndex` plus the declarations a review page cites. */
+export type RichSourceIndex = SourceIndex & {
+  declarations: {
+    symbol: string;
+    start: number;
+    end: number;
+    kind: DeclarationKind;
+    owner?: string;
+  }[];
+  /** Anonymous functions passed as call arguments, such as test callbacks. */
+  callbacks: { start: number; end: number }[];
+  reexports: { exported: string; imported: string; from: string }[];
+  /** Constructor parameter properties: `this.<name>` holds a `<type>`. */
+  injected: { owner: string; name: string; type: string }[];
+  /** `this.<member>` has target '', `this.<target>.<member>` names the target. */
+  memberCalls: { target: string; member: string; line: number }[];
+};
+
+const FUNCTION_VALUE = new Set(['FunctionExpression', 'ArrowFunctionExpression']);
+const MEMBER_KIND: Record<string, DeclarationKind> = {
+  ClassMethod: 'method',
+  ClassPrivateMethod: 'method',
+  TSDeclareMethod: 'method',
+  ClassProperty: 'property',
+  ClassPrivateProperty: 'property',
+};
+const TYPE_DECLARATION = new Set([
+  'TSInterfaceDeclaration',
+  'TSTypeAliasDeclaration',
+  'TSEnumDeclaration',
+]);
+
+export function indexEvidenceSource(path: string, text: string): SourceIndex;
+export function indexEvidenceSource(
+  path: string,
+  text: string,
+  options: { rich: true },
+): RichSourceIndex;
+export function indexEvidenceSource(
+  path: string,
+  text: string,
+  options: { rich?: boolean } = {},
+): SourceIndex | RichSourceIndex {
+  const result: RichSourceIndex = {
+    definitions: [],
+    imports: [],
+    uses: [],
+    declarations: [],
+    callbacks: [],
+    reexports: [],
+    injected: [],
+    memberCalls: [],
+  };
+  function indexRich(n: Ast, parent: Ast | undefined, owner: string | undefined) {
+    if (!n.loc) return;
+    const start = n.loc.start.line;
+    const end = n.loc.end.line;
+    const declare = (symbol: string, kind: DeclarationKind, memberOf?: string) => {
+      if (symbol)
+        result.declarations.push({
+          symbol,
+          start,
+          end,
+          kind,
+          ...(memberOf ? { owner: memberOf } : {}),
+        });
+    };
+    const member = MEMBER_KIND[n.type];
+    if (n.type === 'FunctionDeclaration') declare(name(n.id), 'function');
+    else if (n.type === 'ClassDeclaration') declare(name(n.id), 'class');
+    else if (TYPE_DECLARATION.has(n.type)) declare(name(n.id), 'type');
+    else if (n.type === 'VariableDeclarator')
+      declare(name(n.id), FUNCTION_VALUE.has(ast(n.init)?.type ?? '') ? 'function' : 'variable');
+    else if (
+      n.type === 'ObjectMethod' ||
+      (n.type === 'ObjectProperty' && FUNCTION_VALUE.has(ast(n.value)?.type ?? ''))
+    )
+      declare(name(n.key), 'function');
+    else if (member && owner && n.kind === 'constructor') {
+      declare('constructor', 'constructor', owner);
+      for (const param of (n.params as Ast[] | undefined) ?? []) {
+        const parameter = param.type === 'TSParameterProperty' ? ast(param.parameter) : undefined;
+        const type = ast(ast(ast(parameter?.typeAnnotation)?.typeAnnotation)?.typeName);
+        if (parameter && type?.type === 'Identifier')
+          result.injected.push({ owner, name: name(parameter), type: name(type) });
+      }
+    } else if (member && owner) declare(name(n.key) || name(ast(n.key)?.id), member, owner);
+    else if (
+      FUNCTION_VALUE.has(n.type) &&
+      ['CallExpression', 'NewExpression'].includes(parent?.type ?? '')
+    )
+      result.callbacks.push({ start, end });
+    else if (n.type === 'ExportAllDeclaration')
+      result.reexports.push({ exported: '*', imported: '*', from: name(n.source) });
+    else if (n.type === 'ExportNamedDeclaration' && n.source)
+      for (const s of (n.specifiers as Ast[] | undefined) ?? [])
+        result.reexports.push({
+          exported: name(s.exported),
+          imported: s.type === 'ExportNamespaceSpecifier' ? '*' : name(s.local),
+          from: name(n.source),
+        });
+    else if (n.type === 'MemberExpression' && !n.computed) {
+      const object = ast(n.object);
+      if (object?.type === 'ThisExpression')
+        result.memberCalls.push({ target: '', member: name(n.property), line: start });
+      else if (
+        object?.type === 'MemberExpression' &&
+        !object.computed &&
+        ast(object.object)?.type === 'ThisExpression'
+      )
+        result.memberCalls.push({
+          target: name(object.property),
+          member: name(n.property),
+          line: start,
+        });
+    }
+  }
+  function walk(n: Ast, parent?: Ast, owner?: string) {
     if (n.type === 'ImportDeclaration') {
       for (const s of n.specifiers as Ast[])
         result.imports.push({
@@ -71,6 +178,7 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
         });
       return;
     }
+    if (options.rich) indexRich(n, parent, owner);
     const symbol = name(n.id);
     if (
       symbol &&
@@ -81,6 +189,7 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
     }
     if (n.type === 'Identifier' && n.loc)
       result.uses.push({ symbol: name(n), line: n.loc.start.line });
+    const scope = n.type === 'ClassDeclaration' && symbol ? symbol : owner;
     for (const [key, value] of Object.entries(n)) {
       if (
         [
@@ -94,12 +203,26 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
       )
         continue;
       if (Array.isArray(value)) {
-        for (const child of value) if (ast(child)?.type) walk(child as Ast);
-      } else if (ast(value)?.type) walk(value as Ast);
+        for (const child of value) if (ast(child)?.type) walk(child as Ast, n, scope);
+      } else if (ast(value)?.type) walk(value as Ast, n, scope);
     }
   }
-  walk(tree as unknown as Ast);
-  return result;
+  if (JS_SOURCE.test(path)) {
+    const tree = parse(text, {
+      sourceType: 'unambiguous',
+      // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
+      // decorators-legacy (not the stage-3 "decorators" plugin) is required: NestJS-style
+      // parameter decorators (e.g. constructor(@Inject(TOKEN) ...)) only parse under the legacy proposal.
+      plugins: /\.[cm]?ts$/i.test(path)
+        ? ['typescript', 'decorators-legacy']
+        : ['typescript', 'jsx', 'decorators-legacy'],
+      attachComment: false,
+    });
+    walk(tree as unknown as Ast);
+  }
+  if (options.rich) return result;
+  const { definitions, imports, uses } = result;
+  return { definitions, imports, uses };
 }
 
 export function changedEvidenceLines(patch: string): number[] {
