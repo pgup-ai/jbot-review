@@ -98,6 +98,7 @@ describe('selectReviewPlaybookIds', () => {
       'apps/api/src/user.ts',
       'apps/api/src/userService.ts',
       'libs/modules/src/agent-view/agent-view.module.ts',
+      'libs/modules/src/useConfig.module.ts',
     ]) {
       assert.ok(
         !selectReviewPlaybookIds([file]).includes('frontend-workflow'),
@@ -119,6 +120,8 @@ describe('selectReviewPlaybookIds', () => {
       'src/useThing.ts',
       'src/login-form.ts',
       'src/ui/agent-view.module.ts',
+      'src/ui/useConfig.module.ts',
+      'src/useConfig.module.tsx',
       'client/state/session.ts',
       'src/client/state/session.ts',
       'apps/client/state/session.ts',

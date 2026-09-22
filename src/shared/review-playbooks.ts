@@ -50,7 +50,7 @@ const FRONTEND_WORKFLOW_PATTERNS = [
   /(^|[/._-])(?![^/]*\.module\.[cm]?[jt]s$)(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
   // React hook convention: a `useX` file is frontend even as plain `.ts`. Not
   // case-insensitive — `use[A-Z]` must stay uppercase so `user.ts` is excluded.
-  /(^|\/)use[A-Z][^/]*\.[cm]?[jt]sx?$/,
+  /(^|\/)(?![^/]*\.module\.[cm]?[jt]s$)use[A-Z][^/]*\.[cm]?[jt]sx?$/,
   /\.(tsx|jsx|vue|svelte)$/i,
 ];
 
