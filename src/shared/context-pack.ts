@@ -464,7 +464,8 @@ async function memberReferences(reader: PackReader, target: Located) {
     target.path,
     ...(await reader.references(target.owner!)).map((hit) => hit.path),
   ]);
-  const word = new RegExp(`\\b${target.symbol.replace(/\$/g, '\\$')}\\b`);
+  const escaped = target.symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const word = new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`);
   const hits: { path: string; line: number }[] = [];
   for (const path of paths) {
     const source = await reader.load(path);
@@ -495,6 +496,8 @@ async function callerEntries(
       )
         continue;
       const source = await reader.load(hit.path);
+      // An import names the symbol but calls nothing.
+      if (source?.index.imports.some((i) => i.line === hit.line)) continue;
       if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
       else unverified.push(`${hit.path}:${hit.line}`);
     }
@@ -507,13 +510,20 @@ async function callerEntries(
         a.line - b.line,
     );
     const subject = qualified(target);
-    for (const hit of callers.slice(0, CALLERS_PER_SYMBOL)) {
+    const rest: string[] = [];
+    let excerpts = 0;
+    for (const hit of callers) {
+      const hidden = shown.get(hit.path);
+      if (hidden?.has(hit.line)) continue;
+      if (excerpts === CALLERS_PER_SYMBOL) {
+        rest.push(`${hit.path}:${hit.line}`);
+        continue;
+      }
       const source = reader.sources.get(hit.path)!;
       const caller = innermost(
         source.index.declarations.filter((d) => FUNCTION_LIKE.has(d.kind)),
         hit.line,
       );
-      const hidden = shown.get(hit.path);
       const lines = [
         ...(caller ? [signatureLine(source, caller)] : []),
         ...range(hit.line - CALLER_CONTEXT_LINES, hit.line + CALLER_CONTEXT_LINES),
@@ -525,8 +535,8 @@ async function callerEntries(
       if (!item) continue;
       entries.push(item);
       markShown(shown, item);
+      excerpts++;
     }
-    const rest = callers.slice(CALLERS_PER_SYMBOL).map((hit) => `${hit.path}:${hit.line}`);
     if (rest.length) entries.push(listEntry('callers', 'other-callers', subject, rest));
     if (unverified.length) entries.push(listEntry('callers', 'unverified', subject, unverified));
   }

@@ -159,4 +159,28 @@ test('callers need an import link, and other name matches stay listed as unverif
   );
   assert.deepEqual(pack.supplied.ranges.get('apps/api/src/ledger.controller.ts'), [[3, 9]]);
   assert.equal(pack.supplied.symbols.has('post'), true);
+  // The caller excerpt is formatId's call in post, not ledger.service.ts's import block.
+  const page = [
+    {
+      filename: 'apps/api/src/format.ts',
+      patch: [
+        '@@ -1,3 +1,3 @@',
+        ' export function formatId(id: string) {',
+        '-  return id;',
+        '+  return `L-${id}`;',
+        ' }',
+      ].join('\n'),
+    },
+  ];
+  const formatPack = await buildContextPack(
+    page,
+    new Set([page[0].filename]),
+    provider(),
+    64 * 1024,
+  );
+  assert.match(
+    formatPack.text,
+    /#### apps\/api\/src\/ledger\.service\.ts:10-18 \(LedgerService\.post, calls formatId\)/,
+  );
+  assert.doesNotMatch(formatPack.text, /ledger\.service\.ts:1-/);
 });
