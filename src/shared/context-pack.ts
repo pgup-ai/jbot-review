@@ -62,6 +62,7 @@ export interface ContextPack {
   supplied: SuppliedContext;
   state: 'complete' | 'partial';
   omitted: number;
+  uncollected: number;
   slices: Partial<Record<ContextPackSlice, { items: number; bytes: number }>>;
 }
 
@@ -525,9 +526,11 @@ async function callerEntries(
       )
         continue;
       const source = await reader.load(hit.path);
+      // An unread file was never link-checked; a failed read already counts as uncollected.
+      if (!source) continue;
       // An import names the symbol but calls nothing.
-      if (source?.index.imports.some((i) => i.line === hit.line)) continue;
-      if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
+      if (source.index.imports.some((i) => i.line === hit.line)) continue;
+      if (await linked(reader, hit.path, source, target)) callers.push(hit);
       else unverified.push(`${hit.path}:${hit.line}`);
     }
     const subject = qualified(target);
@@ -670,6 +673,7 @@ export async function buildContextPack(
     supplied,
     state: reader.failures ? 'partial' : 'complete',
     omitted: omitted.length,
+    uncollected: reader.failures,
     slices,
   };
 }

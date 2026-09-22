@@ -98,7 +98,7 @@ export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
   return [...plans].sort((a, b) => score(b) - score(a));
 }
 
-/** A page's hunks regrouped into one patch per file. */
+/** Hunks regrouped into one patch per file. */
 export function planPageFiles(units: DiffUnit[]): PrFile[] {
   return [...new Set(units.map((unit) => unit.file.filename))].map((filename) => ({
     ...units.find((unit) => unit.file.filename === filename)!.file,
@@ -358,15 +358,8 @@ export function targetedDiff(
         );
       }),
     );
-  const files = [...new Set(units.map((u) => u.file.filename))].map((filename) => ({
-    filename,
-    patch: units
-      .filter((u) => u.file.filename === filename)
-      .map((u) => u.file.patch)
-      .join('\n'),
-  }));
   return buildTargetedDiffBlock(
-    files,
+    planPageFiles(units),
     units.flatMap((unit) => unit.adjacent ?? []),
   );
 }
@@ -447,13 +440,12 @@ export interface ContextPackResult {
   pack?: ContextPack;
 }
 
-/** Puts each page's context pack before its diff; pages it cannot serve get `fallback` instead. */
+/** Puts each page's context pack before its diff; pages it cannot serve are left unchanged. */
 export async function addContextPack(params: {
   plans: ShardPlan[];
   build: (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) => Promise<ContextPack>;
-  fallback: (plan: ShardPlan) => Promise<void>;
-  /** Main-page prompt; `contextPack` selects the pack-aware instructions. */
-  renderPrompt: (context: string, contextPack: boolean) => string;
+  /** The pack-aware main-page prompt; it sizes both the room and the final fit. */
+  renderPrompt: (context: string) => string;
   budget: ReviewPromptBudget;
   log: (message: string) => void;
 }): Promise<ContextPackResult[]> {
@@ -469,17 +461,22 @@ export async function addContextPack(params: {
         const started = Date.now();
         const roomBytes = Math.max(
           0,
-          inputCapacity(budget) - Buffer.byteLength(renderPrompt(plan.context, false)) - 1024,
+          inputCapacity(budget) - Buffer.byteLength(renderPrompt(plan.context)) - 1024,
         );
         const pack = await params
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
           .catch(() => undefined);
-        let reason: ContextPackResult['reason'] = !pack ? 'error' : pack.text ? undefined : 'empty';
+        // A directory map alone would cost the page its caller evidence for no code.
+        let reason: ContextPackResult['reason'] = !pack
+          ? 'error'
+          : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
+            ? undefined
+            : 'empty';
         if (pack && !reason) {
           const previous = { context: plan.context, baseContext: plan.baseContext };
           plan.context = withContextPack(plan.context, plan.diffText, pack.text);
           plan.baseContext = withContextPack(plan.baseContext, plan.diffText, pack.text);
-          const measured = measureReviewPrompt(renderPrompt(plan.context, true), budget);
+          const measured = measureReviewPrompt(renderPrompt(plan.context), budget);
           if (measured.fits) {
             plan.promptBytes = measured.promptBytes;
             plan.contextPack = true;
@@ -489,7 +486,6 @@ export async function addContextPack(params: {
           }
         }
         const buildMs = Date.now() - started;
-        if (reason) await params.fallback(plan);
         const result: ContextPackResult = {
           label: plan.label,
           state: reason ? 'fallback' : pack!.state,
@@ -506,6 +502,7 @@ export async function addContextPack(params: {
             roomBytes,
             bytes: reason ? 0 : Buffer.byteLength(pack!.text),
             omitted: reason ? 0 : pack!.omitted,
+            uncollected: result.pack?.uncollected ?? 0,
           })}.`,
         );
       }

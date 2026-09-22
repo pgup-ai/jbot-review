@@ -550,8 +550,6 @@ test('auxiliary planning frees guideline space for a long changed line without d
 
 test('the context pack sits before the page diff, and pages it cannot serve fall back', async () => {
   const budget = reviewPromptBudget('opencode', { contextTokens: 200_000 });
-  const renderPrompt = (context: string, contextPack = false) =>
-    assembleReviewPrompt(context, '', '', false, true, { contextPack });
   const file = {
     filename: 'money.ts',
     patch:
@@ -562,7 +560,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
       coreContext: '## Pull request\nTitle: money',
       context7Block: '',
       shards: [[file]],
-      renderPrompt: (context) => renderPrompt(context),
+      renderPrompt: (context) => assembleReviewPrompt(context, '', '', false, true),
       budget,
       evidenceReserveBytes: 8192,
     })[0];
@@ -576,23 +574,21 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     },
     state: 'complete' as const,
     omitted: 0,
-    slices: {},
+    uncollected: 0,
+    slices: { surrounding: { items: 1, bytes: 1 } },
   };
   const plans = [page(), page(), page(), page()];
   const before = { context: plans[3].context, baseContext: plans[3].baseContext };
-  const fallbacks: typeof plans = [];
   const results = await addContextPack({
     plans,
     build: async (plan) => {
-      if (plan === plans[1]) return { ...pack, text: '' };
+      if (plan === plans[1]) return { ...pack, slices: { directories: { items: 1, bytes: 10 } } };
       if (plan === plans[2]) throw new Error('boom');
       if (plan === plans[3]) return { ...pack, text: '## Context pack\n' + 'x'.repeat(300_000) };
       return pack;
     },
-    fallback: async (plan) => {
-      fallbacks.push(plan);
-    },
-    renderPrompt,
+    renderPrompt: (context) =>
+      assembleReviewPrompt(context, '', '', false, true, { contextPack: true }),
     budget,
     log: () => {},
   });
@@ -613,6 +609,4 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     plans.map((plan) => plan.contextPack),
     [true, undefined, undefined, undefined],
   );
-  assert.equal(fallbacks.length, 3);
-  assert.ok(fallbacks.includes(plans[3]));
 });

@@ -781,6 +781,9 @@ test('resolves tsconfig path aliases to tracked files only', () => {
 test('pack provider reads tracked head sources with tsconfig aliases and word references', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'pack-provider-'));
   t.after(() => rm(workspace, { recursive: true, force: true }));
+  const store = new EvidenceStore(workspace, []);
+  // A failed inventory read is not cached: after `git init` the same store retries it.
+  await assert.rejects(store.packProvider(AbortSignal.timeout(4000)));
   execFileSync('git', ['init', '-q', workspace]);
   await mkdir(join(workspace, 'libs/money/src'), { recursive: true });
   await writeFile(
@@ -795,7 +798,7 @@ test('pack provider reads tracked head sources with tsconfig aliases and word re
   await writeFile(join(workspace, 'libs/money/src/broken.ts'), 'export function (');
   await writeFile(join(workspace, 'untracked.ts'), 'export const total = 1;');
   execFileSync('git', ['add', 'tsconfig.json', 'libs'], { cwd: workspace });
-  const provider = await new EvidenceStore(workspace, []).packProvider(AbortSignal.timeout(4000));
+  const provider = await store.packProvider(AbortSignal.timeout(4000));
   assert.deepEqual(provider.aliases, [
     { prefix: '@app/money', wildcard: false, targets: ['libs/money/src'] },
   ]);

@@ -389,6 +389,7 @@ export class EvidenceStore {
   private sources = new SourceCache();
   private observations = new Map<string, { path: string; line: number }>();
   private inventory?: Promise<Set<string>>;
+  private packInventory?: Promise<{ tracked: Set<string>; aliases: PathAlias[] }>;
   private searches = new Map<string, Promise<string[]>>();
   private inventoryReads = 0;
   private searchCalls = 0;
@@ -446,8 +447,6 @@ export class EvidenceStore {
     }
   }
 
-  private packInventory?: Promise<{ tracked: Set<string>; aliases: PathAlias[] }>;
-
   /** Head-source access for one page's context pack; inventory and aliases load once per run. */
   async packProvider(signal: AbortSignal): Promise<PackSourceProvider> {
     this.packInventory ??= (async () => {
@@ -475,8 +474,8 @@ export class EvidenceStore {
       tracked,
       aliases,
       load: async (path): Promise<PackSource | undefined> => {
-        signal.throwIfAborted();
         if (!JS_SOURCE.test(path)) return undefined;
+        signal.throwIfAborted();
         // A cap miss counts as uncollected, like a deadline miss.
         if (files >= 64 || bytes >= 2 * 1024 * 1024) throw new Error('context pack file cap');
         const source = await this.read(path, signal, tracked);
@@ -486,30 +485,29 @@ export class EvidenceStore {
         if (!source || source.truncated) return undefined;
         files++;
         bytes += Buffer.byteLength(source.text);
-        let index: RichSourceIndex;
         try {
-          index = indexEvidenceSource(path, source.text, { rich: true });
+          const index = indexEvidenceSource(path, source.text, { rich: true });
+          return { lines: source.text.split(/\r?\n/), index };
         } catch {
           // Syntax Babel rejects is a missing source, not a missed deadline.
           return undefined;
         }
-        return { lines: source.text.split(/\r?\n/), index };
       },
       references: async (symbol, paths) => {
         const scope = paths?.map((path) => `:(literal)${path}`) ?? PACK_SOURCE_GLOBS;
         const { stdout } = await exec(
           'git',
-          ['grep', '-n', '-z', '-w', '-F', '-e', symbol, '--', ...scope],
+          ['grep', '-n', '-z', '-I', '-w', '-F', '-e', symbol, '--', ...scope],
           { cwd: this.workspace, signal, maxBuffer: 4 * 1024 * 1024 },
         ).catch((error) => {
           if (error.code === 1) return { stdout: '' };
           throw error;
         });
-        // -z prints paths verbatim and ends both the path and the line number with NUL.
-        return stdout.split('\n').flatMap((row) => {
-          const match = /^([^\0]*)\0(\d+)\0/.exec(row);
-          return match ? [{ path: match[1], line: Number(match[2]) }] : [];
-        });
+        // A -z record is path NUL line NUL text; paths may hold newlines, and -I skips binaries.
+        return [...stdout.matchAll(/([^\0]*)\0(\d+)\0[^\n]*\n/g)].map(([, path, line]) => ({
+          path,
+          line: Number(line),
+        }));
       },
     };
   }
