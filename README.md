@@ -637,6 +637,15 @@ Native tools own search syntax, read limits and continuation behavior; J-Bot
 records their completion/error counts and session token usage. JSON repairs use a
 fresh temporary home with tools denied, leaving other sessions unaffected.
 
+OpenCode verification reserves time for one recovery attempt using its current
+model, settings and native read-only agent. Recovery forks the collected history
+and asks for only the missing checks needed to finish verdicts. Completed verdicts
+are preserved; insufficient evidence remains uncertain. It runs after a timeout
+or incomplete output within the existing budget. Recovery reserves part of the
+time left after setup (about a minute from five minutes); unbounded runs skip
+recovery. Logs report the model, reason, time used and verdict count. No separate model flag or paid fallback is needed.
+JSON repair and formatting remain tool-less.
+
 CommandCode verification receives packed source evidence from earlier native
 review reads by default. Only successfully observed, tracked source is eligible;
 files are revalidated before reuse, and lines already in cited-source context

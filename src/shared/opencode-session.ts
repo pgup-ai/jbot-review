@@ -236,10 +236,18 @@ export interface CreateSessionSpec {
   tier?: OptionTier;
   agent?: string;
   forkFrom?: string;
+  deadline?: number;
 }
 
 /** Control-plane calls never wait on a wedged server longer than one request timeout. */
-const control = () => ({ signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+const control = (deadline?: number) => {
+  const timeout =
+    deadline === undefined
+      ? REQUEST_TIMEOUT_MS
+      : Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
+  if (timeout <= 0) throw new Error('Session setup budget exhausted.');
+  return { signal: AbortSignal.timeout(timeout) };
+};
 
 function modelRef(model: string) {
   const { providerID, modelID } = parseModelName(model);
@@ -256,11 +264,12 @@ export async function createReviewSession(
   const permissions = TOOL_LESS_AGENTS.has(agent) ? DENY_ALL : permissionRules();
   let sessionID: string;
   if (spec.forkFrom) {
-    sessionID = (await client.session.fork({ sessionID: spec.forkFrom }, control())).id;
-    await client.session.switchAgent({ sessionID, agent }, control());
-    await client.session.switchModel({ sessionID, model }, control());
+    sessionID = (await client.session.fork({ sessionID: spec.forkFrom }, control(spec.deadline)))
+      .id;
+    await client.session.switchAgent({ sessionID, agent }, control(spec.deadline));
+    await client.session.switchModel({ sessionID, model }, control(spec.deadline));
     // A fork keeps its source's rules; the verifier gets its own agent's.
-    await client.session.update({ sessionID, permissions }, control());
+    await client.session.update({ sessionID, permissions }, control(spec.deadline));
   } else {
     sessionID = (
       await client.session.create(
@@ -271,11 +280,14 @@ export async function createReviewSession(
           title: `jbot-review ${spec.label}`,
           permissions,
         },
-        control(),
+        control(spec.deadline),
       )
     ).id;
   }
-  await client.session.environment({ sessionID, variables: sessionEnvironment() }, control());
+  await client.session.environment(
+    { sessionID, variables: sessionEnvironment() },
+    control(spec.deadline),
+  );
   rememberSession(client, sessionID, { label: spec.label, agent });
   registerSessionOptions(runtime, sessionID, spec);
   return sessionID;

@@ -17,6 +17,33 @@ import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts'
 const log = () => undefined;
 
 describe('createReviewSession', () => {
+  it('stops fork setup when its shared deadline expires between requests', async (t) => {
+    const fake = fakeOpencodeServer(() => ({ text: '{}' }));
+    const rt = runtime(fake);
+    const source = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    let now = Date.now();
+    const deadline = now + 100;
+    t.mock.method(Date, 'now', () => now);
+    const fork = fake.client.session.fork.bind(fake.client.session);
+    t.mock.method(fake.client.session, 'fork', async (...args) => {
+      assert.ok(args[1]?.signal);
+      const result = await fork(...args);
+      now = deadline;
+      return result;
+    });
+    const calls = fake.calls.length;
+    await assert.rejects(
+      createReviewSession(rt, {
+        label: 'finding-verification-recovery',
+        model: 'openai/gpt-5',
+        forkFrom: source,
+        deadline,
+      }),
+      /Session setup budget exhausted/,
+    );
+    assert.equal(fake.calls.length - calls, 1);
+  });
+
   it('registers independent phase labels without model options, including forked verifiers', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{}' }));
     const rt = runtime(fake);

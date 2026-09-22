@@ -31,7 +31,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `opencode`              | CLI snapshot         |      70 | `opencode/deepseek-v4-flash`                                    |
 | `opencode-go`           | CLI snapshot         |      27 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      71 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      77 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     224 | `cursor/default`                                                |
 | `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |       7 | `codex/default`                                                 |
@@ -896,11 +896,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.56.2`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.62.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-71 J-Bot model values:
+77 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
@@ -930,6 +930,7 @@ The CLI does not expose a complete list.
 - `commandcode/gpt-5.6-sol`
 - `commandcode/gpt-5.6-terra`
 - `commandcode/gpt-6-astra`
+- `commandcode/meituan/longcat-2.0`
 - `commandcode/meta/muse-spark-1.1`
 - `commandcode/meta/muse-spark-1.2`
 - `commandcode/meta/muse-spark-1.2-contributor`
@@ -958,14 +959,19 @@ The CLI does not expose a complete list.
 - `commandcode/sakana/fugu-ultra`
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`
+- `commandcode/stepfun/step-5-preview`
 - `commandcode/tencent/hy3-paid`
 - `commandcode/tencent/hy4-preview`
 - `commandcode/thinkingmachines/inkling`
 - `commandcode/thinkingmachines/inkling-small`
 - `commandcode/xai/grok-4.5`
 - `commandcode/xai/grok-4.6`
+- `commandcode/xai/grok-4.7`
 - `commandcode/xiaomi/mimo-v2.5`
 - `commandcode/xiaomi/mimo-v2.5-pro`
+- `commandcode/xiaomi/mimo-v2.6-flash`
+- `commandcode/xiaomi/mimo-v2.6-pro`
+- `commandcode/xiaomi/mimo-v2.6-pro-ultraspeed`
 - `commandcode/z-ai/glm-5.3-flash`
 - `commandcode/z-ai/glm-5.3-flashx`
 - `commandcode/zai-org/glm-5`

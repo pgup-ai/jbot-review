@@ -64,8 +64,11 @@ const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
 
-// Context windows from the pinned CommandCode 1.56.2 catalog.
+// Context windows from the pinned CommandCode 1.62.0 catalog.
 export const COMMANDCODE_MODEL_LIMITS: Record<string, { contextTokens: number }> = {
+  'xiaomi/mimo-v2.6-pro': { contextTokens: 1_048_576 },
+  'xiaomi/mimo-v2.6-pro-ultraspeed': { contextTokens: 1_048_576 },
+  'xiaomi/mimo-v2.6-flash': { contextTokens: 1_048_576 },
   'meta/muse-spark-1.3-contributor': { contextTokens: 1_048_576 },
   'meta/muse-spark-1.3': { contextTokens: 1_048_576 },
   'gpt-5.6-luna': { contextTokens: 1_050_000 },

@@ -3,6 +3,7 @@ import { modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import type { OptionTier } from './opencode-config.ts';
+import { wrapUpReserveMs } from './time-budget.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import {
   agentForModel,
@@ -14,6 +15,7 @@ import {
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
+  buildVerificationRecoveryPrompt,
   assembleGuidelineCompliancePrompt,
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
@@ -441,22 +443,87 @@ export async function runFindingVerification(
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
   const prompt = assembleFindingVerificationPrompt(prContext, findings, isSingleShotModel(model));
-  const { raw } = await promptPlanAgent(
-    runtime,
+  const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+  log('Creating finding-verification session');
+  const sessionID = await createReviewSession(runtime, {
     model,
-    prompt,
-    'finding-verification',
-    log,
-    timeoutMs,
-    onTokenUsage,
-    undefined,
-    {
-      // 'verify' options exist only when the runner registered them at boot.
-      tier: modelOptions ? 'verify' : 'main',
-      forkFrom,
-    },
+    label: 'finding-verification',
+    deadline,
+    tier: modelOptions ? 'verify' : 'main',
+    forkFrom,
+    agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+  });
+  log(`finding-verification session created: ${sessionID}`);
+  const reserve = deadline === undefined ? 0 : wrapUpReserveMs(deadline - Date.now());
+  let verdicts: FindingVerdict[] | undefined;
+  let failure: unknown;
+  try {
+    const remaining = deadline === undefined ? undefined : deadline - Date.now() - reserve;
+    if (remaining !== undefined && remaining <= 0)
+      throw new Error('Finding verification budget exhausted.');
+    const raw = await promptInSession(runtime, sessionID, {
+      model,
+      text: prompt,
+      label: 'finding-verification',
+      log,
+      timeoutMs: remaining,
+      onTokenUsage,
+    });
+    verdicts = parseFindingVerdicts(raw, findings.length, log);
+    if (verdicts?.length === findings.length) return verdicts;
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !/^opencode finding-verification prompt (?:did not finish within \d+s|settled without a completed assistant message)$/.test(
+        error.message,
+      )
+    )
+      throw error;
+    failure = error;
+  }
+  if (deadline === undefined || deadline - Date.now() < 1000) {
+    if (failure) throw failure;
+    return verdicts;
+  }
+  const started = Date.now();
+  const recoveryDeadline = Math.min(deadline, started + (reserve || 60_000));
+  log(
+    `Finding verification recovery: model=${model} reason=${failure ? 'interrupted' : 'unusable-output'} remainingMs=${recoveryDeadline - started}`,
   );
-  return parseFindingVerdicts(raw, findings.length, log);
+  try {
+    const recoverySession = await createReviewSession(runtime, {
+      model,
+      label: 'finding-verification-recovery',
+      tier: modelOptions ? 'verify' : 'main',
+      agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+      deadline: recoveryDeadline,
+      forkFrom: sessionID,
+    });
+    const remaining = recoveryDeadline - Date.now();
+    if (remaining <= 0) throw new Error('Finding verification recovery budget exhausted.');
+    const raw = await promptInSession(runtime, recoverySession, {
+      model,
+      text: buildVerificationRecoveryPrompt(findings.length),
+      label: 'finding-verification-recovery',
+      log,
+      timeoutMs: remaining,
+      onTokenUsage,
+    });
+    const recovered = parseFindingVerdicts(raw, findings.length, log);
+    const completed = new Map((verdicts ?? []).map((verdict) => [verdict.index, verdict]));
+    for (const verdict of recovered ?? [])
+      if (!completed.has(verdict.index)) completed.set(verdict.index, verdict);
+    log(
+      `Finding verification recovery: elapsedMs=${Date.now() - started} verdicts=${completed.size}/${findings.length}`,
+    );
+    return completed.size ? [...completed.values()] : undefined;
+  } catch (error) {
+    log(
+      `Finding verification recovery failed: model=${model} elapsedMs=${Date.now() - started} error=${error instanceof Error ? error.message : String(error)}; preserving existing verdicts.`,
+    );
+    if (verdicts?.length) return verdicts;
+    throw failure ?? error;
+  }
 }
 
 const reviewSessionsByRuntime = new WeakMap<object, Map<string, string[]>>();
