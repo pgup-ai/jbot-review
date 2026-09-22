@@ -51,17 +51,37 @@ test('supplied overlap separates re-reads and searches of context-pack content',
   const supplied = {
     ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
     symbols: new Set(['LedgerService']),
-    directories: new Set<string>(),
+    directories: new Set(['src']),
   };
   const read = (input: Record<string, unknown>) => suppliedOverlap('/w', 'read', input, supplied);
   assert.equal(read({ filePath: '/w/src/a.ts', offset: 10, limit: 5 }), 'read');
   assert.equal(read({ filePath: '/w/src/a.ts', offset: 1, limit: 5 }), false);
+  // No limit defaults to a 2000-line window; 9 supplied lines in it is not half.
+  assert.equal(read({ filePath: '/w/src/a.ts', offset: 1 }), false);
+  assert.equal(read({ filePath: '/w/src' }), 'read');
   assert.equal(
     suppliedOverlap('/w', 'grep', { pattern: 'LedgerService|other' }, supplied),
     'search',
   );
   assert.equal(
     suppliedOverlap('/w', 'shell', { command: 'grep -rn LedgerService src' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'grep -n "\\bLedgerService\\b" src' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'git log --grep=LedgerService' }, supplied),
+    false,
+  );
+  assert.equal(
+    suppliedOverlap(
+      '/w',
+      'shell',
+      { command: 'grep -n "npm run build" ci.yml' },
+      { ...supplied, symbols: new Set(['run']) },
+    ),
     'search',
   );
   assert.equal(

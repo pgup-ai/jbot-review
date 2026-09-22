@@ -947,7 +947,7 @@ describe('context pack prompt', () => {
         '#### a.ts:1-8 (A.run)',
         '1: run() {',
         '2:   x();',
-        '[lines 3-5: in the diff below]',
+        "[lines 3-5: in this page's diff]",
         '6: }',
         '[lines 7-8 omitted]',
       ].join('\n'),
@@ -968,6 +968,25 @@ describe('context pack prompt', () => {
       uncollected: 1,
     });
     assert.match(pack, /^## Context pack/);
-    assert.match(pack, /### Omitted\n- b\.ts:9-9 \(callers\)\n- 1 item\(s\) not collected/);
+    assert.match(pack, /do\s+not re-read them/);
+    assert.match(pack, /not evidence that none\s+exist/);
+    // The uncollected count goes first, so it survives the Omitted cap below.
+    assert.match(
+      pack,
+      /### Omitted\n- 1 item\(s\) not collected before the pack deadline\n- b\.ts:9-9 \(callers\)/,
+    );
+    const capped = formatContextPack({
+      items: [],
+      omitted: Array.from({ length: 80 }, () => ({
+        slice: 'callers' as const,
+        path: `${'a'.repeat(60)}.ts`,
+        label: '',
+        rows: [[1, 'x']] as [number, string][],
+      })),
+      uncollected: 0,
+    });
+    const omittedSection = capped.slice(capped.indexOf('### Omitted'));
+    assert.ok(Buffer.byteLength(omittedSection, 'utf8') < 2048 + 40);
+    assert.match(omittedSection, /\n- \+\d+ more$/);
   });
 });

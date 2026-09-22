@@ -445,17 +445,18 @@ and identify material uncertainties without asserting unverified premises.`;
 const CONTEXT_PACK_EXPLORATION_POLICY = `## Repository exploration policy
 
 Review every changed hunk in the embedded diff. Start from the context pack
-below: it already holds the code around each change, the definitions the
-change uses, and import-linked callers. Read the repository only for code the
-pack lists as omitted, callers beyond those it shows, and evidence it does not
-cover, such as history, configuration, and tests. Issue independent reads
-together in one turn. Follow dependencies beyond the first hop when the
-evidence reveals a plausible broken contract or unresolved finding. Continue
-paginated or truncated results when the needed evidence is missing.
+below: it holds code around the changes, the definitions they use, and
+import-linked callers. Use tools for what it does not show: code under Omitted
+or outside the excerpted ranges, callers beyond those shown, history,
+configuration, and tests. Issue independent reads together in one turn; never
+guess the input of a dependent lookup. Follow dependencies beyond the first hop
+when the evidence reveals a plausible broken contract or unresolved finding.
+Continue paginated or truncated results when the needed evidence is missing.
 
 Once the changed hunks and plausible failure paths are covered, return the final
-JSON. Do not keep exploring solely for completeness. Report supported findings
-and identify material uncertainties without asserting unverified premises.`;
+JSON. Do not keep exploring solely for completeness or reread the embedded diff
+unless a specific uncertainty requires it. Report supported findings and
+identify material uncertainties without asserting unverified premises.`;
 
 export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
 
@@ -729,12 +730,13 @@ export interface ContextPackEntry {
 
 const CONTEXT_PACK_NOTE = `## Context pack
 
-These excerpts were read from the head commit before this review started: the
-code around every changed line on this page, the definitions those lines use,
-and import-linked call sites of the changed symbols. Treat them as already read
-and do not re-read these ranges. Line numbers match the new side of the diff.
-Callers are limited to import-linked call sites; a missing caller is not
-evidence that none exist.`;
+These excerpts were read before this review started: code around the changes on
+this page, the definitions those lines use, and import-linked call sites of the
+changed symbols. They cover only the ranges shown; anything not shown, including
+Omitted items, has not been read. Treat the shown ranges as already read and do
+not re-read them. Line numbers match the new side of the diff. Callers are
+limited to import-linked call sites; a missing caller is not evidence that none
+exist.`;
 
 const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
   surrounding: '### Surrounding code',
@@ -745,6 +747,12 @@ const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
 
 const CONTEXT_PACK_OMITTED_BYTES = 2048;
 
+/** An item's displayed line span: rows may stop before a truncated `end`. Shared by the header and the Omitted list so they always agree. */
+function contextPackSpan(item: ContextPackEntry): [first: number, last: number] {
+  const first = item.rows[0][0];
+  return [first, Math.max(item.rows.at(-1)![0], item.end ?? 0)];
+}
+
 export function formatContextPackItem(item: ContextPackEntry): string {
   if (item.list) {
     const { kind, subject, entries } = item.list;
@@ -754,15 +762,14 @@ export function formatContextPackItem(item: ContextPackEntry): string {
       ? `Other import-linked callers of \`${subject}\`: ${shown}`
       : `Unverified name matches for \`${subject}\` (no import link found): ${shown}`;
   }
-  const first = item.rows[0][0];
-  const last = Math.max(item.rows.at(-1)![0], item.end ?? 0);
+  const [first, last] = contextPackSpan(item);
   const title = [item.label, item.calls && `calls ${item.calls}`].filter(Boolean).join(', ');
   const lines = [`#### ${item.path}:${first}-${last}${title ? ` (${title})` : ''}`];
   const gap = (from: number, to: number) => {
     let inDiff = true;
     for (let line = from; line <= to && inDiff; line++) inDiff = item.inDiff?.has(line) ?? false;
     lines.push(
-      inDiff ? `[lines ${from}-${to}: in the diff below]` : `[lines ${from}-${to} omitted]`,
+      inDiff ? `[lines ${from}-${to}: in this page's diff]` : `[lines ${from}-${to} omitted]`,
     );
   };
   let previous = first;
@@ -772,6 +779,23 @@ export function formatContextPackItem(item: ContextPackEntry): string {
     previous = line;
   }
   if (last > previous) gap(previous + 1, last);
+  return lines.join('\n');
+}
+
+/** Adds whole Omitted-list entries while the section stays within budget, then folds the rest into one final line — no mid-entry truncation. */
+function formatOmittedList(entries: string[]): string {
+  const lines = ['### Omitted'];
+  let bytes = Buffer.byteLength(lines[0], 'utf8');
+  let shown = 0;
+  for (const entry of entries) {
+    const size = Buffer.byteLength(entry, 'utf8') + 1;
+    if (bytes + size > CONTEXT_PACK_OMITTED_BYTES) break;
+    lines.push(entry);
+    bytes += size;
+    shown += 1;
+  }
+  const remaining = entries.length - shown;
+  if (remaining > 0) lines.push(`- +${remaining} more`);
   return lines.join('\n');
 }
 
@@ -786,27 +810,18 @@ export function formatContextPack(pack: {
       ? [[CONTEXT_PACK_TITLES[slice], ...items.map(formatContextPackItem)].join('\n\n')]
       : [];
   });
+  // The uncollected count goes first so the budget above can never cut it.
   const omitted = [
-    ...pack.omitted.map((item) =>
-      item.list
-        ? `- ${item.list.subject} (${item.slice})`
-        : `- ${item.path}:${item.rows[0][0]}-${item.rows.at(-1)![0]} (${item.slice})`,
-    ),
     ...(pack.uncollected
       ? [`- ${pack.uncollected} item(s) not collected before the pack deadline`]
       : []),
+    ...pack.omitted.map((item) => {
+      if (item.list) return `- ${item.list.subject} (${item.slice})`;
+      const [first, last] = contextPackSpan(item);
+      return `- ${item.path}:${first}-${last} (${item.slice})`;
+    }),
   ];
-  return [
-    CONTEXT_PACK_NOTE,
-    ...sections,
-    omitted.length
-      ? truncateUtf8WithNotice(
-          ['### Omitted', ...omitted].join('\n'),
-          CONTEXT_PACK_OMITTED_BYTES,
-          'Omitted list',
-        )
-      : '',
-  ]
+  return [CONTEXT_PACK_NOTE, ...sections, omitted.length ? formatOmittedList(omitted) : '']
     .filter(Boolean)
     .join('\n\n');
 }
@@ -1404,7 +1419,7 @@ export function assembleReviewPrompt(
      * reminder stays last (invariant #5).
      */
     contextFirst?: boolean;
-    /** JBOT_REVIEW_EXPERIMENT=context-pack main pages; lens prompts ignore it. */
+    /** JBOT_REVIEW_EXPERIMENT=context-pack main pages; implies the embedded-first base and overrides embeddedFirstPrompt=false (lens prompts ignore it). */
     contextPack?: boolean;
   } = {},
 ): string {

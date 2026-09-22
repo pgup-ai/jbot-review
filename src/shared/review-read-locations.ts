@@ -1,5 +1,7 @@
 import { relative, resolve } from 'node:path';
 
+const SHELL_TOOLS = ['shell', 'bash', 'execute', 'exec'];
+
 export function reviewReadLocations(
   workspace: string,
   tool: string,
@@ -33,7 +35,7 @@ export function reviewReadLocations(
     );
     return locations;
   }
-  if (!['shell', 'bash', 'execute', 'exec'].includes(tool)) return [];
+  if (!SHELL_TOOLS.includes(tool)) return [];
   const command = input.command;
   // Observe a tiny literal grammar; never evaluate shell syntax or replay its output.
   if (
@@ -81,6 +83,33 @@ export interface SuppliedContext {
   directories: Set<string>;
 }
 
+/**
+ * The pattern argument of the first `grep`, `rg`, or `git grep` command word in a
+ * shell command: the argument after `-e`, or the first non-option word after the
+ * command word. Matching the exact word "grep" (never a `--grep=...` flag) means
+ * `git log --grep` is never mistaken for a search.
+ */
+function shellSearchPattern(command: string): string | undefined {
+  const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(
+    (m) => m[1] ?? m[2] ?? m[3],
+  );
+  for (let i = 0; i < tokens.length; i++) {
+    const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
+    if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
+    for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
+      if (tokens[j] === '-e') return tokens[j + 1];
+      if (!tokens[j].startsWith('-')) return tokens[j];
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+/** Identifier tokens (3+ chars) in a search pattern; collapses `\X` escapes first so `\bFoo\b` still yields `Foo`. */
+function searchTokens(pattern: string): string[] {
+  return pattern.replace(/\\[\s\S]/g, ' ').match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
+}
+
 /** Whether a tool call re-reads or re-searches what the session's context pack already supplied. */
 export function suppliedOverlap(
   workspace: string,
@@ -88,21 +117,31 @@ export function suppliedOverlap(
   input: Record<string, unknown>,
   supplied: SuppliedContext,
 ): 'read' | 'search' | false {
-  for (const location of reviewReadLocations(workspace, tool, input))
-    if (
-      supplied.ranges
-        .get(location.path)
-        ?.some(([start, end]) => location.line <= end && location.endLine >= start)
-    )
-      return 'read';
-  const query =
-    tool === 'grep' || tool === 'search'
+  for (const location of reviewReadLocations(workspace, tool, input)) {
+    // Whole-file reads (endLine at MAX) and default 2000-line reads of a mostly
+    // unsupplied file must not count merely for touching a supplied line.
+    const size = location.endLine - location.line + 1;
+    if (size > 2000) continue;
+    const ranges = supplied.ranges.get(location.path) ?? [];
+    let covered = 0;
+    for (let line = location.line; line <= location.endLine; line++)
+      if (ranges.some(([start, end]) => line >= start && line <= end)) covered++;
+    if (covered * 2 >= size) return 'read';
+  }
+  const dirInput = input.path ?? input.filePath ?? input.directory;
+  if (
+    typeof dirInput === 'string' &&
+    supplied.directories.has(relative(workspace, resolve(workspace, dirInput)))
+  )
+    return 'read';
+  const pattern =
+    tool === 'grep'
       ? input.pattern
-      : ['shell', 'bash'].includes(tool) && /\b(?:grep|rg)\b/.test(String(input.command))
-        ? input.command
+      : SHELL_TOOLS.includes(tool) && typeof input.command === 'string'
+        ? shellSearchPattern(input.command)
         : undefined;
-  return typeof query === 'string' &&
-    (query.match(/[A-Za-z_$][\w$]{2,}/g) ?? []).some((token) => supplied.symbols.has(token))
+  return typeof pattern === 'string' &&
+    searchTokens(pattern).some((token) => supplied.symbols.has(token))
     ? 'search'
     : false;
 }
