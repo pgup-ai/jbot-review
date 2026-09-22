@@ -132,6 +132,7 @@ test('a source the provider cannot deliver makes the pack partial', async () => 
   const failing = { ...provider(), load: async () => Promise.reject(new Error('timeout')) };
   const pack = await buildContextPack(PAGE, CHANGED, failing, 64 * 1024);
   assert.equal(pack.state, 'partial');
+  assert.equal(pack.uncollected, 1);
   assert.match(pack.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
 });
 

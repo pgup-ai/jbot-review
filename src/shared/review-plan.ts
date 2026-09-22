@@ -437,6 +437,8 @@ export interface ContextPackResult {
   reason?: 'empty' | 'error' | 'overflow';
   buildMs: number;
   roomBytes: number;
+  /** Also kept on fallback pages, so a deadline-starved empty page stays visible. */
+  uncollected: number;
   pack?: ContextPack;
 }
 
@@ -492,6 +494,7 @@ export async function addContextPack(params: {
           ...(reason ? { reason } : { pack }),
           buildMs,
           roomBytes,
+          uncollected: pack?.uncollected ?? 0,
         };
         results[index] = result;
         params.log(
@@ -502,7 +505,7 @@ export async function addContextPack(params: {
             roomBytes,
             bytes: reason ? 0 : Buffer.byteLength(pack!.text),
             omitted: reason ? 0 : pack!.omitted,
-            uncollected: result.pack?.uncollected ?? 0,
+            uncollected: result.uncollected,
           })}.`,
         );
       }
