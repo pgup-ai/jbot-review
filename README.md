@@ -1047,9 +1047,22 @@ model, settings, instructions and PR intent, and every subsequent change is to a
 README, changelog or Markdown audit. Code, configuration, guidelines, unknown
 history and explicit same-head reruns run auxiliaries normally. Logs record each
 decision and the reused commit. Setting `dynamic-fanout: false` also forces normal
-auxiliary scheduling. Local mode has no prior GitHub review state, so it cannot exercise auxiliary reuse. Clean follow-ups that do not post a new review keep the older completion baseline. See the
+auxiliary scheduling. The local CLI has no prior GitHub review state; comparison fixtures can supply a prior review explicitly. Clean follow-ups that do not post a new review keep the older completion baseline. See the
 [paired follow-up experiment](docs/audits/2026-09-20-adaptive-auxiliary-review.md)
 for measured savings and the rejected verifier-retrieval trial.
+
+Incremental follow-ups also check guideline relevance without an experiment flag.
+An enabled guideline pass runs for applicable scoped rules even on a one-line
+change. Explicit path scopes are matched against the affected files, including
+callers selected by incremental planning. Unknown scope remains applicable.
+
+The extra pass can be reused only after a completed guideline check with matching
+base, policy and reviewed head, when the remaining rules are complete global
+guidance that fits in the main prompt. Main receives that guidance in full. Missing
+or truncated guidance, unknown scope, changed policy and incomplete history keep
+the check running. Logs record run/reuse/skip decisions and the reused head.
+Guidelines may share an interactions session, so reuse does not always remove a
+whole model session.
 
 Every preset withholds uncertain, investigation-only and low-confidence candidates
 from inline, file-level and review-body findings. Their full details remain in
@@ -1416,6 +1429,9 @@ page fails the run before posting; it is never cached as a completed review.
 Deadlines also apply while queued. Coverage logs record any cutoff or failure.
 
 The changes-since summary and addressed-thread check use low-priority slots.
+They enter scheduling after enabled finder pages have been queued (or preparation
+has failed), so faster summary preparation cannot take a finder’s slot. They do
+not wait for finder results. Existing queue priorities and concurrency caps still apply.
 Their results are kept if they have finished when main review completes;
 otherwise they are skipped and cancelled before verification can need their
 session slots. Skips appear in the

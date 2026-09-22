@@ -66,6 +66,7 @@ export async function planAuxiliaryReuse(input: {
   policy: string;
   sessions: string[];
   priorBodies: string[];
+  guidelineFollowup?: { baseline: string; coveredByMain: boolean };
 }): Promise<Array<{ session: string; reason: string; baseline?: AuxiliaryBaseline }>> {
   const latest = input.priorBodies.at(-1) ?? '';
   const prior = auxiliaryBaselines(latest);
@@ -79,7 +80,14 @@ export async function planAuxiliaryReuse(input: {
       else if (baseline.policy !== input.policy) reason = 'policy-changed';
       else if (!input.head || baseline.head === input.head || input.reviewedHead === input.head)
         reason = 'explicit-rerun';
-      else {
+      else if (session === 'guideline-compliance' && input.guidelineFollowup) {
+        reason =
+          baseline.head !== input.guidelineFollowup.baseline
+            ? 'guideline-baseline-mismatch'
+            : input.guidelineFollowup.coveredByMain
+              ? 'global-guidelines-in-main'
+              : 'relevant-guidelines';
+      } else {
         let delta = deltas.get(baseline.head);
         if (!delta) {
           const git = (...args: string[]) =>
@@ -112,7 +120,13 @@ export async function planAuxiliaryReuse(input: {
         }
         reason = await delta;
       }
-      return { session, reason, ...(reason === 'documentation-only' ? { baseline } : {}) };
+      return {
+        session,
+        reason,
+        ...(['documentation-only', 'global-guidelines-in-main'].includes(reason)
+          ? { baseline }
+          : {}),
+      };
     }),
   );
 }
