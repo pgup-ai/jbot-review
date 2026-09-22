@@ -575,15 +575,21 @@ describe('CommandCode multi-key pick', () => {
     assert.deepEqual(splitCommandCodeAccessKeys(',,'), []);
   });
 
-  it('checks monthly credits for single keys and normalized lists', async (t) => {
+  it('checks plan limits for single keys and normalized lists', async (t) => {
     let remaining = 1;
+    let fiveExceeded = false;
     const requests: string[] = [];
     t.mock.method(
       globalThis,
       'fetch',
       async (_url: unknown, options: { headers: Record<string, string> }) => {
         requests.push(options.headers.Authorization);
-        return new Response(JSON.stringify({ credits: { monthlyCredits: remaining } }));
+        return new Response(
+          JSON.stringify({
+            credits: { monthlyCredits: remaining },
+            windowLimits: { fiveHour: usage(remaining, fiveExceeded).fiveHour },
+          }),
+        );
       },
     );
     for (const [raw, key] of [
@@ -604,6 +610,12 @@ describe('CommandCode multi-key pick', () => {
         /monthly plan credits exhausted/,
       );
       remaining = 1;
+      fiveExceeded = true;
+      await assert.rejects(
+        selectCommandCodeAccessKey(raw, () => {}),
+        /5-hour or weekly usage limits exhausted/,
+      );
+      fiveExceeded = false;
     }
     assert.deepEqual(await selectCommandCodeAccessKey(',,', () => {}), {
       key: ',,',
@@ -627,9 +639,9 @@ describe('CommandCode multi-key pick', () => {
         ]).key,
         'funded',
       );
-      assert.equal(
-        pickCommandCodeAccessKey([exhausted, { key: 'limited', usage: usage(1, true) }]).key,
-        'limited',
+      assert.throws(
+        () => pickCommandCodeAccessKey([exhausted, { key: 'limited', usage: usage(1, true) }]),
+        /5-hour or weekly usage limits exhausted/,
       );
       assert.throws(() => pickCommandCodeAccessKey([exhausted]), /monthly plan credits exhausted/);
       assert.throws(
@@ -658,7 +670,7 @@ describe('CommandCode multi-key pick', () => {
     );
   });
 
-  it('picks window-open keys by most remaining credits, failing back sanely', () => {
+  it('ranks eligible keys by weekly headroom and rejects exhausted or unavailable limits', () => {
     // Share of the WEEKLY limit still open ranks first — read from the credits
     // payload, so the pick never depends on the slower monthly enrichment.
     const withWeekly = (monthlyCredits: number, used: number, cap: number) => ({
@@ -700,33 +712,43 @@ describe('CommandCode multi-key pick', () => {
     ]);
     assert.equal(windowAware.key, 'k2');
     assert.match(windowAware.reason, /picked 2\/2 \(…k2, 97% of weekly limit left\)/);
-    // Over-cap windows floor at zero headroom (never a negative percentage).
-    const overCap = pickCommandCodeAccessKey([
-      {
-        key: 'k1',
-        usage: { ...usage(9, true), weekly: { used: 40, cap: 35, resetAt: 1, exceeded: true } },
-      },
-    ]);
-    assert.match(overCap.reason, /\(…k1, 0% of weekly limit left\)$/);
-    // Every window limited: fall back to most remaining, flagged as such.
-    const allLimited = pickCommandCodeAccessKey([
-      { key: 'k1', usage: usage(9, true) },
-      { key: 'k2', usage: usage(3, false, true) },
-    ]);
-    assert.equal(allLimited.key, 'k1');
-    assert.match(allLimited.reason, /^all 2 window-limited; picked 1\/2/);
-    // The window-limited count covers only REACHABLE keys, not failed probes.
-    const mixed = pickCommandCodeAccessKey([{ key: 'k1', usage: usage(9, true) }, { key: 'k2' }]);
-    assert.equal(mixed.key, 'k1');
-    assert.match(mixed.reason, /^all 1 window-limited; picked 1\/2/);
-    // Unreachable probes are excluded; all unreachable → first key (legacy behavior).
-    assert.equal(
-      pickCommandCodeAccessKey([{ key: 'k1' }, { key: 'k2', usage: usage(5) }]).key,
-      'k2',
+    for (const window of ['fiveHour', 'weekly'] as const) {
+      for (const used of [14, 15]) {
+        const exhausted = {
+          key: 'exhausted',
+          usage: {
+            ...usage(9),
+            purchasedCredits: 100,
+            [window]: { used, cap: 14, resetAt: 1, exceeded: false },
+          },
+        };
+        assert.equal(
+          pickCommandCodeAccessKey([exhausted, { key: 'open', usage: usage(1) }]).key,
+          'open',
+        );
+        assert.throws(
+          () => pickCommandCodeAccessKey([exhausted, { key: 'unknown' }]),
+          /5-hour or weekly usage limits exhausted/,
+        );
+      }
+    }
+    assert.throws(
+      () =>
+        pickCommandCodeAccessKey([
+          { key: 'weekly-a', usage: usage(9, false, true) },
+          { key: 'five-hour', usage: usage(36, true) },
+          { key: 'weekly-b', usage: usage(24, false, true) },
+        ]),
+      /5-hour or weekly usage limits exhausted/,
     );
-    const none = pickCommandCodeAccessKey([{ key: 'k1' }, { key: 'k2' }]);
-    assert.equal(none.key, 'k1');
-    assert.match(none.reason, /probes unavailable; using first of 2/);
+    assert.equal(
+      pickCommandCodeAccessKey([{ key: 'unknown' }, { key: 'open', usage: usage(5) }]).key,
+      'open',
+    );
+    assert.throws(
+      () => pickCommandCodeAccessKey([{ key: 'k1' }, { key: 'k2' }]),
+      /usage unavailable for all keys/,
+    );
   });
 });
 

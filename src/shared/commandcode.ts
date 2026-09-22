@@ -1054,24 +1054,31 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
     (probe): probe is { key: string; usage: CommandCodePlanUsage } => probe.usage !== undefined,
   );
   if (reachable.length === 0) {
-    return { key: probes[0].key, reason: `probes unavailable; using first of ${probes.length}` };
+    throw new Error(
+      'CommandCode usage unavailable for all keys; cannot confirm available plan limits.',
+    );
   }
   const funded = reachable.filter((probe) => probe.usage.monthlyCredits > 0);
   if (funded.length === 0) {
     throw new Error('CommandCode monthly plan credits exhausted for all reachable keys.');
   }
-  const windowOpen = funded.filter(
-    (probe) => !probe.usage.fiveHour?.exceeded && !probe.usage.weekly?.exceeded,
+  const windowOpen = funded.filter((probe) =>
+    [probe.usage.fiveHour, probe.usage.weekly].every(
+      (window) => !window || (!window.exceeded && window.used < window.cap),
+    ),
   );
-  const pool = windowOpen.length > 0 ? windowOpen : funded;
-  const best = pool.reduce((a, b) => {
+  if (windowOpen.length === 0) {
+    throw new Error(
+      'CommandCode 5-hour or weekly usage limits exhausted for all funded reachable keys.',
+    );
+  }
+  const best = windowOpen.reduce((a, b) => {
     const headroomA = weeklyHeadroom(a.usage);
     const headroomB = weeklyHeadroom(b.usage);
     if (headroomB > headroomA) return b;
     if (headroomB === headroomA && b.usage.monthlyCredits > a.usage.monthlyCredits) return b;
     return a;
   });
-  const prefix = windowOpen.length === 0 ? `all ${funded.length} window-limited; ` : '';
   // The full-headroom sentinel for an uncapped account must not read as a real meter.
   const standing = best.usage.weekly
     ? `${Math.round(weeklyHeadroom(best.usage) * 100)}% of weekly limit left`
@@ -1079,7 +1086,7 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
   return {
     key: best.key,
     reason:
-      `${prefix}picked ${probes.indexOf(best) + 1}/${probes.length} ` +
+      `picked ${probes.indexOf(best) + 1}/${probes.length} ` +
       `(…${best.key.slice(-4)}, ${standing})`,
   };
 }
