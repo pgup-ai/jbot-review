@@ -442,6 +442,21 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
+const CONTEXT_PACK_EXPLORATION_POLICY = `## Repository exploration policy
+
+Review every changed hunk in the embedded diff. Start from the context pack
+below: it already holds the code around each change, the definitions the
+change uses, and import-linked callers. Read the repository only for code the
+pack lists as omitted, callers beyond those it shows, and evidence it does not
+cover, such as history, configuration, and tests. Issue independent reads
+together in one turn. Follow dependencies beyond the first hop when the
+evidence reveals a plausible broken contract or unresolved finding. Continue
+paginated or truncated results when the needed evidence is missing.
+
+Once the changed hunks and plausible failure paths are covered, return the final
+JSON. Do not keep exploring solely for completeness. Report supported findings
+and identify material uncertainties without asserting unverified premises.`;
+
 export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
 
 // Lens body for backends whose read-only mode denies every tool: the base's
@@ -527,6 +542,13 @@ function replacePromptSection(prompt: string, current: string, replacement: stri
   return `${prompt.slice(0, start)}${replacement}${prompt.slice(start + current.length)}`;
 }
 
+const EMBEDDED_FIRST_COVERAGE_STEPS = `1. Cover the file's full diff hunks under the repository exploration policy.
+2. For each changed or new function, type, or constant: find its callers and
+   callees — including UNCHANGED code elsewhere in the file or repo — and
+   verify the change does not break their assumptions. A new gate, early
+   return, narrowed type, or changed default frequently breaks an unchanged
+   code path far from the diff.`;
+
 /** Prompt-only Phase 3 treatment. REVIEW_PROMPT remains the production control. */
 export const EMBEDDED_FIRST_REVIEW_PROMPT = [
   [
@@ -554,16 +576,24 @@ export const EMBEDDED_FIRST_REVIEW_PROMPT = [
    return, narrowed type, or changed default frequently breaks an unchanged
    code path far from the diff. Use grep on the symbol name; a "Changed
    symbol usage" section below may list known call sites to start from.`,
-    `1. Cover the file's full diff hunks under the repository exploration policy.
-2. For each changed or new function, type, or constant: find its callers and
-   callees — including UNCHANGED code elsewhere in the file or repo — and
-   verify the change does not break their assumptions. A new gate, early
-   return, narrowed type, or changed default frequently breaks an unchanged
-   code path far from the diff.`,
+    EMBEDDED_FIRST_COVERAGE_STEPS,
   ],
 ].reduce(
   (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),
   REVIEW_PROMPT,
+);
+
+/** JBOT_REVIEW_EXPERIMENT=context-pack: the embedded-first review, starting from the page's context pack. */
+export const CONTEXT_PACK_REVIEW_PROMPT = [
+  [EMBEDDED_FIRST_EXPLORATION_POLICY, CONTEXT_PACK_EXPLORATION_POLICY],
+  [
+    EMBEDDED_FIRST_COVERAGE_STEPS,
+    `${EMBEDDED_FIRST_COVERAGE_STEPS} Use the context pack's callers and
+   definitions as the starting set.`,
+  ],
+].reduce(
+  (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),
+  EMBEDDED_FIRST_REVIEW_PROMPT,
 );
 
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
@@ -673,6 +703,112 @@ export function formatBlastRadiusContext(
       return `- \`${symbol}\` — referenced by unchanged: ${shown.join(', ')}${more}`;
     }),
   ].join('\n');
+}
+
+export type ContextPackSlice = 'surrounding' | 'definitions' | 'callers' | 'directories';
+
+/** One context-pack item: numbered source rows, or a single list line. */
+export interface ContextPackEntry {
+  slice: ContextPackSlice;
+  path: string;
+  label: string;
+  /** Ascending source rows; each gap between them renders as one marker. */
+  rows: [line: number, text: string][];
+  /** Last line of the underlying range when the rows stop earlier. */
+  end?: number;
+  /** Lines the page's diff already shows. */
+  inDiff?: Set<number>;
+  /** For a caller: the changed symbol it uses. */
+  calls?: string;
+  list?: {
+    kind: 'other-callers' | 'unverified' | 'directory';
+    subject: string;
+    entries: string[];
+  };
+}
+
+const CONTEXT_PACK_NOTE = `## Context pack
+
+These excerpts were read from the head commit before this review started: the
+code around every changed line on this page, the definitions those lines use,
+and import-linked call sites of the changed symbols. Treat them as already read
+and do not re-read these ranges. Line numbers match the new side of the diff.
+Callers are limited to import-linked call sites; a missing caller is not
+evidence that none exist.`;
+
+const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
+  surrounding: '### Surrounding code',
+  definitions: '### Definitions used by the change',
+  callers: '### Callers of changed symbols',
+  directories: '### Directory map (* marks files this PR changes)',
+};
+
+const CONTEXT_PACK_OMITTED_BYTES = 2048;
+
+export function formatContextPackItem(item: ContextPackEntry): string {
+  if (item.list) {
+    const { kind, subject, entries } = item.list;
+    const shown = entries.join(', ');
+    if (kind === 'directory') return `- ${subject}/: ${shown}`;
+    return kind === 'other-callers'
+      ? `Other import-linked callers of \`${subject}\`: ${shown}`
+      : `Unverified name matches for \`${subject}\` (no import link found): ${shown}`;
+  }
+  const first = item.rows[0][0];
+  const last = Math.max(item.rows.at(-1)![0], item.end ?? 0);
+  const title = [item.label, item.calls && `calls ${item.calls}`].filter(Boolean).join(', ');
+  const lines = [`#### ${item.path}:${first}-${last}${title ? ` (${title})` : ''}`];
+  const gap = (from: number, to: number) => {
+    let inDiff = true;
+    for (let line = from; line <= to && inDiff; line++) inDiff = item.inDiff?.has(line) ?? false;
+    lines.push(
+      inDiff ? `[lines ${from}-${to}: in the diff below]` : `[lines ${from}-${to} omitted]`,
+    );
+  };
+  let previous = first;
+  for (const [line, text] of item.rows) {
+    if (line > previous + 1) gap(previous + 1, line - 1);
+    lines.push(`${line}: ${text}`);
+    previous = line;
+  }
+  if (last > previous) gap(previous + 1, last);
+  return lines.join('\n');
+}
+
+export function formatContextPack(pack: {
+  items: ContextPackEntry[];
+  omitted: ContextPackEntry[];
+  uncollected: number;
+}): string {
+  const sections = (Object.keys(CONTEXT_PACK_TITLES) as ContextPackSlice[]).flatMap((slice) => {
+    const items = pack.items.filter((item) => item.slice === slice);
+    return items.length
+      ? [[CONTEXT_PACK_TITLES[slice], ...items.map(formatContextPackItem)].join('\n\n')]
+      : [];
+  });
+  const omitted = [
+    ...pack.omitted.map((item) =>
+      item.list
+        ? `- ${item.list.subject} (${item.slice})`
+        : `- ${item.path}:${item.rows[0][0]}-${item.rows.at(-1)![0]} (${item.slice})`,
+    ),
+    ...(pack.uncollected
+      ? [`- ${pack.uncollected} item(s) not collected before the pack deadline`]
+      : []),
+  ];
+  return [
+    CONTEXT_PACK_NOTE,
+    ...sections,
+    omitted.length
+      ? truncateUtf8WithNotice(
+          ['### Omitted', ...omitted].join('\n'),
+          CONTEXT_PACK_OMITTED_BYTES,
+          'Omitted list',
+        )
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export interface JevCandidate {
@@ -1247,7 +1383,7 @@ const CONTEXT_FIRST_ORIENTATION = `## Reading order
 
 The pull request context, diff hunks, and repository guidelines for this review
 appear above these instructions: where an instruction says a PR-context section
-(metadata, summary instructions, diff hunks, guidelines, prior threads,
+(metadata, summary instructions, diff hunks, context pack, guidelines, prior threads,
 changed-symbol usage) is "below", read it above. Sections of these instructions
 keep their stated order; the review lens and the final output reminder still
 follow.`;
@@ -1268,14 +1404,18 @@ export function assembleReviewPrompt(
      * reminder stays last (invariant #5).
      */
     contextFirst?: boolean;
+    /** JBOT_REVIEW_EXPERIMENT=context-pack main pages; lens prompts ignore it. */
+    contextPack?: boolean;
   } = {},
 ): string {
   const focusedLens = Object.values(REVIEW_LENSES).some((lens) => lensAddendum.startsWith(lens));
   const instructions = focusedLens
     ? buildLensReviewPrompt(embeddedFirstPrompt, options.toolsAvailable ?? true)
-    : embeddedFirstPrompt
-      ? EMBEDDED_FIRST_REVIEW_PROMPT
-      : REVIEW_PROMPT;
+    : options.contextPack
+      ? CONTEXT_PACK_REVIEW_PROMPT
+      : embeddedFirstPrompt
+        ? EMBEDDED_FIRST_REVIEW_PROMPT
+        : REVIEW_PROMPT;
   const guidelineBlock = guidelines ? ['## Repository review guidelines\n', guidelines] : [];
   const parts = options.contextFirst
     ? [prContext, ...guidelineBlock, CONTEXT_FIRST_ORIENTATION, instructions]

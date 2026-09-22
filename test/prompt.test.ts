@@ -12,6 +12,7 @@ import {
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT7_REASON_BUDGET,
+  CONTEXT_PACK_REVIEW_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
@@ -34,6 +35,8 @@ import {
   buildContextTrimNotice,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
+  formatContextPack,
+  formatContextPackItem,
   formatFindingsForVerification,
   selectLensKeys,
   withNoToolsReviewDirective,
@@ -904,5 +907,67 @@ describe('buildContextTrimNotice', () => {
       buildContextTrimNotice(['blast radius', 'summary scope']),
       /blast radius, summary scope/,
     );
+  });
+});
+
+describe('context pack prompt', () => {
+  it('replaces the exploration policy and extends coverage step 2 once', () => {
+    assert.equal(
+      (CONTEXT_PACK_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? []).length,
+      1,
+    );
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /Issue independent reads\s+together in one turn/);
+    assert.match(
+      CONTEXT_PACK_REVIEW_PROMPT,
+      /Use the context pack's callers and\s+definitions as the starting set/,
+    );
+    assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, /Start with targeted reads of\s+callers/);
+    assert.ok(
+      assembleReviewPrompt('ctx', '', '', false, true, { contextPack: true }).startsWith(
+        CONTEXT_PACK_REVIEW_PROMPT,
+      ),
+    );
+  });
+
+  it('renders rows with diff pointers and truncation markers, lists, and the omitted list', () => {
+    assert.equal(
+      formatContextPackItem({
+        slice: 'surrounding',
+        path: 'a.ts',
+        label: 'A.run',
+        rows: [
+          [1, 'run() {'],
+          [2, '  x();'],
+          [6, '}'],
+        ],
+        end: 8,
+        inDiff: new Set([3, 4, 5]),
+      }),
+      [
+        '#### a.ts:1-8 (A.run)',
+        '1: run() {',
+        '2:   x();',
+        '[lines 3-5: in the diff below]',
+        '6: }',
+        '[lines 7-8 omitted]',
+      ].join('\n'),
+    );
+    assert.equal(
+      formatContextPackItem({
+        slice: 'directories',
+        path: '',
+        label: '',
+        rows: [],
+        list: { kind: 'directory', subject: 'src', entries: ['a.ts*', 'lib/'] },
+      }),
+      '- src/: a.ts*, lib/',
+    );
+    const pack = formatContextPack({
+      items: [],
+      omitted: [{ slice: 'callers', path: 'b.ts', label: '', rows: [[9, 'x']] }],
+      uncollected: 1,
+    });
+    assert.match(pack, /^## Context pack/);
+    assert.match(pack, /### Omitted\n- b\.ts:9-9 \(callers\)\n- 1 item\(s\) not collected/);
   });
 });
