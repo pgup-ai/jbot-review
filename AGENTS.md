@@ -52,7 +52,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    scope via summary instructions. Incremental scope must be visible in the report
    and telemetry; incomplete or unverified runs cannot establish a new baseline.
    The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
-   documentation-only follow-ups with unchanged base and policy; main review
+   documentation-only follow-ups with unchanged base and policy. Incremental
+   follow-ups may also reuse a matching completed guideline pass when no scoped
+   rule applies and complete global guidance is delivered in the main prompt;
+   unknown scope or incomplete guidance keeps the pass enabled. Main review
    still covers its selected scope and verification remains enabled. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
    Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement

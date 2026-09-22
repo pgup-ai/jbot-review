@@ -1953,3 +1953,100 @@ it('binds confirmation quotes to each candidate and only its delivered evidence'
     );
   }
 });
+
+it('queues finder pages before bookkeeping without waiting for finder results', async () => {
+  for (const kind of ['lens', 'guideline'] as const) {
+    for (const preparationFails of [false, true]) {
+      const slots = new Semaphore(5, true);
+      const mainSlots = await Promise.all([1, 2, 3, 4].map(() => slots.acquire('high')));
+      const order: string[] = [];
+      let finishFinder!: () => void;
+      const finderResult = new Promise<void>((resolve) => {
+        finishFinder = resolve;
+      });
+      let allowPreparation!: () => void;
+      const preparation = new Promise<void>((resolve) => {
+        allowPreparation = resolve;
+      });
+      let dispatched!: () => void;
+      const queued = new Promise<void>((resolve) => {
+        dispatched = resolve;
+      });
+      const backend = limitReviewBackendSessions(
+        {
+          name: 'fixture',
+          runReview: async () => {
+            order.push('finder');
+            await finderResult;
+            return { summary: '', findings: [] };
+          },
+          runGuidelineComplianceCheck: async () => {
+            order.push('finder');
+            await finderResult;
+            return [];
+          },
+          runChangesSinceLastReview: async () => {
+            order.push('summary');
+            return '';
+          },
+        } as unknown as ReviewBackend,
+        'aux',
+        slots,
+      );
+      let summary: Promise<string> | undefined;
+      const onQueued = () => {
+        summary ??= backend.runChangesSinceLastReview('m', '', () => {});
+        dispatched();
+      };
+      const plans = async () => {
+        await preparation;
+        if (preparationFails) throw new Error('Evidence preparation failed');
+        return [
+          {
+            label: 'page',
+            context: 'diff',
+            baseContext: 'diff',
+            assignedFiles: ['a.ts'],
+            diffCoverage: {
+              assignedFiles: 1,
+              completeFiles: 1,
+              truncatedFiles: 0,
+              omittedFiles: 0,
+              bytes: 4,
+            },
+          },
+        ];
+      };
+      const options = {
+        backend,
+        model: 'm',
+        guidelinesForPrompt: 'rules',
+        onQueued,
+        plans,
+        log: () => {},
+      };
+      const finder =
+        kind === 'lens'
+          ? startLensPasses({ ...options, lensPrContext: 'diff', lensKeys: ['interactions'] })[0]
+          : startGuidelineComplianceCheck({
+              ...options,
+              prContext: 'diff',
+              enabled: true,
+              hasGuidelines: true,
+              plans,
+            });
+      assert.deepEqual(order, []);
+      allowPreparation();
+      await queued;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepEqual(order, preparationFails ? ['summary'] : ['finder']);
+      mainSlots[0]();
+      await summary;
+      assert.deepEqual(order, preparationFails ? ['summary'] : ['finder', 'summary']);
+      finishFinder();
+      await finder;
+      mainSlots.forEach((release) => release());
+      assert.equal(slots.isBusy(), false);
+    }
+  }
+});

@@ -260,6 +260,7 @@ import {
   buildReviewScopeContext,
   discoverGuidelineDocs,
   applicableGuidelines,
+  canCheckGlobalGuidelinesInMain,
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
@@ -1573,6 +1574,13 @@ async function runReviewPipeline(params: {
   };
   files = reviewScope.files;
   const incrementalContext = buildIncrementalReviewContext(reviewScope, fullReviewFiles);
+  const followupGuidelines =
+    reviewScope.mode === 'incremental'
+      ? applicableGuidelines(
+          discoveredGuidelines,
+          files.map((file) => file.filename),
+        )
+      : undefined;
   changedFiles.splice(0, changedFiles.length, ...files.map((file) => file.filename));
   log(
     `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
@@ -1627,7 +1635,10 @@ async function runReviewPipeline(params: {
       })
     : null;
   const effectiveReviewPasses = fanout?.reviewPasses ?? options.reviewPasses;
-  const effectiveGuidelinePass = fanout?.guidelinePass ?? options.guidelinePass;
+  const effectiveGuidelinePass =
+    reviewScope.mode === 'incremental'
+      ? options.guidelinePass
+      : (fanout?.guidelinePass ?? options.guidelinePass);
   if (fanout?.tier === 'minimal') {
     log(
       `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,
@@ -2484,6 +2495,9 @@ async function runReviewPipeline(params: {
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     let guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
+    const complianceGuidelines = followupGuidelines
+      ? formatGuidelines(followupGuidelines)
+      : guidelines;
     let candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
@@ -2496,6 +2510,7 @@ async function runReviewPipeline(params: {
         : []),
     ];
     const policy = auxiliaryPolicy({
+      scopePolicy,
       model: auxModel,
       backend: auxBackend.name,
       modelOptions: options.modelOptions,
@@ -2508,7 +2523,10 @@ async function runReviewPipeline(params: {
       linkedIssueContext,
       experiment: options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
-      prompts: auxiliarySessions.map((session) =>
+      prompts: [
+        'guideline-compliance',
+        ...Object.keys(REVIEW_LENSES).map((key) => `review-${key}`),
+      ].map((session) =>
         session === 'guideline-compliance'
           ? assembleGuidelineCompliancePrompt('', guidelines)
           : assembleReviewPrompt(
@@ -2524,18 +2542,45 @@ async function runReviewPipeline(params: {
             ),
       ),
     });
+    const adaptiveReuse =
+      options.experiment.preset === 'adaptive' && options.dynamicFanout && !localDiff;
     const auxiliaryDecisions =
-      options.experiment.preset === 'adaptive' && options.dynamicFanout && !localDiff
+      adaptiveReuse || reviewScope.mode === 'incremental'
         ? await planAuxiliaryReuse({
             workspace,
             base: baseSha,
             head: headSha,
             reviewedHead,
             policy,
-            sessions: auxiliarySessions,
-            priorBodies: priorJbotReviewGroups.map((review) => review.body),
+            sessions: adaptiveReuse
+              ? auxiliarySessions
+              : auxiliarySessions.filter((session) => session === 'guideline-compliance'),
+            priorBodies: localDiff?.priorReview
+              ? [localDiff.priorReview]
+              : priorJbotReviewGroups.map((review) => review.body),
+            ...(followupGuidelines && reviewScope.baseline
+              ? {
+                  guidelineFollowup: {
+                    baseline: reviewScope.baseline,
+                    coveredByMain: canCheckGlobalGuidelinesInMain(followupGuidelines),
+                  },
+                }
+              : {}),
           })
         : [];
+    if (!auxiliaryDecisions.some((decision) => decision.session === 'guideline-compliance')) {
+      log(
+        `Auxiliary scheduling: ${JSON.stringify({
+          session: 'guideline-compliance',
+          action: guidelineCandidate && complianceGuidelines ? 'run' : 'skip',
+          reason: !guidelineCandidate
+            ? 'disabled-or-fanout'
+            : !complianceGuidelines
+              ? 'no-guidelines'
+              : 'full-review',
+        })}`,
+      );
+    }
     const reusedAux = new Map(
       auxiliaryDecisions.flatMap((decision) =>
         decision.baseline ? [[decision.session, decision.baseline] as const] : [],
@@ -2559,8 +2604,6 @@ async function runReviewPipeline(params: {
     }
     candidateLensKeys = candidateLensKeys.filter((key) => !reusedAux.has(`review-${key}`));
     guidelineCandidate &&= !reusedAux.has('guideline-compliance');
-    // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
-    // compliance session's own final enable, not the option.
     const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
@@ -2569,7 +2612,12 @@ async function runReviewPipeline(params: {
       widen: options.guidelineWiden,
       full: guidelines,
     };
-    const guidelinesForPrompt = selectFinderGuidelineText(guidelineSelection);
+    const guidelinesInMain = auxiliaryDecisions.some(
+      (decision) => decision.reason === 'global-guidelines-in-main',
+    );
+    const guidelinesForPrompt = guidelinesInMain
+      ? complianceGuidelines
+      : selectFinderGuidelineText(guidelineSelection);
 
     // Keep room for a useful diff page; the planner checks the final assembled prompt.
     const trimBudget = options.contextTrim
@@ -2813,33 +2861,56 @@ async function runReviewPipeline(params: {
     // Only a single-shard main leads with the diff, so only then does a lens on
     // the same model gain from waiting for main's prefill.
     const lensSharesMainPrefix = auxModel === model && shardPlans.length <= 1;
+    const jointGuidelines =
+      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0
+        ? complianceGuidelines
+        : '';
+    const preparingFinders = new Set([
+      ...candidateLensKeys.map((key) => `review-${key}`),
+      ...(guidelineCandidate && complianceGuidelines && !sweepGuidelines && !jointGuidelines
+        ? ['guideline-compliance']
+        : []),
+    ]);
+    let releaseBookkeeping!: () => void;
+    const bookkeepingReady = new Promise<void>((resolve) => {
+      releaseBookkeeping = resolve;
+    });
+    const finderQueued = (session: string) => {
+      preparingFinders.delete(session);
+      if (preparingFinders.size === 0) releaseBookkeeping();
+    };
+    if (preparingFinders.size === 0) releaseBookkeeping();
     const addressedPriorCheck = trackAux(
       'addressed-prior-comments',
-      startAddressedPriorCommentsCheck({
-        backend: auxBackend,
-        model: auxModel,
-        prContext:
-          auxSessionsEnabled && priorJbotThreads.length > 0
-            ? buildAddressedPriorCommentsContext({
-                diffScope: formatDiffScope(diffScope),
-                commits: addressedCommits,
-                threads: priorJbotThreadBlock,
-                diff: targetedDiff(
-                  shardPlans,
-                  priorJbotThreads.map((thread) => ({
-                    path: thread.path,
-                    line: thread.line ?? 0,
-                    body: thread.body,
-                  })),
-                ),
-              })
-            : '',
-        priorJbotThreads: auxSessionsEnabled ? priorJbotThreads : [],
-        timeoutMs: finderTimeoutMs,
-        log,
-        onTokenUsage: recordTokenUsage,
-        onCoverage: recordCoverage,
-      }),
+      bookkeepingReady.then(() =>
+        abandonedAuxLabels.has('addressed-prior-comments')
+          ? []
+          : startAddressedPriorCommentsCheck({
+              backend: auxBackend,
+              model: auxModel,
+              prContext:
+                auxSessionsEnabled && priorJbotThreads.length > 0
+                  ? buildAddressedPriorCommentsContext({
+                      diffScope: formatDiffScope(diffScope),
+                      commits: addressedCommits,
+                      threads: priorJbotThreadBlock,
+                      diff: targetedDiff(
+                        shardPlans,
+                        priorJbotThreads.map((thread) => ({
+                          path: thread.path,
+                          line: thread.line ?? 0,
+                          body: thread.body,
+                        })),
+                      ),
+                    })
+                  : '',
+              priorJbotThreads: auxSessionsEnabled ? priorJbotThreads : [],
+              timeoutMs: finderTimeoutMs,
+              log,
+              onTokenUsage: recordTokenUsage,
+              onCoverage: recordCoverage,
+            }),
+      ),
     );
 
     const lensGuidelines = selectFinderGuidelineText({
@@ -2848,7 +2919,7 @@ async function runReviewPipeline(params: {
       lens: true,
     });
     const prepareAuxPlans = async (lens?: string, lensRules = lensGuidelines) => {
-      const render = (context: string, rules = lens ? lensRules : guidelines) =>
+      const render = (context: string, rules = lens ? lensRules : complianceGuidelines) =>
         lens
           ? assembleReviewPrompt(
               context,
@@ -2870,8 +2941,8 @@ async function runReviewPipeline(params: {
         shards,
         budget: auxPromptBudget,
         renderPrompt: render,
-        guidelines: lens ? lensRules : guidelines,
-        guidelineLabels: discoveredGuidelines.docs.map((doc) => doc.label),
+        guidelines: lens ? lensRules : complianceGuidelines,
+        guidelineLabels: (followupGuidelines ?? discoveredGuidelines).docs.map((doc) => doc.label),
         evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
       });
       await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
@@ -2880,32 +2951,27 @@ async function runReviewPipeline(params: {
 
     const changesSinceLastReview = trackAux(
       'changes-since-last-review',
-      startChangesSinceLastReviewSummary({
-        backend: auxBackend,
-        model: auxModel,
-        workspace,
-        embedDiff: auxOnPi || auxRequiresCompleteEmbeddedDiff,
-        // Use allPriorReviewComments (always fetched), NOT the
-        // includePriorComments-gated priorComments: whether to summarize the
-        // delta is a re-review decision, independent of whether prior comments
-        // are injected into the finder CONTEXT. Same rule as priorJbotReviewCount
-        // (see the comment above its definition). Gating on priorComments here
-        // silently disables the block whenever include-prior-comments is false.
-        reviewedHead,
-        headSha,
-        enabled:
-          shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
-          auxSessionsEnabled,
-        isAbandoned: () => abandonedAuxLabels.has('changes-since-last-review'),
-        timeoutMs: finderTimeoutMs,
-        log,
-        onTokenUsage: recordTokenUsage,
-        onCoverage: recordCoverage,
-      }),
+      bookkeepingReady.then(() =>
+        startChangesSinceLastReviewSummary({
+          backend: auxBackend,
+          model: auxModel,
+          workspace,
+          embedDiff: auxOnPi || auxRequiresCompleteEmbeddedDiff,
+          // Summarize re-reviews even when finder prompts exclude prior comments.
+          reviewedHead,
+          headSha,
+          enabled:
+            shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
+            auxSessionsEnabled,
+          isAbandoned: () => abandonedAuxLabels.has('changes-since-last-review'),
+          timeoutMs: finderTimeoutMs,
+          log,
+          onTokenUsage: recordTokenUsage,
+          onCoverage: recordCoverage,
+        }),
+      ),
     );
 
-    const jointGuidelines =
-      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0 ? guidelines : '';
     if (jointGuidelines)
       log(`Guideline compliance shares review-${candidateLensKeys[0]} pages and evidence.`);
     // Lens passes run on the aux model (recall supplement, not the deep
@@ -2917,6 +2983,7 @@ async function runReviewPipeline(params: {
       model: auxModel,
       lensPrContext,
       plans: prepareAuxPlans,
+      onQueued: finderQueued,
       guidelinesForPrompt: lensGuidelines,
       guidelineCompliance: jointGuidelines,
       lensKeys: candidateLensKeys,
@@ -2946,8 +3013,9 @@ async function runReviewPipeline(params: {
               model: auxModel,
               prContext: coreContext,
               plans: () => prepareAuxPlans(),
-              guidelinesForPrompt: guidelines,
-              hasGuidelines: Boolean(guidelines),
+              onQueued: finderQueued,
+              guidelinesForPrompt: complianceGuidelines,
+              hasGuidelines: Boolean(complianceGuidelines),
               enabled: guidelineCandidate && !sweepGuidelines,
               timeoutMs: finderTimeoutMs,
               log,
@@ -3270,14 +3338,27 @@ async function runReviewPipeline(params: {
     ]);
     const coverageNotice = formatIncompleteCoverage(incompleteSessions);
     const auxiliaryBaselines: AuxiliaryBaseline[] =
-      options.experiment.preset === 'adaptive' && headSha && baseSha
-        ? auxiliarySessions.flatMap((session) => {
-            const prior = reusedAux.get(session);
-            if (prior) return [prior];
-            return auxCoverage.get(session)?.complete && !partialSessions.has(session)
-              ? [{ session, head: headSha, base: baseSha, policy }]
-              : [];
-          })
+      headSha && baseSha
+        ? auxiliarySessions
+            .filter(
+              (session) =>
+                session === 'guideline-compliance' || options.experiment.preset === 'adaptive',
+            )
+            .flatMap((session) => {
+              const prior = reusedAux.get(session);
+              if (prior)
+                return [
+                  {
+                    ...prior,
+                    ...(guidelinesInMain && session === 'guideline-compliance'
+                      ? { head: headSha }
+                      : {}),
+                  },
+                ];
+              return auxCoverage.get(session)?.complete && !partialSessions.has(session)
+                ? [{ session, head: headSha, base: baseSha, policy }]
+                : [];
+            })
         : [];
     if (coverageNotice) log(coverageNotice);
     telemetry.snapshot('filtered', filteredFindings);
@@ -3817,6 +3898,7 @@ export function startLensPasses(params: {
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
   onFindings?: (label: string, findings: Finding[]) => void;
+  onQueued?: (session: string) => void;
 }): Promise<Finding[]>[] {
   const { lensKeys } = params;
   if (lensKeys.length === 0) return [];
@@ -3847,7 +3929,7 @@ export function startLensPasses(params: {
             `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, guidelineParts: new Set(plans.map((plan) => plan.guidelines ?? guidelines)).size, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
           );
           const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
-          const results = await Promise.all(
+          const pending = Promise.all(
             plans.map(async (plan, page) => {
               try {
                 if (params.isAbandoned?.(`review-${key}`))
@@ -3897,6 +3979,8 @@ export function startLensPasses(params: {
               }
             }),
           );
+          params.onQueued?.(`review-${key}`);
+          const results = await pending;
           return {
             findings: results.flatMap((result) => result.findings),
             partial: results.some((result) => result.partial),
@@ -3912,6 +3996,7 @@ export function startLensPasses(params: {
           return result.findings;
         })
         .catch((error) => {
+          params.onQueued?.(`review-${key}`);
           params.log(
             `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
           );
@@ -3926,9 +4011,11 @@ export function startLensPasses(params: {
     };
     const delayMs = params.launchDelayMs?.(index) ?? 0;
     if (delayMs <= 0) return run();
-    return sleep(delayMs).then(() =>
-      params.isAbandoned?.(`review-${key}`) ? ([] as Finding[]) : run(),
-    );
+    return sleep(delayMs).then(() => {
+      if (!params.isAbandoned?.(`review-${key}`)) return run();
+      params.onQueued?.(`review-${key}`);
+      return [];
+    });
   });
 }
 
@@ -4894,14 +4981,17 @@ export function startGuidelineComplianceCheck(params: {
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
   onFindings?: (findings: Finding[]) => void;
+  onQueued?: (session: string) => void;
 }): Promise<Finding[]> {
   const session = 'guideline-compliance';
   if (!params.enabled) {
+    params.onQueued?.(session);
     params.onCoverage?.({ session, state: 'skipped' });
     return Promise.resolve([]);
   }
   if (!params.hasGuidelines) {
     params.log('Guideline-compliance check skipped: no repository guidelines discovered.');
+    params.onQueued?.(session);
     params.onCoverage?.({ session, state: 'skipped' });
     return Promise.resolve([]);
   }
@@ -4914,7 +5004,7 @@ export function startGuidelineComplianceCheck(params: {
       const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
         await (params.plans?.() ?? [{ context: params.prContext }]);
       const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
-      const results = await Promise.all(
+      const pending = Promise.all(
         plans.map(async (plan, page) => {
           try {
             const findings = await params.backend.runGuidelineComplianceCheck(
@@ -4951,6 +5041,8 @@ export function startGuidelineComplianceCheck(params: {
           }
         }),
       );
+      params.onQueued?.(session);
+      const results = await pending;
       return results.flat();
     })
     .then((findings) => {
@@ -4963,6 +5055,7 @@ export function startGuidelineComplianceCheck(params: {
       return findings;
     })
     .catch((error) => {
+      params.onQueued?.(session);
       params.log(
         `(skipped guideline-compliance check: ${
           error instanceof Error ? error.message : String(error)

@@ -91,6 +91,28 @@ test('documentation reuse requires a successful ancestor with matching base and 
       assert.equal(result[0].reason, reason);
       assert.equal(result[0].baseline, undefined);
     }
+    const guideline = { ...baseline, session: 'guideline-compliance' };
+    const followup = {
+      ...input,
+      sessions: ['guideline-compliance'],
+      priorBodies: [withAuxiliaryBaselines('<sup>driver</sup>', [guideline])],
+      guidelineFollowup: { baseline: reviewed, coveredByMain: true },
+    };
+    assert.equal((await planAuxiliaryReuse(followup))[0].reason, 'global-guidelines-in-main');
+    assert.equal((await planAuxiliaryReuse(followup))[0].baseline?.head, reviewed);
+    for (const [override, reason] of [
+      [{ guidelineFollowup: { baseline: reviewed, coveredByMain: false } }, 'relevant-guidelines'],
+      [
+        { guidelineFollowup: { baseline: head, coveredByMain: true } },
+        'guideline-baseline-mismatch',
+      ],
+      [{ policy: auxiliaryPolicy('changed rules') }, 'policy-changed'],
+      [{ priorBodies: ['incomplete prior guideline review'] }, 'no-completed-baseline'],
+    ] as const) {
+      const [decision] = await planAuxiliaryReuse({ ...followup, ...override });
+      assert.equal(decision.reason, reason);
+      assert.equal(decision.baseline, undefined);
+    }
     writeFileSync(join(workspace, 'worker.ts'), 'export const capacity = 1;\n');
     commit();
     writeFileSync(join(workspace, 'README.md'), 'Another documentation-only commit\n');

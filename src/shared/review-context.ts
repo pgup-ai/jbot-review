@@ -1277,6 +1277,21 @@ function renderGuidelineBlock(
   }
 }
 
+export function canCheckGlobalGuidelinesInMain(discovered: DiscoveredGuidelines): boolean {
+  return (
+    !discovered.budgetExhausted &&
+    discovered.referenced.length === 0 &&
+    discovered.docs.every(
+      (doc) =>
+        doc.relevance === GUIDELINE_RELEVANCE.root &&
+        ROOT_GUIDELINE_FILES.includes(doc.label) &&
+        !doc.globs?.length &&
+        !/\[[^\n]*truncated/i.test(doc.text),
+    ) &&
+    Buffer.byteLength(formatGuidelines(discovered)) <= MAX_FINDER_GUIDELINE_BYTES
+  );
+}
+
 function guidelineSources(
   docs: GuidelineDoc[],
   relevance: (doc: GuidelineDoc) => number = (doc) => doc.relevance,

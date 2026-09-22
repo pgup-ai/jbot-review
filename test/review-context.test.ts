@@ -10,6 +10,7 @@ import {
   buildReviewScopeContext,
   discoverGuidelineDocs,
   applicableGuidelines,
+  canCheckGlobalGuidelinesInMain,
   discoverGuidelines,
   formatContextBudget,
   formatDiffScope,
@@ -966,4 +967,33 @@ describe('formatFinderGuidelines', () => {
       assert.match(roomy, /findme-bomb/, 'a brace bomb leaves the doc unscoped, never demoted');
     });
   });
+});
+
+it('keeps dedicated guideline checking unless complete global rules fit in main', () => {
+  const root = { label: 'AGENTS.md', text: 'Preserve invariants.', relevance: 1 as const };
+  const scoped = {
+    label: '.cursor/rules/browser.mdc',
+    text: 'Check browser behavior.',
+    relevance: 1 as const,
+    globs: ['ui/**'],
+  };
+  const discovered = { docs: [root, scoped], referenced: [], budgetExhausted: false };
+  assert.equal(
+    canCheckGlobalGuidelinesInMain(applicableGuidelines(discovered, ['worker/task.ts'])),
+    true,
+  );
+  assert.equal(
+    canCheckGlobalGuidelinesInMain(applicableGuidelines(discovered, ['ui/caller.ts'])),
+    false,
+  );
+  for (const override of [
+    { referenced: ['unknown.md'] },
+    { budgetExhausted: true },
+    { docs: [{ ...root, text: 'x'.repeat(MAX_FINDER_GUIDELINE_BYTES) }] },
+    { docs: [{ ...root, text: '[Guidance truncated after 100 bytes.]' }] },
+    { docs: [{ ...root, label: 'review/contracts.md' }] },
+    { docs: [{ ...root, relevance: 3 as const }] },
+    { docs: [{ ...scoped, globs: ['!(ui)/**'] }] },
+  ])
+    assert.equal(canCheckGlobalGuidelinesInMain({ ...discovered, ...override }), false);
 });
