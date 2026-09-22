@@ -23,6 +23,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   const off = reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'off' });
   assert.deepEqual(off, {
     preset: 'off',
+    contextPack: false,
     jevPrefetch: 'off',
     explorationEvidence: 'off',
     verificationEvidence: 'off',
@@ -53,8 +54,15 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       preset: 'adaptive',
       exploration: { ...off.exploration, batchDiffRecovery: true },
     },
+    {
+      ...off,
+      preset: 'context-pack',
+      contextPack: true,
+      exploration: { ...off.exploration, batchDiffRecovery: true },
+    },
   ];
   assert.deepEqual(reviewExperiment({}), expected[1]);
+  assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[1]);
   const hashes = new Set<string>();
   for (const preset of expected) {
     const experiment = reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: preset.preset });
@@ -68,7 +76,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     assert.deepEqual(configuration.explorationExperiment, preset.exploration);
     hashes.add(configurationHash);
   }
-  assert.equal(hashes.size, 4);
+  assert.equal(hashes.size, 5);
   off.reuse.shared = true;
   off.exploration.readEvidence = 'linked';
   assert.equal(reviewExperiment({}).reuse.shared, false);
