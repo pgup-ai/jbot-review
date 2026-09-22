@@ -501,6 +501,9 @@ describe('selectLensKeys', () => {
         'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.ts',
         'packages/sdk/client/http.ts',
         'packages/sdk/src/client/http.ts',
+        'libs/modules/src/agent-view/config/agent-view.config.ts',
+        'libs/modules/src/agent-view/repository/read-agent-view.repository.ts',
+        'libs/modules/src/agent-view/service/agent-view-product.service.ts',
       ]),
       ['interactions', 'integrity'],
     );
