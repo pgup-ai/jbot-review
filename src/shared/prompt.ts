@@ -1914,3 +1914,30 @@ export function compactReviewPageContext(
     .join('\n\n');
   return Buffer.byteLength(compact) < Buffer.byteLength(context) ? compact : context;
 }
+
+export function buildIncrementalReviewContext(
+  scope: import('./incremental-review.ts').IncrementalReviewPlan,
+  allFiles: import('./github.ts').PrFile[],
+): string {
+  if (scope.mode !== 'incremental') return '';
+  const selected = new Set(scope.files.map((file) => file.filename));
+  const prior = allFiles
+    .filter((file) => !selected.has(file.filename))
+    .map((file) => file.filename);
+  const map = prior.join('\n');
+  const bytes = Buffer.from(map);
+  const end = bytes.length > 8192 ? Math.max(0, bytes.lastIndexOf('\n', 8192)) : bytes.length;
+  const bounded = bytes.toString('utf8', 0, end);
+  return [
+    '## Incremental review scope',
+    `The last completed review covered head ${scope.baseline}.`,
+    'The changed-files list and embedded hunks are the mandatory scope for this follow-up. Review ALL their base-to-head hunks, including earlier commits in those files.',
+    'Earlier PR files listed below were previously reviewed and are context, not mandatory repeat work. Investigate their underlying code whenever a changed caller, callee or contract can affect them. Report concrete regressions there too.',
+    'This explicit scope overrides generic instructions to re-review the full PR or never skip previously reviewed files. Repository access remains available for dependent investigation; do not treat a prior review as proof that affected code is correct.',
+    'Previously reviewed PR files outside this follow-up:',
+    bounded,
+    ...(Buffer.byteLength(map) > 8192
+      ? ['[Remaining file names omitted; use the full PR git diff to list them.]']
+      : []),
+  ].join('\n');
+}

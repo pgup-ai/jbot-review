@@ -90,22 +90,22 @@ describe('jbot opencode plugin', () => {
     );
   });
 
-  it('strips mutating and interactive tools for the plan agent and rewrites the Gemini-hostile schema', async () => {
+  it('strips mutating and interactive tools for review and wrap-up and rewrites the Gemini-hostile schema', async () => {
     const { context } = await loadPlugin();
-    const event = { agent: 'plan', tools: tools() };
-    context(event);
-    assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
-    assert.deepEqual(event.tools.shell.input.properties.timeout, { type: 'integer', minimum: 1 });
-    assert.deepEqual(event.tools.shell.input.properties.limit, { type: 'integer', minimum: 1 });
-  });
-
-  it('strips every tool for the wrap-up and single-shot agents', async () => {
-    const { context } = await loadPlugin();
-    for (const agent of ['jbot-wrapup', 'jbot-plain']) {
+    for (const agent of ['plan', 'jbot-wrapup']) {
       const event = { agent, tools: tools() };
       context(event);
-      assert.deepEqual(event.tools, {}, agent);
+      assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
+      assert.deepEqual(event.tools.shell.input.properties.timeout, { type: 'integer', minimum: 1 });
+      assert.deepEqual(event.tools.shell.input.properties.limit, { type: 'integer', minimum: 1 });
     }
+  });
+
+  it('strips every tool for the single-shot agent', async () => {
+    const { context } = await loadPlugin();
+    const event = { agent: 'jbot-plain', tools: tools() };
+    context(event);
+    assert.deepEqual(event.tools, {});
   });
 
   it('applies the options registered for the session and nothing for unknown ones', async () => {
@@ -144,5 +144,16 @@ describe('jbot opencode plugin', () => {
     const allow = { effect: 'allow', message: '' };
     evaluate(allow);
     assert.equal(allow.effect, 'allow');
+    const wrapShell = { agent: 'jbot-wrapup', action: 'shell', effect: 'allow', message: '' };
+    evaluate(wrapShell);
+    assert.equal(wrapShell.effect, 'deny');
+    assert.equal(wrapShell.message, PERMISSION_DENIED_MESSAGE);
+    for (const event of [
+      { agent: 'plan', action: 'shell', effect: 'allow' },
+      { agent: 'jbot-wrapup', action: 'read', effect: 'allow' },
+    ]) {
+      evaluate(event);
+      assert.equal(event.effect, 'allow');
+    }
   });
 });

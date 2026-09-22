@@ -16,7 +16,7 @@ import { PERMISSION_DENIED_MESSAGE } from './prompt.ts';
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
 import { readFileSync } from 'node:fs';
 const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task']);
-const TOOL_LESS_AGENTS = new Set(['jbot-wrapup', 'jbot-plain']);
+const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
 
 function stripTools(tools, agent) {
   const all = TOOL_LESS_AGENTS.has(agent);
@@ -56,7 +56,7 @@ export default {
       }
     });
     await ctx.permission.hook('evaluate', (event) => {
-      if (event.effect === 'ask') {
+      if (event.effect === 'ask' || (event.agent === 'jbot-wrapup' && event.action === 'shell')) {
         event.effect = 'deny';
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }

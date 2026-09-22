@@ -48,7 +48,8 @@ describe('buildConfig', () => {
       Object.keys(config.agents).sort(),
       [PLAIN_AGENT, REVIEWER_AGENT, WRAPUP_AGENT].sort(),
     );
-    assert.deepEqual(config.agents[WRAPUP_AGENT].permissions, [
+    assert.deepEqual(config.agents[WRAPUP_AGENT].permissions, permissionRules());
+    assert.deepEqual(config.agents[PLAIN_AGENT].permissions, [
       { action: '*', resource: '*', effect: 'deny' },
     ]);
     assert.equal(config.agents[REVIEWER_AGENT].system, 'Review only.');

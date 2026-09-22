@@ -5,16 +5,9 @@ import { BASH_PERMISSIONS, CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 export const MAIN_AGENT = 'plan';
 /** Opt-in (JBOT_REVIEWER_AGENT=1): plan's policy with a review system prompt instead of the coding-agent one. */
 export const REVIEWER_AGENT = 'jbot-reviewer';
-/**
- * Tool-less jbot agents: deny-all at the agent level and, for sessions created
- * on them, at the session level too (session rules append last); the plugin
- * strips their tools in every request, which also covers a mid-turn switch to
- * jbot-wrapup.
- */
 export const WRAPUP_AGENT = 'jbot-wrapup';
 export const PLAIN_AGENT = 'jbot-plain';
-/** A tool-less turn is one completion: no wrap-up reserve, no finalize trigger. */
-export const TOOL_LESS_AGENTS: ReadonlySet<string> = new Set([WRAPUP_AGENT, PLAIN_AGENT]);
+export const TOOL_LESS_AGENTS: ReadonlySet<string> = new Set([PLAIN_AGENT]);
 
 export interface PermissionRule {
   action: string;
@@ -234,8 +227,8 @@ export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
       },
       [WRAPUP_AGENT]: {
         mode: 'primary',
-        description: 'jbot-review: final answer, tools off',
-        permissions: DENY_ALL,
+        description: 'jbot-review: final answer, read-only tools',
+        permissions: permissionRules(),
       },
       [PLAIN_AGENT]: {
         mode: 'primary',

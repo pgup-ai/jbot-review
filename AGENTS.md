@@ -39,16 +39,21 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 
 ## Invariants — do not break these
 
-1. **Full-diff scope, always.** Every review run covers the complete
+1. **Complete delivery for the selected review scope.** Every full review covers the complete
    base...head diff — as one session or as the UNION of parallel shards
    (`shardFilesForReview` assigns file groups; `buildShardPlans` partitions every
    hunk into budgeted pages, with byte-conserving splits for oversized hunks).
    Every mandatory page must complete; repository access alone is not delivery.
-   Findings remain clamped to assigned files in code. Never reintroduce delta-only review scope; "what changed
-   since the last run" applies to the summary TEXT (`buildSummaryScopeBlock`).
+   Findings remain clamped to assigned files in code. Automatic incremental
+   follow-ups may select affected files after a completed, matching baseline; every selected file still receives its complete base...head
+   patch. Earlier PR files remain available as context, and findings there may
+   still be reported. Missing history, changed policy/base, uncertain dependencies,
+   explicit reruns and auto-approval require a full review. Never silently narrow
+   scope via summary instructions. Incremental scope must be visible in the report
+   and telemetry; incomplete or unverified runs cannot establish a new baseline.
    The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
-   documentation-only follow-ups with unchanged base and policy; the main review
-   still covers the full PR and verification remains enabled. Repeat-comment noise is handled downstream by
+   documentation-only follow-ups with unchanged base and policy; main review
+   still covers its selected scope and verification remains enabled. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
    Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement
    sessions (lens passes, guideline pass) by diff shape — it never narrows the
@@ -89,7 +94,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
    escapes the env allowlist), the jbot plugin's `context` hook (removes
    write/edit/patch/apply_patch/multiedit/question/subagent/task from every
-   request and every tool for the wrap-up and single-shot agents), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
+   request and every tool for the single-shot agent; wrap-up retains
+   native tool schemas for model compatibility, with wrap-up shell execution
+   denied by the permission hook), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
    the server child so the reviewed repo's committed `.opencode/` (plugins,
    config) never loads — that code runs at server start OUTSIDE the tool
    sandbox. Sessions are hermetic on both sides: the operator's global config

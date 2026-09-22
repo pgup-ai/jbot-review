@@ -1,3 +1,8 @@
+import {
+  planIncrementalReview,
+  withReviewBaseline,
+  type ReviewBaseline,
+} from './incremental-review.ts';
 import { NativeEvidenceStore } from './native-evidence.ts';
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
@@ -148,6 +153,7 @@ import {
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
+  buildIncrementalReviewContext,
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   GUIDELINE_REVIEW_LENS,
@@ -1037,7 +1043,7 @@ async function runReviewPipeline(params: {
    * Replaces every GitHub read and forces dryRun, so a run with it set
    * performs no GitHub API call at all.
    */
-  localDiff?: { files: PrFile[]; commits: ReviewCommit[] };
+  localDiff?: { files: PrFile[]; commits: ReviewCommit[]; priorReview?: string };
   options?: ReviewRunOptions;
   /**
    * Internal: runPrReview installs the pipeline's failure finalizer here so a
@@ -1295,7 +1301,7 @@ async function runReviewPipeline(params: {
       log,
     });
   };
-  const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
+  let files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
   // The "review done" 🚀 reaction means "the PR has no open jbot findings".
   // Skip paths below do NOT touch it: a no-reviewable-files or docs-only push
   // doesn't change the review verdict, so leaving the reaction as-is keeps it
@@ -1513,6 +1519,65 @@ async function runReviewPipeline(params: {
     );
   }
 
+  const fullReviewFiles = files;
+  const scopePolicy = auxiliaryPolicy({
+    version: 1,
+    model,
+    auxModel,
+    baseURL,
+    auxBaseURL: options.auxBaseURL,
+    modelOptions: options.modelOptions,
+    guidelines,
+    title: pullTitle,
+    body: pullBody,
+    reviewer: runIdentity(process.env).reviewerRevision,
+    configuration: runConfiguration(options, model).configurationHash,
+  });
+  const scopeStartedAt = Date.now();
+  const reviewScope = await planIncrementalReview({
+    workspace,
+    files,
+    head: headSha,
+    base: baseSha,
+    policy: scopePolicy,
+    priorBody: localDiff?.priorReview ?? priorJbotReviewGroups.at(-1)?.body,
+    forceFull:
+      !options.skipUnchanged ||
+      options.autoApprove ||
+      !priorThreadStateKnown ||
+      allPriorJbotThreads.some((thread) => !thread.isResolved) ||
+      (mainCliBackend === 'commandcode'
+        ? !options.commandCodeTools
+        : backendRequiresCompleteEmbeddedDiff(
+            providerID,
+            mainCliBackend,
+            mainOnOpencode ? modelID : undefined,
+          )),
+    worktree: !!localDiff,
+  });
+  const scopeStats = {
+    mode: reviewScope.mode,
+    reason: reviewScope.reason,
+    files: reviewScope.files.length,
+    totalFiles: fullReviewFiles.length,
+    patchBytes: reviewScope.files.reduce(
+      (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
+      0,
+    ),
+    totalPatchBytes: fullReviewFiles.reduce(
+      (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
+      0,
+    ),
+    planningMs: Date.now() - scopeStartedAt,
+    baseline: reviewScope.baseline,
+  };
+  files = reviewScope.files;
+  const incrementalContext = buildIncrementalReviewContext(reviewScope, fullReviewFiles);
+  changedFiles.splice(0, changedFiles.length, ...files.map((file) => file.filename));
+  log(
+    `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
+  );
+
   // A real review is about to run: clear the prior 🚀 so it only reappears if
   // this run leaves the PR with zero open findings. A removed reaction means
   // "review in flight"; a thrown/aborted run leaves it absent.
@@ -1727,7 +1792,7 @@ async function runReviewPipeline(params: {
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
   const auxDiffBlockText = diffHunksBlock;
-  const auxPrContext = joinContext(coreContext, auxDiffBlockText);
+  const auxPrContext = joinContext(coreContext, incrementalContext, auxDiffBlockText);
   const lensContextBlocks = [
     buildReviewScopeContext({
       pullTitle,
@@ -1739,6 +1804,7 @@ async function runReviewPipeline(params: {
     blastRadiusBlock,
     explorationEvidence,
     LENS_CONTEXT_NOTE,
+    incrementalContext,
   ];
   // The trust boundary leads either way; the shared-prefix arm moves only the diff.
   const lensPrContext = options.sharedPrefixPrompt
@@ -2531,15 +2597,18 @@ async function runReviewPipeline(params: {
             buildContextTrimNotice(dropped),
           );
 
-    const mainCoreContext = compactReviewPageContext(
-      trimmedCoreContext,
-      buildReviewScopeContext(
-        { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
-        false,
+    const mainCoreContext = joinContext(
+      compactReviewPageContext(
+        trimmedCoreContext,
+        buildReviewScopeContext(
+          { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
+          false,
+        ),
+        summaryScopeBlock,
+        reviewFocusBlock,
+        joinContext(blastRadiusBlock, explorationEvidence),
       ),
-      summaryScopeBlock,
-      reviewFocusBlock,
-      joinContext(blastRadiusBlock, explorationEvidence),
+      incrementalContext,
     );
     if (mainCoreContext !== trimmedCoreContext)
       log(
@@ -2611,6 +2680,7 @@ async function runReviewPipeline(params: {
         ),
       );
       telemetry.recordExecution({
+        reviewScope: scopeStats,
         reviewPasses: effectiveReviewPasses,
         reviewShards: shardPlans.length,
         lensKeys: candidateLensKeys,
@@ -3277,6 +3347,20 @@ async function runReviewPipeline(params: {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
     }
 
+    const reviewMetadata = {
+      auxiliaryBaselines,
+      diagnosticsUrl,
+      reviewScope: scopeStats,
+      baseline:
+        verificationEnabled &&
+        headSha &&
+        baseSha &&
+        incompleteSessions.length === 0 &&
+        !verifiedFindings.some(isUnresolvedFinding)
+          ? { head: headSha, base: baseSha, policy: scopePolicy }
+          : undefined,
+    };
+
     if (options.dryRun) {
       const body = buildBody(
         changesSinceText,
@@ -3291,7 +3375,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
-        { auxiliaryBaselines, diagnosticsUrl },
+        reviewMetadata,
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -3340,7 +3424,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
-        { auxiliaryBaselines, diagnosticsUrl },
+        reviewMetadata,
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -5053,10 +5137,20 @@ export function buildBody(
   engineByModel?: Record<string, string>,
   reasoningEffort?: string,
   incompleteSessions: readonly IncompleteSession[] = [],
-  experiment?: { auxiliaryBaselines: AuxiliaryBaseline[]; diagnosticsUrl?: string },
+  experiment?: {
+    auxiliaryBaselines: AuxiliaryBaseline[];
+    diagnosticsUrl?: string;
+    reviewScope?: { mode: 'full' | 'incremental'; files: number; totalFiles: number };
+    baseline?: ReviewBaseline;
+  },
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
+  if (experiment?.reviewScope?.mode === 'incremental')
+    lines.push(
+      `**Scope:** Incremental follow-up; ${experiment.reviewScope.files} of ${experiment.reviewScope.totalFiles} PR files re-reviewed, including related earlier changes.`,
+      '',
+    );
   const coverageNotice = formatIncompleteCoverage(incompleteSessions);
   if (coverageNotice) lines.push(coverageNotice, '');
   if (changesSinceLastReview.trim()) {
@@ -5104,9 +5198,13 @@ export function buildBody(
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return withReviewCoverage(
-    withAuxiliaryBaselines(lines.join('\n'), experiment?.auxiliaryBaselines ?? []),
+    withReviewBaseline(
+      withAuxiliaryBaselines(lines.join('\n'), experiment?.auxiliaryBaselines ?? []),
+      experiment?.baseline,
+    ),
     headSha,
     incompleteSessions.length === 0,
+    experiment?.reviewScope?.mode,
   );
 }
 

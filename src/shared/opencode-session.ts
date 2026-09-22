@@ -626,7 +626,7 @@ async function promptHoldingSlot(
     }
 
     const agent = sessionsByClient.get(client)?.get(sessionID)?.agent ?? MAIN_AGENT;
-    const canWrapUp = !TOOL_LESS_AGENTS.has(agent);
+    const canWrapUp = agent !== WRAPUP_AGENT && !TOOL_LESS_AGENTS.has(agent);
     const reserve =
       canWrapUp && spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
     let requestWrapUp: ((budgetMs: number) => void) | undefined;

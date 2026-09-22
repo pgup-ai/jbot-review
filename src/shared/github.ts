@@ -32,16 +32,26 @@ export function withReviewCoverage(
   body: string,
   headSha: string | undefined,
   complete: boolean,
+  scope: 'full' | 'incremental' = 'full',
 ): string {
   if (!headSha) return body;
   const marker =
-    complete && /^[0-9a-f]{40}$/i.test(headSha) ? `completed-head:${headSha}` : 'incomplete';
+    complete && /^[0-9a-f]{40}$/i.test(headSha)
+      ? `${scope === 'incremental' ? 'incremental-head' : 'completed-head'}:${headSha}`
+      : 'incomplete';
   return `${body}\n\n<!-- jbot-review:${marker} -->`;
 }
 
-export function completedReviewHead(body: string): string | undefined {
+export function completedReviewHead(
+  body: string,
+  scope: 'full' | 'incremental' = 'full',
+): string | undefined {
+  const marker = scope === 'incremental' ? 'incremental-head' : 'completed-head';
   return body.match(
-    /\n<!-- jbot-review:completed-head:([0-9a-f]{40}) -->(?:\s*<!-- jbot-review:(?:review|threads:\d+|linked-comments:[\d,]*) -->)*\s*$/i,
+    new RegExp(
+      `\\n<!-- jbot-review:${marker}:([0-9a-f]{40}) -->(?:\\s*<!-- jbot-review:(?:review|threads:\\d+|linked-comments:[\\d,]*) -->)*\\s*$`,
+      'i',
+    ),
   )?.[1];
 }
 
@@ -1214,6 +1224,7 @@ export function selectResolvedJbotReviewsToFinalize(
 
 export function compactJbotReviewBody(body: string, threadCount: number): string {
   if (hasInternalMarker(body, COMPACTED_REVIEW_MARKER)) return body;
+  const incrementalHead = completedReviewHead(body, 'incremental');
   const linkedCommentIds = parseLinkedCommentIds(body);
   const original = stripLinkedCommentsFooter(body)
     .replaceAll(REVIEW_MARKER, '')
@@ -1239,8 +1250,9 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
           '',
           COMPACTED_REVIEW_MARKER,
         ].join('\n'),
-        completedReviewHead(body),
+        incrementalHead ?? completedReviewHead(body),
         true,
+        incrementalHead ? 'incremental' : 'full',
       ),
     ),
     linkedCommentIds,

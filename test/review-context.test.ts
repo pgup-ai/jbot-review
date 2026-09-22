@@ -17,6 +17,7 @@ import {
   formatGuidelines,
   formatLinkedIssues,
   selectFinderGuidelineText,
+  selectGuidelineSections,
   truncatePrBody,
   MAX_CHANGED_FILES_BYTES,
   MAX_COMMITS_BYTES,
@@ -28,6 +29,20 @@ import {
 } from '../src/shared/review-context.ts';
 
 const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
+
+it('selects complete heading subtrees and rejects missing, fenced or ambiguous titles', () => {
+  const text =
+    '# Guide\nIntro\n## Commands\nRun tests\n## Contracts\nKeep parity\n### Defaults\nKeep defaults\n```md\n## Fake\n```\n## Style\nUse tabs';
+  const scoped = selectGuidelineSections(text, ['Contracts', 'Defaults'])!;
+  assert.match(
+    scoped,
+    /## Contracts\nKeep parity\n### Defaults\nKeep defaults\n```md\n## Fake\n```/,
+  );
+  assert.match(scoped, /other text omitted: Guide, Commands, Style/);
+  assert.doesNotMatch(scoped, /Run tests|Use tabs/);
+  assert.equal(selectGuidelineSections(text, ['Fake']), undefined);
+  assert.equal(selectGuidelineSections(text + '\n## Contracts\nOther', ['Contracts']), undefined);
+});
 
 describe('formatContextBudget', () => {
   it('reports per-fragment bytes largest-first with a total, dropping empties', () => {
