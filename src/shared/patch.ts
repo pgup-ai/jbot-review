@@ -7,7 +7,7 @@
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /** Walks a patch, yielding every NEW-side line (added or context) with its number. */
-function* newSideLines(
+export function* newSideLines(
   patch: string,
 ): Generator<{ line: number; content: string; added: boolean }> {
   let newLine = 0;

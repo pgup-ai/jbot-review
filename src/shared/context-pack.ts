@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
+import { PATH_PATTERNS } from './diff-context.ts';
 import {
   changedEvidenceLines,
   resolveEvidenceImport,
@@ -8,6 +9,7 @@ import {
   type RichSourceIndex,
 } from './evidence.ts';
 import type { PrFile } from './github.ts';
+import { newSideLines } from './patch.ts';
 import {
   formatContextPack,
   formatContextPackItem,
@@ -94,6 +96,10 @@ class PackReader {
       );
     return this.matches.get(key)!;
   }
+
+  resolve(path: string, specifier: string): string | undefined {
+    return resolveEvidenceImport(path, specifier, this.provider.tracked, this.provider.aliases);
+  }
 }
 
 const within = (span: { start: number; end: number }, line: number) =>
@@ -105,20 +111,6 @@ const range = (start: number, end: number) =>
 const qualified = (d: { symbol: string; owner?: string }) =>
   d.owner ? `${d.owner}.${d.symbol}` : d.symbol;
 const packageOf = (path: string) => path.split('/').slice(0, 2).join('/');
-const isTest = (path: string) =>
-  /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec|e2e-spec)\./.test(path);
-
-/** New-side lines the page's hunks already show. */
-function diffLines(patch: string): Set<number> {
-  const lines = new Set<number>();
-  let line = 0;
-  for (const row of patch.split('\n')) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row);
-    if (hunk) line = Number(hunk[1]);
-    else if (row.startsWith('+') || row.startsWith(' ')) lines.add(line++);
-  }
-  return lines;
-}
 
 function entry(
   slice: ContextPackSlice,
@@ -136,11 +128,11 @@ function entry(
 }
 
 function listEntry(
-  slice: ContextPackSlice,
   kind: NonNullable<ContextPackEntry['list']>['kind'],
   subject: string,
   entries: string[],
 ): ContextPackEntry {
+  const slice = kind === 'directory' ? 'directories' : 'callers';
   return { slice, path: '', label: '', rows: [], list: { kind, subject, entries } };
 }
 
@@ -282,12 +274,7 @@ async function exported(
     ...reexports.filter((r) => r.exported === symbol && r.imported !== '*'),
     ...reexports.filter((r) => r.exported === '*'),
   ]) {
-    const target = resolveEvidenceImport(
-      path,
-      next.from,
-      reader.provider.tracked,
-      reader.provider.aliases,
-    );
+    const target = reader.resolve(path, next.from);
     const found =
       target &&
       (await exported(reader, target, next.exported === '*' ? symbol : next.imported, hops + 1));
@@ -306,12 +293,7 @@ async function declaredFrom(
   if (topLevel(source.index, symbol)) return { path, symbol };
   const binding = source.index.imports.find((i) => i.local === symbol);
   if (!binding || binding.imported === '*' || binding.imported === 'default') return undefined;
-  const target = resolveEvidenceImport(
-    path,
-    binding.from,
-    reader.provider.tracked,
-    reader.provider.aliases,
-  );
+  const target = reader.resolve(path, binding.from);
   return target ? exported(reader, target, binding.imported) : undefined;
 }
 
@@ -482,12 +464,7 @@ async function linked(
   const name = target.owner ?? target.symbol;
   for (const binding of source.index.imports) {
     if (binding.imported !== name) continue;
-    const resolved = resolveEvidenceImport(
-      path,
-      binding.from,
-      reader.provider.tracked,
-      reader.provider.aliases,
-    );
+    const resolved = reader.resolve(path, binding.from);
     // A removed or re-exported name has no declaring module here, so any in-repo import counts.
     if (
       target.path
@@ -523,7 +500,7 @@ async function callerEntries(
         : (await reader.references(target.symbol)).slice(0, MAX_REFERENCES)
     ).sort(
       (a, b) =>
-        Number(isTest(a.path)) - Number(isTest(b.path)) ||
+        Number(PATH_PATTERNS.tests.test(a.path)) - Number(PATH_PATTERNS.tests.test(b.path)) ||
         Number(packageOf(b.path) === packageOf(target.path)) -
           Number(packageOf(a.path) === packageOf(target.path)) ||
         a.path.localeCompare(b.path) ||
@@ -572,8 +549,8 @@ async function callerEntries(
       markShown(shown, item);
       excerpts++;
     }
-    if (rest.length) entries.push(listEntry('callers', 'other-callers', subject, rest));
-    if (unverified.length) entries.push(listEntry('callers', 'unverified', subject, unverified));
+    if (rest.length) entries.push(listEntry('other-callers', subject, rest));
+    if (unverified.length) entries.push(listEntry('unverified', subject, unverified));
   }
   return entries;
 }
@@ -596,7 +573,7 @@ function directoryEntries(
       }
       const sorted = [...names].sort();
       const more = sorted.length - MAX_DIRECTORY_NAMES;
-      return listEntry('directories', 'directory', directory, [
+      return listEntry('directory', directory, [
         ...sorted.slice(0, MAX_DIRECTORY_NAMES),
         ...(more > 0 ? [`+${more} more`] : []),
       ]);
@@ -611,7 +588,13 @@ export async function buildContextPack(
 ): Promise<ContextPack> {
   const reader = new PackReader(provider);
   for (const file of files) await reader.load(file.filename);
-  const diff: Lines = new Map(files.map((file) => [file.filename, diffLines(file.patch ?? '')]));
+  const diff: Lines = new Map(
+    files.map((file) => [
+      file.filename,
+      // A trailing newline would read as one more context line.
+      new Set(Array.from(newSideLines((file.patch ?? '').replace(/\n$/, '')), (l) => l.line)),
+    ]),
+  );
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
   const surrounding = surroundingEntries(files, reader, diff, shown);
   const definitions = await definitionEntries(files, reader, diff, shown);
@@ -637,7 +620,8 @@ export async function buildContextPack(
       used += bytes;
     } else omitted.push(item);
   }
-  // The estimate leaves out section titles, so trim until the rendered pack fits.
+  // The estimate leaves out section titles and the Omitted list,
+  // so trim until the rendered pack fits.
   let text = render();
   while (kept.length && Buffer.byteLength(text) > budgetBytes) {
     omitted.unshift(kept.pop()!);

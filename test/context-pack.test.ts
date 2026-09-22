@@ -145,7 +145,7 @@ test('used definitions follow imports, path aliases, re-exports and injected ser
     pack.text,
     /#### libs\/ledger\/src\/ledger\.repository\.ts:2-4 \(LedgerRepository\.save\)\n2: {3}save\(id: string\) \{/,
   );
-  // Task 9 adds caller symbols to the same set, so check membership only.
+  // Callers add their symbols to the same set.
   assert.ok(pack.supplied.symbols.has('formatId') && pack.supplied.symbols.has('save'));
 });
 
