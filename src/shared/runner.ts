@@ -2641,35 +2641,48 @@ async function runReviewPipeline(params: {
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
-    // Pack pages carry import-linked callers; pages without a pack get the usage list back below.
-    const pageBlocks = options.experiment.contextPack
-      ? kept.filter((block) => block.name !== SUPPLEMENTARY_BLOCK_NAMES.blastRadius)
-      : kept;
     const trimmedCoreContext =
-      dropped.length === 0 && pageBlocks.length === kept.length
+      dropped.length === 0
         ? coreContext
         : joinContext(
             UNTRUSTED_PR_CONTENT_NOTE,
             baseCoreContext,
-            ...pageBlocks.map((block) => block.text),
+            ...kept.map((block) => block.text),
             buildContextTrimNotice(dropped),
           );
 
-    const mainCoreContext = joinContext(
-      compactReviewPageContext(
-        trimmedCoreContext,
-        buildReviewScopeContext(
-          { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
-          false,
+    const pageContext = (core: string, evidence: string) =>
+      joinContext(
+        compactReviewPageContext(
+          core,
+          buildReviewScopeContext(
+            { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
+            false,
+          ),
+          summaryScopeBlock,
+          reviewFocusBlock,
+          evidence,
         ),
-        summaryScopeBlock,
-        reviewFocusBlock,
-        options.experiment.contextPack
-          ? explorationEvidence
-          : joinContext(blastRadiusBlock, explorationEvidence),
-      ),
-      incrementalContext,
+        incrementalContext,
+      );
+    const fullCoreContext = pageContext(
+      trimmedCoreContext,
+      joinContext(blastRadiusBlock, explorationEvidence),
     );
+    // The pack's import-linked callers stand in for the usage list; compliance pages keep it.
+    const usageBlock = kept.find((block) => block.name === SUPPLEMENTARY_BLOCK_NAMES.blastRadius);
+    const mainCoreContext =
+      options.experiment.contextPack && usageBlock
+        ? pageContext(
+            joinContext(
+              UNTRUSTED_PR_CONTENT_NOTE,
+              baseCoreContext,
+              ...kept.map((block) => (block === usageBlock ? explorationEvidence : block.text)),
+              buildContextTrimNotice(dropped),
+            ),
+            explorationEvidence,
+          )
+        : fullCoreContext;
     if (mainCoreContext !== trimmedCoreContext)
       log(
         `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(mainCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
@@ -3004,7 +3017,7 @@ async function runReviewPipeline(params: {
       const plans = buildAuxiliaryPlans({
         coreContext: lens
           ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
-          : mainCoreContext,
+          : fullCoreContext,
         context7Block: '',
         shards,
         budget: auxPromptBudget,
