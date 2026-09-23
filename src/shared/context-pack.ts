@@ -73,6 +73,7 @@ type Located = { path: string; symbol: string; owner?: string };
 class PackReader {
   readonly sources = new Map<string, PackSource | undefined>();
   private readonly matches = new Map<string, Promise<{ path: string; line: number }[]>>();
+  readonly refused = new Set<string>();
   failures = 0;
 
   constructor(readonly provider: PackSourceProvider) {}
@@ -81,6 +82,7 @@ class PackReader {
     if (!this.sources.has(path)) {
       const source = await this.provider.load(path).catch(() => {
         this.failures++;
+        this.refused.add(path);
         return undefined;
       });
       this.sources.set(path, source);
@@ -526,11 +528,11 @@ async function callerEntries(
       )
         continue;
       const source = await reader.load(hit.path);
-      // An unread file was never link-checked; a failed read already counts as uncollected.
-      if (!source) continue;
+      // A refused read already counts as uncollected; hits in unusable files stay unverified.
+      if (reader.refused.has(hit.path)) continue;
       // An import names the symbol but calls nothing.
-      if (source.index.imports.some((i) => i.line === hit.line)) continue;
-      if (await linked(reader, hit.path, source, target)) callers.push(hit);
+      if (source?.index.imports.some((i) => i.line === hit.line)) continue;
+      if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
       else unverified.push(`${hit.path}:${hit.line}`);
     }
     const subject = qualified(target);

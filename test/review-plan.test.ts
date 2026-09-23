@@ -582,7 +582,8 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
   const results = await addContextPack({
     plans,
     build: async (plan) => {
-      if (plan === plans[1]) return { ...pack, slices: { directories: { items: 1, bytes: 10 } } };
+      if (plan === plans[1])
+        return { ...pack, uncollected: 2, slices: { directories: { items: 1, bytes: 10 } } };
       if (plan === plans[2]) throw new Error('boom');
       if (plan === plans[3]) return { ...pack, text: '## Context pack\n' + 'x'.repeat(300_000) };
       return pack;
@@ -601,6 +602,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
       ['fallback', 'overflow'],
     ],
   );
+  assert.equal(results[1].uncollected, 2);
   assert.match(plans[0].context, /PACKED\n\n## Diff hunks/);
   assert.ok(plans[0].baseContext.includes('PACKED'));
   assert.ok(!plans[1].context.includes('PACKED'));

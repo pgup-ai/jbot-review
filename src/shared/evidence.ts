@@ -497,14 +497,14 @@ export class EvidenceStore {
         const scope = paths?.map((path) => `:(literal)${path}`) ?? PACK_SOURCE_GLOBS;
         const { stdout } = await exec(
           'git',
-          ['grep', '-n', '-z', '-I', '-w', '-F', '-e', symbol, '--', ...scope],
+          ['grep', '--no-color', '-n', '-z', '-I', '-w', '-F', '-e', symbol, '--', ...scope],
           { cwd: this.workspace, signal, maxBuffer: 4 * 1024 * 1024 },
         ).catch((error) => {
           if (error.code === 1) return { stdout: '' };
           throw error;
         });
-        // A -z record is path NUL line NUL text; paths may hold newlines, and -I skips binaries.
-        return [...stdout.matchAll(/([^\0]*)\0(\d+)\0[^\n]*\n/g)].map(([, path, line]) => ({
+        // Records are path NUL line NUL text (a path may hold a newline); /y keeps parsing linear.
+        return [...stdout.matchAll(/([^\0]*)\0(\d+)\0[^\n]*\n/gy)].map(([, path, line]) => ({
           path,
           line: Number(line),
         }));

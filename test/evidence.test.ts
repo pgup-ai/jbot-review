@@ -808,6 +808,8 @@ test('pack provider reads tracked head sources with tsconfig aliases and word re
   );
   assert.equal(await provider.load('untracked.ts'), undefined);
   assert.equal(await provider.load('libs/money/src/broken.ts'), undefined);
+  // A developer's color.ui=always must not wrap the line numbers in escape codes.
+  execFileSync('git', ['config', 'color.ui', 'always'], { cwd: workspace });
   assert.deepEqual(await provider.references('total'), [
     { path: 'libs/money/src/index.ts', line: 1 },
     { path: 'libs/money/src/total.ts', line: 1 },
