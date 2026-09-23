@@ -2721,6 +2721,8 @@ async function runReviewPipeline(params: {
         },
       );
     const renderMainPrompt = mainPromptRenderer();
+    // Only a usage list that mainCore swapped out comes back, on pages the pack cannot serve.
+    const usageTrailer = usageBlock ? blastRadiusBlock : '';
     log(
       `Main prompt budget: ${JSON.stringify(mainPromptBudget)}; input tokens conservatively bounded by UTF-8 bytes.`,
     );
@@ -2730,12 +2732,8 @@ async function runReviewPipeline(params: {
       shards,
       renderPrompt: renderMainPrompt,
       budget: mainPromptBudget,
-      // Pages the pack cannot serve get the usage list back after caller evidence.
       evidenceReserveBytes:
-        REVIEW_EVIDENCE_BYTES +
-        (options.experiment.contextPack && blastRadiusBlock
-          ? Buffer.byteLength(blastRadiusBlock) + 2
-          : 0),
+        REVIEW_EVIDENCE_BYTES + (usageTrailer ? Buffer.byteLength(usageTrailer) + 2 : 0),
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       diffFirst: options.sharedPrefixPrompt,
       numberedDiff: options.experiment.contextPack,
@@ -2761,7 +2759,7 @@ async function runReviewPipeline(params: {
         renderMainPrompt,
         mainPromptBudget,
         log,
-        blastRadiusBlock,
+        usageTrailer,
       );
       for (const { row, supplied } of packs) {
         if (supplied)
@@ -3010,19 +3008,15 @@ async function runReviewPipeline(params: {
         embeddedFirstPrompt: packPages,
         numberedDiff: packPages,
       });
-      if (packPages) {
-        const packs = await addContextPack({
-          plans,
-          build: buildPagePack,
-          renderPrompt: render,
-          budget: auxPromptBudget,
-          log,
-        });
-        const supplied = packs.flatMap((pack) => (pack.supplied ? [pack.supplied] : []));
-        if (supplied.length)
-          packSupplied.set('guideline-compliance', mergeSuppliedContexts(supplied));
-        for (const { row } of packs) telemetry.recordContextPack(row);
-      }
+      const packs = packPages
+        ? await addContextPack({
+            plans,
+            build: buildPagePack,
+            renderPrompt: render,
+            budget: auxPromptBudget,
+            log,
+          })
+        : [];
       await addReviewEvidence(
         plans.filter((plan) => !plan.contextPack),
         evidence,
@@ -3030,7 +3024,20 @@ async function runReviewPipeline(params: {
         auxPromptBudget,
         log,
       );
-      return prioritizeAuxiliaryPlans(plans);
+      const ordered = prioritizeAuxiliaryPlans(plans);
+      // Label pack rows the way the pages' sessions are labelled, after risk ordering.
+      for (const [index, { row }] of packs.entries()) {
+        const page = ordered.indexOf(plans[index]) + 1;
+        telemetry.recordContextPack({
+          ...row,
+          session:
+            ordered.length > 1 ? `guideline-compliance-page-${page}` : 'guideline-compliance',
+        });
+      }
+      const supplied = packs.flatMap((pack) => (pack.supplied ? [pack.supplied] : []));
+      if (supplied.length)
+        packSupplied.set('guideline-compliance', mergeSuppliedContexts(supplied));
+      return ordered;
     };
 
     const changesSinceLastReview = trackAux(

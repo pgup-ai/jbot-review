@@ -799,6 +799,11 @@ test('pack provider reads tracked head sources with tsconfig aliases and word re
     'export function total(n: number) {\n  return n;\n}',
   );
   await writeFile(join(workspace, 'libs/money/src/broken.ts'), 'export function (');
+  // Babel counts a lone CR as a line break; git grep and the pack's rows do not.
+  await writeFile(
+    join(workspace, 'libs/money/src/cr.ts'),
+    'export const a = 1;\rexport const b = 2;',
+  );
   await writeFile(join(workspace, 'untracked.ts'), 'export const total = 1;');
   execFileSync('git', ['add', 'tsconfig.json', 'libs'], { cwd: workspace });
   const provider = await store.packProvider(AbortSignal.timeout(4000));
@@ -811,6 +816,7 @@ test('pack provider reads tracked head sources with tsconfig aliases and word re
   );
   assert.equal(await provider.load('untracked.ts'), undefined);
   assert.equal(await provider.load('libs/money/src/broken.ts'), undefined);
+  assert.equal(await provider.load('libs/money/src/cr.ts'), undefined);
   // A developer's color.ui=always must not wrap the line numbers in escape codes.
   execFileSync('git', ['config', 'color.ui', 'always'], { cwd: workspace });
   assert.deepEqual(await provider.references('total'), [

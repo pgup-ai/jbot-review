@@ -482,6 +482,8 @@ export class EvidenceStore {
         if (!source || source.truncated) return undefined;
         files++;
         bytes += Buffer.byteLength(source.text);
+        // Babel also ends lines at a lone \r, U+2028 and U+2029; split() and git grep do not.
+        if (/\r(?!\n)|[\u2028\u2029]/.test(source.text)) return undefined;
         try {
           const index = indexEvidenceSource(path, source.text, { rich: true });
           return { lines: source.text.split(/\r?\n/), index };
