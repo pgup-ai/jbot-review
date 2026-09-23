@@ -2940,10 +2940,21 @@ async function runReviewPipeline(params: {
     const bookkeepingReady = new Promise<void>((resolve) => {
       releaseBookkeeping = resolve;
     });
+    // A tool-less lens page is one turn, so it queues before compliance's tool loops take every aux slot.
+    const lensesQueuing = new Set(
+      toolLessAux ? candidateLensKeys.map((key) => `review-${key}`) : [],
+    );
+    let releaseCompliance!: () => void;
+    const lensesQueued = new Promise<void>((resolve) => {
+      releaseCompliance = resolve;
+    });
     const finderQueued = (session: string) => {
       preparingFinders.delete(session);
+      lensesQueuing.delete(session);
+      if (lensesQueuing.size === 0) releaseCompliance();
       if (preparingFinders.size === 0) releaseBookkeeping();
     };
+    if (lensesQueuing.size === 0) releaseCompliance();
     if (preparingFinders.size === 0) releaseBookkeeping();
     const addressedPriorCheck = trackAux(
       'addressed-prior-comments',
@@ -3110,21 +3121,23 @@ async function runReviewPipeline(params: {
         ? Promise.resolve([])
         : jointGuidelines
           ? lensPasses[0].promise.then(() => [])
-          : startGuidelineComplianceCheck({
-              backend: auxBackend,
-              model: auxModel,
-              prContext: coreContext,
-              plans: () => prepareAuxPlans(),
-              onQueued: finderQueued,
-              guidelinesForPrompt: complianceGuidelines,
-              hasGuidelines: Boolean(complianceGuidelines),
-              enabled: guidelineCandidate && !sweepGuidelines,
-              timeoutMs: finderTimeoutMs,
-              log,
-              onTokenUsage: recordTokenUsage,
-              onCoverage: recordCoverage,
-              onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
-            }),
+          : lensesQueued.then(() =>
+              startGuidelineComplianceCheck({
+                backend: auxBackend,
+                model: auxModel,
+                prContext: coreContext,
+                plans: () => prepareAuxPlans(),
+                onQueued: finderQueued,
+                guidelinesForPrompt: complianceGuidelines,
+                hasGuidelines: Boolean(complianceGuidelines),
+                enabled: guidelineCandidate && !sweepGuidelines,
+                timeoutMs: finderTimeoutMs,
+                log,
+                onTokenUsage: recordTokenUsage,
+                onCoverage: recordCoverage,
+                onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
+              }),
+            ),
     );
 
     let summary: string;
