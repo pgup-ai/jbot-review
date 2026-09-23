@@ -637,15 +637,18 @@ describe('assembleFindingVerificationPrompt', () => {
     );
   });
 
-  it('defaults to the agentic prompt that reads the actual code', () => {
-    assert.match(assembleFindingVerificationPrompt('CTX', findings), /read\s+the actual code/);
+  it('defaults to the agentic prompt that can read the checkout', () => {
+    assert.match(
+      assembleFindingVerificationPrompt('CTX', findings),
+      /for anything else a finding depends on/,
+    );
   });
 
   it('single-shot mode judges from the diff and forbids browsing, keeping discipline', () => {
     const prompt = assembleFindingVerificationPrompt('CTX', findings, true);
 
     assert.match(prompt, /NOT browsing the repository/);
-    assert.doesNotMatch(prompt, /read\s+the actual code/);
+    assert.doesNotMatch(prompt, /for anything else a finding depends on/);
     // preserves the adversarial refute-by-default + framework-abstention discipline
     assert.match(prompt, /each finding is WRONG/);
     assert.match(prompt, /library\/framework behaves internally/);
@@ -755,7 +758,7 @@ describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
   });
 
   it('requires citing the violated rule in every finding', () => {
-    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /MUST name or quote the specific written rule/);
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /MUST quote the specific written rule/);
   });
 
   it('backticks the document name in the example finding title, per the shared title rule', () => {
@@ -929,6 +932,13 @@ describe('context pack prompt', () => {
     ])
       assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, directive);
     assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /find its callers and\s+callees/);
+    // Backends that deny every tool are not offered the checkout.
+    const noTools = assembleReviewPrompt('ctx', '', '', false, true, {
+      contextPack: true,
+      toolsAvailable: false,
+    });
+    assert.match(noTools, /No repository reads are available/);
+    assert.doesNotMatch(noTools, /available through tools/);
     assert.ok(
       assembleReviewPrompt('ctx', '', '', false, true, { contextPack: true }).startsWith(
         CONTEXT_PACK_REVIEW_PROMPT,

@@ -630,6 +630,14 @@ downgrade severity.`,
   EMBEDDED_FIRST_REVIEW_PROMPT,
 );
 
+const CONTEXT_PACK_NO_TOOLS_REVIEW_PROMPT = replacePromptSection(
+  CONTEXT_PACK_REVIEW_PROMPT,
+  `The rest of the checkout is available through tools: decide for yourself what,
+if anything, you need beyond the pack, and issue independent reads together in
+one turn.`,
+  `No repository reads are available: judge from the diff and the pack.`,
+);
+
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with exactly two top-level keys,
@@ -1036,7 +1044,7 @@ export const GUIDELINE_REVIEW_LENS = `## Written-rule check for this pass
 
 Also check every assigned hunk against the supplied repository guidelines,
 rule by rule. Report only observed conflicts with an explicit written rule;
-name or quote it and cite its inspected location as \`path/to/rule.md:42\`.
+quote it and name the file it comes from.
 Do not invent rules or infer tool usage, authorship, or generation history
 from file style. A recommendation needs a concrete benefit on changed code.
 For written-rule violations use P1 only for a mandatory/blocking rule with
@@ -1458,7 +1466,7 @@ export function assembleReviewPrompt(
   evidenceQuotes = false,
   embeddedFirstPrompt = false,
   options: {
-    /** False on backends that deny every tool; only lens bodies change (the main prompt keeps its directive). */
+    /** False on backends that deny every tool; lens bodies and pack pages change (other main prompts keep their directive). */
     toolsAvailable?: boolean;
     /**
      * JBOT_SHARED_PREFIX_PROMPT: context, then guidelines, then instructions,
@@ -1475,7 +1483,9 @@ export function assembleReviewPrompt(
   const instructions = focusedLens
     ? buildLensReviewPrompt(embeddedFirstPrompt, options.toolsAvailable ?? true)
     : packPage
-      ? CONTEXT_PACK_REVIEW_PROMPT
+      ? options.toolsAvailable === false
+        ? CONTEXT_PACK_NO_TOOLS_REVIEW_PROMPT
+        : CONTEXT_PACK_REVIEW_PROMPT
       : embeddedFirstPrompt
         ? EMBEDDED_FIRST_REVIEW_PROMPT
         : REVIEW_PROMPT;
@@ -1600,8 +1610,8 @@ ${REVIEW_COMMAND_POLICY}
 - Report one finding per violation, anchored to a line ADDED by this PR, or
   to line 0 of the changed file when no single added line carries the
   violation.
-- Every finding body MUST name or quote the specific written rule it violates
-  and cite its inspected repository location as \`path/to/rule.md:42\`.
+- Every finding body MUST quote the specific written rule it violates and name
+  the file it comes from, such as \`TECHNICAL_STANDARDS.md\`.
 - A P3 recommendation still needs an observed conflict and a concrete benefit.
   Do not infer tool usage, authorship, or generation history from file style.
 - Do not report issues in code this PR did not touch.
@@ -1631,7 +1641,7 @@ JSON string values; escape newlines inside string values as \\n.
       "kind": "maintainability",
       "confidence": "high",
       "title": "Floating promise violates \`TECHNICAL_STANDARDS.md\`",
-      "body": "\`TECHNICAL_STANDARDS.md:7\` says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
+      "body": "\`TECHNICAL_STANDARDS.md\` says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
     }
   ]
 }
@@ -1698,8 +1708,9 @@ that each finding is WRONG. Your job is to try to refute it.
 
 ## How to work
 
-- The full repository is checked out on the PR branch. For each finding, read
-  the actual code at and around the cited location — never judge from the
+- The "Cited and related repository source excerpts" section below holds the
+  code around each cited location, and the full repository is checked out on
+  the PR branch for anything else a finding depends on. Never judge from the
   finding text alone.
 - Reproduce the claimed trigger path concretely: what input or state reaches
   this code, and does the claimed wrong result actually occur? Check guards,
