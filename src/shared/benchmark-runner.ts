@@ -18,7 +18,6 @@ export interface BenchmarkProgramMetrics {
   cacheReadTokens: number;
   costUsd: number;
   sessions: number;
-  /** Model turns across main review pages; absent from rows written before it existed. */
   mainTurns?: number;
   mainExecutionMs?: number;
 }

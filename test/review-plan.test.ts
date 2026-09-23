@@ -599,7 +599,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     log: () => {},
   });
   assert.deepEqual(
-    results.map((result) => [result.state, result.reason]),
+    results.map(({ row }) => [row.state, row.reason]),
     [
       ['complete', undefined],
       ['fallback', 'empty'],
@@ -607,7 +607,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
       ['fallback', 'overflow'],
     ],
   );
-  assert.equal(results[1].uncollected, 2);
+  assert.equal(results[1].row.uncollected, 2);
   assert.match(plans[0].context, /PACKED\n\n## Diff hunks\n[\s\S]*\n2 \+  return n \* 100;\n/);
   assert.ok(plans[0].baseContext.includes('PACKED'));
   assert.ok(!plans[1].context.includes('PACKED'));

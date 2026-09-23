@@ -2760,21 +2760,11 @@ async function runReviewPipeline(params: {
         log,
         blastRadiusBlock,
       );
-      for (const result of packs) {
-        if (result.pack)
-          for (const label of [result.label, `${result.label}-retry`])
-            packSupplied.set(label, result.pack.supplied);
-        telemetry.recordContextPack({
-          session: result.label,
-          state: result.state,
-          ...(result.reason ? { reason: result.reason } : {}),
-          buildMs: result.buildMs,
-          roomBytes: result.roomBytes,
-          bytes: result.pack ? Buffer.byteLength(result.pack.text) : 0,
-          omitted: result.pack?.omitted ?? 0,
-          uncollected: result.uncollected,
-          slices: result.pack?.slices ?? {},
-        });
+      for (const { row, supplied } of packs) {
+        if (supplied)
+          for (const label of [row.session, `${row.session}-retry`])
+            packSupplied.set(label, supplied);
+        telemetry.recordContextPack(row);
       }
     } else await addReviewEvidence(shardPlans, evidence, renderMainPrompt, mainPromptBudget, log);
 

@@ -31,7 +31,7 @@ import type { PrFile } from './github.ts';
 import type { Finding } from './types.ts';
 
 const exec = promisify(execFile);
-const PACK_SOURCE_GLOBS = ['*.ts', '*.tsx', '*.js', '*.jsx', '*.mts', '*.cts', '*.mjs', '*.cjs'];
+export const JS_GLOBS = ['*.ts', '*.tsx', '*.js', '*.jsx', '*.mts', '*.cts', '*.mjs', '*.cjs'];
 export const JS_SOURCE = /\.[cm]?[jt]sx?$/i;
 type Ast = {
   type: string;
@@ -45,7 +45,6 @@ const name = (value: unknown) => {
 };
 // Falls back to an inner .id (e.g. a PrivateName like #repo lacks its own .name/.value).
 const keyOrPrivateName = (value: unknown) => name(value) || name(ast(value)?.id);
-// A computed key only counts when it's a string literal, e.g. ['status.in'].
 const keyName = (key: unknown, computed: unknown) =>
   computed && ast(key)?.type !== 'StringLiteral' ? '' : keyOrPrivateName(key);
 type SourceIndex = {
@@ -57,7 +56,6 @@ type SourceIndex = {
 export type DeclarationKind =
   'function' | 'class' | 'variable' | 'type' | 'method' | 'property' | 'constructor';
 
-/** Context-pack index: `SourceIndex` plus the declarations a review page cites. */
 export type RichSourceIndex = SourceIndex & {
   declarations: {
     symbol: string;
@@ -66,7 +64,6 @@ export type RichSourceIndex = SourceIndex & {
     kind: DeclarationKind;
     owner?: string;
   }[];
-  /** Anonymous functions passed as call arguments, such as test callbacks. */
   callbacks: { start: number; end: number }[];
   reexports: { exported: string; imported: string; from: string }[];
   /** Constructor parameter properties: `this.<name>` holds a `<type>`. */
@@ -153,7 +150,7 @@ export function indexEvidenceSource(
       declare(keyName(n.key, n.computed), 'function');
     else if (member && owner && n.kind === 'constructor') {
       declare('constructor', 'constructor', owner);
-      for (const param of (n.params as Ast[] | undefined) ?? []) {
+      for (const param of n.params as Ast[]) {
         const parameter = param.type === 'TSParameterProperty' ? ast(param.parameter) : undefined;
         const type = ast(ast(ast(parameter?.typeAnnotation)?.typeAnnotation)?.typeName);
         if (parameter && type?.type === 'Identifier')
@@ -172,7 +169,7 @@ export function indexEvidenceSource(
     else if (n.type === 'ExportAllDeclaration')
       result.reexports.push({ exported: '*', imported: '*', from: name(n.source) });
     else if (n.type === 'ExportNamedDeclaration' && n.source)
-      for (const s of (n.specifiers as Ast[] | undefined) ?? [])
+      for (const s of n.specifiers as Ast[])
         result.reexports.push({
           exported: name(s.exported),
           imported: s.type === 'ExportNamespaceSpecifier' ? '*' : name(s.local),
@@ -494,7 +491,7 @@ export class EvidenceStore {
         }
       },
       references: async (symbol, paths) => {
-        const scope = paths?.map((path) => `:(literal)${path}`) ?? PACK_SOURCE_GLOBS;
+        const scope = paths?.map((path) => `:(literal)${path}`) ?? JS_GLOBS;
         const { stdout } = await exec(
           'git',
           ['grep', '--no-color', '-n', '-z', '-I', '-w', '-F', '-e', symbol, '--', ...scope],

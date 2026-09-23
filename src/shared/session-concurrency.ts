@@ -28,7 +28,6 @@ export interface ReviewBackend {
       deadlineAt?: number;
       lensAddendum?: string;
       contextFirst?: boolean;
-      /** The page got a context pack; use the pack prompt. */
       contextPack?: boolean;
       label?: string;
       timeoutMs?: number;

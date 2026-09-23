@@ -717,9 +717,7 @@ export interface ContextPackEntry {
   rows: [line: number, text: string][];
   /** Last line of the underlying range when the rows stop earlier. */
   end?: number;
-  /** Lines the page's diff already shows. */
   inDiff?: Set<number>;
-  /** For a caller: the changed symbol it uses. */
   calls?: string;
   list?: {
     kind: 'other-callers' | 'unverified' | 'all-shown' | 'directory';
@@ -2077,7 +2075,6 @@ export function compactReviewPageContext(
  * out cannot slip under the threshold and keep metadata that compliance pages drop.
  */
 export function compactReviewPageContexts(params: {
-  /** The trimmed core, usage list included. */
   core: string;
   /** The core with its usage block swapped for exploration evidence; absent, main equals full. */
   mainCore?: string;

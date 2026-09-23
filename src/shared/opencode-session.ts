@@ -372,7 +372,6 @@ export function recordAssistantTools(
   options: {
     experiment?: ReturnType<typeof readExplorationStats>;
     stopReason?: TelemetryStopReason;
-    /** The session's context-pack content and the workspace it is relative to, when it got one. */
     supplied?: { context: SuppliedContext; workspace: string };
   } = {},
 ): void {

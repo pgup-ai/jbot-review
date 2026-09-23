@@ -3,7 +3,6 @@ import type { JevPrefetchMode } from './jev-prefetch.ts';
 
 export interface ReviewExperiment {
   preset: 'off' | 'diff-batches' | 'linked' | 'jev' | 'adaptive' | 'context-pack' | 'custom';
-  /** Main review pages receive a context pack instead of caller evidence. */
   contextPack: boolean;
   jevPrefetch: JevPrefetchMode;
   explorationEvidence: JevPrefetchMode;

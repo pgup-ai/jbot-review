@@ -170,7 +170,6 @@ function mergeRanges(ranges: { start: number; end: number; label: string }[]) {
   }));
 }
 
-/** Each changed line's enclosing definition, plus changed classes' constructors and fields. */
 function surroundingEntries(
   files: PrFile[],
   reader: PackReader,
@@ -247,7 +246,6 @@ function surroundingEntries(
   return entries;
 }
 
-/** First line of a declaration that is not a decorator. */
 function signatureLine(source: PackSource, d: { start: number; end: number }): number {
   let depth = 0;
   for (let line = d.start; line <= d.end; line++) {
@@ -258,7 +256,6 @@ function signatureLine(source: PackSource, d: { start: number; end: number }): n
   return d.start;
 }
 
-/** Inside a function-like declaration, or strictly inside a callback or any other declaration. */
 function local(index: RichSourceIndex, d: Declaration): boolean {
   const contains = (o: { start: number; end: number }) => o.start <= d.start && d.end <= o.end;
   // An equal span is the declaration's own value, such as `const x = wrap(() => {})`.
@@ -271,7 +268,6 @@ function local(index: RichSourceIndex, d: Declaration): boolean {
   );
 }
 
-/** A module-level declaration: not a member and not local. */
 function topLevel(index: RichSourceIndex, symbol: string): Declaration | undefined {
   return index.declarations.find((d) => !d.owner && d.symbol === symbol && !local(index, d));
 }
@@ -302,7 +298,6 @@ async function exported(
   return undefined;
 }
 
-/** Where `symbol`, as written in `path`, is declared: in that file or through a named import. */
 async function declaredFrom(
   reader: PackReader,
   path: string,
@@ -340,7 +335,6 @@ function definitionLines(source: PackSource, d: Declaration): number[] {
   return range(d.start, d.end - d.start < 40 ? d.end : d.start + 19);
 }
 
-/** Definitions the changed lines use, via imports, aliases, re-exports and injected members. */
 async function definitionEntries(
   files: PrFile[],
   reader: PackReader,
@@ -353,7 +347,6 @@ async function definitionEntries(
     const key = `${found.path}\0${qualified(found)}`;
     wanted.set(key, { ...found, from, uses: (wanted.get(key)?.uses ?? 0) + 1 });
   };
-  // Uses repeat symbols, so each (path, symbol) resolves once.
   const resolved = new Map<string, Promise<Located | undefined>>();
   const declared = (path: string, source: PackSource, symbol: string) => {
     const key = `${path}\0${symbol}`;
@@ -496,15 +489,6 @@ async function linked(
   return false;
 }
 
-/** Member names collide often, so only files that name the class are searched. */
-async function memberReferences(reader: PackReader, target: Located) {
-  const files = new Set([
-    target.path,
-    ...(await reader.references(target.owner!)).map((hit) => hit.path),
-  ]);
-  return reader.references(target.symbol, [...files]);
-}
-
 async function callerEntries(
   files: PrFile[],
   reader: PackReader,
@@ -514,9 +498,11 @@ async function callerEntries(
   const entries: ContextPackEntry[] = [];
   for (const target of changedSymbols(files, reader)) {
     const pkg = packageOf(target.path);
-    const found = target.owner
-      ? await memberReferences(reader, target)
-      : await reader.references(target.symbol);
+    // Member names collide often, so only files that name the class are searched.
+    const paths = target.owner
+      ? [...new Set([target.path, ...(await reader.references(target.owner)).map((h) => h.path)])]
+      : undefined;
+    const found = await reader.references(target.symbol, paths);
     // Rank before capping, so the most useful hits are kept and load first.
     const hits = found
       .map((hit) => ({
@@ -545,7 +531,6 @@ async function callerEntries(
       const source = await reader.load(hit.path);
       // A refused read already counts as uncollected; hits in unusable files stay unverified.
       if (reader.refused.has(hit.path)) continue;
-      // An import names the symbol but calls nothing.
       if (source?.index.imports.some((i) => i.line === hit.line)) imports.add(hit);
       else if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
       else unverified.push(`${hit.path}:${hit.line}`);
@@ -603,7 +588,6 @@ async function callerEntries(
   return entries;
 }
 
-/** Changed files' directories, then their ancestors: tracked files and immediate subdirectories. */
 function directoryEntries(
   files: PrFile[],
   changed: Set<string>,

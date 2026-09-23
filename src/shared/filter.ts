@@ -407,9 +407,8 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
  * can carry, and its evidence necessarily quotes adjacent code rather than the
  * defect.
  *
- * Every finding's evidence, line 0 included and even with evidence quotes off,
- * first drops line numbers provably copied from a numbered page diff: verifier
- * prompts quote it.
+ * Evidence always drops line numbers copied from a numbered page diff, line 0
+ * and quotes-off included: verifier prompts quote it.
  */
 export function resolveFindingAnchors(
   findings: Finding[],

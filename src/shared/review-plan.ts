@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { CONTEXT_PACK_MAX_BYTES, type ContextPack } from './context-pack.ts';
 import type { PrFile } from './github.ts';
 import type { EvidenceStore } from './evidence.ts';
+import type { SuppliedContext } from './review-read-locations.ts';
+import type { ContextPackTelemetryRow } from './telemetry.ts';
 import { findingSourceLocations } from './finding-context.ts';
 import type { Finding } from './types.ts';
 import {
@@ -88,7 +90,6 @@ export interface ShardPlan {
   guidelines?: string;
   /** The page's embedded diff block; a context pack goes right before it. */
   diffText?: string;
-  /** The page got a context pack, so its session uses the pack prompt. */
   contextPack?: boolean;
 }
 
@@ -98,7 +99,6 @@ export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
   return [...plans].sort((a, b) => score(b) - score(a));
 }
 
-/** Hunks regrouped into one patch per file. */
 export function planPageFiles(units: DiffUnit[]): PrFile[] {
   return [...new Set(units.map((unit) => unit.file.filename))].map((filename) => ({
     ...units.find((unit) => unit.file.filename === filename)!.file,
@@ -438,15 +438,9 @@ export async function addReviewEvidence(
   );
 }
 
-export interface ContextPackResult {
-  label: string;
-  state: 'complete' | 'partial' | 'fallback';
-  reason?: 'empty' | 'error' | 'overflow';
-  buildMs: number;
-  roomBytes: number;
-  /** Also kept on fallback pages, so a deadline-starved empty page stays visible. */
-  uncollected: number;
-  pack?: ContextPack;
+interface ContextPackResult {
+  row: Omit<ContextPackTelemetryRow, 'kind'>;
+  supplied?: SuppliedContext;
 }
 
 /** Puts each page's context pack before its diff; pages it cannot serve are left unchanged. */
@@ -476,7 +470,7 @@ export async function addContextPack(params: {
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
           .catch(() => undefined);
         // A directory map alone would cost the page its caller evidence for no code.
-        let reason: ContextPackResult['reason'] = !pack
+        let reason: ContextPackResult['row']['reason'] = !pack
           ? 'error'
           : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
             ? undefined
@@ -494,27 +488,22 @@ export async function addContextPack(params: {
             reason = 'overflow';
           }
         }
-        const buildMs = Date.now() - started;
-        const result: ContextPackResult = {
-          label: plan.label,
-          state: reason ? 'fallback' : pack!.state,
-          ...(reason ? { reason } : { pack }),
-          buildMs,
+        const served = reason ? undefined : pack;
+        const row: ContextPackResult['row'] = {
+          session: plan.label,
+          state: served?.state ?? 'fallback',
+          ...(reason ? { reason } : {}),
+          buildMs: Date.now() - started,
           roomBytes,
+          bytes: served ? Buffer.byteLength(served.text) : 0,
+          omitted: served?.omitted ?? 0,
+          // Also kept on fallback pages, so a deadline-starved empty page stays visible.
           uncollected: pack?.uncollected ?? 0,
+          slices: served?.slices ?? {},
         };
-        results[index] = result;
-        params.log(
-          `Context pack (${plan.label}): ${JSON.stringify({
-            state: result.state,
-            reason,
-            buildMs,
-            roomBytes,
-            bytes: reason ? 0 : Buffer.byteLength(pack!.text),
-            omitted: reason ? 0 : pack!.omitted,
-            uncollected: result.uncollected,
-          })}.`,
-        );
+        results[index] = { row, supplied: served?.supplied };
+        const { session: _session, slices: _slices, ...logged } = row;
+        params.log(`Context pack (${plan.label}): ${JSON.stringify(logged)}.`);
       }
     }),
   );

@@ -85,10 +85,7 @@ export interface SuppliedContext {
   lines: Map<string, number>;
 }
 
-/**
- * The pattern of the first grep, rg or git grep in a shell command
- * (`git log --grep` is not one).
- */
+/** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
 function shellSearchPattern(command: string): string | undefined {
   const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(
     (m) => m[1] ?? m[2] ?? m[3],
@@ -112,7 +109,6 @@ function searchTokens(pattern: string): string[] {
   return pattern.replace(/\\[\s\S]/g, ' ').match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
 }
 
-/** Whether a tool call re-reads or re-searches what the session's page already supplied. */
 export function suppliedOverlap(
   workspace: string,
   tool: string,
