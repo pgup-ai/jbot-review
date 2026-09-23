@@ -503,7 +503,8 @@ export class EvidenceStore {
           if (error.code === 1) return { stdout: '' };
           throw error;
         });
-        // Records are path NUL line NUL text (a path may hold a newline); /y keeps parsing linear.
+        // Records are path NUL line NUL text, and a path may hold a newline. -I keeps
+        // NUL-free binary notices out of the records; /y keeps parsing linear.
         return [...stdout.matchAll(/([^\0]*)\0(\d+)\0[^\n]*\n/gy)].map(([, path, line]) => ({
           path,
           line: Number(line),
