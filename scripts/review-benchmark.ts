@@ -419,6 +419,11 @@ function sumProgram(rows: BenchmarkCaseRow[]): BenchmarkProgramMetrics {
       sessions: sum.sessions + row.program.sessions,
       mainTurns: (sum.mainTurns ?? 0) + (row.program.mainTurns ?? 0),
       mainExecutionMs: (sum.mainExecutionMs ?? 0) + (row.program.mainExecutionMs ?? 0),
+      packsServed: (sum.packsServed ?? 0) + (row.program.packsServed ?? 0),
+      mainReads: (sum.mainReads ?? 0) + (row.program.mainReads ?? 0),
+      mainSuppliedRereads: (sum.mainSuppliedRereads ?? 0) + (row.program.mainSuppliedRereads ?? 0),
+      mainSuppliedSearches:
+        (sum.mainSuppliedSearches ?? 0) + (row.program.mainSuppliedSearches ?? 0),
     }),
     {
       inputTokens: 0,
@@ -429,6 +434,10 @@ function sumProgram(rows: BenchmarkCaseRow[]): BenchmarkProgramMetrics {
       sessions: 0,
       mainTurns: 0,
       mainExecutionMs: 0,
+      packsServed: 0,
+      mainReads: 0,
+      mainSuppliedRereads: 0,
+      mainSuppliedSearches: 0,
     },
   );
 }

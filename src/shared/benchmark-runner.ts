@@ -20,6 +20,11 @@ export interface BenchmarkProgramMetrics {
   sessions: number;
   mainTurns?: number;
   mainExecutionMs?: number;
+  /** Context-pack A/B signals: packs served (any session), and main-session reads/re-reads/searches. */
+  packsServed?: number;
+  mainReads?: number;
+  mainSuppliedRereads?: number;
+  mainSuppliedSearches?: number;
 }
 
 export function emptyBenchmarkProgramMetrics(): BenchmarkProgramMetrics {
@@ -32,6 +37,10 @@ export function emptyBenchmarkProgramMetrics(): BenchmarkProgramMetrics {
     sessions: 0,
     mainTurns: 0,
     mainExecutionMs: 0,
+    packsServed: 0,
+    mainReads: 0,
+    mainSuppliedRereads: 0,
+    mainSuppliedSearches: 0,
   };
 }
 
@@ -63,6 +72,8 @@ export function classifyBenchmarkProcessFailure(error: unknown): {
   };
 }
 
+const MAIN_SESSION = /^review(?:-shard-\d+)?(?:-retry)?$/;
+
 export function parseBenchmarkTelemetry(telemetry: string | undefined): BenchmarkProgramMetrics {
   const metrics = emptyBenchmarkProgramMetrics();
   if (!telemetry) return metrics;
@@ -75,10 +86,10 @@ export function parseBenchmarkTelemetry(telemetry: string | undefined): Benchmar
     }
     if (!isRecord(parsed)) continue;
     const row = parsed;
+    const isMainSession = typeof row.session === 'string' && MAIN_SESSION.test(row.session);
     if (
       row.kind === 'exploration' &&
-      typeof row.session === 'string' &&
-      /^review(?:-shard-\d+)?(?:-retry)?$/.test(row.session) &&
+      isMainSession &&
       typeof row.turnCount === 'number' &&
       Number.isFinite(row.turnCount) &&
       row.turnCount >= 0
@@ -94,6 +105,27 @@ export function parseBenchmarkTelemetry(telemetry: string | undefined): Benchmar
       row.durationMs >= 0
     )
       metrics.mainExecutionMs! += row.durationMs;
+    // Counts every context pack served, not just main sessions.
+    if (row.kind === 'context-pack' && typeof row.state === 'string' && row.state !== 'fallback')
+      metrics.packsServed! += 1;
+    if (row.kind === 'tool' && isMainSession && row.toolClass === 'file-read')
+      metrics.mainReads! += 1;
+    if (
+      row.kind === 'exploration' &&
+      isMainSession &&
+      typeof row.suppliedRereads === 'number' &&
+      Number.isFinite(row.suppliedRereads) &&
+      row.suppliedRereads >= 0
+    )
+      metrics.mainSuppliedRereads! += row.suppliedRereads;
+    if (
+      row.kind === 'exploration' &&
+      isMainSession &&
+      typeof row.suppliedSearches === 'number' &&
+      Number.isFinite(row.suppliedSearches) &&
+      row.suppliedSearches >= 0
+    )
+      metrics.mainSuppliedSearches! += row.suppliedSearches;
     if (row.kind !== 'session') continue;
     metrics.sessions += 1;
     for (const key of [

@@ -39,7 +39,14 @@ const PROGRAM_METRICS = Object.keys(
   emptyBenchmarkProgramMetrics(),
 ) as (keyof BenchmarkProgramMetrics)[];
 // Rows written before these metrics existed lack them.
-const OPTIONAL_METRICS = new Set<keyof BenchmarkProgramMetrics>(['mainTurns', 'mainExecutionMs']);
+const OPTIONAL_METRICS = new Set<keyof BenchmarkProgramMetrics>([
+  'mainTurns',
+  'mainExecutionMs',
+  'packsServed',
+  'mainReads',
+  'mainSuppliedRereads',
+  'mainSuppliedSearches',
+]);
 
 function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
