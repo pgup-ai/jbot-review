@@ -2711,7 +2711,6 @@ async function runReviewPipeline(params: {
         },
       );
     const renderMainPrompt = mainPromptRenderer();
-    const renderPackPrompt = mainPromptRenderer(true);
     log(
       `Main prompt budget: ${JSON.stringify(mainPromptBudget)}; input tokens conservatively bounded by UTF-8 bytes.`,
     );
@@ -2748,7 +2747,7 @@ async function runReviewPipeline(params: {
             await evidence.packProvider(signal),
             budgetBytes,
           ),
-        renderPrompt: renderPackPrompt,
+        renderPrompt: mainPromptRenderer(true),
         budget: mainPromptBudget,
         log,
       });
