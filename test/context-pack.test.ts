@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildContextPack, type PackSourceProvider } from '../src/shared/context-pack.ts';
-import {
-  changedEvidenceLines,
-  indexEvidenceSource,
-  type PathAlias,
-} from '../src/shared/evidence.ts';
+import { indexEvidenceSource, type PathAlias } from '../src/shared/evidence.ts';
 
 const REPO: Record<string, string> = {
   'apps/api/src/ledger.service.ts': [
@@ -71,9 +67,7 @@ const PAGE = [
     ].join('\n'),
   },
 ];
-const changed = (files: { filename: string; patch: string }[]) =>
-  new Map(files.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch))]));
-const CHANGED = changed(PAGE);
+const CHANGED = PAGE;
 const FORMAT_PAGE = [
   {
     filename: 'apps/api/src/format.ts',
@@ -172,7 +166,7 @@ test('surrounding code encloses changes in top-level variables and in class bodi
   ].join('\n');
   const pack = await buildContextPack(
     [{ filename: path, patch }],
-    changed([{ filename: path, patch }]),
+    [{ filename: path, patch }],
     provider({ ...REPO, [path]: source }),
     64 * 1024,
   );
@@ -213,6 +207,13 @@ test('used definitions follow imports, path aliases, re-exports and injected ser
     /#### libs\/ledger\/src\/ledger\.repository\.ts:2-4 \(LedgerRepository\.save\)\n2: {3}save\(id: string\) \{/,
   );
   assert.ok(pack.supplied.symbols.has('formatId') && pack.supplied.symbols.has('save'));
+  // format.ts changes on another page, so the page that imports it gets that diff.
+  const linked = await buildContextPack(PAGE, [...PAGE, ...FORMAT_PAGE], provider(), 64 * 1024);
+  assert.match(
+    linked.text,
+    /### Changes on other pages\n\n#### apps\/api\/src\/format\.ts\n```diff\n@@ -1,3 \+1,3 @@\n1  export function formatId/,
+  );
+  assert.doesNotMatch(pack.text, /### Changes on other pages/);
 });
 
 test('callers need an import link, and other name matches stay listed as unverified', async () => {
@@ -232,7 +233,7 @@ test('callers need an import link, and other name matches stay listed as unverif
   // PAGE changes ledger.service.ts line 15 on another page.
   const formatPack = await buildContextPack(
     FORMAT_PAGE,
-    changed([...FORMAT_PAGE, ...PAGE]),
+    [...FORMAT_PAGE, ...PAGE],
     provider(),
     64 * 1024,
   );
@@ -265,7 +266,7 @@ test('callers need an import link, and other name matches stay listed as unverif
 
 test('an all-shown claim needs a complete search and every match shown', async () => {
   const text = async (page: typeof PAGE, source: PackSourceProvider, budget = 64 * 1024) =>
-    (await buildContextPack(page, changed(page), source, budget)).text;
+    (await buildContextPack(page, page, source, budget)).text;
   const long = REPO['apps/api/src/ledger.service.ts'].replace(
     'key));',
     `key)); // ${'x'.repeat(2000)}`,

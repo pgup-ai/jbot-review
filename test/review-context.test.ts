@@ -771,7 +771,7 @@ describe('formatFinderGuidelines', () => {
     assert.doesNotMatch(pack, /POINTER_TEXT|SKILL_TEXT/);
     assert.match(
       pack,
-      /omitted file\(s\): \.cursor\/BUGBOT\.md, \.agents\/skills\/audit\/SKILL\.md\. The full set, including these files, is audited by the separate guideline-compliance pass; do not open them\./,
+      /omitted file\(s\): \.cursor\/BUGBOT\.md, \.agents\/skills\/audit\/SKILL\.md\. The full set is reviewed by the separate guideline-compliance pass\./,
     );
     assert.match(
       formatFinderGuidelines(discovered),

@@ -165,7 +165,6 @@ export function buildShardPlans(params: {
   diffFirst?: boolean;
   numberedDiff?: boolean;
   batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
-  onDemandRecovery?: boolean;
 }): ShardPlan[] {
   const files = params.shards.flat();
   const originals = params.shards.map((shard) => shard.flatMap(diffUnits));
@@ -192,7 +191,6 @@ export function buildShardPlans(params: {
           files,
           files.filter((f) => !assignedFiles.includes(f.filename)).map((f) => f.filename),
           params.batchDiffScope,
-          params.onDemandRecovery,
         )
       : '';
     const parts =

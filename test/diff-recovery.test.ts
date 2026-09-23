@@ -35,9 +35,6 @@ test('recovery batches bound estimated output and prompt bytes without hiding un
   assert.ok(block.includes(`${files.length - delivered} omitted`));
   assert.equal(buildDiffRecoveryBlock(files, [], scope), '');
   assert.equal(buildDiffRecoveryBlock(files, paths, { baseRef: 'main' }), '');
-  const onDemand = buildDiffRecoveryBlock(files, paths, scope, true);
-  assert.match(onDemand, /do not fetch their diffs to review them\. Only when a specific/);
-  assert.equal(onDemand.split('\n').slice(2).join('\n'), block.split('\n').slice(2).join('\n'));
 });
 
 test('recovery commands preserve literal hostile filenames, PR scope and uncommitted local scope', (t) => {

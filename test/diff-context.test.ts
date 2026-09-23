@@ -136,7 +136,7 @@ describe('buildDiffHunksBlock', () => {
     assert.equal(
       buildDiffHunksBlock(files, { numbered: true }),
       buildDiffHunksBlock(files)
-        .replace(/risk first\.\n[^\n]+\n/, `risk first.\n${note}\n`)
+        .replace('risk first.\n', `risk first.\n${note}\n`)
         .replace(patch, numbered),
     );
     // Re-indented lines are listed; a context line ends the change block they can match in.

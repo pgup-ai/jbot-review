@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
-import { PATH_PATTERNS } from './diff-context.ts';
+import { numberNewSideLines, PATH_PATTERNS } from './diff-context.ts';
 import {
   changedEvidenceLines,
   resolveEvidenceImport,
@@ -588,6 +588,31 @@ async function callerEntries(
   return entries;
 }
 
+/** Other pages' diffs of files this page imports or takes a definition from. */
+function changeEntries(
+  files: PrFile[],
+  prFiles: PrFile[],
+  reader: PackReader,
+  definitions: ContextPackEntry[],
+): ContextPackEntry[] {
+  const page = new Set(files.map((file) => file.filename));
+  const linked = new Set(definitions.map((item) => item.path));
+  for (const file of files)
+    for (const binding of reader.sources.get(file.filename)?.index.imports ?? []) {
+      const target = reader.resolve(file.filename, binding.from);
+      if (target) linked.add(target);
+    }
+  return prFiles
+    .filter((file) => file.patch && !page.has(file.filename) && linked.has(file.filename))
+    .map((file) => ({
+      slice: 'changes',
+      path: file.filename,
+      label: '',
+      rows: [],
+      diff: numberNewSideLines(file.patch!),
+    }));
+}
+
 function directoryEntries(
   files: PrFile[],
   changed: Map<string, Set<number>>,
@@ -616,8 +641,8 @@ function directoryEntries(
 
 export async function buildContextPack(
   files: PrFile[],
-  /** Every PR file's changed new-side lines, this page's and other pages'. */
-  changed: Map<string, Set<number>>,
+  /** Every PR file, this page's and other pages'. */
+  prFiles: PrFile[],
   provider: PackSourceProvider,
   budgetBytes: number,
 ): Promise<ContextPack> {
@@ -631,6 +656,9 @@ export async function buildContextPack(
     ]),
   );
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
+  const changed: Lines = new Map(
+    prFiles.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch ?? ''))]),
+  );
   const surrounding = surroundingEntries(files, reader, diff, shown);
   const definitions = await definitionEntries(files, reader, diff, shown);
   const callers = await callerEntries(files, reader, diff, shown);
@@ -639,6 +667,7 @@ export async function buildContextPack(
     ...definitions,
     ...callers.filter((e) => !e.list),
     ...callers.filter((e) => e.list),
+    ...changeEntries(files, prFiles, reader, definitions),
     ...directoryEntries(files, changed, provider.tracked),
   ];
   // Excerpts of files another page changes would otherwise read as unchanged code.

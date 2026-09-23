@@ -41,7 +41,7 @@ import {
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
-import { changedEvidenceLines, EvidenceStore } from './evidence.ts';
+import { EvidenceStore } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 import {
   auxiliaryPolicy,
@@ -174,7 +174,6 @@ import {
   assembleFindingVerificationPrompt,
   COMPLIANCE_PACK_NOTE,
   selectLensKeys,
-  VERIFIER_SOURCES_READ_NOTE,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
@@ -1674,13 +1673,7 @@ async function runReviewPipeline(params: {
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
       : undefined;
-  const verifierSourceContext = options.experiment.contextPack
-    ? async (targets: Finding[]) => {
-        const sources = await (findingSources?.(targets) ??
-          buildFindingSourceContext(workspace, targets));
-        return sources && joinContext(VERIFIER_SOURCES_READ_NOTE, sources);
-      }
-    : findingSources;
+  const verifierSourceContext = findingSources;
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
     findings: Finding[],
@@ -2692,17 +2685,10 @@ async function runReviewPipeline(params: {
       );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
-    // Every PR file's changed lines, so a page's pack can mark what other pages change.
-    const changedLines = new Map(
-      fullReviewFiles.map((file) => [
-        file.filename,
-        new Set(changedEvidenceLines(file.patch ?? '')),
-      ]),
-    );
     const buildPagePack = async (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) =>
       buildContextPack(
         planPageFiles(plan.units ?? []),
-        changedLines,
+        fullReviewFiles,
         await evidence.packProvider(signal),
         budgetBytes,
       );
@@ -2759,7 +2745,6 @@ async function runReviewPipeline(params: {
         !['pi', 'commandcode'].includes(mainBackend.name)
           ? diffScope
           : undefined,
-      onDemandRecovery: options.experiment.contextPack,
     });
 
     if (options.experiment.contextPack) {

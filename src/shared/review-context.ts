@@ -1374,7 +1374,7 @@ export function formatFinderGuidelines(
     complianceCovers?: boolean;
     canReadWorkspace?: boolean;
     lens?: boolean;
-    /** context-pack finders: no pointer stubs or agent skills, and no guidance-file reads. */
+    /** context-pack finders: no pointer stubs or agent skills. */
     contextPack?: boolean;
   } = {},
 ): string {
@@ -1453,9 +1453,7 @@ export function formatFinderGuidelines(
         );
       }
       const coverage = complianceCovers
-        ? options.contextPack
-          ? 'The full set, including these files, is audited by the separate guideline-compliance pass; do not open them.'
-          : 'The full set is reviewed by the separate guideline-compliance pass.'
+        ? 'The full set is reviewed by the separate guideline-compliance pass.'
         : options.canReadWorkspace === false
           ? 'The guideline-compliance pass is not running this run. Omitted guidance is unavailable to this session.'
           : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';

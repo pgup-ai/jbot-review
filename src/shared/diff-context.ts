@@ -474,16 +474,14 @@ export function buildDiffHunksBlockWithMetadata(
   const lines = [
     '## Diff hunks',
     'Merge-base-relative patches for the changed files, highest review risk first.',
-    // Only the context-pack preset numbers diffs, and its prompts ask for targeted lookups instead.
     ...(options.numbered
       ? [
           "Each new-side line starts with its line number; cite it for a finding's line " +
             'instead of re-reading the file to count lines. A "Whitespace only" line under a ' +
             'file lists added lines whose text matches a removed line apart from whitespace: the PR moved or re-indented that code, it did not write it.',
         ]
-      : [
-          'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
-        ]),
+      : []),
+    'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
     '',
     sections.join('\n\n'),
   ];
@@ -564,7 +562,7 @@ export function whitespaceOnlyLines(patch: string): number[] {
   return found;
 }
 
-function numberNewSideLines(patch: string): string {
+export function numberNewSideLines(patch: string): string {
   return patch
     .split(/\n(?=@@ )/)
     .map((hunk) => {
