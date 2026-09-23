@@ -6,6 +6,7 @@ import type { TelemetryStopReason } from './telemetry.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
+  CLOSED_BOOK_AGENT,
   DENY_ALL,
   MAIN_AGENT,
   PLAIN_AGENT,
@@ -753,8 +754,13 @@ function formatUnknown(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
-export function agentForModel(singleShot: boolean, reviewerAgent = false): string {
+export function agentForModel(
+  singleShot: boolean,
+  reviewerAgent = false,
+  toolLess = false,
+): string {
   if (singleShot) return PLAIN_AGENT;
+  if (toolLess) return CLOSED_BOOK_AGENT;
   return reviewerAgent ? REVIEWER_AGENT : MAIN_AGENT;
 }
 

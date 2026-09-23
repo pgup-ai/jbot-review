@@ -1978,6 +1978,9 @@ export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you descr
 export const PERMISSION_DENIED_MESSAGE =
   'jbot-review runs headless; nothing can answer a permission prompt.';
 
+export const TOOLS_OFF_MESSAGE =
+  'Tools are off for this pass; answer from the evidence in the prompt.';
+
 export function buildJsonRepairPrompt(parseError: string): string {
   return [
     'Your previous response could not be parsed as JSON.',

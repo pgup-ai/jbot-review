@@ -93,15 +93,17 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    the companion clones a committed ref, and the two must agree.
 8. **Read-only enforced in four layers** for every opencode session: the
    `plan` agent (or the opt-in `jbot-reviewer`, or the context-pack preset's
-   step-capped `jbot-verify`, with the same session rules),
+   step-capped `jbot-verify` and tool-less `jbot-closed-book`, with the same
+   session rules),
    the ordered `permissions` ruleset (config-level and repeated on
    `session.create`: `edit`/`external_directory`/`question` deny, the shell
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
    escapes the env allowlist), the jbot plugin's `context` hook (removes
    write/edit/patch/apply_patch/multiedit/question/subagent/task from every
-   request and every tool for the single-shot agent; wrap-up retains
-   native tool schemas for model compatibility, with wrap-up shell execution
-   denied by the permission hook), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
+   request and every tool for the single-shot agent; wrap-up and
+   `jbot-closed-book` retain native tool schemas for model and free-tier
+   gateway compatibility, and the permission hook denies wrap-up shell
+   execution and every `jbot-closed-book` call), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
    the server child so the reviewed repo's committed `.opencode/` (plugins,
    config) never loads — that code runs at server start OUTSIDE the tool
    sandbox. Sessions are hermetic on both sides: the operator's global config

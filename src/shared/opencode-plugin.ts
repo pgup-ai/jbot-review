@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PERMISSION_DENIED_MESSAGE } from './prompt.ts';
+import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -56,7 +56,10 @@ export default {
       }
     });
     await ctx.permission.hook('evaluate', (event) => {
-      if (event.effect === 'ask' || (event.agent === 'jbot-wrapup' && event.action === 'shell')) {
+      if (event.agent === 'jbot-closed-book') {
+        event.effect = 'deny';
+        event.message = ${JSON.stringify(TOOLS_OFF_MESSAGE)};
+      } else if (event.effect === 'ask' || (event.agent === 'jbot-wrapup' && event.action === 'shell')) {
         event.effect = 'deny';
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }

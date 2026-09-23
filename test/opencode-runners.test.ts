@@ -141,10 +141,10 @@ describe('runReview on V2', () => {
     assert.ok(fake.prompts[0]!.body.text.includes(NO_TOOLS_REVIEW_DIRECTIVE.split('\n')[0]!));
   });
 
-  it('runs tool-less passes on jbot-plain and the capped verification re-check on jbot-verify', async () => {
+  it('runs tool-less passes closed-book and the capped verification re-check on jbot-verify', async () => {
     const lens = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
     await runReview(runtime(lens), 'openai/gpt-5', 'ctx', '', log, { toolLess: true });
-    assert.equal([...lens.sessions.values()][0]!.agent, 'jbot-plain');
+    assert.equal([...lens.sessions.values()][0]!.agent, 'jbot-closed-book');
     assert.ok(lens.prompts[0]!.body.text.startsWith(NO_TOOLS_REVIEW_DIRECTIVE));
     const verify = fakeOpencodeServer(() => ({ text: verdicts }));
     for (const mode of ['single-shot', 'capped'] as const)
@@ -161,7 +161,7 @@ describe('runReview on V2', () => {
       );
     assert.deepEqual(
       [...verify.sessions.values()].map((session) => session.agent),
-      ['jbot-plain', 'jbot-verify'],
+      ['jbot-closed-book', 'jbot-verify'],
     );
     assert.match(verify.prompts[0]!.body.text, /have no tools on this call/);
   });

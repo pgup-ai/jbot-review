@@ -2,7 +2,7 @@ import { parseModelName } from '@symma/protocol';
 import { modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
-import { PLAIN_AGENT, VERIFY_AGENT, type OptionTier } from './opencode-config.ts';
+import { VERIFY_AGENT, type OptionTier } from './opencode-config.ts';
 import { wrapUpReserveMs } from './time-budget.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import {
@@ -215,7 +215,7 @@ export async function runReview(
     options.timeoutMs,
     options.onTokenUsage,
     outcome,
-    options.toolLess ? { agent: PLAIN_AGENT } : {},
+    { toolLess: options.toolLess },
   );
   let result: ReviewResult;
   try {
@@ -445,7 +445,10 @@ export async function runFindingVerification(
   mode?: 'single-shot' | 'capped',
 ): Promise<FindingVerdict[] | undefined> {
   const singleShot = isSingleShotModel(model) || mode === 'single-shot';
-  const agent = mode === 'capped' ? VERIFY_AGENT : agentForModel(singleShot, runtime.reviewerAgent);
+  const agent =
+    mode === 'capped'
+      ? VERIFY_AGENT
+      : agentForModel(isSingleShotModel(model), runtime.reviewerAgent, mode === 'single-shot');
   const forkFrom = runtime.verifyFork ? singleReviewSession(runtime) : undefined;
   if (runtime.verifyFork && !forkFrom) {
     log('finding-verification: fork skipped (no single main review session)');
@@ -578,7 +581,7 @@ async function promptPlanAgent(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   outcome?: PromptOutcome,
-  session: { tier?: OptionTier; forkFrom?: string; agent?: string } = {},
+  session: { tier?: OptionTier; forkFrom?: string; toolLess?: boolean } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   const sessionID = await createReviewSession(runtime, {
@@ -586,7 +589,7 @@ async function promptPlanAgent(
     model,
     tier: session.tier,
     forkFrom: session.forkFrom,
-    agent: session.agent ?? agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+    agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent, session.toolLess),
   });
   log(`${label} session created: ${sessionID}`);
   const text = await promptInSession(runtime, sessionID, {

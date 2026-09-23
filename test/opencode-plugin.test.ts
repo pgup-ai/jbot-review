@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { hermeticOpencodeConfigHome } from '../src/shared/opencode-plugin.ts';
-import { PERMISSION_DENIED_MESSAGE } from '../src/shared/prompt.ts';
+import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from '../src/shared/prompt.ts';
 
 type Hook = (event: unknown) => unknown;
 
@@ -92,7 +92,7 @@ describe('jbot opencode plugin', () => {
 
   it('strips mutating and interactive tools for review and wrap-up and rewrites the Gemini-hostile schema', async () => {
     const { context } = await loadPlugin();
-    for (const agent of ['plan', 'jbot-wrapup']) {
+    for (const agent of ['plan', 'jbot-wrapup', 'jbot-closed-book']) {
       const event = { agent, tools: tools() };
       context(event);
       assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
@@ -148,6 +148,9 @@ describe('jbot opencode plugin', () => {
     evaluate(wrapShell);
     assert.equal(wrapShell.effect, 'deny');
     assert.equal(wrapShell.message, PERMISSION_DENIED_MESSAGE);
+    const closedRead = { agent: 'jbot-closed-book', action: 'read', effect: 'allow', message: '' };
+    evaluate(closedRead);
+    assert.deepEqual(closedRead, { ...closedRead, effect: 'deny', message: TOOLS_OFF_MESSAGE });
     for (const event of [
       { agent: 'plan', action: 'shell', effect: 'allow' },
       { agent: 'jbot-wrapup', action: 'read', effect: 'allow' },
