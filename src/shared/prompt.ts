@@ -1398,7 +1398,7 @@ const CONTEXT_FIRST_ORIENTATION = `## Reading order
 
 The pull request context, diff hunks, and repository guidelines for this review
 appear above these instructions: where an instruction says a PR-context section
-(metadata, summary instructions, diff hunks, context pack, guidelines, prior threads,
+(metadata, summary instructions, diff hunks, guidelines, prior threads,
 changed-symbol usage) is "below", read it above. Sections of these instructions
 keep their stated order; the review lens and the final output reminder still
 follow.`;
@@ -1424,16 +1424,24 @@ export function assembleReviewPrompt(
   } = {},
 ): string {
   const focusedLens = Object.values(REVIEW_LENSES).some((lens) => lensAddendum.startsWith(lens));
+  const packPage = !focusedLens && options.contextPack;
   const instructions = focusedLens
     ? buildLensReviewPrompt(embeddedFirstPrompt, options.toolsAvailable ?? true)
-    : options.contextPack
+    : packPage
       ? CONTEXT_PACK_REVIEW_PROMPT
       : embeddedFirstPrompt
         ? EMBEDDED_FIRST_REVIEW_PROMPT
         : REVIEW_PROMPT;
   const guidelineBlock = guidelines ? ['## Repository review guidelines\n', guidelines] : [];
+  // Pack wording stays off other prompts so their shared-prefix bytes are unchanged.
+  const orientation = packPage
+    ? CONTEXT_FIRST_ORIENTATION.replace(
+        'diff hunks, guidelines',
+        'diff hunks, context pack, guidelines',
+      )
+    : CONTEXT_FIRST_ORIENTATION;
   const parts = options.contextFirst
-    ? [prContext, ...guidelineBlock, CONTEXT_FIRST_ORIENTATION, instructions]
+    ? [prContext, ...guidelineBlock, orientation, instructions]
     : [instructions, ...guidelineBlock, prContext];
   if (lensAddendum) parts.push(lensAddendum);
   if (evidenceQuotes) parts.push(EVIDENCE_INSTRUCTION);
