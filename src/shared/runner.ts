@@ -2683,9 +2683,9 @@ async function runReviewPipeline(params: {
             explorationEvidence,
           )
         : fullCoreContext;
-    if (mainCoreContext !== trimmedCoreContext)
+    if (fullCoreContext !== trimmedCoreContext)
       log(
-        `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(mainCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
+        `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(fullCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
       );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
