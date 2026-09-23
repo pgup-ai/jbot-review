@@ -408,7 +408,8 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
  * defect.
  *
  * Every finding's evidence, line 0 included and even with evidence quotes off,
- * first loses line numbers copied from a numbered page diff: verifier prompts quote it.
+ * first drops line numbers provably copied from a numbered page diff: verifier
+ * prompts quote it.
  */
 export function resolveFindingAnchors(
   findings: Finding[],

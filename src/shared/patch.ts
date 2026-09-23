@@ -179,7 +179,7 @@ function matchWindow(
  * only a quote that matches nothing as written, and something once unnumbered, changes.
  */
 export function unnumberedEvidence(patch: string | undefined, evidence: string): string {
-  const lineNumber = /^\s*\d+ [ +-]?/;
+  const lineNumber = /^\s*\d+(?: [ +-]?|$)/;
   const lines = evidence.split('\n');
   if (!patch || !lines.every((line) => !line.trim() || lineNumber.test(line))) return evidence;
   const plain = lines

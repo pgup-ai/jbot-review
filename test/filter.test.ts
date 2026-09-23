@@ -720,6 +720,18 @@ describe('resolveFindingAnchors', () => {
       [2, 'const a = 1;\nconst total = order.total;'],
       'a quote copied from a numbered page diff anchors and comes out as plain code',
     );
+    const blank = finding({ path: 'e.ts', line: 99, evidence: '1  a();\n2\n3 +b();' });
+    resolveFindingAnchors(
+      [blank],
+      new Map([['e.ts', new Set([3])]]),
+      new Map([['e.ts', ['@@ -1,2 +1,3 @@', ' a();', ' ', '+b();'].join('\n')]]),
+      true,
+    );
+    assert.deepEqual(
+      [blank.line, blank.evidence],
+      [3, 'a();\n\nb();'],
+      "a blank line's number quoted without its trailing spaces still counts as numbered",
+    );
 
     const off = finding({ path: 'a.ts', line: 99, evidence: '3 +return total;' });
     assert.deepEqual(resolveFindingAnchors([off], addable, patchByPath, false), []);
