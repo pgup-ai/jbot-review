@@ -163,6 +163,7 @@ export function buildShardPlans(params: {
   minimumDiffBytes?: number;
   embeddedFirstPrompt?: boolean;
   diffFirst?: boolean;
+  numberedDiff?: boolean;
   batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
 }): ShardPlan[] {
   const files = params.shards.flat();
@@ -175,7 +176,10 @@ export function buildShardPlans(params: {
   const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
     const assignedFiles = [...new Set(units.map((u) => u.file.filename))];
     const pageFiles = planPageFiles(units);
-    const diff = buildDiffHunksBlockWithMetadata(pageFiles, COMPLETE_DIFF_OPTIONS);
+    const diff = buildDiffHunksBlockWithMetadata(pageFiles, {
+      ...COMPLETE_DIFF_OPTIONS,
+      numbered: params.numberedDiff,
+    });
     const assignment = buildShardAssignmentBlock(
       assignedFiles,
       index,

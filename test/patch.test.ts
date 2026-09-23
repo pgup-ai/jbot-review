@@ -109,6 +109,9 @@ describe('rescueAnchorByEvidence (F12 orphan rescue)', () => {
     assert.equal(rescueAnchorByEvidence(signs, '-1;'), undefined);
     // A quote that matches nothing as written still falls back to the marker read.
     assert.equal(rescueAnchorByEvidence(signs, '+  1;'), 2);
+    // Then to dropping a line number copied from a numbered page diff.
+    const numbered = ['@@ -14 +14,2 @@', ' }', '+    const x = 1;'].join('\n');
+    assert.equal(rescueAnchorByEvidence(numbered, '15 +    const x = 1;'), 15);
   });
 
   it('ignores a blank quote or missing patch', () => {

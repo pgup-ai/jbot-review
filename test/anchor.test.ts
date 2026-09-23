@@ -21,6 +21,8 @@ describe('anchorByEvidenceSnippet', () => {
 
     // Diff markers and indentation are normalized away on both sides.
     assert.equal(anchorByEvidenceSnippet(PATCH, '+  const b = compute(a);\n+return b;'), 2);
+    // So is a line number copied from a numbered page diff.
+    assert.equal(anchorByEvidenceSnippet(PATCH, '1  const a = 1;\n2 +const b = compute(a);'), 2);
 
     // Leading/trailing blank lines are trimmed; a single line still works.
     assert.equal(anchorByEvidenceSnippet(PATCH, '\nreturn b;\n'), 3);

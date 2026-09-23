@@ -1,4 +1,5 @@
 import type { PrFile } from './github.ts';
+import { newSideLines } from './patch.ts';
 
 /**
  * Embeds the PR's diff hunks directly into the review prompt under an
@@ -388,6 +389,7 @@ export function shardFilesForReview(
 export interface DiffHunksOptions {
   totalBudgetBytes?: number;
   perFileBudgetBytes?: number;
+  numbered?: boolean;
 }
 
 export interface DiffHunksBlockResult {
@@ -439,7 +441,9 @@ export function buildDiffHunksBlockWithMetadata(
   let remaining = totalBudget;
 
   for (const file of ranked) {
-    const patch = file.patch as string;
+    const patch = options.numbered
+      ? numberNewSideLines(file.patch as string)
+      : (file.patch as string);
     const truncationNotice = `_Hunks truncated for ${file.filename}; run the git diff command for the rest._`;
     const sectionSeparatorBytes = sections.length > 0 ? 2 : 0; // blank line between file sections
     const truncatedSectionOverhead =
@@ -468,6 +472,12 @@ export function buildDiffHunksBlockWithMetadata(
   const lines = [
     '## Diff hunks',
     'Merge-base-relative patches for the changed files, highest review risk first.',
+    ...(options.numbered
+      ? [
+          "Each new-side line starts with its line number; cite it for a finding's line " +
+            'instead of re-reading the file to count lines.',
+        ]
+      : []),
     'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
     '',
     sections.join('\n\n'),
@@ -498,6 +508,25 @@ function renderDiffSection(
   return [`### ${filename}`, '```diff', text, '```', ...(truncated ? [truncationNotice] : [])].join(
     '\n',
   );
+}
+
+function numberNewSideLines(patch: string): string {
+  return patch
+    .split(/\n(?=@@ )/)
+    .map((hunk) => {
+      const numbers = Array.from(newSideLines(hunk), ({ line }) => String(line));
+      const width = numbers.at(-1)?.length ?? 0;
+      let next = 0;
+      return hunk
+        .split('\n')
+        .map((line, index) =>
+          index === 0
+            ? line
+            : `${(/^[-\\]/.test(line) ? '' : numbers[next++]).padStart(width)} ${line}`,
+        )
+        .join('\n');
+    })
+    .join('\n');
 }
 
 /**

@@ -45,6 +45,11 @@ function stripQuotedMarker(line: string): string {
   return line.startsWith('+') || line.startsWith('-') ? line.slice(1).trim() : line;
 }
 
+/** Drops a line number, and the marker after it, copied from a numbered page diff. */
+function stripQuotedNumber(line: string): string {
+  return line.replace(/^\s*\d+ [ +-]?/, '').trim();
+}
+
 export function parseAddedLines(patch: string | undefined): Set<number> {
   const added = new Set<number>();
   if (patch) for (const { line } of addedLines(patch)) added.add(line);
@@ -68,10 +73,11 @@ export function rescueAnchorByEvidence(
 ): number | undefined {
   const needle = evidence.trim();
   if (!patch || !needle) return undefined;
-  // Ambiguity fails closed: only a quote that matched nothing as written is
-  // retried on the assumption its leading '+'/'-' was a marker.
-  const asWritten = prefixMatches(patch, needle);
-  const found = asWritten.length > 0 ? asWritten : prefixMatches(patch, stripQuotedMarker(needle));
+  // Ambiguity fails closed: each retry assumes a copied '+'/'-' marker, then a
+  // copied line number, and runs only when every earlier reading matched nothing.
+  let found = prefixMatches(patch, needle);
+  if (!found.length) found = prefixMatches(patch, stripQuotedMarker(needle));
+  if (!found.length) found = prefixMatches(patch, stripQuotedNumber(needle));
   return found.length === 1 ? found[0] : undefined;
 }
 
@@ -134,13 +140,13 @@ export function evidenceWindow(
     added: l.added,
     text: l.content.trim(),
   }));
-  // Source that legitimately starts with '+'/'-' is indistinguishable from a
-  // copied diff marker, so the quote is tried as written first. Only a quote
-  // that matched NOTHING is retried stripped: retrying an AMBIGUOUS one would
-  // let a second reading of it anchor somewhere the quote itself never pointed.
-  const asWritten = matchWindow(side, target);
-  const result =
-    asWritten.matches > 0 ? asWritten : matchWindow(side, target.map(stripQuotedMarker));
+  // Source that legitimately starts with '+'/'-' or digits is indistinguishable from a
+  // copied diff marker or line number, so the quote is tried as written first. Only a quote
+  // that matched NOTHING is retried stripped: retrying an AMBIGUOUS one would let a second
+  // reading of it anchor somewhere the quote itself never pointed.
+  let result = matchWindow(side, target);
+  if (!result.matches) result = matchWindow(side, target.map(stripQuotedMarker));
+  if (!result.matches) result = matchWindow(side, target.map(stripQuotedNumber));
   if (result.matches > 1) return 'ambiguous';
   return result.matches === 1
     ? { anchor: result.anchor, start: result.start, end: result.end }

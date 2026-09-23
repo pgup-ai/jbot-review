@@ -567,6 +567,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
       renderPrompt: (context) => assembleReviewPrompt(context, '', '', false, true),
       budget,
       evidenceReserveBytes: 8192,
+      numberedDiff: true,
     })[0];
   const pack = {
     text: '## Context pack\nPACKED',
@@ -607,7 +608,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     ],
   );
   assert.equal(results[1].uncollected, 2);
-  assert.match(plans[0].context, /PACKED\n\n## Diff hunks/);
+  assert.match(plans[0].context, /PACKED\n\n## Diff hunks\n[\s\S]*\n2 \+  return n \* 100;\n/);
   assert.ok(plans[0].baseContext.includes('PACKED'));
   assert.ok(!plans[1].context.includes('PACKED'));
   assert.deepEqual({ context: plans[3].context, baseContext: plans[3].baseContext }, before);
