@@ -2,7 +2,7 @@ import { parseModelName } from '@symma/protocol';
 import { modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
-import type { OptionTier } from './opencode-config.ts';
+import { PLAIN_AGENT, VERIFY_AGENT, type OptionTier } from './opencode-config.ts';
 import { wrapUpReserveMs } from './time-budget.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import {
@@ -177,6 +177,7 @@ export async function runReview(
     lensAddendum?: string;
     contextFirst?: boolean;
     contextPack?: boolean;
+    toolLess?: boolean;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
     label?: string;
@@ -195,11 +196,12 @@ export async function runReview(
       options.evidenceQuotes ?? false,
       options.embeddedFirstPrompt ?? false,
       {
-        toolsAvailable: !isSingleShotModel(model),
+        toolsAvailable: !isSingleShotModel(model) && !options.toolLess,
         contextFirst: options.contextFirst,
         contextPack: options.contextPack,
       },
     ),
+    options.toolLess,
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
@@ -213,6 +215,7 @@ export async function runReview(
     options.timeoutMs,
     options.onTokenUsage,
     outcome,
+    options.toolLess ? { agent: PLAIN_AGENT } : {},
   );
   let result: ReviewResult;
   try {
@@ -439,7 +442,10 @@ export async function runFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
+  mode?: 'single-shot' | 'capped',
 ): Promise<FindingVerdict[] | undefined> {
+  const singleShot = isSingleShotModel(model) || mode === 'single-shot';
+  const agent = mode === 'capped' ? VERIFY_AGENT : agentForModel(singleShot, runtime.reviewerAgent);
   const forkFrom = runtime.verifyFork ? singleReviewSession(runtime) : undefined;
   if (runtime.verifyFork && !forkFrom) {
     log('finding-verification: fork skipped (no single main review session)');
@@ -447,7 +453,7 @@ export async function runFindingVerification(
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, isSingleShotModel(model));
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, singleShot);
   const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
   log('Creating finding-verification session');
   const sessionID = await createReviewSession(runtime, {
@@ -456,7 +462,7 @@ export async function runFindingVerification(
     deadline,
     tier: modelOptions ? 'verify' : 'main',
     forkFrom,
-    agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+    agent,
   });
   log(`finding-verification session created: ${sessionID}`);
   const reserve = deadline === undefined ? 0 : wrapUpReserveMs(deadline - Date.now());
@@ -500,7 +506,7 @@ export async function runFindingVerification(
       model,
       label: 'finding-verification-recovery',
       tier: modelOptions ? 'verify' : 'main',
-      agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+      agent,
       deadline: recoveryDeadline,
       forkFrom: sessionID,
     });
@@ -559,8 +565,8 @@ function isSingleShotModel(model: string): boolean {
  * JSON. Passes with a tailored single-shot prompt variant (changes-since,
  * verification) use that instead. Agentic models are unchanged.
  */
-function promptForModel(model: string, prompt: string): string {
-  return isSingleShotModel(model) ? withNoToolsReviewDirective(prompt) : prompt;
+function promptForModel(model: string, prompt: string, toolLess = false): string {
+  return toolLess || isSingleShotModel(model) ? withNoToolsReviewDirective(prompt) : prompt;
 }
 
 async function promptPlanAgent(
@@ -572,7 +578,7 @@ async function promptPlanAgent(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   outcome?: PromptOutcome,
-  session: { tier?: OptionTier; forkFrom?: string } = {},
+  session: { tier?: OptionTier; forkFrom?: string; agent?: string } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   const sessionID = await createReviewSession(runtime, {
@@ -580,7 +586,7 @@ async function promptPlanAgent(
     model,
     tier: session.tier,
     forkFrom: session.forkFrom,
-    agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+    agent: session.agent ?? agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
   });
   log(`${label} session created: ${sessionID}`);
   const text = await promptInSession(runtime, sessionID, {

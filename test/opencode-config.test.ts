@@ -6,6 +6,7 @@ import { isPoolsideProvider } from '../src/shared/poolside.ts';
 import {
   PLAIN_AGENT,
   REVIEWER_AGENT,
+  VERIFY_AGENT,
   WRAPUP_AGENT,
   buildConfig,
   modelOptionsByModel,
@@ -46,13 +47,17 @@ describe('buildConfig', () => {
     assert.equal(config.$schema, 'https://opencode.ai/config.json');
     assert.deepEqual(
       Object.keys(config.agents).sort(),
-      [PLAIN_AGENT, REVIEWER_AGENT, WRAPUP_AGENT].sort(),
+      [PLAIN_AGENT, REVIEWER_AGENT, VERIFY_AGENT, WRAPUP_AGENT].sort(),
     );
     assert.deepEqual(config.agents[WRAPUP_AGENT].permissions, permissionRules());
     assert.deepEqual(config.agents[PLAIN_AGENT].permissions, [
       { action: '*', resource: '*', effect: 'deny' },
     ]);
     assert.equal(config.agents[REVIEWER_AGENT].system, 'Review only.');
+    assert.deepEqual(
+      [config.agents[VERIFY_AGENT].system, config.agents[VERIFY_AGENT].steps],
+      ['Review only.', 6],
+    );
     assert.equal(config.providers, undefined);
     const cached = buildConfig({
       models: [

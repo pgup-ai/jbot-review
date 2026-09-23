@@ -1849,6 +1849,57 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
   }
 });
 
+it('keeps tool-less confirmations and re-checks the rest within capped tool turns', async () => {
+  const targets: Finding[] = ['a', 'b', 'c'].map((name) => ({
+    path: `${name}.ts`,
+    line: 1,
+    severity: 'P2',
+    title: name,
+    body: 'claim',
+  }));
+  for (const firstPass of ['answers', 'fails'] as const) {
+    const calls: string[] = [];
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: '',
+      sourceContext: async () => 'cited source',
+      targets,
+      toolLessFirst: true,
+      log: () => {},
+      backend: {
+        async runFindingVerification(_model, _context, findings, ...rest) {
+          const mode = rest.at(-1);
+          calls.push(`${mode}:${findings.map((finding) => finding.title).join('')}`);
+          if (mode === 'capped')
+            return findings.map((_, index) => ({ index, verdict: 'refuted' as const }));
+          if (firstPass === 'fails') throw new Error('unusable output');
+          return [
+            { index: 0, verdict: 'refuted' as const },
+            { index: 1, verdict: 'confirmed' as const },
+            // A confirmation quoting code the verifier was not shown is re-checked too.
+            {
+              index: 2,
+              verdict: 'confirmed' as const,
+              finding: { title: 'c', severity: 'P2' as const, kind: 'bug' as const, evidence: 'x' },
+            },
+          ];
+        },
+      },
+    });
+    assert.deepEqual(calls, [
+      'single-shot:abc',
+      firstPass === 'answers' ? 'capped:ac' : 'capped:abc',
+    ]);
+    assert.deepEqual(
+      verdicts.map((v) => `${v.index}:${v.verdict}`).sort(),
+      firstPass === 'answers'
+        ? ['0:refuted', '1:confirmed', '2:refuted']
+        : ['0:refuted', '1:refuted', '2:refuted'],
+    );
+  }
+});
+
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
   const findings: Finding[] = Array.from({ length: 23 }, (_, i) => ({
     path: 'missing.ts',

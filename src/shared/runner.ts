@@ -384,6 +384,7 @@ function createOpencodeBackend(
       timeoutMs,
       onTokenUsage,
       modelOptions,
+      mode,
     ) =>
       runOpencodeFindingVerification(
         runtime,
@@ -394,6 +395,7 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
         modelOptions,
+        mode,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
@@ -2612,6 +2614,8 @@ async function runReviewPipeline(params: {
     }
     candidateLensKeys = candidateLensKeys.filter((key) => !reusedAux.has(`review-${key}`));
     guidelineCandidate &&= !reusedAux.has('guideline-compliance');
+    // Pack runs on opencode answer the lens and the first verification pass from supplied code, tools off.
+    const toolLessAux = options.experiment.contextPack && auxBackend.name === 'opencode';
     const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
@@ -2919,7 +2923,7 @@ async function runReviewPipeline(params: {
     const lensSharesMainPrefix =
       auxModel === model && shardPlans.length <= 1 && !shardPlans[0]?.contextPack;
     const jointGuidelines =
-      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0
+      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0 && !toolLessAux
         ? complianceGuidelines
         : '';
     const preparingFinders = new Set([
@@ -2975,7 +2979,11 @@ async function runReviewPipeline(params: {
       mainCanReadWorkspace: auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
       lens: true,
     });
-    const prepareAuxPlans = async (lens?: string, lensRules = lensGuidelines) => {
+    const prepareAuxPlans = async (
+      lens?: string,
+      lensRules = lensGuidelines,
+      session = 'guideline-compliance',
+    ) => {
       const render = (context: string, rules = lens ? lensRules : complianceGuidelines) =>
         lens
           ? assembleReviewPrompt(
@@ -2985,13 +2993,13 @@ async function runReviewPipeline(params: {
               options.evidenceQuotes,
               options.embeddedFirstPrompt,
               {
-                toolsAvailable: auxBackend.canReadWorkspace,
+                toolsAvailable: auxBackend.canReadWorkspace && !toolLessAux,
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
           : assembleGuidelineCompliancePrompt(context, rules);
-      // Compliance pages get the main pages' numbered diff and context pack.
-      const packPages = !lens && options.experiment.contextPack;
+      // Compliance pages and tool-less lens pages get the main pages' numbered diff and context pack.
+      const packPages = options.experiment.contextPack && (!lens || toolLessAux);
       const plans = buildAuxiliaryPlans({
         coreContext: lens
           ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
@@ -3030,13 +3038,11 @@ async function runReviewPipeline(params: {
         const page = ordered.indexOf(plans[index]) + 1;
         telemetry.recordContextPack({
           ...row,
-          session:
-            ordered.length > 1 ? `guideline-compliance-page-${page}` : 'guideline-compliance',
+          session: ordered.length > 1 ? `${session}-page-${page}` : session,
         });
       }
       const supplied = packs.flatMap((pack) => (pack.supplied ? [pack.supplied] : []));
-      if (supplied.length)
-        packSupplied.set('guideline-compliance', mergeSuppliedContexts(supplied));
+      if (supplied.length) packSupplied.set(session, mergeSuppliedContexts(supplied));
       return ordered;
     };
 
@@ -3075,6 +3081,7 @@ async function runReviewPipeline(params: {
       model: auxModel,
       lensPrContext,
       plans: prepareAuxPlans,
+      toolLess: toolLessAux,
       onQueued: finderQueued,
       guidelinesForPrompt: lensGuidelines,
       guidelineCompliance: jointGuidelines,
@@ -3213,6 +3220,7 @@ async function runReviewPipeline(params: {
         targets,
         timeoutMs,
         modelOptions: verifierSessionOptions,
+        toolLessFirst: toolLessAux,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
@@ -3381,6 +3389,7 @@ async function runReviewPipeline(params: {
           Date.now() - runStartedAt,
         ),
         modelOptions: verifierSessionOptions,
+        toolLessFirst: toolLessAux,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
@@ -3405,6 +3414,7 @@ async function runReviewPipeline(params: {
         findings: suppression.findings,
         enabled: verificationEnabled,
         modelOptions: verifierSessionOptions,
+        toolLessFirst: toolLessAux,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
@@ -3974,7 +3984,8 @@ export function startLensPasses(params: {
   backend: ReviewBackend;
   model: string;
   lensPrContext: string;
-  plans?: (lens: string, guidelines: string) => ShardPlan[] | Promise<ShardPlan[]>;
+  plans?: (lens: string, guidelines: string, session: string) => ShardPlan[] | Promise<ShardPlan[]>;
+  toolLess?: boolean;
   guidelinesForPrompt: string;
   guidelineCompliance?: string;
   lensKeys: string[];
@@ -4017,7 +4028,9 @@ export function startLensPasses(params: {
       return Promise.resolve()
         .then(async () => {
           const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
-            await (params.plans?.(lens, guidelines) ?? [{ context: params.lensPrContext }]);
+            await (params.plans?.(lens, guidelines, `review-${key}`) ?? [
+              { context: params.lensPrContext },
+            ]);
           params.log(
             `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, guidelineParts: new Set(plans.map((plan) => plan.guidelines ?? guidelines)).size, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
           );
@@ -4034,6 +4047,7 @@ export function startLensPasses(params: {
                   params.log,
                   {
                     lensAddendum: lens,
+                    toolLess: params.toolLess,
                     label: `review-${key}`,
                     timeoutMs: params.timeoutMs,
                     deadlineAt: params.deadlineAt,
@@ -4211,6 +4225,7 @@ async function verifyFindings(params: {
   timeoutMs?: number;
   /** TASK-157: the verifier's floored options when the aux entry lacks them. */
   modelOptions?: Record<string, unknown>;
+  toolLessFirst?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -4260,6 +4275,8 @@ export async function requestFindingVerdicts(params: {
   targets: Finding[];
   timeoutMs?: number;
   modelOptions?: Record<string, unknown>;
+  /** A tool-less pass first; only its confirmations are final, the rest get a capped check. */
+  toolLessFirst?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -4325,20 +4342,53 @@ export async function requestFindingVerdicts(params: {
       } else if (params.prepareEvidence) {
         params.log('Skipping optional evidence preparation to preserve verification time.');
       }
-      const timeoutMs =
+      const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
           : Math.max(0, params.timeoutMs - (Date.now() - startedAt));
-      if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
-      const batch = await params.backend.runFindingVerification(
-        params.model,
-        context,
-        targets,
-        params.log,
-        timeoutMs,
-        params.onTokenUsage,
-        params.modelOptions,
-      );
+      if (remaining() === 0) throw new Error('Finding verification budget exhausted.');
+      const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') =>
+        params.backend.runFindingVerification(
+          params.model,
+          context,
+          findings,
+          params.log,
+          remaining(),
+          params.onTokenUsage,
+          params.modelOptions,
+          mode,
+        );
+      let batch: FindingVerdictList | undefined;
+      if (params.toolLessFirst) {
+        // Only a tool-less confirmation is final: a refutation without a lookup could drop a real bug.
+        const first = await verify(targets, 'single-shot').catch((error: unknown) => {
+          params.log(
+            `(tool-less verification failed: ${error instanceof Error ? error.message : String(error)})`,
+          );
+          return undefined;
+        });
+        const confirmed = (first ?? []).filter(
+          (verdict) => checkConfirmationEvidence(verdict, sourceContext).verdict === 'confirmed',
+        );
+        const rest = targets.filter((_, index) => !confirmed.some((v) => v.index === index));
+        params.log(
+          `Tool-less verification confirmed ${confirmed.length}/${targets.length}; re-checking ${rest.length} with tools.`,
+        );
+        // A failed re-check leaves its findings unverified; the confirmations stand.
+        const capped = rest.length
+          ? await verify(rest, 'capped').catch((error: unknown) => {
+              failure ??= error instanceof Error ? error : new Error(String(error));
+              return undefined;
+            })
+          : [];
+        batch = [
+          ...confirmed,
+          ...(capped ?? []).map((verdict) => ({
+            ...verdict,
+            index: targets.indexOf(rest[verdict.index]),
+          })),
+        ];
+      } else batch = await verify(targets);
       if (!batch) throw new Error('Finding verification output unusable.');
       const checked = await Promise.all(
         batch.map(async (verdict) => {

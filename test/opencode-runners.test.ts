@@ -141,6 +141,31 @@ describe('runReview on V2', () => {
     assert.ok(fake.prompts[0]!.body.text.includes(NO_TOOLS_REVIEW_DIRECTIVE.split('\n')[0]!));
   });
 
+  it('runs tool-less passes on jbot-plain and the capped verification re-check on jbot-verify', async () => {
+    const lens = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
+    await runReview(runtime(lens), 'openai/gpt-5', 'ctx', '', log, { toolLess: true });
+    assert.equal([...lens.sessions.values()][0]!.agent, 'jbot-plain');
+    assert.ok(lens.prompts[0]!.body.text.startsWith(NO_TOOLS_REVIEW_DIRECTIVE));
+    const verify = fakeOpencodeServer(() => ({ text: verdicts }));
+    for (const mode of ['single-shot', 'capped'] as const)
+      await runFindingVerification(
+        runtime(verify),
+        'openai/gpt-5',
+        'ctx',
+        [finding],
+        log,
+        undefined,
+        undefined,
+        undefined,
+        mode,
+      );
+    assert.deepEqual(
+      [...verify.sessions.values()].map((session) => session.agent),
+      ['jbot-plain', 'jbot-verify'],
+    );
+    assert.match(verify.prompts[0]!.body.text, /have no tools on this call/);
+  });
+
   it('records one usage row per attempted prompt, repair and failure included', async () => {
     for (const replies of [
       [{ text: '{"summary": "broken' }, { text: '{"findings":[]}' }],

@@ -92,7 +92,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    gateway pins the right side back to HEAD in a throwaway linked worktree —
    the companion clones a committed ref, and the two must agree.
 8. **Read-only enforced in four layers** for every opencode session: the
-   `plan` agent (or the opt-in `jbot-reviewer` with the same session rules),
+   `plan` agent (or the opt-in `jbot-reviewer`, or the context-pack preset's
+   step-capped `jbot-verify`, with the same session rules),
    the ordered `permissions` ruleset (config-level and repeated on
    `session.create`: `edit`/`external_directory`/`question` deny, the shell
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
