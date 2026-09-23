@@ -80,7 +80,9 @@ export function parseBenchmarkTelemetry(telemetry: string | undefined): Benchmar
       row.kind === 'exploration' &&
       typeof row.session === 'string' &&
       /^review(?:-shard-\d+)?(?:-retry)?$/.test(row.session) &&
-      typeof row.turnCount === 'number'
+      typeof row.turnCount === 'number' &&
+      Number.isFinite(row.turnCount) &&
+      row.turnCount >= 0
     )
       metrics.mainTurns! += row.turnCount;
     // Session-scoped rows overlap the run-scoped one.
@@ -88,7 +90,9 @@ export function parseBenchmarkTelemetry(telemetry: string | undefined): Benchmar
       row.kind === 'phase' &&
       row.phase === 'main-execution' &&
       row.scope === 'run' &&
-      typeof row.durationMs === 'number'
+      typeof row.durationMs === 'number' &&
+      Number.isFinite(row.durationMs) &&
+      row.durationMs >= 0
     )
       metrics.mainExecutionMs! += row.durationMs;
     if (row.kind !== 'session') continue;

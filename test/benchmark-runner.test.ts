@@ -34,6 +34,7 @@ describe('benchmark runner decisions', () => {
         JSON.stringify({ kind: 'exploration', session: 'review-shard-2', turnCount: 3 }),
         JSON.stringify({ kind: 'exploration', session: 'review-shard-2-retry', turnCount: 2 }),
         JSON.stringify({ kind: 'exploration', session: 'review-interactions', turnCount: 9 }),
+        JSON.stringify({ kind: 'exploration', session: 'review', turnCount: -1 }),
         JSON.stringify({ kind: 'phase', phase: 'main-execution', scope: 'run', durationMs: 1200 }),
         JSON.stringify({
           kind: 'phase',

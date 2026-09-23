@@ -2,19 +2,27 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildContextPack, CONTEXT_PACK_MAX_BYTES } from '../src/shared/context-pack.ts';
+import { buildContextPack } from '../src/shared/context-pack.ts';
 import { EvidenceStore } from '../src/shared/evidence.ts';
 import { isNoiseFile } from '../src/shared/filter.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../src/shared/git.ts';
 import { suppliedOverlap, type SuppliedContext } from '../src/shared/review-read-locations.ts';
 import { benchmarkArgument } from './benchmark-args.ts';
 
-/** One historical run: head, base, page count and each main session's logged calls (ms). */
+/**
+ * One historical run: head, base, pack budget and each main session's logged calls (ms).
+ * Calls come from CI `<label> tool: key=value` lines (key: the call's first string argument,
+ * value cut at 120 chars); `start`/`end` bracket the session; paths are under /github/workspace.
+ */
 interface ReplayRun {
   id: string;
   head: string;
   base: string;
-  pages: number;
+  /**
+   * Live pack budget: the sum over pages of min(64 KiB, input capacity - page prompt without
+   * caller evidence - 1 KiB), from the run's logs.
+   */
+  packBytes: number;
   sessions: {
     label: string;
     start: number;
@@ -23,8 +31,8 @@ interface ReplayRun {
   }[];
 }
 
-// Calls in one model turn finish together; turns land seconds apart.
-const TURN_GAP_MS = 1500;
+// Calls are logged when made: a turn's calls land milliseconds apart, turns a second or more.
+const TURN_GAP_MS = 500;
 const CI_WORKSPACE = '/github/workspace';
 
 const runsPath = benchmarkArgument('runs');
@@ -62,6 +70,16 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
   const root = mkdtempSync(join(tmpdir(), 'context-pack-replay-'));
   const workspace = join(root, 'workspace');
   try {
+    if (
+      !run.sessions.every(
+        (s) =>
+          Number.isFinite(s.start) &&
+          Number.isFinite(s.end) &&
+          s.calls.every((c) => Number.isFinite(c.t)),
+      )
+    )
+      throw new Error('non-numeric session or call time');
+    if (!Number.isFinite(run.packBytes) || run.packBytes < 0) throw new Error('invalid packBytes');
     execFileSync('git', [
       '-C',
       repository,
@@ -73,7 +91,7 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
       run.head,
     ]);
     const files = parseGitDiff(
-      execFileSync('git', ['-C', workspace, ...GIT_DIFF_ARGS, run.base, run.head], {
+      execFileSync('git', ['-C', workspace, ...GIT_DIFF_ARGS, `${run.base}...${run.head}`], {
         encoding: 'utf8',
         maxBuffer: 512 * 1024 * 1024,
       }),
@@ -87,9 +105,11 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
       files,
       new Set(files.map((file) => file.filename)),
       provider,
-      Math.min(run.pages, 4) * CONTEXT_PACK_MAX_BYTES,
+      run.packBytes,
     );
     const buildMs = Date.now() - started;
+    // Like addContextPack: a pack without a code slice is not served.
+    const served = pack.slices.surrounding || pack.slices.definitions || pack.slices.callers;
     const views = [
       [bounds.answered, pack.supplied],
       [bounds.touched, wholeFiles(pack.supplied)],
@@ -101,7 +121,7 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
         if (!turn.length) return;
         turns++;
         for (const [bound, supplied] of views)
-          if (turn.every((call) => answered(call, supplied))) {
+          if (served && turn.every((call) => answered(call, supplied))) {
             bound.turns++;
             bound.ms += turn[0].t - previous;
           }
@@ -116,7 +136,7 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
       turns++; // the final answer turn
       sessionMs += session.end - session.start;
     }
-    detail.push({ id: run.id, buildMs, state: pack.text ? pack.state : 'empty' });
+    detail.push({ id: run.id, buildMs, state: served ? pack.state : 'empty' });
   } catch (error) {
     detail.push({ id: run.id, error: String(error).slice(0, 200) });
   } finally {
@@ -127,7 +147,7 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
   }
 }
 const built = detail.flatMap((run) => (run.buildMs === undefined ? [] : [run.buildMs]));
-const p90 = [...built].sort((a, b) => a - b)[Math.floor(0.9 * (built.length - 1))] ?? 0;
+const p90 = built.sort((a, b) => a - b)[Math.floor(0.9 * (built.length - 1))] ?? 0;
 console.log(
   JSON.stringify(
     {
