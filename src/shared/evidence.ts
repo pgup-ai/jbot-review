@@ -271,9 +271,10 @@ export class EvidenceStore {
     if (pending) this.searchSharedRequests++;
     else {
       this.searchCalls++;
+      // A user's color.ui=always would wrap paths in ANSI codes.
       pending = exec(
         'git',
-        ['grep', '-l', '-z', '-F', ...patterns.flatMap((s) => ['-e', s]), '--'],
+        ['grep', '--no-color', '-l', '-z', '-F', ...patterns.flatMap((s) => ['-e', s]), '--'],
         {
           cwd: this.workspace,
           signal: this.reuse.shared ? AbortSignal.timeout(4000) : signal,
