@@ -444,11 +444,13 @@ export function buildDiffHunksBlockWithMetadata(
     const patch = options.numbered
       ? numberNewSideLines(file.patch as string)
       : (file.patch as string);
+    const reindented = options.numbered ? whitespaceOnlyLines(file.patch as string) : [];
+    const note = reindented.length ? `Whitespace only: ${formatLineRanges(reindented)}` : '';
     const truncationNotice = `_Hunks truncated for ${file.filename}; run the git diff command for the rest._`;
     const sectionSeparatorBytes = sections.length > 0 ? 2 : 0; // blank line between file sections
     const truncatedSectionOverhead =
       sectionSeparatorBytes +
-      Buffer.byteLength(renderDiffSection(file.filename, '', true, truncationNotice), 'utf8');
+      Buffer.byteLength(renderDiffSection(file.filename, '', true, truncationNotice, note), 'utf8');
     const patchBudget = Math.min(
       perFileBudget - truncatedSectionOverhead,
       remaining - truncatedSectionOverhead,
@@ -458,7 +460,7 @@ export function buildDiffHunksBlockWithMetadata(
       omittedFiles.push(file.filename);
       continue;
     }
-    const section = renderDiffSection(file.filename, text, truncated, truncationNotice);
+    const section = renderDiffSection(file.filename, text, truncated, truncationNotice, note);
     const sectionBytes = sectionSeparatorBytes + Buffer.byteLength(section, 'utf8');
     if (sectionBytes > remaining) {
       omittedFiles.push(file.filename);
@@ -476,7 +478,8 @@ export function buildDiffHunksBlockWithMetadata(
     ...(options.numbered
       ? [
           "Each new-side line starts with its line number; cite it for a finding's line " +
-            'instead of re-reading the file to count lines.',
+            'instead of re-reading the file to count lines. A "Whitespace only" line under a ' +
+            'file lists added lines whose text matches a removed line apart from whitespace: the PR moved or re-indented that code, it did not write it.',
         ]
       : [
           'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
@@ -506,10 +509,59 @@ function renderDiffSection(
   text: string,
   truncated: boolean,
   truncationNotice = `_Hunks truncated for ${filename}; run the git diff command for the rest._`,
+  note = '',
 ): string {
-  return [`### ${filename}`, '```diff', text, '```', ...(truncated ? [truncationNotice] : [])].join(
-    '\n',
-  );
+  return [
+    `### ${filename}`,
+    ...(note ? [note] : []),
+    '```diff',
+    text,
+    '```',
+    ...(truncated ? [truncationNotice] : []),
+  ].join('\n');
+}
+
+/** Ascending lines as "3-5, 9", capped so one note stays short. */
+export function formatLineRanges(lines: number[]): string {
+  const ranges: [number, number][] = [];
+  for (const line of lines) {
+    const last = ranges.at(-1);
+    if (last && line === last[1] + 1) last[1] = line;
+    else ranges.push([line, line]);
+  }
+  const shown = ranges.slice(0, 8).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`));
+  return [...shown, ...(ranges.length > 8 ? [`+${ranges.length - 8} more`] : [])].join(', ');
+}
+
+/**
+ * Added lines whose text matches a removed line of the same change block apart
+ * from whitespace. Re-indented code otherwise reads as code the PR wrote.
+ */
+export function whitespaceOnlyLines(patch: string): number[] {
+  const found: number[] = [];
+  const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
+  let removed: string[] = [];
+  let line = 0;
+  for (const row of patch.split('\n')) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row);
+    if (hunk) {
+      line = Number(hunk[1]);
+      removed = [];
+    } else if (row.startsWith('-')) removed.push(normalize(row.slice(1)));
+    else if (row.startsWith('+')) {
+      const text = normalize(row.slice(1));
+      const at = text ? removed.indexOf(text) : -1;
+      if (at >= 0) {
+        removed.splice(at, 1);
+        found.push(line);
+      }
+      line++;
+    } else if (row.startsWith(' ')) {
+      removed = [];
+      line++;
+    }
+  }
+  return found;
 }
 
 function numberNewSideLines(patch: string): string {

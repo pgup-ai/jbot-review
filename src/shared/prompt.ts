@@ -6,6 +6,7 @@ import { GIT_DIFF_ARGS } from './git.ts';
 import {
   PATH_PATTERNS,
   buildDiffHunksBlockWithMetadata,
+  formatLineRanges,
   type ChangeShape,
 } from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
@@ -449,18 +450,19 @@ and identify material uncertainties without asserting unverified premises.`;
 const CONTEXT_PACK_EXPLORATION_POLICY = `## Repository exploration policy
 
 Review every changed hunk in the embedded diff, starting from the context pack
-below. Use a tool only to answer a specific question about a hunk that the diff
-and the pack leave open, such as code under Omitted, a caller or test the pack
-does not show, or configuration. Issue independent reads together in one turn;
-never guess the input of a dependent lookup. Follow dependencies beyond the
-first hop when the evidence reveals a plausible broken contract or unresolved
-finding. Continue paginated or truncated results when the needed evidence is
-missing.
+below. Skip orientation lookups: the diff and the pack already show the changed
+code, its surroundings, the definitions it uses, and its callers, so do not
+re-read them. Spend lookups on verification: before you report a finding,
+confirm the premise it rests on (the guard, caller, type, default, or test that
+makes it true or false) from the pack, or with a targeted lookup when the pack
+does not show it. Issue independent reads together in one turn; never guess the
+input of a dependent lookup. Follow dependencies beyond the first hop when the
+evidence reveals a plausible broken contract or unresolved finding. Continue
+paginated or truncated results when the needed evidence is missing.
 
 Once the changed hunks and plausible failure paths are covered, return the final
-JSON. Do not explore for completeness, and do not re-read the embedded diff or
-the pack. Report supported findings and identify material uncertainties without
-asserting unverified premises.`;
+JSON. Do not explore for completeness. Report supported findings and identify
+material uncertainties without asserting unverified premises.`;
 
 export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
 
@@ -783,18 +785,6 @@ const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
 
 const CONTEXT_PACK_OMITTED_BYTES = 2048;
 
-/** Ascending lines as "3-5, 9", capped so one header stays short. */
-function lineRanges(lines: number[]): string {
-  const ranges: [number, number][] = [];
-  for (const line of lines) {
-    const last = ranges.at(-1);
-    if (last && line === last[1] + 1) last[1] = line;
-    else ranges.push([line, line]);
-  }
-  const shown = ranges.slice(0, 8).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`));
-  return [...shown, ...(ranges.length > 8 ? [`+${ranges.length - 8} more`] : [])].join(', ');
-}
-
 function contextPackSpan(item: ContextPackEntry): [first: number, last: number] {
   const first = item.rows[0][0];
   return [first, Math.max(item.rows.at(-1)![0], item.end ?? 0)];
@@ -814,7 +804,7 @@ export function formatContextPackItem(item: ContextPackEntry): string {
   const [first, last] = contextPackSpan(item);
   const title = [
     [item.label, item.calls && `calls ${item.calls}`].filter(Boolean).join(', '),
-    item.otherPages?.length && `changed on another page: ${lineRanges(item.otherPages)}`,
+    item.otherPages?.length && `changed on another page: ${formatLineRanges(item.otherPages)}`,
   ]
     .filter(Boolean)
     .join('; ');
@@ -1677,12 +1667,14 @@ export const COMPLIANCE_PACK_NOTE = `## Page audit notes
 - A rule citation may be the guideline file path plus a verbatim quote of the
   rule. Add a line number only when you already know it; do not open a
   guideline file just to find one.
+- Before reporting a violation, confirm this PR wrote the code: lines under a
+  "Whitespace only" note were moved or re-indented, not written.
 
 ## Repository exploration policy
 
-Audit the embedded hunks first. Use a tool only when a specific rule check needs
-code that the diff and the context pack do not show; issue independent reads
-together in one turn.`;
+Audit the embedded hunks first. Use a tool when a specific rule check needs code
+or an omitted guideline part that the diff and the context pack do not show;
+issue independent reads together in one turn.`;
 
 export function assembleGuidelineSweepPrompt(guidelines: string): string {
   return assembleGuidelineCompliancePrompt(
