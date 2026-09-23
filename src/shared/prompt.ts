@@ -1629,8 +1629,8 @@ message.`;
 export const COMPLIANCE_PACK_NOTE = `## Page audit notes
 
 - The "Diff hunks" section below embeds this page's complete diff with new-side
-  line numbers, so do not run git diff for this page's files. When the PR
-  needs more than one page, other pages are audited by parallel tasks.
+  line numbers, so do not run git diff for this page's files. Other pages of
+  this PR are audited by parallel tasks.
 - A context pack before the diff, when present, holds code jbot already read for
   this page: the code around the changes, the definitions they use, and their
   callers.

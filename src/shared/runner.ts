@@ -3001,8 +3001,7 @@ async function runReviewPipeline(params: {
             ? joinContext(fullCoreContext, COMPLIANCE_PACK_NOTE)
             : fullCoreContext,
         context7Block: '',
-        // One compliance page per PR when it fits: every page re-sends the full guideline set.
-        shards: packPages ? [shards.flat()] : shards,
+        shards,
         budget: auxPromptBudget,
         renderPrompt: render,
         guidelines: lens ? lensRules : complianceGuidelines,
