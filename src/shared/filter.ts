@@ -287,7 +287,6 @@ export function checkConfirmationEvidence(
   };
 }
 
-/** Whether a confirmed verdict resolves the finding when applied. */
 export function resolvesFinding(finding: Finding, verdict: FindingVerdict): boolean {
   return !confirmedFinding(finding, verdict).verificationUncertain;
 }
