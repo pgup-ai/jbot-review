@@ -750,7 +750,10 @@ describe('context pack telemetry', () => {
       });
     tools.startTool({ ...call, session: 'review', supplied: 'read' })(done);
     tools.startTool({ ...call, session: 'review', supplied: false })(done);
+    tools.startTool({ ...call, toolClass: 'search', session: 'review', supplied: 'search' })(done);
     finish('review', true);
+    // The concurrency wrapper finishes the session again, without the flag.
+    finish('review');
     finish('review-shard-2', true);
     tools.startTool({ ...call, session: 'lens' })(done);
     finish('lens');
@@ -771,7 +774,7 @@ describe('context pack telemetry', () => {
     const explored = Object.fromEntries(
       rows.filter((row) => row.kind === 'exploration').map((row) => [row.session, row]),
     );
-    assert.deepEqual([explored.review.suppliedRereads, explored.review.suppliedSearches], [1, 0]);
+    assert.deepEqual([explored.review.suppliedRereads, explored.review.suppliedSearches], [1, 1]);
     assert.deepEqual(
       [explored['review-shard-2'].suppliedRereads, explored['review-shard-2'].suppliedSearches],
       [0, 0],

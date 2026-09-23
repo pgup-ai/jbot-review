@@ -2697,7 +2697,7 @@ async function runReviewPipeline(params: {
             joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks),
           );
     };
-    const renderMainPrompt = (context: string) =>
+    const mainPromptRenderer = (contextPack?: boolean) => (context: string) =>
       assembleReviewPrompt(
         context,
         guidelinesForPrompt,
@@ -2707,21 +2707,11 @@ async function runReviewPipeline(params: {
         {
           toolsAvailable: guidelineSelection.mainCanReadWorkspace,
           contextFirst: options.sharedPrefixPrompt,
+          contextPack,
         },
       );
-    const renderPackPrompt = (context: string) =>
-      assembleReviewPrompt(
-        context,
-        guidelinesForPrompt,
-        '',
-        options.evidenceQuotes,
-        options.embeddedFirstPrompt,
-        {
-          toolsAvailable: guidelineSelection.mainCanReadWorkspace,
-          contextFirst: options.sharedPrefixPrompt,
-          contextPack: true,
-        },
-      );
+    const renderMainPrompt = mainPromptRenderer();
+    const renderPackPrompt = mainPromptRenderer(true);
     log(
       `Main prompt budget: ${JSON.stringify(mainPromptBudget)}; input tokens conservatively bounded by UTF-8 bytes.`,
     );

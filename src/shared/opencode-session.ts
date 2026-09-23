@@ -372,9 +372,8 @@ export function recordAssistantTools(
   options: {
     experiment?: ReturnType<typeof readExplorationStats>;
     stopReason?: TelemetryStopReason;
-    /** The session's context-pack content, when it got one. */
-    supplied?: SuppliedContext;
-    workspace?: string;
+    /** The session's context-pack content and the workspace it is relative to, when it got one. */
+    supplied?: { context: SuppliedContext; workspace: string };
   } = {},
 ): void {
   for (const message of messages) {
@@ -399,10 +398,10 @@ export function recordAssistantTools(
         ...(options.supplied
           ? {
               supplied: suppliedOverlap(
-                options.workspace ?? '',
+                options.supplied.workspace,
                 part.name,
                 part.state.input ?? {},
-                options.supplied,
+                options.supplied.context,
               ),
             }
           : {}),
@@ -619,11 +618,11 @@ async function promptHoldingSlot(
               value - (initialExperiment?.[key] ?? 0),
             ]),
           );
+        const supplied = runtime.suppliedContext?.(abortLabel);
         recordAssistantTools(telemetry, label, turn, {
           experiment,
           stopReason,
-          supplied: runtime.suppliedContext?.(label),
-          workspace: runtime.workspace,
+          supplied: supplied && { context: supplied, workspace: runtime.workspace },
         });
       }
       const turnUsage = sumUsage(turn);

@@ -135,12 +135,14 @@ describe('recordAssistantTools', () => {
         },
       ] as never,
       {
-        workspace: '/w',
         supplied: {
-          ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
-          lines: new Map([['src/a.ts', 400]]),
-          symbols: new Set(['LedgerService']),
-          directories: new Set(),
+          workspace: '/w',
+          context: {
+            ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
+            lines: new Map([['src/a.ts', 400]]),
+            symbols: new Set(['LedgerService']),
+            directories: new Set(),
+          },
         },
       },
     );
