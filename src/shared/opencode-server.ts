@@ -315,6 +315,8 @@ export interface OpencodeRuntime {
   onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   suppliedContext?: (session: string) => SuppliedContext | undefined;
   reviewerAgent?: boolean;
+  /** One provider cache key and gateway affinity for this run's cache-enabled models. */
+  runCache?: { key: string; models: Set<string> };
   stop(): void;
 }
 
@@ -334,6 +336,7 @@ export interface StartOpencodeOptions {
   suppliedContext?: (session: string) => SuppliedContext | undefined;
   reviewerAgent?: boolean;
   runStats?: boolean;
+  runCacheKey?: string;
 }
 
 export async function startOpencode(
@@ -437,6 +440,14 @@ export async function startOpencode(
     onSourceRead: options.onSourceRead,
     suppliedContext: options.suppliedContext,
     reviewerAgent: options.reviewerAgent,
+    runCache: options.runCacheKey
+      ? {
+          key: options.runCacheKey,
+          models: new Set(
+            models.filter((m) => m.promptCache).map((m) => `${m.providerID}/${m.modelID}`),
+          ),
+        }
+      : undefined,
     stop,
   };
 }

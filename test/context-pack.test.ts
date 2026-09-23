@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildContextPack, type PackSourceProvider } from '../src/shared/context-pack.ts';
-import { indexEvidenceSource, type PathAlias } from '../src/shared/evidence.ts';
+import {
+  changedEvidenceLines,
+  indexEvidenceSource,
+  type PathAlias,
+} from '../src/shared/evidence.ts';
 
 const REPO: Record<string, string> = {
   'apps/api/src/ledger.service.ts': [
@@ -67,7 +71,9 @@ const PAGE = [
     ].join('\n'),
   },
 ];
-const CHANGED = new Set(PAGE.map((file) => file.filename));
+const changed = (files: { filename: string; patch: string }[]) =>
+  new Map(files.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch))]));
+const CHANGED = changed(PAGE);
 const FORMAT_PAGE = [
   {
     filename: 'apps/api/src/format.ts',
@@ -166,7 +172,7 @@ test('surrounding code encloses changes in top-level variables and in class bodi
   ].join('\n');
   const pack = await buildContextPack(
     [{ filename: path, patch }],
-    new Set([path]),
+    changed([{ filename: path, patch }]),
     provider({ ...REPO, [path]: source }),
     64 * 1024,
   );
@@ -223,15 +229,16 @@ test('callers need an import link, and other name matches stay listed as unverif
   assert.equal(pack.supplied.symbols.has('post'), true);
   assert.doesNotMatch(pack.text, /No references to/);
   // The caller excerpt is formatId's call in post, not ledger.service.ts's import block.
+  // PAGE changes ledger.service.ts line 15 on another page.
   const formatPack = await buildContextPack(
     FORMAT_PAGE,
-    new Set([FORMAT_PAGE[0].filename]),
+    changed([...FORMAT_PAGE, ...PAGE]),
     provider(),
     64 * 1024,
   );
   assert.match(
     formatPack.text,
-    /#### apps\/api\/src\/ledger\.service\.ts:10-18 \(LedgerService\.post, calls formatId\)/,
+    /#### apps\/api\/src\/ledger\.service\.ts:10-18 \(LedgerService\.post, calls formatId; changed on another page: 15\)/,
   );
   assert.doesNotMatch(formatPack.text, /ledger\.service\.ts:1-/);
   // The import in ledger.service.ts is not shown, but its file's call is.
@@ -258,7 +265,7 @@ test('callers need an import link, and other name matches stay listed as unverif
 
 test('an all-shown claim needs a complete search and every match shown', async () => {
   const text = async (page: typeof PAGE, source: PackSourceProvider, budget = 64 * 1024) =>
-    (await buildContextPack(page, new Set([page[0].filename]), source, budget)).text;
+    (await buildContextPack(page, changed(page), source, budget)).text;
   const long = REPO['apps/api/src/ledger.service.ts'].replace(
     'key));',
     `key)); // ${'x'.repeat(2000)}`,

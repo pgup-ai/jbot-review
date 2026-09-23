@@ -918,11 +918,11 @@ describe('context pack prompt', () => {
       1,
     );
     assert.match(CONTEXT_PACK_REVIEW_PROMPT, /Issue independent reads\s+together in one turn/);
-    assert.match(
-      CONTEXT_PACK_REVIEW_PROMPT,
-      /Use the context pack's callers and\s+definitions as the starting set/,
-    );
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /search again\s+only for a symbol the pack does not/);
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /do not run git diff for this\s+page's files/);
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /Do not open guidance files unless/);
     assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, /Start with targeted reads of\s+callers/);
+    assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, /read any listed referenced Markdown/);
     assert.ok(
       assembleReviewPrompt('ctx', '', '', false, true, { contextPack: true }).startsWith(
         CONTEXT_PACK_REVIEW_PROMPT,
@@ -943,9 +943,10 @@ describe('context pack prompt', () => {
         ],
         end: 8,
         inDiff: new Set([3, 4, 5]),
+        otherPages: [1, 2, 6],
       }),
       [
-        '#### a.ts:1-8 (A.run)',
+        '#### a.ts:1-8 (A.run; changed on another page: 1-2, 6)',
         '1: run() {',
         '2:   x();',
         "[lines 3-5: in this page's diff]",
@@ -969,8 +970,8 @@ describe('context pack prompt', () => {
       uncollected: 1,
     });
     assert.match(pack, /^## Context pack/);
-    assert.match(pack, /do\s+not re-read them/);
-    assert.match(pack, /not evidence that none\s+exist/);
+    assert.match(pack, /do not re-read these ranges or repeat the\s+searches behind them/);
+    assert.match(pack, /may have callers the search missed/);
     assert.match(
       pack,
       /### Omitted\n- 1 item\(s\) not collected within the pack's time and file limits\n- b\.ts:9-9 \(callers\)/,

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildContextPack } from '../src/shared/context-pack.ts';
-import { EvidenceStore } from '../src/shared/evidence.ts';
+import { changedEvidenceLines, EvidenceStore } from '../src/shared/evidence.ts';
 import { isNoiseFile } from '../src/shared/filter.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../src/shared/git.ts';
 import { suppliedOverlap, type SuppliedContext } from '../src/shared/review-read-locations.ts';
@@ -103,7 +103,7 @@ for (const line of readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)) {
     // Page assignments are not logged, so a multi-page run is scored at PR level.
     const pack = await buildContextPack(
       files,
-      new Set(files.map((file) => file.filename)),
+      new Map(files.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch!))])),
       provider,
       run.packBytes,
     );

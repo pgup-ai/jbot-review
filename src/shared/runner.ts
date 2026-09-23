@@ -37,11 +37,12 @@ import {
   computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
   sharedPrefixLaunchDelayMs,
+  SHARED_PREFIX_STAGGER_MS,
   wrapUpReserveMs,
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
-import { EvidenceStore } from './evidence.ts';
+import { changedEvidenceLines, EvidenceStore } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 import {
   auxiliaryPolicy,
@@ -172,7 +173,9 @@ import {
   assembleReviewPrompt,
   assembleGuidelineCompliancePrompt,
   assembleFindingVerificationPrompt,
+  COMPLIANCE_PACK_NOTE,
   selectLensKeys,
+  VERIFIER_SOURCES_READ_NOTE,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
@@ -1668,10 +1671,17 @@ async function runReviewPipeline(params: {
     options.experiment.reuse,
   );
   const packSupplied = new Map<string, SuppliedContext>();
-  const verifierSourceContext =
+  const findingSources =
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
       : undefined;
+  const verifierSourceContext = options.experiment.contextPack
+    ? async (targets: Finding[]) => {
+        const sources = await (findingSources?.(targets) ??
+          buildFindingSourceContext(workspace, targets));
+        return sources && joinContext(VERIFIER_SOURCES_READ_NOTE, sources);
+      }
+    : findingSources;
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
     findings: Finding[],
@@ -1831,7 +1841,7 @@ async function runReviewPipeline(params: {
   // prefill. Same diff block as the aux path, so a slim verifier never judges
   // from a diff the full context would have carried whole.
   const verifierPrContext =
-    options.verifierSlimContext && linkedIssueContext
+    (options.verifierSlimContext || options.experiment.contextPack) && linkedIssueContext
       ? buildSlimVerifierContext({
           pullTitle,
           pullBody,
@@ -2309,6 +2319,7 @@ async function runReviewPipeline(params: {
           suppliedContext: (session: string) => packSupplied.get(session),
           reviewerAgent: process.env.JBOT_REVIEWER_AGENT === '1',
           runStats: process.env.JBOT_RUN_STATS === '1',
+          runCacheKey: options.experiment.contextPack ? `jbot-${randomUUID()}` : undefined,
           explorationExperiment: options.experiment.exploration,
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
@@ -2617,6 +2628,7 @@ async function runReviewPipeline(params: {
       mainCanReadWorkspace: mainBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
       widen: options.guidelineWiden,
       full: guidelines,
+      contextPack: options.experiment.contextPack,
     };
     const guidelinesInMain = auxiliaryDecisions.some(
       (decision) => decision.reason === 'global-guidelines-in-main',
@@ -2682,6 +2694,20 @@ async function runReviewPipeline(params: {
       );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    // Every PR file's changed lines, so a page's pack can mark what other pages change.
+    const changedLines = new Map(
+      fullReviewFiles.map((file) => [
+        file.filename,
+        new Set(changedEvidenceLines(file.patch ?? '')),
+      ]),
+    );
+    const buildPagePack = async (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) =>
+      buildContextPack(
+        planPageFiles(plan.units ?? []),
+        changedLines,
+        await evidence.packProvider(signal),
+        budgetBytes,
+      );
 
     const verifierContextForTargets = (targets: Finding[]) => {
       const fits = measureReviewPrompt(
@@ -2735,19 +2761,13 @@ async function runReviewPipeline(params: {
         !['pi', 'commandcode'].includes(mainBackend.name)
           ? diffScope
           : undefined,
+      onDemandRecovery: options.experiment.contextPack,
     });
 
     if (options.experiment.contextPack) {
-      const changedPaths = new Set(fullReviewFiles.map((file) => file.filename));
       const packs = await addContextPack({
         plans: shardPlans,
-        build: async (plan, budgetBytes, signal) =>
-          buildContextPack(
-            planPageFiles(plan.units ?? []),
-            changedPaths,
-            await evidence.packProvider(signal),
-            budgetBytes,
-          ),
+        build: buildPagePack,
         renderPrompt: mainPromptRenderer(true),
         budget: mainPromptBudget,
         log,
@@ -2911,6 +2931,11 @@ async function runReviewPipeline(params: {
       onCoverage: recordCoverage,
       cache: shardCache,
       sweepGuidelines,
+      // Later pages wait for the first page's prefill so its run-keyed prefix cache can serve them.
+      launchDelayMs:
+        options.experiment.contextPack && mainOnOpencode && promptCachePolicy.providerPromptCache
+          ? (index) => (index > 0 ? SHARED_PREFIX_STAGGER_MS : 0)
+          : undefined,
     });
 
     // Only a single-shard main without a context pack leads with the diff, so only
@@ -2989,10 +3014,14 @@ async function runReviewPipeline(params: {
               },
             )
           : assembleGuidelineCompliancePrompt(context, rules);
+      // Compliance pages get the main pages' numbered diff and context pack.
+      const packPages = !lens && options.experiment.contextPack;
       const plans = buildAuxiliaryPlans({
         coreContext: lens
           ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
-          : fullCoreContext,
+          : packPages
+            ? joinContext(fullCoreContext, COMPLIANCE_PACK_NOTE)
+            : fullCoreContext,
         context7Block: '',
         shards,
         budget: auxPromptBudget,
@@ -3000,8 +3029,25 @@ async function runReviewPipeline(params: {
         guidelines: lens ? lensRules : complianceGuidelines,
         guidelineLabels: (followupGuidelines ?? discoveredGuidelines).docs.map((doc) => doc.label),
         evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
+        embeddedFirstPrompt: packPages,
+        numberedDiff: packPages,
       });
-      await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
+      if (packPages)
+        for (const { row } of await addContextPack({
+          plans,
+          build: buildPagePack,
+          renderPrompt: render,
+          budget: auxPromptBudget,
+          log,
+        }))
+          telemetry.recordContextPack(row);
+      await addReviewEvidence(
+        plans.filter((plan) => !plan.contextPack),
+        evidence,
+        render,
+        auxPromptBudget,
+        log,
+      );
       return prioritizeAuxiliaryPlans(plans);
     };
 
@@ -4456,6 +4502,7 @@ export async function runShardedReview(params: {
   onCoverage?: SessionCoverageRecorder;
   /** Content-addressed reuse of completed shard results. */
   cache?: { dir: string; headSha: string; config: string };
+  launchDelayMs?: (index: number) => number;
 }): Promise<{ summary: string; findings: Finding[] }> {
   const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
@@ -4483,7 +4530,7 @@ export async function runShardedReview(params: {
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
-    shardPlans.map(async (plan): Promise<ShardOutcome> => {
+    shardPlans.map(async (plan, index): Promise<ShardOutcome> => {
       const startedAt = Date.now();
       const promptBytes =
         plan.promptBytes ??
@@ -4574,6 +4621,7 @@ export async function runShardedReview(params: {
           embeddedFirstPrompt: params.embeddedFirstPrompt,
           contextFirst: params.contextFirst,
           contextPack: plan.contextPack,
+          launchDelayMs: params.launchDelayMs?.(index),
         });
         if (!result.partial) persist(result, primaryFingerprint);
         cover(result.partial ? 'partial' : 'completed');

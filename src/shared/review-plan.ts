@@ -165,6 +165,7 @@ export function buildShardPlans(params: {
   diffFirst?: boolean;
   numberedDiff?: boolean;
   batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
+  onDemandRecovery?: boolean;
 }): ShardPlan[] {
   const files = params.shards.flat();
   const originals = params.shards.map((shard) => shard.flatMap(diffUnits));
@@ -191,6 +192,7 @@ export function buildShardPlans(params: {
           files,
           files.filter((f) => !assignedFiles.includes(f.filename)).map((f) => f.filename),
           params.batchDiffScope,
+          params.onDemandRecovery,
         )
       : '';
     const parts =
@@ -447,8 +449,8 @@ interface ContextPackResult {
 export async function addContextPack(params: {
   plans: ShardPlan[];
   build: (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) => Promise<ContextPack>;
-  /** The pack-aware main-page prompt; it sizes both the room and the final fit. */
-  renderPrompt: (context: string) => string;
+  /** The pack-aware page prompt; it sizes both the room and the final fit. */
+  renderPrompt: (context: string, guidelines?: string) => string;
   budget: ReviewPromptBudget;
   log: (message: string) => void;
 }): Promise<ContextPackResult[]> {
@@ -464,7 +466,9 @@ export async function addContextPack(params: {
         const started = Date.now();
         const roomBytes = Math.max(
           0,
-          inputCapacity(budget) - Buffer.byteLength(renderPrompt(plan.context)) - 1024,
+          inputCapacity(budget) -
+            Buffer.byteLength(renderPrompt(plan.context, plan.guidelines)) -
+            1024,
         );
         const pack = await params
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
@@ -479,7 +483,7 @@ export async function addContextPack(params: {
           const previous = { context: plan.context, baseContext: plan.baseContext };
           plan.context = withContextPack(plan.context, plan.diffText, pack.text);
           plan.baseContext = withContextPack(plan.baseContext, plan.diffText, pack.text);
-          const measured = measureReviewPrompt(renderPrompt(plan.context), budget);
+          const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
           if (measured.fits) {
             plan.promptBytes = measured.promptBytes;
             plan.contextPack = true;

@@ -11,7 +11,7 @@ type Hook = (event: unknown) => unknown;
 
 async function loadPlugin(
   tool = { transform: async () => {}, hook: async () => {} },
-): Promise<{ context: Hook; evaluate: Hook }> {
+): Promise<{ context: Hook; evaluate: Hook; request: Hook }> {
   const file = join(hermeticOpencodeConfigHome(), 'opencode', 'plugins', 'jbot-review.js');
   const mod = await import(pathToFileURL(file).href);
   const hooks: Record<string, Hook> = {};
@@ -28,7 +28,11 @@ async function loadPlugin(
     },
     permission: { hook: async (name: string, fn: Hook) => (hooks[`permission.${name}`] = fn) },
   });
-  return { context: hooks['session.context']!, evaluate: hooks['permission.evaluate']! };
+  return {
+    context: hooks['session.context']!,
+    evaluate: hooks['permission.evaluate']!,
+    request: hooks['session.model.request']!,
+  };
 }
 
 const tools = () => ({
@@ -109,13 +113,16 @@ describe('jbot opencode plugin', () => {
   });
 
   it('applies the options registered for the session and nothing for unknown ones', async () => {
-    const { context } = await loadPlugin();
+    const { context, request } = await loadPlugin();
     const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
     temps.push(dir);
     const file = join(dir, 'opts.json');
     writeFileSync(
       file,
-      JSON.stringify({ ses_1: { reasoningEffort: 'low', jbotSessionLabel: 'review' } }),
+      JSON.stringify({
+        ses_1: { reasoningEffort: 'low', jbotSessionLabel: 'review' },
+        ses_3: { promptCacheKey: 'jbot-run', jbotAffinity: 'jbot-run' },
+      }),
     );
     process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
     try {
@@ -130,6 +137,18 @@ describe('jbot opencode plugin', () => {
       const unknown = { agent: 'plan', tools: tools(), sessionID: 'ses_2', options: {} };
       context(unknown);
       assert.deepEqual(unknown.options, {});
+      // A run key reaches the provider options; its affinity goes to the gateway header only.
+      const keyed = { agent: 'plan', tools: tools(), sessionID: 'ses_3', options: {} };
+      context(keyed);
+      assert.deepEqual(keyed.options, { promptCacheKey: 'jbot-run' });
+      for (const [sessionID, affinity] of [
+        ['ses_3', 'jbot-run'],
+        ['ses_2', 'ses_2'],
+      ]) {
+        const event = { sessionID, headers: { 'x-session-affinity': sessionID } };
+        request(event);
+        assert.equal(event.headers['x-session-affinity'], affinity);
+      }
     } finally {
       delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
     }

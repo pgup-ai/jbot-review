@@ -59,6 +59,13 @@ describe('createReviewSession', () => {
     assert.deepEqual(options[id], { jbotSessionLabel: 'review' });
     assert.deepEqual(options[fork], { jbotSessionLabel: 'finding-verification' });
     assert.equal('JBOT_EXPLORATION_CONFIG' in fake.sessions.get(fork)!.environment!, false);
+    rt.explorationExperiment.readEvidence = false;
+    rt.runCache = { key: 'jbot-run', models: new Set(['openai/gpt-5']) };
+    const keyed = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    const uncached = await createReviewSession(rt, { label: 'review', model: 'fireworks/x' });
+    const keyedOptions = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
+    assert.deepEqual(keyedOptions[keyed], { promptCacheKey: 'jbot-run', jbotAffinity: 'jbot-run' });
+    assert.equal(keyedOptions[uncached], undefined);
   });
 
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {

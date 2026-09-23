@@ -472,13 +472,15 @@ export function buildDiffHunksBlockWithMetadata(
   const lines = [
     '## Diff hunks',
     'Merge-base-relative patches for the changed files, highest review risk first.',
+    // Only the context-pack preset numbers diffs, and its prompts ask for targeted lookups instead.
     ...(options.numbered
       ? [
           "Each new-side line starts with its line number; cite it for a finding's line " +
             'instead of re-reading the file to count lines.',
         ]
-      : []),
-    'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
+      : [
+          'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
+        ]),
     '',
     sections.join('\n\n'),
   ];

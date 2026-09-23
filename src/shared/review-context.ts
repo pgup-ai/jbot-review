@@ -1374,6 +1374,8 @@ export function formatFinderGuidelines(
     complianceCovers?: boolean;
     canReadWorkspace?: boolean;
     lens?: boolean;
+    /** context-pack finders: no pointer stubs or agent skills, and no guidance-file reads. */
+    contextPack?: boolean;
   } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
@@ -1388,6 +1390,17 @@ export function formatFinderGuidelines(
       ? 0
       : doc.relevance;
   const procedureOmissions: string[] = [];
+  // A short doc naming other docs, or an agent skill, sends a finder reading instead of reviewing.
+  const pointer = (doc: GuidelineDoc) =>
+    (Buffer.byteLength(doc.text) < 600 && /\.md\b/i.test(doc.text)) ||
+    /(^|\/)(\.agents\/|SKILL\.md$)/i.test(doc.label);
+  const pointers =
+    options.contextPack && !options.lens
+      ? discovered.docs.filter(pointer).map((doc) => doc.label)
+      : [];
+  const finderDocs = pointers.length
+    ? discovered.docs.filter((doc) => !pointers.includes(doc.label))
+    : discovered.docs;
   const docs = options.lens
     ? discovered.docs.map((doc) => {
         const lines = doc.text.replace(/\r\n/g, '\n').split('\n');
@@ -1409,13 +1422,14 @@ export function formatFinderGuidelines(
         }
         return { ...doc, text: lines.filter((_, index) => !omitted.has(index)).join('\n') };
       })
-    : discovered.docs;
+    : finderDocs;
   return renderGuidelineBlock(
     guidelineSources(docs, effectiveRelevance),
     capBytes,
     (fragmentOmissions) => {
       const omitted = uniqueLabels([
         ...fragmentOmissions,
+        ...pointers,
         ...(!complianceCovers ? discovered.referenced : []),
       ]);
       if (omitted.length === 0 && !discovered.budgetExhausted && procedureOmissions.length === 0)
@@ -1439,7 +1453,9 @@ export function formatFinderGuidelines(
         );
       }
       const coverage = complianceCovers
-        ? 'The full set is reviewed by the separate guideline-compliance pass.'
+        ? options.contextPack
+          ? 'The full set, including these files, is audited by the separate guideline-compliance pass; do not open them.'
+          : 'The full set is reviewed by the separate guideline-compliance pass.'
         : options.canReadWorkspace === false
           ? 'The guideline-compliance pass is not running this run. Omitted guidance is unavailable to this session.'
           : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
@@ -1468,6 +1484,7 @@ export function selectFinderGuidelineText(params: {
   widen: 'auto' | 'full';
   full: string;
   lens?: boolean;
+  contextPack?: boolean;
 }): string {
   const full = !params.complianceRuns && (params.widen === 'full' || !params.mainCanReadWorkspace);
   if (full && !params.lens) return params.full;
@@ -1477,6 +1494,7 @@ export function selectFinderGuidelineText(params: {
     canReadWorkspace: params.mainCanReadWorkspace,
     capBytes: params.lens ? MAX_LENS_GUIDELINE_BYTES : full ? MAX_GUIDELINE_TOTAL_BYTES : undefined,
     lens: params.lens,
+    contextPack: params.contextPack,
   });
 }
 

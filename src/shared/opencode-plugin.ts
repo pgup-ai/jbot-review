@@ -10,8 +10,9 @@ import { PERMISSION_DENIED_MESSAGE } from './prompt.ts';
  * package directory). Strips mutating tools per request and every tool for the
  * tool-less agents; rewrites `exclusiveMinimum: 0` → `minimum: 1` because
  * Gemini-backed proxies 400 on it; applies the per-session options file
- * because V2 ignores config model overrides on catalog providers. Plain object
- * export: V2's `Plugin.define` is the identity.
+ * because V2 ignores config model overrides on catalog providers, including a
+ * run-wide cache affinity header. Plain object export: V2's `Plugin.define` is
+ * the identity.
  */
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
 import { readFileSync } from 'node:fs';
@@ -52,9 +53,19 @@ export default {
       const options = sessionOptions(event.sessionID);
       if (options) {
         delete options.jbotSessionLabel;
+        delete options.jbotAffinity;
         Object.assign(event.options, options);
       }
     });
+    try {
+      // Gateways route by this header; a shared run key keeps a run's prompt prefixes on one cache.
+      await ctx.session.hook('model.request', (event) => {
+        const affinity = sessionOptions(event.sessionID)?.jbotAffinity;
+        if (affinity) event.headers['x-session-affinity'] = affinity;
+      });
+    } catch {
+      console.warn('[jbot-review] Request-affinity hook unavailable; sessions keep their own cache routing.');
+    }
     await ctx.permission.hook('evaluate', (event) => {
       if (event.effect === 'ask' || (event.agent === 'jbot-wrapup' && event.action === 'shell')) {
         event.effect = 'deny';

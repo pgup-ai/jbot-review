@@ -590,7 +590,7 @@ async function callerEntries(
 
 function directoryEntries(
   files: PrFile[],
-  changed: Set<string>,
+  changed: Map<string, Set<number>>,
   tracked: Set<string>,
 ): ContextPackEntry[] {
   const directories = new Set(files.map((file) => posix.dirname(file.filename)));
@@ -616,7 +616,8 @@ function directoryEntries(
 
 export async function buildContextPack(
   files: PrFile[],
-  changed: Set<string>,
+  /** Every PR file's changed new-side lines, this page's and other pages'. */
+  changed: Map<string, Set<number>>,
   provider: PackSourceProvider,
   budgetBytes: number,
 ): Promise<ContextPack> {
@@ -640,6 +641,16 @@ export async function buildContextPack(
     ...callers.filter((e) => e.list),
     ...directoryEntries(files, changed, provider.tracked),
   ];
+  // Excerpts of files another page changes would otherwise read as unchanged code.
+  for (const item of ordered) {
+    if (!item.rows.length) continue;
+    const last = Math.max(item.rows.at(-1)![0], item.end ?? 0);
+    const own = diff.get(item.path);
+    const lines = [...(changed.get(item.path) ?? [])]
+      .filter((line) => item.rows[0][0] <= line && line <= last && !own?.has(line))
+      .sort((a, b) => a - b);
+    if (lines.length) item.otherPages = lines;
+  }
   const kept: ContextPackEntry[] = [];
   const omitted: ContextPackEntry[] = [];
   const render = () =>
