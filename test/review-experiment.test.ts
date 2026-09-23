@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { reviewExperiment } from '../src/shared/review-experiment.ts';
+import { reviewExperiment, toolLessAuxiliary } from '../src/shared/review-experiment.ts';
 import { normalizeOptions } from '../src/shared/runner.ts';
 import { runConfiguration } from '../src/shared/run-telemetry.ts';
 
@@ -81,4 +81,19 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   off.exploration.readEvidence = 'linked';
   assert.equal(reviewExperiment({}).reuse.shared, false);
   assert.equal(reviewExperiment({}).exploration.readEvidence, false);
+});
+
+test('context-pack runs auxiliary passes tool-less only on opencode with an agentic aux model', () => {
+  const pack = reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'context-pack' });
+  assert.equal(toolLessAuxiliary(pack, 'opencode', true), true);
+  assert.equal(toolLessAuxiliary(pack, 'opencode', false), false);
+  assert.equal(toolLessAuxiliary(pack, 'pi', true), false);
+  assert.equal(
+    toolLessAuxiliary(
+      reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'diff-batches' }),
+      'opencode',
+      true,
+    ),
+    false,
+  );
 });

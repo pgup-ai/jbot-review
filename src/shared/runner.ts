@@ -24,7 +24,7 @@ import {
 import { buildContextPack } from './context-pack.ts';
 import { mergeSuppliedContexts, type SuppliedContext } from './review-read-locations.ts';
 import { catalogModelLimits } from './pi.ts';
-import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
+import { reviewExperiment, toolLessAuxiliary, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +60,7 @@ import {
   demoteLowConfidenceBlockingFindings,
   mergeVerdictsByLocation,
   resolveFindingAnchors,
+  resolvesFinding,
   isNoiseFile,
   isUnresolvedFinding,
   isPrCleanAfterRun,
@@ -2614,11 +2615,11 @@ async function runReviewPipeline(params: {
     }
     candidateLensKeys = candidateLensKeys.filter((key) => !reusedAux.has(`review-${key}`));
     guidelineCandidate &&= !reusedAux.has('guideline-compliance');
-    // Only opencode has tool-less lens and verification modes; a single-shot model is tool-less already.
-    const toolLessAux =
-      options.experiment.contextPack &&
-      auxBackend.name === 'opencode' &&
-      modelSupportsAgenticTools(auxProviderID, auxModelID);
+    const toolLessAux = toolLessAuxiliary(
+      options.experiment,
+      auxBackend.name,
+      modelSupportsAgenticTools(auxProviderID, auxModelID),
+    );
     const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
@@ -4359,17 +4360,33 @@ export async function requestFindingVerdicts(params: {
           params.modelOptions,
           mode,
         );
+      const check = async (verdict: FindingVerdictList[number]) => {
+        let result = checkConfirmationEvidence(verdict, sourceContext);
+        const target = targets[verdict.index];
+        if (result.verdict === 'confirmed' && result.finding && target) {
+          result = checkConfirmationEvidence(
+            result,
+            joinContext(
+              await (params.sourceContext?.([target]) ??
+                buildFindingSourceContext(params.workspace, [target])),
+              preparedSources.get(target) ?? '',
+            ),
+          );
+        }
+        return result;
+      };
       let batch: FindingVerdictList | undefined;
       if (params.toolLessFirst) {
-        // Only a tool-less confirmation is final: a refutation without a lookup could drop a real bug.
         const first = await verify(targets, 'single-shot').catch((error: unknown) => {
           params.log(
             `(tool-less verification failed: ${error instanceof Error ? error.message : String(error)})`,
           );
           return undefined;
         });
-        const confirmed = (first ?? []).filter(
-          (verdict) => checkConfirmationEvidence(verdict, sourceContext).verdict === 'confirmed',
+        // Only an accepted tool-less confirmation is final: a refutation without a lookup could drop a real bug.
+        const confirmed = (await Promise.all((first ?? []).map(check))).filter(
+          (verdict) =>
+            verdict.verdict === 'confirmed' && resolvesFinding(targets[verdict.index], verdict),
         );
         const rest = targets.filter((_, index) => !confirmed.some((v) => v.index === index));
         params.log(
@@ -4392,21 +4409,10 @@ export async function requestFindingVerdicts(params: {
       } else batch = await verify(targets);
       if (!batch) throw new Error('Finding verification output unusable.');
       const checked = await Promise.all(
-        batch.map(async (verdict) => {
-          let result = checkConfirmationEvidence(verdict, sourceContext);
-          const target = targets[verdict.index];
-          if (result.verdict === 'confirmed' && result.finding && target) {
-            result = checkConfirmationEvidence(
-              result,
-              joinContext(
-                await (params.sourceContext?.([target]) ??
-                  buildFindingSourceContext(params.workspace, [target])),
-                preparedSources.get(target) ?? '',
-              ),
-            );
-          }
-          return { ...result, index: verdict.index + offset };
-        }),
+        batch.map(async (verdict) => ({
+          ...(await check(verdict)),
+          index: verdict.index + offset,
+        })),
       );
       verdicts.push(...checked);
       if (batch.length < targets.length)

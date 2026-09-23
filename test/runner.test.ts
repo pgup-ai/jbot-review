@@ -1850,15 +1850,17 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
 });
 
 it('keeps tool-less confirmations and re-checks the rest within capped tool turns', async () => {
-  const targets: Finding[] = ['a', 'b', 'c'].map((name) => ({
+  const targets: Finding[] = ['a', 'b', 'c', 'd'].map((name) => ({
     path: `${name}.ts`,
     line: 1,
     severity: 'P2',
     title: name,
     body: 'claim',
+    ...(name === 'd' ? { kind: 'investigate' as const } : {}),
   }));
-  for (const firstPass of ['answers', 'fails'] as const) {
+  for (const run of ['answers', 'first fails', 're-check fails'] as const) {
     const calls: string[] = [];
+    const coverage: string[] = [];
     const verdicts = await requestFindingVerdicts({
       workspace: '/unused',
       model: 'test/model',
@@ -1867,36 +1869,45 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
       targets,
       toolLessFirst: true,
       log: () => {},
+      onCoverage: (row) => coverage.push(row.state),
       backend: {
         async runFindingVerification(_model, _context, findings, ...rest) {
           const mode = rest.at(-1);
           calls.push(`${mode}:${findings.map((finding) => finding.title).join('')}`);
-          if (mode === 'capped')
+          if (mode === 'capped') {
+            if (run === 're-check fails') throw new Error('provider unavailable');
             return findings.map((_, index) => ({ index, verdict: 'refuted' as const }));
-          if (firstPass === 'fails') throw new Error('unusable output');
+          }
+          if (run === 'first fails') throw new Error('unusable output');
           return [
             { index: 0, verdict: 'refuted' as const },
             { index: 1, verdict: 'confirmed' as const },
-            // A confirmation quoting code the verifier was not shown is re-checked too.
+            // Re-checked too: a quote of code the verifier was not shown, and a tentative
+            // finding confirmed without an evidence-backed replacement.
             {
               index: 2,
               verdict: 'confirmed' as const,
               finding: { title: 'c', severity: 'P2' as const, kind: 'bug' as const, evidence: 'x' },
             },
+            { index: 3, verdict: 'confirmed' as const },
           ];
         },
       },
     });
     assert.deepEqual(calls, [
-      'single-shot:abc',
-      firstPass === 'answers' ? 'capped:ac' : 'capped:abc',
+      'single-shot:abcd',
+      run === 'first fails' ? 'capped:abcd' : 'capped:acd',
     ]);
+    // A failed re-check returns only the confirmation; the rest stay unverified downstream.
     assert.deepEqual(
       verdicts.map((v) => `${v.index}:${v.verdict}`).sort(),
-      firstPass === 'answers'
-        ? ['0:refuted', '1:confirmed', '2:refuted']
-        : ['0:refuted', '1:refuted', '2:refuted'],
+      run === 'answers'
+        ? ['0:refuted', '1:confirmed', '2:refuted', '3:refuted']
+        : run === 'first fails'
+          ? ['0:refuted', '1:refuted', '2:refuted', '3:refuted']
+          : ['1:confirmed'],
     );
+    assert.deepEqual(coverage, [run === 're-check fails' ? 'failed' : 'completed']);
   }
 });
 
