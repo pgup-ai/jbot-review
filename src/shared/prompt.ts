@@ -758,7 +758,7 @@ export function formatContextPackItem(item: ContextPackEntry): string {
     const shown = entries.join(', ');
     if (kind === 'directory') return `- ${subject}/: ${shown}`;
     if (kind === 'all-shown')
-      return `No references to \`${subject}\` beyond this page's diff and the excerpts above.`;
+      return `No references to \`${subject}\` in JS or TS files beyond this page's diff and the excerpts above.`;
     return kind === 'other-callers'
       ? `Other import-linked callers of \`${subject}\`: ${shown}`
       : `Unverified name matches for \`${subject}\` (no import link found): ${shown}`;
@@ -814,11 +814,14 @@ export function formatContextPack(pack: {
     ...(pack.uncollected
       ? [`- ${pack.uncollected} item(s) not collected within the pack's time and file limits`]
       : []),
-    ...pack.omitted.map((item) => {
-      if (item.list) return `- ${item.list.subject} (${item.slice})`;
-      const [first, last] = contextPackSpan(item);
-      return `- ${item.path}:${first}-${last} (${item.slice})`;
-    }),
+    // A cut all-shown claim leaves the default: callers may exist.
+    ...pack.omitted
+      .filter((item) => item.list?.kind !== 'all-shown')
+      .map((item) => {
+        if (item.list) return `- ${item.list.subject} (${item.slice})`;
+        const [first, last] = contextPackSpan(item);
+        return `- ${item.path}:${first}-${last} (${item.slice})`;
+      }),
   ];
   return [CONTEXT_PACK_NOTE, ...sections, omitted.length ? formatOmittedList(omitted) : '']
     .filter(Boolean)

@@ -119,6 +119,9 @@ const range = (start: number, end: number) =>
 const qualified = (d: { symbol: string; owner?: string }) =>
   d.owner ? `${d.owner}.${d.symbol}` : d.symbol;
 const packageOf = (path: string) => path.split('/').slice(0, 2).join('/');
+/** A blank or comment line, which changes nothing about the declaration around it. */
+const trivia = (source: PackSource, line: number) =>
+  /^(?:\/[/*]|\*|$)/.test(source.lines[line - 1]?.trim() ?? '');
 
 function entry(
   slice: ContextPackSlice,
@@ -180,14 +183,18 @@ function surroundingEntries(
     if (!source || !file.patch) continue;
     const changed = changedEvidenceLines(file.patch);
     const { declarations, callbacks } = source.index;
-    const enclosing = declarations.filter(
+    const enclosing = declarations.filter((d) => ENCLOSING.has(d.kind));
+    const containers = declarations.filter(
       (d) =>
-        ENCLOSING.has(d.kind) ||
-        ((d.kind === 'variable' || d.kind === 'class') && !local(source.index, d)),
+        (d.kind === 'variable' || d.kind === 'class') &&
+        changed.some((line) => within(d, line)) &&
+        !local(source.index, d),
     );
     const ranges: { start: number; end: number; label: string }[] = [];
     for (const line of changed) {
-      const named = innermost(enclosing, line);
+      const named =
+        innermost(enclosing, line) ??
+        (trivia(source, line) ? undefined : innermost(containers, line));
       const outer = named ?? innermost(callbacks, line);
       if (!outer) continue;
       const label = named ? qualified(named) : '';
@@ -446,7 +453,7 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
         d.kind === 'class' &&
         inside.every(
           (line) =>
-            /^(?:\/[/*]|\*|$)/.test(source.lines[line - 1].trim()) ||
+            trivia(source, line) ||
             declarations.some((m) => m.owner === d.symbol && within(m, line)),
         )
       )
@@ -576,15 +583,20 @@ async function callerEntries(
     if (rest.length) entries.push(listEntry('other-callers', subject, rest));
     if (unverified.length) entries.push(listEntry('unverified', subject, unverified));
     else if (
+      !target.owner &&
+      !reader.unsearched.has(target.symbol) &&
       found.length <= MAX_REFERENCES &&
       // An import calls nothing, but a file matched only at its import may call through an alias.
       hits.every(
         (hit) =>
           seen(hit) || (imports.has(hit) && hits.some((h) => h.path === hit.path && seen(h))),
       ) &&
-      // The member search skips files that never name the class, so those must hold no match.
-      (!target.owner || (await reader.references(target.symbol)).length === found.length) &&
-      ![target.symbol, target.owner].some((name) => name && reader.unsearched.has(name))
+      // A default or renamed export reaches callers under names a word search cannot see.
+      !hits.some(
+        (hit) =>
+          hit.path === target.path &&
+          /\b(?:default|as|exports)\b/.test(reader.sources.get(hit.path)!.lines[hit.line - 1]),
+      )
     )
       entries.push(listEntry('all-shown', subject, []));
   }

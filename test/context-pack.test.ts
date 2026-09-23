@@ -172,6 +172,9 @@ test('surrounding code encloses changes in top-level variables and in class bodi
   );
   assert.match(pack.text, /#### apps\/api\/src\/retry\.ts:4-10 \(retried\)\n4: export const/);
   assert.match(pack.text, /#### apps\/api\/src\/retry\.ts:14-17 \(RetryService\)\n14: {3}run/);
+  const blank = [{ filename: 'apps/api/src/ledger.service.ts', patch: '@@ -8,0 +9 @@\n+' }];
+  const spaced = await buildContextPack(blank, CHANGED, provider(), 64 * 1024);
+  assert.doesNotMatch(spaced.text, /\(LedgerService[,)]/);
 });
 
 test('the budget cuts whole items from the end and lists them as omitted', async () => {
@@ -235,7 +238,7 @@ test('callers need an import link, and other name matches stay listed as unverif
   // The import in ledger.service.ts is not shown, but its file's call is.
   assert.match(
     formatPack.text,
-    /18: \}\n\nNo references to `formatId` beyond this page's diff and the excerpts above\./,
+    /18: \}\n\nNo references to `formatId` in JS or TS files beyond this page's diff and the excerpts above\./,
   );
   // The diff shows all of format.ts, so a re-read of it counts as supplied.
   assert.equal(formatPack.supplied.lines.get('apps/api/src/format.ts'), 3);
@@ -261,9 +264,18 @@ test('an all-shown claim needs a complete search and every match shown', async (
     'key));',
     `key)); // ${'x'.repeat(2000)}`,
   );
-  // A failed search, a file matched only at an aliased import, or a cut caller excerpt.
+  // A failed or capped search, an aliased import or export, or a cut caller excerpt.
+  const capped = Array.from({ length: 51 }, () => ({ path: 'apps/api/src/format.ts', line: 1 }));
   for (const [source, budget] of [
     [{ ...provider(), references: () => Promise.reject(new Error('timeout')) }, 64 * 1024],
+    [{ ...provider(), references: async () => capped }, 64 * 1024],
+    [
+      provider({
+        ...REPO,
+        'apps/api/src/format.ts': `${REPO['apps/api/src/format.ts']}\nexport { formatId as fmt };`,
+      }),
+      64 * 1024,
+    ],
     [
       provider({
         ...REPO,
@@ -274,14 +286,9 @@ test('an all-shown claim needs a complete search and every match shown', async (
     [provider({ ...REPO, 'apps/api/src/ledger.service.ts': long }), 1500],
   ] as const)
     assert.doesNotMatch(await text(FORMAT_PAGE, source, budget), /No references to/);
-  // A member search covers only files that name the class, so a match elsewhere voids the claim.
-  assert.match(
-    await text(PAGE, provider({ ...REPO, 'apps/api/src/legacy.ts': '' })),
-    /No references to `LedgerService\.post` beyond/,
-  );
-  const unrelated = 'export const send = (http: { post(): void }) => http.post();';
+  // Member names collide across classes, so members never get the claim.
   assert.doesNotMatch(
-    await text(PAGE, provider({ ...REPO, 'apps/api/src/legacy.ts': unrelated })),
+    await text(PAGE, provider({ ...REPO, 'apps/api/src/legacy.ts': '' })),
     /No references to/,
   );
 });
