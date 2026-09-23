@@ -15,6 +15,7 @@ import {
 import { hermeticOpencodeConfigHome } from './opencode-plugin.ts';
 import { startProgressLogger } from './opencode-session.ts';
 import { REVIEWER_SYSTEM_PROMPT } from './prompt.ts';
+import type { SuppliedContext } from './review-read-locations.ts';
 
 const READY_TIMEOUT_MS = 15_000;
 /** Bounds how long a stopping server keeps its port for the optional stats line. */
@@ -312,6 +313,7 @@ export interface OpencodeRuntime {
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
   verifyFork?: boolean;
   onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
+  suppliedContext?: (session: string) => SuppliedContext | undefined;
   reviewerAgent?: boolean;
   stop(): void;
 }
@@ -329,6 +331,7 @@ export interface StartOpencodeOptions {
   transcriptDir?: string;
   verifyFork?: boolean;
   onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
+  suppliedContext?: (session: string) => SuppliedContext | undefined;
   reviewerAgent?: boolean;
   runStats?: boolean;
 }
@@ -432,6 +435,7 @@ export async function startOpencode(
     transcriptDir: options.transcriptDir,
     verifyFork: options.verifyFork,
     onSourceRead: options.onSourceRead,
+    suppliedContext: options.suppliedContext,
     reviewerAgent: options.reviewerAgent,
     stop,
   };

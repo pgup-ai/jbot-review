@@ -19,6 +19,7 @@ import {
 } from './opencode-config.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import { WRAP_UP_PROMPT } from './prompt.ts';
+import { suppliedOverlap, type SuppliedContext } from './review-read-locations.ts';
 import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import {
   extractPromptTokenUsage,
@@ -371,6 +372,9 @@ export function recordAssistantTools(
   options: {
     experiment?: ReturnType<typeof readExplorationStats>;
     stopReason?: TelemetryStopReason;
+    /** The session's context-pack content, when it got one. */
+    supplied?: SuppliedContext;
+    workspace?: string;
   } = {},
 ): void {
   for (const message of messages) {
@@ -392,6 +396,16 @@ export function recordAssistantTools(
         capability: OPENCODE_TELEMETRY_CAPABILITY,
         toolClass,
         inputBytes: serializedBytes(part.state.input),
+        ...(options.supplied
+          ? {
+              supplied: suppliedOverlap(
+                options.workspace ?? '',
+                part.name,
+                part.state.input ?? {},
+                options.supplied,
+              ),
+            }
+          : {}),
         exactRequest: createHash('sha256')
           .update(JSON.stringify([part.name, part.state.input]))
           .digest('hex'),
@@ -424,6 +438,7 @@ export function recordAssistantTools(
     budgetTier: 'observe-only',
     stopReason: options.stopReason ?? 'completed',
     ...(options.experiment ? { experiment: options.experiment } : {}),
+    ...(options.supplied ? { suppliedTracked: true } : {}),
     ...(messages.length > 0 ? { turnCount: messages.length } : {}),
   });
 }
@@ -604,7 +619,12 @@ async function promptHoldingSlot(
               value - (initialExperiment?.[key] ?? 0),
             ]),
           );
-        recordAssistantTools(telemetry, label, turn, { experiment, stopReason });
+        recordAssistantTools(telemetry, label, turn, {
+          experiment,
+          stopReason,
+          supplied: runtime.suppliedContext?.(label),
+          workspace: runtime.workspace,
+        });
       }
       const turnUsage = sumUsage(turn);
       log(`${label} ${formatTokenUsage(turnUsage)}`);
