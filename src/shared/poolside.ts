@@ -75,6 +75,7 @@ export async function runPoolsideReview(
   options: {
     lensAddendum?: string;
     contextFirst?: boolean;
+    contextPack?: boolean;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
     label?: string;
@@ -89,7 +90,7 @@ export async function runPoolsideReview(
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
     options.embeddedFirstPrompt ?? false,
-    { toolsAvailable: false, contextFirst: options.contextFirst },
+    { toolsAvailable: false, contextFirst: options.contextFirst, contextPack: options.contextPack },
   );
   log(`Prompt assembled (${label}, poolside): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runPoolsidePrompt({

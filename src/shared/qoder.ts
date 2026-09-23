@@ -158,6 +158,7 @@ export async function runQoderReview(
   options: {
     lensAddendum?: string;
     contextFirst?: boolean;
+    contextPack?: boolean;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
     label?: string;
@@ -174,7 +175,7 @@ export async function runQoderReview(
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
     options.embeddedFirstPrompt ?? false,
-    { contextFirst: options.contextFirst },
+    { contextFirst: options.contextFirst, contextPack: options.contextPack },
   );
   log(`Prompt assembled (${label}, qoder): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runQoderPrompt(

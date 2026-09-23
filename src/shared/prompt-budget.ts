@@ -29,7 +29,11 @@ export function budgetReviewBackend(
           options?.lensAddendum,
           options?.evidenceQuotes,
           options?.embeddedFirstPrompt,
-          { toolsAvailable: backend.canReadWorkspace, contextFirst: options?.contextFirst },
+          {
+            toolsAvailable: backend.canReadWorkspace,
+            contextFirst: options?.contextFirst,
+            contextPack: options?.contextPack,
+          },
         ),
       );
       return backend.runReview(model, context, guidelines, log, options);

@@ -9,7 +9,9 @@ import {
   buildShardPlans,
   buildAuxiliaryPlans,
   prioritizeAuxiliaryPlans,
+  addContextPack,
   addReviewEvidence,
+  planPageFiles,
   targetedVerifierContext,
   targetedDiff,
   measureReviewPrompt,
@@ -19,6 +21,8 @@ import {
   COMPLETE_DIFF_OPTIONS,
   type ShardPlan,
 } from './review-plan.ts';
+import { buildContextPack } from './context-pack.ts';
+import type { SuppliedContext } from './review-read-locations.ts';
 import { catalogModelLimits } from './pi.ts';
 import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
@@ -1662,6 +1666,7 @@ async function runReviewPipeline(params: {
     options.experiment.docsPath,
     options.experiment.reuse,
   );
+  const packSupplied = new Map<string, SuppliedContext>();
   const verifierSourceContext =
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
@@ -2300,6 +2305,7 @@ async function runReviewPipeline(params: {
           onSourceRead: evidence.reuse.handoff
             ? (tool, input) => evidence.observe(tool, input)
             : undefined,
+          suppliedContext: (session: string) => packSupplied.get(session),
           reviewerAgent: process.env.JBOT_REVIEWER_AGENT === '1',
           runStats: process.env.JBOT_RUN_STATS === '1',
           explorationExperiment: options.experiment.exploration,
@@ -2653,7 +2659,9 @@ async function runReviewPipeline(params: {
         ),
         summaryScopeBlock,
         reviewFocusBlock,
-        joinContext(blastRadiusBlock, explorationEvidence),
+        options.experiment.contextPack
+          ? explorationEvidence
+          : joinContext(blastRadiusBlock, explorationEvidence),
       ),
       incrementalContext,
     );
@@ -2690,6 +2698,19 @@ async function runReviewPipeline(params: {
           contextFirst: options.sharedPrefixPrompt,
         },
       );
+    const renderPackPrompt = (context: string) =>
+      assembleReviewPrompt(
+        context,
+        guidelinesForPrompt,
+        '',
+        options.evidenceQuotes,
+        options.embeddedFirstPrompt,
+        {
+          toolsAvailable: guidelineSelection.mainCanReadWorkspace,
+          contextFirst: options.sharedPrefixPrompt,
+          contextPack: true,
+        },
+      );
     log(
       `Main prompt budget: ${JSON.stringify(mainPromptBudget)}; input tokens conservatively bounded by UTF-8 bytes.`,
     );
@@ -2710,7 +2731,49 @@ async function runReviewPipeline(params: {
           : undefined,
     });
 
-    await addReviewEvidence(shardPlans, evidence, renderMainPrompt, mainPromptBudget, log);
+    if (options.experiment.contextPack) {
+      const changedPaths = new Set(fullReviewFiles.map((file) => file.filename));
+      const packs = await addContextPack({
+        plans: shardPlans,
+        build: async (plan, budgetBytes, signal) =>
+          buildContextPack(
+            planPageFiles(plan.units ?? []),
+            changedPaths,
+            await evidence.packProvider(signal),
+            budgetBytes,
+          ),
+        renderPrompt: renderPackPrompt,
+        budget: mainPromptBudget,
+        log,
+      });
+      // Pages without a pack get today's evidence under one shared deadline, plus the usage list.
+      const fallbacks = shardPlans.filter((plan) => !plan.contextPack);
+      await addReviewEvidence(fallbacks, evidence, renderMainPrompt, mainPromptBudget, log);
+      for (const plan of blastRadiusBlock ? fallbacks : []) {
+        const context = joinContext(plan.context, blastRadiusBlock);
+        const measured = measureReviewPrompt(renderMainPrompt(context), mainPromptBudget);
+        if (!measured.fits) continue;
+        plan.context = context;
+        plan.baseContext = joinContext(plan.baseContext, blastRadiusBlock);
+        plan.promptBytes = measured.promptBytes;
+      }
+      for (const result of packs) {
+        if (result.pack)
+          for (const label of [result.label, `${result.label}-retry`])
+            packSupplied.set(label, result.pack.supplied);
+        telemetry.recordContextPack({
+          session: result.label,
+          state: result.state,
+          ...(result.reason ? { reason: result.reason } : {}),
+          buildMs: result.buildMs,
+          roomBytes: result.roomBytes,
+          bytes: result.pack ? Buffer.byteLength(result.pack.text) : 0,
+          omitted: result.pack?.omitted ?? 0,
+          uncollected: result.uncollected,
+          slices: result.pack?.slices ?? {},
+        });
+      }
+    } else await addReviewEvidence(shardPlans, evidence, renderMainPrompt, mainPromptBudget, log);
 
     if (telemetry.enabled) {
       const auxEffortOptions = auxOnPoolside
@@ -2857,9 +2920,10 @@ async function runReviewPipeline(params: {
       sweepGuidelines,
     });
 
-    // Only a single-shard main leads with the diff, so only then does a lens on
-    // the same model gain from waiting for main's prefill.
-    const lensSharesMainPrefix = auxModel === model && shardPlans.length <= 1;
+    // Only a single-shard main without a context pack leads with the diff, so only
+    // then does a lens on the same model gain from waiting for main's prefill.
+    const lensSharesMainPrefix =
+      auxModel === model && shardPlans.length <= 1 && !shardPlans[0]?.contextPack;
     const jointGuidelines =
       guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0
         ? complianceGuidelines
@@ -4437,7 +4501,7 @@ export async function runShardedReview(params: {
             '',
             params.evidenceQuotes,
             params.embeddedFirstPrompt,
-            { contextFirst: params.contextFirst },
+            { contextFirst: params.contextFirst, contextPack: plan.contextPack },
           ),
         );
       const oversized = assembledContextWarning(plan.label, promptBytes);
@@ -4516,6 +4580,7 @@ export async function runShardedReview(params: {
           evidenceQuotes: params.evidenceQuotes,
           embeddedFirstPrompt: params.embeddedFirstPrompt,
           contextFirst: params.contextFirst,
+          contextPack: plan.contextPack,
         });
         if (!result.partial) persist(result, primaryFingerprint);
         cover(result.partial ? 'partial' : 'completed');
@@ -4539,7 +4604,7 @@ export async function runShardedReview(params: {
             '',
             params.evidenceQuotes,
             params.embeddedFirstPrompt,
-            { contextFirst: params.contextFirst },
+            { contextFirst: params.contextFirst, contextPack: plan.contextPack },
           ),
         );
         // A prior run's successful retry was saved under the base-context
@@ -4624,6 +4689,7 @@ export async function runShardedReview(params: {
               evidenceQuotes: params.evidenceQuotes,
               embeddedFirstPrompt: params.embeddedFirstPrompt,
               contextFirst: params.contextFirst,
+              contextPack: plan.contextPack,
             },
           );
           if (!result.partial) persist(result, retryFingerprint);

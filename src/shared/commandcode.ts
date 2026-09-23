@@ -248,6 +248,7 @@ export async function runCommandCodeReview(
     guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     contextFirst?: boolean;
+    contextPack?: boolean;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
     label?: string;
@@ -265,7 +266,11 @@ export async function runCommandCodeReview(
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
     options.embeddedFirstPrompt ?? false,
-    { toolsAvailable: Boolean(options.runtime?.tools), contextFirst: options.contextFirst },
+    {
+      toolsAvailable: Boolean(options.runtime?.tools),
+      contextFirst: options.contextFirst,
+      contextPack: options.contextPack,
+    },
   );
   log(
     `Prompt assembled (${label}, commandcode): ${prompt.length} chars, guidelines=${!!guidelines}`,

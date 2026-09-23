@@ -176,6 +176,7 @@ export async function runReview(
     guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     contextFirst?: boolean;
+    contextPack?: boolean;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
     label?: string;
@@ -193,7 +194,11 @@ export async function runReview(
       options.lensAddendum ?? '',
       options.evidenceQuotes ?? false,
       options.embeddedFirstPrompt ?? false,
-      { toolsAvailable: !isSingleShotModel(model), contextFirst: options.contextFirst },
+      {
+        toolsAvailable: !isSingleShotModel(model),
+        contextFirst: options.contextFirst,
+        contextPack: options.contextPack,
+      },
     ),
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);

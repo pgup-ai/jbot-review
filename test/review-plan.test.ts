@@ -44,6 +44,7 @@ import {
   limitReviewBackendSessions,
   type ReviewBackend,
 } from '../src/shared/session-concurrency.ts';
+import type { ReviewResult } from '../src/shared/types.ts';
 
 const renderPrompt = (context: string) => assembleReviewPrompt(context, 'Repository rules.');
 const budget = reviewPromptBudget('cline');
@@ -611,4 +612,32 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     plans.map((plan) => plan.contextPack),
     [true, undefined, undefined, undefined],
   );
+});
+
+test('only the page that got a context pack asks its backend for the pack prompt', async () => {
+  const shards = ['a.ts', 'b.ts'].map((filename) => [
+    { filename, patch: '@@ -1 +1 @@\n-old\n+new' },
+  ]);
+  const plans = buildShardPlans({ ...base, shards });
+  plans[0].contextPack = true;
+  const received = new Map<string | undefined, boolean | undefined>();
+  await runShardedReview({
+    backend: {
+      name: 'fake',
+      async runReview(_model, _context, _guidelines, _log, options): Promise<ReviewResult> {
+        received.set(options?.label, options?.contextPack);
+        return { summary: '', findings: [], addressedPriorComments: [] };
+      },
+    } as ReviewBackend,
+    model: 'test/model',
+    guidelinesForPrompt: '',
+    shardPlans: plans,
+    changedFiles: shards.flat().map((f) => f.filename),
+    context7Active: false,
+    context7ApiKey: '',
+    log: () => {},
+  });
+  assert.deepEqual([...received.keys()], ['review-shard-1', 'review-shard-2']);
+  assert.equal(received.get('review-shard-1'), true);
+  assert.ok(!received.get('review-shard-2'));
 });
