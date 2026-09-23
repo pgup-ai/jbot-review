@@ -308,15 +308,9 @@ function registerSessionOptions(
   const options = sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
   const experiment = runtime.explorationExperiment;
   const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
-  // opencode keys the cache and gateway affinity by session; one run key lets sessions share prefixes.
-  const cacheKey = runtime.runCache?.models.has(spec.model) ? runtime.runCache.key : undefined;
-  if (!options && !label && !cacheKey) return;
+  if (!options && !label) return;
   const map = sessionOptionsByRuntime.get(runtime) ?? {};
-  map[sessionID] = {
-    ...options,
-    ...(label ? { jbotSessionLabel: spec.label } : {}),
-    ...(cacheKey ? { promptCacheKey: cacheKey, jbotAffinity: cacheKey } : {}),
-  };
+  map[sessionID] = { ...options, ...(label ? { jbotSessionLabel: spec.label } : {}) };
   sessionOptionsByRuntime.set(runtime, map);
   const tmp = `${runtime.sessionOptionsFile}.tmp`;
   writeFileSync(tmp, JSON.stringify(map));

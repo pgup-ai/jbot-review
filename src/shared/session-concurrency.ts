@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import type { GuidelineSweep } from './guideline-sweep.ts';
 import {
   Semaphore,
@@ -30,8 +29,6 @@ export interface ReviewBackend {
       lensAddendum?: string;
       contextFirst?: boolean;
       contextPack?: boolean;
-      /** Waited out after slot acquisition, so the session keeps its queue position. */
-      launchDelayMs?: number;
       label?: string;
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;
@@ -263,9 +260,8 @@ export function limitReviewBackendSessions(
           : undefined;
       return withSlots(
         options?.label ?? 'review',
-        async () => {
-          if (options?.launchDelayMs) await sleep(options.launchDelayMs);
-          return backend.runReview(
+        () =>
+          backend.runReview(
             model,
             context,
             guidelines,
@@ -279,8 +275,7 @@ export function limitReviewBackendSessions(
                   ),
                 }
               : options,
-          );
-        },
+          ),
         rolePriority,
         budget,
       );

@@ -37,7 +37,6 @@ import {
   computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
   sharedPrefixLaunchDelayMs,
-  SHARED_PREFIX_STAGGER_MS,
   wrapUpReserveMs,
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
@@ -2319,7 +2318,6 @@ async function runReviewPipeline(params: {
           suppliedContext: (session: string) => packSupplied.get(session),
           reviewerAgent: process.env.JBOT_REVIEWER_AGENT === '1',
           runStats: process.env.JBOT_RUN_STATS === '1',
-          runCacheKey: options.experiment.contextPack ? `jbot-${randomUUID()}` : undefined,
           explorationExperiment: options.experiment.exploration,
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
@@ -2931,11 +2929,6 @@ async function runReviewPipeline(params: {
       onCoverage: recordCoverage,
       cache: shardCache,
       sweepGuidelines,
-      // Later pages wait for the first page's prefill so its run-keyed prefix cache can serve them.
-      launchDelayMs:
-        options.experiment.contextPack && mainOnOpencode && promptCachePolicy.providerPromptCache
-          ? (index) => (index > 0 ? SHARED_PREFIX_STAGGER_MS : 0)
-          : undefined,
     });
 
     // Only a single-shard main without a context pack leads with the diff, so only
@@ -4502,7 +4495,6 @@ export async function runShardedReview(params: {
   onCoverage?: SessionCoverageRecorder;
   /** Content-addressed reuse of completed shard results. */
   cache?: { dir: string; headSha: string; config: string };
-  launchDelayMs?: (index: number) => number;
 }): Promise<{ summary: string; findings: Finding[] }> {
   const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
@@ -4530,7 +4522,7 @@ export async function runShardedReview(params: {
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
-    shardPlans.map(async (plan, index): Promise<ShardOutcome> => {
+    shardPlans.map(async (plan): Promise<ShardOutcome> => {
       const startedAt = Date.now();
       const promptBytes =
         plan.promptBytes ??
@@ -4621,7 +4613,6 @@ export async function runShardedReview(params: {
           embeddedFirstPrompt: params.embeddedFirstPrompt,
           contextFirst: params.contextFirst,
           contextPack: plan.contextPack,
-          launchDelayMs: params.launchDelayMs?.(index),
         });
         if (!result.partial) persist(result, primaryFingerprint);
         cover(result.partial ? 'partial' : 'completed');
