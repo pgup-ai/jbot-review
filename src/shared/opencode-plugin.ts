@@ -9,7 +9,8 @@ import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
  * XDG_CONFIG_HOME's `plugins/` dir (a configured `plugins:` entry would need a
  * package directory). Strips mutating tools per request and every tool for the
  * tool-less agents; rewrites `exclusiveMinimum: 0` → `minimum: 1` because
- * Gemini-backed proxies 400 on it; applies the per-session options file
+ * Gemini-backed proxies 400 on it; drops the nested AGENTS.md instructions
+ * opencode's read tool injects; applies the per-session options file
  * because V2 ignores config model overrides on catalog providers. Plain object
  * export: V2's `Plugin.define` is the identity.
  */
@@ -33,6 +34,18 @@ function geminiSafe(node) {
   for (const value of Object.values(node)) geminiSafe(value);
 }
 
+// opencode's read tool adds each nested AGENTS.md it walks past as an
+// "Instructions from: <path>/AGENTS.md" user message; reviewed-repo text is evidence, never instructions.
+const REPO_INSTRUCTIONS = /^Instructions from: [^\\n]*AGENTS\\.md\\n/;
+function dropRepoInstructions(messages) {
+  if (!Array.isArray(messages)) return;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const { role, content } = messages[i];
+    const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((part) => part?.text ?? '').join('') : '';
+    if (role === 'user' && REPO_INSTRUCTIONS.test(text)) messages.splice(i, 1);
+  }
+}
+
 function sessionOptions(sessionID) {
   const file = process.env.JBOT_OPENCODE_SESSION_OPTIONS;
   if (!file) return undefined;
@@ -49,6 +62,7 @@ export default {
     await ctx.session.hook('context', (event) => {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);
+      dropRepoInstructions(event.messages);
       const options = sessionOptions(event.sessionID);
       if (options) {
         delete options.jbotSessionLabel;

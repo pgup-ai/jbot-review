@@ -100,10 +100,12 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
    escapes the env allowlist), the jbot plugin's `context` hook (removes
    write/edit/patch/apply_patch/multiedit/question/subagent/task from every
-   request and every tool for the single-shot agent; wrap-up and
-   `jbot-closed-book` retain native tool schemas for model and free-tier
-   gateway compatibility, and the permission hook denies wrap-up shell
-   execution and every `jbot-closed-book` call), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
+   request and every tool for the single-shot agent, and drops the
+   "Instructions from:" messages opencode's read tool injects for nested
+   `AGENTS.md` files so repo text never reaches a session as instructions;
+   wrap-up and `jbot-closed-book` retain native tool schemas for model and
+   free-tier gateway compatibility, and the permission hook denies wrap-up
+   shell execution and every `jbot-closed-book` call), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
    the server child so the reviewed repo's committed `.opencode/` (plugins,
    config) never loads — that code runs at server start OUTSIDE the tool
    sandbox. Sessions are hermetic on both sides: the operator's global config
