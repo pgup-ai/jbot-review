@@ -212,6 +212,8 @@ describe('buildBlastRadiusBlock', () => {
       );
       await writeFile(join(repo, 'src', 'dollar.ts'), 'import { foo$ } from "./a.ts";\n');
       await execFileAsync('git', ['add', '-A'], { cwd: repo });
+      // A developer's global color.ui=always must not corrupt the parsed paths.
+      await execFileAsync('git', ['config', 'color.ui', 'always'], { cwd: repo });
 
       const block = await buildBlastRadiusBlock(repo, [
         {
@@ -227,6 +229,7 @@ describe('buildBlastRadiusBlock', () => {
       assert.match(block, /`foo\$` — referenced by unchanged: src\/dollar\.ts/);
       assert.match(block, /`removedAlias` — referenced by unchanged: src\/caller\.ts/);
       assert.doesNotMatch(block, /ghostFn/);
+      assert.ok(!block.includes('\x1b['));
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

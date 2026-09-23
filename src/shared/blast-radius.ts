@@ -80,11 +80,16 @@ export type SymbolGrep = (workspace: string, symbol: string) => Promise<string[]
 
 async function gitGrepFiles(workspace: string, symbol: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync('git', ['grep', '-l', '-w', '-F', '--', symbol], {
-      cwd: workspace,
-      timeout: GIT_GREP_TIMEOUT_MS,
-      maxBuffer: 1024 * 1024,
-    });
+    // A user's color.ui=always would wrap paths in ANSI codes.
+    const { stdout } = await execFileAsync(
+      'git',
+      ['grep', '--no-color', '-l', '-w', '-F', '--', symbol],
+      {
+        cwd: workspace,
+        timeout: GIT_GREP_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      },
+    );
     return stdout.split('\n').filter(Boolean);
   } catch (error) {
     // git grep exits 1 on "no matches" — that is a result, not a failure.

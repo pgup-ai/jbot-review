@@ -114,6 +114,8 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
     "import { review as run } from './another-engine.js';\nrun({ WRONG_BINDING: true });",
   );
   execFileSync('git', ['add', '.'], { cwd: workspace });
+  // A developer's global color.ui=always must not corrupt the parsed paths.
+  execFileSync('git', ['config', 'color.ui', 'always'], { cwd: workspace });
   const store = new EvidenceStore(workspace, [
     {
       filename: 'engine.ts',
@@ -128,6 +130,7 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   });
   assert.match(evidence, /worker.ts/);
   assert.match(evidence, /reviewShards: 1/);
+  assert.match(evidence, /import-linked reference/);
   assert.doesNotMatch(evidence, /WRONG_BINDING/);
 });
 
