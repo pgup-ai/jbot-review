@@ -626,6 +626,7 @@ test('only the page that got a context pack asks its backend for the pack prompt
       name: 'fake',
       async runReview(_model, _context, _guidelines, _log, options): Promise<ReviewResult> {
         received.set(options?.label, options?.contextPack);
+        if (options?.label === 'review-shard-1') throw new Error('Upstream idle timeout exceeded');
         return { summary: '', findings: [], addressedPriorComments: [] };
       },
     } as ReviewBackend,
@@ -637,7 +638,11 @@ test('only the page that got a context pack asks its backend for the pack prompt
     context7ApiKey: '',
     log: () => {},
   });
-  assert.deepEqual([...received.keys()], ['review-shard-1', 'review-shard-2']);
+  assert.deepEqual(
+    [...received.keys()],
+    ['review-shard-1', 'review-shard-2', 'review-shard-1-retry'],
+  );
   assert.equal(received.get('review-shard-1'), true);
+  assert.equal(received.get('review-shard-1-retry'), true);
   assert.ok(!received.get('review-shard-2'));
 });

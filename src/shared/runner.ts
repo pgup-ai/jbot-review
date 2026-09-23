@@ -162,6 +162,7 @@ import {
   REVIEW_LENSES,
   GUIDELINE_REVIEW_LENS,
   LENS_CONTEXT_NOTE,
+  SUPPLEMENTARY_BLOCK_NAMES,
   UNTRUSTED_PR_CONTENT_NOTE,
   buildAddressedPriorCommentsContext,
   buildContext7PromptBlock,
@@ -2640,13 +2641,17 @@ async function runReviewPipeline(params: {
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
+    // Pack pages carry import-linked callers; pages without a pack get the usage list back below.
+    const pageBlocks = options.experiment.contextPack
+      ? kept.filter((block) => block.name !== SUPPLEMENTARY_BLOCK_NAMES.blastRadius)
+      : kept;
     const trimmedCoreContext =
-      dropped.length === 0
+      dropped.length === 0 && pageBlocks.length === kept.length
         ? coreContext
         : joinContext(
             UNTRUSTED_PR_CONTENT_NOTE,
             baseCoreContext,
-            ...kept.map((block) => block.text),
+            ...pageBlocks.map((block) => block.text),
             buildContextTrimNotice(dropped),
           );
 
