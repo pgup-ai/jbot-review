@@ -35,13 +35,14 @@ function geminiSafe(node) {
 }
 
 // opencode's read tool adds each nested AGENTS.md it walks past as an
-// "Instructions from:" user message; reviewed-repo text is evidence, never instructions.
+// "Instructions from: <path>/AGENTS.md" user message; reviewed-repo text is evidence, never instructions.
+const REPO_INSTRUCTIONS = /^Instructions from: [^\\n]*AGENTS\\.md\\n/;
 function dropRepoInstructions(messages) {
   if (!Array.isArray(messages)) return;
   for (let i = messages.length - 1; i >= 0; i--) {
     const { role, content } = messages[i];
     const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((part) => part?.text ?? '').join('') : '';
-    if (role === 'user' && text.startsWith('Instructions from: ')) messages.splice(i, 1);
+    if (role === 'user' && REPO_INSTRUCTIONS.test(text)) messages.splice(i, 1);
   }
 }
 
