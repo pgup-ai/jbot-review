@@ -2738,7 +2738,12 @@ async function runReviewPipeline(params: {
       shards,
       renderPrompt: renderMainPrompt,
       budget: mainPromptBudget,
-      evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
+      // Pages the pack cannot serve get the usage list back after caller evidence.
+      evidenceReserveBytes:
+        REVIEW_EVIDENCE_BYTES +
+        (options.experiment.contextPack && blastRadiusBlock
+          ? Buffer.byteLength(blastRadiusBlock) + 2
+          : 0),
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       diffFirst: options.sharedPrefixPrompt,
       batchDiffScope:
@@ -2764,17 +2769,14 @@ async function runReviewPipeline(params: {
         budget: mainPromptBudget,
         log,
       });
-      // Pages without a pack get today's evidence under one shared deadline, plus the usage list.
-      const fallbacks = shardPlans.filter((plan) => !plan.contextPack);
-      await addReviewEvidence(fallbacks, evidence, renderMainPrompt, mainPromptBudget, log);
-      for (const plan of blastRadiusBlock ? fallbacks : []) {
-        const context = joinContext(plan.context, blastRadiusBlock);
-        const measured = measureReviewPrompt(renderMainPrompt(context), mainPromptBudget);
-        if (!measured.fits) continue;
-        plan.context = context;
-        plan.baseContext = joinContext(plan.baseContext, blastRadiusBlock);
-        plan.promptBytes = measured.promptBytes;
-      }
+      await addReviewEvidence(
+        shardPlans.filter((plan) => !plan.contextPack),
+        evidence,
+        renderMainPrompt,
+        mainPromptBudget,
+        log,
+        blastRadiusBlock,
+      );
       for (const result of packs) {
         if (result.pack)
           for (const label of [result.label, `${result.label}-retry`])

@@ -398,8 +398,11 @@ test('late diff pages receive actual unchanged caller code and verifier selectio
   };
   const all = [...filler, file];
   const plans = buildShardPlans({ ...base, shards: [[file]], evidenceReserveBytes: 8192 });
-  await addReviewEvidence(plans, new EvidenceStore(workspace, all), renderPrompt, budget, () => {});
+  const usage = '## Changed symbol usage\n- `total` — referenced by unchanged: consumer.ts';
+  const store = new EvidenceStore(workspace, all);
+  await addReviewEvidence(plans, store, renderPrompt, budget, () => {}, usage);
   assert.match(plans[0].context, /charge = amount\(1\) \* 100/);
+  assert.ok(plans[0].context.endsWith(usage) && plans[0].baseContext.endsWith(usage));
   assert.ok(measureReviewPrompt(renderPrompt(plans[0].context), budget).fits);
   const other = buildShardPlans({ ...base, shards: [filler] });
   assert.match(

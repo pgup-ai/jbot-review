@@ -380,6 +380,8 @@ export async function addReviewEvidence(
   renderPrompt: (context: string, guidelines?: string) => string,
   budget: ReviewPromptBudget,
   log: (message: string) => void,
+  /** Appended after the caller evidence; planning reserved its room. */
+  trailer = '',
 ): Promise<void> {
   let next = 0;
   const deadline = Date.now() + 5000;
@@ -415,8 +417,9 @@ export async function addReviewEvidence(
           REVIEW_EVIDENCE_BYTES - 2,
           'Caller evidence',
         );
-        plan.context += `\n\n${block}`;
-        plan.baseContext += `\n\n${block}`;
+        const addition = trailer ? `${block}\n\n${trailer}` : block;
+        plan.context += `\n\n${addition}`;
+        plan.baseContext += `\n\n${addition}`;
         const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
         if (!measured.fits)
           throw new Error(
