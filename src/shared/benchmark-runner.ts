@@ -18,6 +18,9 @@ export interface BenchmarkProgramMetrics {
   cacheReadTokens: number;
   costUsd: number;
   sessions: number;
+  /** Model turns across main review pages; absent from rows written before it existed. */
+  mainTurns?: number;
+  mainExecutionMs?: number;
 }
 
 export function emptyBenchmarkProgramMetrics(): BenchmarkProgramMetrics {
@@ -28,6 +31,8 @@ export function emptyBenchmarkProgramMetrics(): BenchmarkProgramMetrics {
     cacheReadTokens: 0,
     costUsd: 0,
     sessions: 0,
+    mainTurns: 0,
+    mainExecutionMs: 0,
   };
 }
 
@@ -71,6 +76,21 @@ export function parseBenchmarkTelemetry(telemetry: string | undefined): Benchmar
     }
     if (!isRecord(parsed)) continue;
     const row = parsed;
+    if (
+      row.kind === 'exploration' &&
+      typeof row.session === 'string' &&
+      /^review(?:-shard-\d+)?(?:-retry)?$/.test(row.session) &&
+      typeof row.turnCount === 'number'
+    )
+      metrics.mainTurns! += row.turnCount;
+    // Session-scoped rows overlap the run-scoped one.
+    if (
+      row.kind === 'phase' &&
+      row.phase === 'main-execution' &&
+      row.scope === 'run' &&
+      typeof row.durationMs === 'number'
+    )
+      metrics.mainExecutionMs! += row.durationMs;
     if (row.kind !== 'session') continue;
     metrics.sessions += 1;
     for (const key of [

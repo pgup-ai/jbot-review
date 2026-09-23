@@ -417,6 +417,8 @@ function sumProgram(rows: BenchmarkCaseRow[]): BenchmarkProgramMetrics {
       cacheReadTokens: sum.cacheReadTokens + row.program.cacheReadTokens,
       costUsd: sum.costUsd + row.program.costUsd,
       sessions: sum.sessions + row.program.sessions,
+      mainTurns: (sum.mainTurns ?? 0) + (row.program.mainTurns ?? 0),
+      mainExecutionMs: (sum.mainExecutionMs ?? 0) + (row.program.mainExecutionMs ?? 0),
     }),
     {
       inputTokens: 0,
@@ -425,6 +427,8 @@ function sumProgram(rows: BenchmarkCaseRow[]): BenchmarkProgramMetrics {
       cacheReadTokens: 0,
       costUsd: 0,
       sessions: 0,
+      mainTurns: 0,
+      mainExecutionMs: 0,
     },
   );
 }

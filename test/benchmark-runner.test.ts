@@ -30,6 +30,18 @@ describe('benchmark runner decisions', () => {
           cacheReadTokens: 3,
           estimatedCostUsd: 0.25,
         }),
+        JSON.stringify({ kind: 'exploration', session: 'review-shard-1', turnCount: 4 }),
+        JSON.stringify({ kind: 'exploration', session: 'review-shard-2', turnCount: 3 }),
+        JSON.stringify({ kind: 'exploration', session: 'review-shard-2-retry', turnCount: 2 }),
+        JSON.stringify({ kind: 'exploration', session: 'review-interactions', turnCount: 9 }),
+        JSON.stringify({ kind: 'phase', phase: 'main-execution', scope: 'run', durationMs: 1200 }),
+        JSON.stringify({
+          kind: 'phase',
+          phase: 'main-execution',
+          scope: 'session',
+          session: 'review-shard-1',
+          durationMs: 900,
+        }),
       ].join('\n'),
     );
     assert.deepEqual(metrics, {
@@ -39,6 +51,8 @@ describe('benchmark runner decisions', () => {
       cacheReadTokens: 3,
       costUsd: 0.25,
       sessions: 1,
+      mainTurns: 9,
+      mainExecutionMs: 1200,
     });
   });
 
