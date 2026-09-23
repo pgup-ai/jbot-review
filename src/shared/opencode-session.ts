@@ -645,7 +645,9 @@ async function promptHoldingSlot(
     }
 
     const agent = sessionsByClient.get(client)?.get(sessionID)?.agent ?? MAIN_AGENT;
-    const canWrapUp = agent !== WRAPUP_AGENT && !TOOL_LESS_AGENTS.has(agent);
+    // A wrap-up turn never wraps up again; closed-book stays in place so its tools stay denied.
+    const canWrapUp =
+      agent !== WRAPUP_AGENT && !TOOL_LESS_AGENTS.has(agent) && spec.text !== WRAP_UP_PROMPT;
     const reserve =
       canWrapUp && spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
     let requestWrapUp: ((budgetMs: number) => void) | undefined;
@@ -670,8 +672,9 @@ async function promptHoldingSlot(
         );
         await interruptBestEffort(client, sessionID, label, log);
         await recordTurn([], 'aborted');
-        await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT }, control());
-        rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
+        const wrapUpAgent = agent === CLOSED_BOOK_AGENT ? agent : WRAPUP_AGENT;
+        await client.session.switchAgent({ sessionID, agent: wrapUpAgent }, control());
+        rememberSession(client, sessionID, { agent: wrapUpAgent });
         try {
           const wrapped = await promptHoldingSlot(runtime, sessionID, {
             ...spec,

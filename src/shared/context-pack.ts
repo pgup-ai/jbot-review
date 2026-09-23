@@ -3,6 +3,7 @@ import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { numberNewSideLines, PATH_PATTERNS } from './diff-context.ts';
 import {
   changedEvidenceLines,
+  JS_SOURCE,
   resolveEvidenceImport,
   type DeclarationKind,
   type PathAlias,
@@ -655,6 +656,15 @@ export async function buildContextPack(
       new Set(Array.from(newSideLines((file.patch ?? '').replace(/\n$/, '')), (l) => l.line)),
     ]),
   );
+  // A changed JS/TS file the provider could not index leaves the page without its callers.
+  for (const [path, lines] of diff)
+    if (
+      lines.size &&
+      JS_SOURCE.test(path) &&
+      !reader.sources.get(path) &&
+      !reader.refused.has(path)
+    )
+      reader.failures++;
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
   const changed: Lines = new Map(
     prFiles.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch ?? ''))]),

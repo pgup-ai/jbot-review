@@ -14,7 +14,11 @@ import {
   runReview,
 } from '../src/shared/opencode.ts';
 import { permissionRules } from '../src/shared/opencode-config.ts';
-import { CONTINUATION_NUDGE_PROMPT, NO_TOOLS_REVIEW_DIRECTIVE } from '../src/shared/prompt.ts';
+import {
+  CONTINUATION_NUDGE_PROMPT,
+  NO_TOOLS_REVIEW_DIRECTIVE,
+  WRAP_UP_PROMPT,
+} from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 import {
   fakeOpencodeServer,
@@ -187,19 +191,27 @@ describe('runReview on V2', () => {
   });
 
   it('marks a review wrapped up by the grace finalize partial and skips the guideline sweep', async () => {
-    const fake = fakeOpencodeServer((session) =>
-      session.agent === 'jbot-wrapup' ? { text: '{"findings":[]}' } : { hang: true },
-    );
-    const rt = runtime(fake);
-    const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, {
-      timeoutMs: 60_000,
-      guidelineSweep: { guidelines: 'g', findings: [] } as never,
-    });
-    while (fake.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
-    const result = await review;
-    assert.equal(result.partial, true);
-    assert.equal(fake.prompts.length, 2);
+    for (const toolLess of [false, true]) {
+      const wrapUpAgents: string[] = [];
+      const fake = fakeOpencodeServer((session, text) => {
+        if (text !== WRAP_UP_PROMPT) return { hang: true };
+        wrapUpAgents.push(session.agent);
+        return { text: '{"findings":[]}' };
+      });
+      const rt = runtime(fake);
+      const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, {
+        timeoutMs: 60_000,
+        toolLess,
+        guidelineSweep: { guidelines: 'g', findings: [] } as never,
+      });
+      while (fake.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
+      const result = await review;
+      assert.equal(result.partial, true);
+      assert.equal(fake.prompts.length, 2);
+      // A closed-book pass wraps up in place, so its tools stay denied.
+      assert.deepEqual(wrapUpAgents, [toolLess ? 'jbot-closed-book' : 'jbot-wrapup']);
+    }
   });
 });
 

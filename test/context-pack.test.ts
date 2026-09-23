@@ -210,11 +210,16 @@ test('changed symbols past the cap are named in Omitted', async () => {
 });
 
 test('a source the provider cannot deliver makes the pack partial', async () => {
-  const failing = { ...provider(), load: async () => Promise.reject(new Error('timeout')) };
-  const pack = await buildContextPack(PAGE, CHANGED, failing, 64 * 1024);
-  assert.equal(pack.state, 'partial');
-  assert.equal(pack.uncollected, 1);
-  assert.match(pack.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
+  // A rejected load, and a changed JS/TS file the provider could not index.
+  for (const load of [async () => Promise.reject(new Error('timeout')), async () => undefined]) {
+    const pack = await buildContextPack(PAGE, CHANGED, { ...provider(), load }, 64 * 1024);
+    assert.equal(pack.state, 'partial');
+    assert.equal(pack.uncollected, 1);
+    assert.match(pack.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
+  }
+  const docs = [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b' }];
+  const unindexed = { ...provider(), load: async () => undefined };
+  assert.equal((await buildContextPack(docs, docs, unindexed, 64 * 1024)).state, 'complete');
 });
 
 test('used definitions follow imports, path aliases, re-exports and injected services', async () => {
