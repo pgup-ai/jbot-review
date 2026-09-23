@@ -134,6 +134,21 @@ export interface ExplorationTelemetryRow {
   unchangedRepeatCalls?: number;
   changedRepeatCalls?: number;
   unchangedRepeatDurationMs?: number;
+  suppliedRereads?: number;
+  suppliedSearches?: number;
+}
+
+export interface ContextPackTelemetryRow {
+  kind: 'context-pack';
+  session: string;
+  state: 'complete' | 'partial' | 'fallback';
+  reason?: 'empty' | 'error' | 'overflow' | 'partial';
+  buildMs: number;
+  roomBytes: number;
+  bytes: number;
+  omitted: number;
+  uncollected: number;
+  slices: Partial<Record<string, { items: number; bytes: number }>>;
 }
 
 export interface PhaseTelemetryStart {
@@ -306,6 +321,7 @@ const STAGE_ORDER: TelemetryStage[] = ['gated', 'deduped', 'suppressed', 'verifi
 export interface TelemetryRecorder {
   recordEvidenceCache(row: EvidenceCacheStats): void;
   recordJevPrefetch(row: JevPrefetchStats): void;
+  recordContextPack(row: Omit<ContextPackTelemetryRow, 'kind'>): void;
   readonly enabled: boolean;
   /** Tag findings with a stable id + origin session; returns the tagged copies. */
   produced(session: string, findings: Finding[]): Finding[];
@@ -333,6 +349,7 @@ export interface TelemetryRecorder {
 const DISABLED: TelemetryRecorder = {
   recordEvidenceCache: () => undefined,
   recordJevPrefetch: () => undefined,
+  recordContextPack: () => undefined,
   enabled: false,
   produced: (_session, findings) => findings,
   snapshot: () => undefined,
@@ -381,6 +398,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
   const prefetch: JevPrefetchStats[] = [];
+  const packs: ContextPackTelemetryRow[] = [];
   let evidenceCache: EvidenceCacheStats | undefined;
   const progress: CommandCodeProgressTelemetryRow[] = [];
   const phases: PhaseTelemetryRow[] = [];
@@ -479,6 +497,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     recordJevPrefetch(row) {
       prefetch.push(row);
     },
+    recordContextPack(row) {
+      packs.push({ kind: 'context-pack', ...row });
+    },
     recordOutcome(row) {
       outcomes.push({ kind: 'outcome', ...row });
     },
@@ -519,6 +540,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         ...header,
         ...phases,
         ...prefetch,
+        ...packs,
         ...(evidenceCache ? [evidenceCache] : []),
         ...coverage,
         ...outcomes,

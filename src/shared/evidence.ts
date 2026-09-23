@@ -1,4 +1,4 @@
-import { parse } from '@babel/parser';
+import { parse, type ParserPlugin } from '@babel/parser';
 import { execFile } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -26,10 +26,12 @@ import {
   formatEvidenceCoverage,
   type JevCandidate,
 } from './prompt.ts';
+import type { PackSource, PackSourceProvider } from './context-pack.ts';
 import type { PrFile } from './github.ts';
 import type { Finding } from './types.ts';
 
 const exec = promisify(execFile);
+export const JS_GLOBS = ['*.ts', '*.tsx', '*.js', '*.jsx', '*.mts', '*.cts', '*.mjs', '*.cjs'];
 export const JS_SOURCE = /\.[cm]?[jt]sx?$/i;
 type Ast = {
   type: string;
@@ -41,21 +43,160 @@ const name = (value: unknown) => {
   const n = ast(value);
   return typeof n?.name === 'string' ? n.name : typeof n?.value === 'string' ? n.value : '';
 };
+// Falls back to an inner .id (e.g. a PrivateName like #repo lacks its own .name/.value).
+const keyOrPrivateName = (value: unknown) => name(value) || name(ast(value)?.id);
+const keyName = (key: unknown, computed: unknown) =>
+  computed && ast(key)?.type !== 'StringLiteral' ? '' : keyOrPrivateName(key);
 type SourceIndex = {
   definitions: { symbol: string; start: number; end: number }[];
   imports: { local: string; imported: string; from: string; line: number }[];
   uses: { symbol: string; line: number }[];
 };
 
-export function indexEvidenceSource(path: string, text: string): SourceIndex {
-  const result: SourceIndex = { definitions: [], imports: [], uses: [] };
-  if (!JS_SOURCE.test(path)) return result;
-  const tree = parse(text, {
-    sourceType: 'unambiguous',
-    plugins: ['typescript', 'jsx'],
+export type DeclarationKind =
+  'function' | 'class' | 'variable' | 'type' | 'method' | 'property' | 'constructor';
+
+export type RichSourceIndex = SourceIndex & {
+  declarations: {
+    symbol: string;
+    start: number;
+    end: number;
+    kind: DeclarationKind;
+    owner?: string;
+  }[];
+  callbacks: { start: number; end: number }[];
+  reexports: { exported: string; imported: string; from: string }[];
+  /** Constructor parameter properties: `this.<name>` holds a `<type>`. */
+  injected: { owner: string; name: string; type: string }[];
+  /** `this.<member>` has target '', `this.<target>.<member>` names the target. */
+  memberCalls: { target: string; member: string; line: number }[];
+};
+
+const FUNCTION_VALUE = new Set(['FunctionExpression', 'ArrowFunctionExpression']);
+const MEMBER_KIND: Record<string, DeclarationKind> = {
+  ClassMethod: 'method',
+  ClassPrivateMethod: 'method',
+  TSDeclareMethod: 'method',
+  ClassProperty: 'property',
+  ClassPrivateProperty: 'property',
+};
+const TYPE_DECLARATION = new Set([
+  'TSInterfaceDeclaration',
+  'TSTypeAliasDeclaration',
+  'TSEnumDeclaration',
+]);
+
+/** NestJS parameter decorators need the legacy plugin; only the modern one reads a decorated computed key. */
+function parseSource(path: string, text: string) {
+  // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
+  const plugins: ParserPlugin[] = /\.[cm]?ts$/i.test(path) ? ['typescript'] : ['typescript', 'jsx'];
+  const options = (decorators: ParserPlugin) => ({
+    sourceType: 'unambiguous' as const,
+    plugins: [...plugins, decorators],
     attachComment: false,
   });
-  function walk(n: Ast) {
+  try {
+    return parse(text, options('decorators-legacy'));
+  } catch {
+    return parse(text, options('decorators'));
+  }
+}
+
+export function indexEvidenceSource(path: string, text: string): SourceIndex;
+export function indexEvidenceSource(
+  path: string,
+  text: string,
+  options: { rich: true },
+): RichSourceIndex;
+export function indexEvidenceSource(
+  path: string,
+  text: string,
+  options: { rich?: boolean } = {},
+): SourceIndex | RichSourceIndex {
+  const result: RichSourceIndex = {
+    definitions: [],
+    imports: [],
+    uses: [],
+    declarations: [],
+    callbacks: [],
+    reexports: [],
+    injected: [],
+    memberCalls: [],
+  };
+  function indexRich(n: Ast, parent: Ast | undefined, owner: string | undefined) {
+    if (!n.loc) return;
+    const start = n.loc.start.line;
+    const end = n.loc.end.line;
+    const declare = (symbol: string, kind: DeclarationKind, memberOf?: string) => {
+      if (symbol)
+        result.declarations.push({
+          symbol,
+          start,
+          end,
+          kind,
+          ...(memberOf ? { owner: memberOf } : {}),
+        });
+    };
+    const member = MEMBER_KIND[n.type];
+    if (n.type === 'FunctionDeclaration') declare(name(n.id), 'function');
+    else if (n.type === 'ClassDeclaration') declare(name(n.id), 'class');
+    else if (TYPE_DECLARATION.has(n.type)) declare(name(n.id), 'type');
+    else if (n.type === 'VariableDeclarator')
+      declare(name(n.id), FUNCTION_VALUE.has(ast(n.init)?.type ?? '') ? 'function' : 'variable');
+    else if (
+      n.type === 'ObjectMethod' ||
+      (n.type === 'ObjectProperty' && FUNCTION_VALUE.has(ast(n.value)?.type ?? ''))
+    )
+      declare(keyName(n.key, n.computed), 'function');
+    else if (member && owner && n.kind === 'constructor') {
+      declare('constructor', 'constructor', owner);
+      for (const param of n.params as Ast[]) {
+        const parameter = param.type === 'TSParameterProperty' ? ast(param.parameter) : undefined;
+        const type = ast(ast(ast(parameter?.typeAnnotation)?.typeAnnotation)?.typeName);
+        if (parameter && type?.type === 'Identifier')
+          result.injected.push({ owner, name: name(parameter), type: name(type) });
+      }
+    } else if (member && owner) {
+      // An arrow/function-valued class property (`handle = () => {}`) is a method, not data.
+      const kind =
+        member === 'property' && FUNCTION_VALUE.has(ast(n.value)?.type ?? '') ? 'method' : member;
+      declare(keyName(n.key, n.computed), kind, owner);
+    } else if (
+      FUNCTION_VALUE.has(n.type) &&
+      ['CallExpression', 'NewExpression'].includes(parent?.type ?? '')
+    )
+      result.callbacks.push({ start, end });
+    else if (n.type === 'ExportAllDeclaration')
+      result.reexports.push({ exported: '*', imported: '*', from: name(n.source) });
+    else if (n.type === 'ExportNamedDeclaration' && n.source)
+      for (const s of n.specifiers as Ast[])
+        result.reexports.push({
+          exported: name(s.exported),
+          imported: s.type === 'ExportNamespaceSpecifier' ? '*' : name(s.local),
+          from: name(n.source),
+        });
+    else if (
+      (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') &&
+      !n.computed
+    ) {
+      const object = ast(n.object);
+      // The property's own line, not `this`'s, so a chain broken across lines matches changed lines.
+      const line = ast(n.property)?.loc?.start.line ?? start;
+      if (object?.type === 'ThisExpression')
+        result.memberCalls.push({ target: '', member: keyOrPrivateName(n.property), line });
+      else if (
+        (object?.type === 'MemberExpression' || object?.type === 'OptionalMemberExpression') &&
+        !object.computed &&
+        ast(object.object)?.type === 'ThisExpression'
+      )
+        result.memberCalls.push({
+          target: keyOrPrivateName(object.property),
+          member: keyOrPrivateName(n.property),
+          line,
+        });
+    }
+  }
+  function walk(n: Ast, parent?: Ast, owner?: string) {
     if (n.type === 'ImportDeclaration') {
       for (const s of n.specifiers as Ast[])
         result.imports.push({
@@ -66,6 +207,7 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
         });
       return;
     }
+    if (options.rich) indexRich(n, parent, owner);
     const symbol = name(n.id);
     if (
       symbol &&
@@ -76,6 +218,8 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
     }
     if (n.type === 'Identifier' && n.loc)
       result.uses.push({ symbol: name(n), line: n.loc.start.line });
+    const scope =
+      n.type === 'ClassDeclaration' || n.type === 'ClassExpression' ? symbol || undefined : owner;
     for (const [key, value] of Object.entries(n)) {
       if (
         [
@@ -89,12 +233,14 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
       )
         continue;
       if (Array.isArray(value)) {
-        for (const child of value) if (ast(child)?.type) walk(child as Ast);
-      } else if (ast(value)?.type) walk(value as Ast);
+        for (const child of value) if (ast(child)?.type) walk(child as Ast, n, scope);
+      } else if (ast(value)?.type) walk(value as Ast, n, scope);
     }
   }
-  walk(tree as unknown as Ast);
-  return result;
+  if (JS_SOURCE.test(path)) walk(parseSource(path, text) as unknown as Ast);
+  if (options.rich) return result;
+  const { definitions, imports, uses } = result;
+  return { definitions, imports, uses };
 }
 
 export function changedEvidenceLines(patch: string): number[] {
@@ -110,20 +256,88 @@ export function changedEvidenceLines(patch: string): number[] {
   return [...new Set(lines)];
 }
 
+export interface PathAlias {
+  /** Specifier prefix; wildcard aliases stop at the `*`. */
+  prefix: string;
+  wildcard: boolean;
+  targets: string[];
+}
+
+/** tsconfig `compilerOptions.paths`, tolerating a leading BOM, comments and trailing commas. */
+export function parseTsconfigPaths(text: string): PathAlias[] {
+  const source = text.replace(/^\uFEFF/, '');
+  let json = '';
+  for (let i = 0, quoted = false; i < source.length; i++) {
+    const c = source[i];
+    if (quoted) {
+      json += c;
+      if (c === '\\') json += source[++i] ?? '';
+      else if (c === '"') quoted = false;
+    } else if (c === '/' && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n') i++;
+      json += '\n';
+    } else if (c === '/' && source[i + 1] === '*') {
+      i = source.indexOf('*/', i + 2);
+      if (i < 0) break;
+      i++;
+    } else {
+      quoted = c === '"';
+      json += c;
+    }
+  }
+  const options = (
+    JSON.parse(json.replace(/,(\s*[}\]])/g, '$1')) as {
+      compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> };
+    }
+  ).compilerOptions;
+  const baseUrl = options?.baseUrl ?? '.';
+  // Cap entries/targets: a hostile tsconfig must not blow up alias-matching CPU.
+  return Object.entries(options?.paths ?? {})
+    .slice(0, 256)
+    .map(([key, targets]) => ({
+      prefix: key.replace(/\*$/, ''),
+      wildcard: key.endsWith('*'),
+      targets: targets.slice(0, 8).map((target) => posix.normalize(posix.join(baseUrl, target))),
+    }))
+    .sort((a, b) => Number(a.wildcard) - Number(b.wildcard) || b.prefix.length - a.prefix.length);
+}
+
+const IMPORT_SUFFIXES = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mts',
+  '.cts',
+  '/index.ts',
+  '/index.tsx',
+  '/index.js',
+];
+
+/** Only tracked paths resolve, so an alias in a PR's tsconfig cannot point reads outside the repo. */
 export function resolveEvidenceImport(
   path: string,
   specifier: string,
   paths: Set<string>,
+  aliases: PathAlias[] = [],
 ): string | undefined {
-  if (!specifier.startsWith('.')) return undefined;
-  const base = posix.normalize(posix.join(posix.dirname(path), specifier));
-  const stem = base.replace(/\.[cm]?js$/, '');
-  return [
-    base,
-    ...['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '/index.ts', '/index.tsx', '/index.js'].map(
-      (ext) => stem + ext,
-    ),
-  ].find((p) => paths.has(p));
+  const bases = specifier.startsWith('.')
+    ? [posix.normalize(posix.join(posix.dirname(path), specifier))]
+    : aliases.flatMap(({ prefix, wildcard, targets }) =>
+        wildcard
+          ? specifier.startsWith(prefix)
+            ? targets.map((target) => target.replace('*', () => specifier.slice(prefix.length)))
+            : []
+          : specifier === prefix
+            ? targets
+            : [],
+      );
+  for (const base of bases) {
+    const stem = base.replace(/\.[cm]?js$/, '');
+    const hit = [base, ...IMPORT_SUFFIXES.map((suffix) => stem + suffix)].find((p) => paths.has(p));
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 export function evidenceMode(value: string | undefined): JevPrefetchMode {
@@ -172,6 +386,7 @@ export class EvidenceStore {
   private sources = new SourceCache();
   private observations = new Map<string, { path: string; line: number }>();
   private inventory?: Promise<Set<string>>;
+  private packInventory?: Promise<{ tracked: Set<string>; aliases: PathAlias[] }>;
   private searches = new Map<string, Promise<string[]>>();
   private inventoryReads = 0;
   private searchCalls = 0;
@@ -227,6 +442,74 @@ export class EvidenceStore {
       if (this.observations.size >= 64) break;
       this.observations.set(`${ref.path}:${ref.line}`, ref);
     }
+  }
+
+  /** Head-source access for one page's context pack; inventory and aliases load once per run. */
+  async packProvider(signal: AbortSignal): Promise<PackSourceProvider> {
+    this.packInventory ??= (async () => {
+      const tracked = await this.tracked(AbortSignal.timeout(4000));
+      // Nx-style repos keep `paths` in tsconfig.base.json.
+      for (const file of ['tsconfig.json', 'tsconfig.base.json']) {
+        try {
+          const config = await this.read(file, AbortSignal.timeout(1000), tracked);
+          const aliases = config ? parseTsconfigPaths(config.text) : [];
+          if (aliases.length) return { tracked, aliases };
+        } catch {
+          // An unreadable or invalid config keeps relative imports only.
+        }
+      }
+      return { tracked, aliases: [] };
+    })().catch((error) => {
+      // The next page retries instead of every page falling back for the rest of the run.
+      this.packInventory = undefined;
+      throw error;
+    });
+    const { tracked, aliases } = await waitForEvidence(this.packInventory, signal);
+    let files = 0;
+    let bytes = 0;
+    return {
+      tracked,
+      aliases,
+      load: async (path): Promise<PackSource | undefined> => {
+        if (!JS_SOURCE.test(path)) return undefined;
+        signal.throwIfAborted();
+        // A cap miss counts as uncollected, like a deadline miss.
+        if (files >= 64 || bytes >= 2 * 1024 * 1024) throw new Error('context pack file cap');
+        const source = await this.read(path, signal, tracked);
+        // The tracked reader swallows aborts, so a deadline surfaces here as a rejection.
+        signal.throwIfAborted();
+        // A file cut at the read cap cannot be parsed or cited by line.
+        if (!source || source.truncated) return undefined;
+        files++;
+        bytes += Buffer.byteLength(source.text);
+        // Babel also ends lines at a lone \r, U+2028 and U+2029; split() and git grep do not.
+        if (/\r(?!\n)|[\u2028\u2029]/.test(source.text)) return undefined;
+        try {
+          const index = indexEvidenceSource(path, source.text, { rich: true });
+          return { lines: source.text.split(/\r?\n/), index };
+        } catch {
+          // Syntax Babel rejects is a missing source, not a missed deadline.
+          return undefined;
+        }
+      },
+      references: async (symbol, paths) => {
+        const scope = paths?.map((path) => `:(literal)${path}`) ?? JS_GLOBS;
+        const { stdout } = await exec(
+          'git',
+          ['grep', '--no-color', '-n', '-z', '-I', '-w', '-F', '-e', symbol, '--', ...scope],
+          { cwd: this.workspace, signal, maxBuffer: 4 * 1024 * 1024 },
+        ).catch((error) => {
+          if (error.code === 1) return { stdout: '' };
+          throw error;
+        });
+        // Records are path NUL line NUL text, and a path may hold a newline. -I keeps
+        // NUL-free binary notices out of the records; /y keeps parsing linear.
+        return [...stdout.matchAll(/([^\0]*)\0(\d+)\0[^\n]*\n/gy)].map(([, path, line]) => ({
+          path,
+          line: Number(line),
+        }));
+      },
+    };
   }
 
   private async tracked(signal: AbortSignal): Promise<Set<string>> {
@@ -671,7 +954,7 @@ export class EvidenceStore {
     const digest = evidenceHash(source.text);
     const old = this.cache.get(path);
     if (old?.digest === digest && old.truncated === source.truncated) return old;
-    const key = JSON.stringify(['index-v2-babel-7.29.9', path, digest, source.truncated]);
+    const key = JSON.stringify(['index-v3-babel-7.29.9', path, digest, source.truncated]);
     const persisted = await this.disk.get(key);
     let index: SourceIndex;
     const fromDisk = validSourceIndex(persisted);

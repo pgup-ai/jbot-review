@@ -31,6 +31,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 | `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                                                                                                                                              |
 | `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                                                                                                                                          |
 | `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                                                                                                                                         |
+| `src/shared/context-pack.ts`        | Pure per-page context pack for `JBOT_REVIEW_EXPERIMENT=context-pack`: selects, ranks and byte-budgets surrounding code, used definitions, import-linked callers, other pages' diffs and a directory map via an injected provider                       |
 | `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                   |
 | `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                         |
 | `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                        |
@@ -91,7 +92,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    gateway pins the right side back to HEAD in a throwaway linked worktree —
    the companion clones a committed ref, and the two must agree.
 8. **Read-only enforced in four layers** for every opencode session: the
-   `plan` agent (or the opt-in `jbot-reviewer` with the same session rules),
+   `plan` agent (or the opt-in `jbot-reviewer`, or the context-pack preset's
+   step-capped `jbot-verify` and tool-less `jbot-closed-book`, with the same
+   session rules),
    the ordered `permissions` ruleset (config-level and repeated on
    `session.create`: `edit`/`external_directory`/`question` deny, the shell
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
@@ -100,8 +103,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    request and every tool for the single-shot agent, and drops the
    "Instructions from:" messages opencode's read tool injects for nested
    `AGENTS.md` files so repo text never reaches a session as instructions;
-   wrap-up retains native tool schemas for model compatibility, with wrap-up
-   shell execution denied by the permission hook), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
+   wrap-up and `jbot-closed-book` retain native tool schemas for model and
+   free-tier gateway compatibility, and the permission hook denies wrap-up
+   shell execution and every `jbot-closed-book` call), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
    the server child so the reviewed repo's committed `.opencode/` (plugins,
    config) never loads — that code runs at server start OUTSIDE the tool
    sandbox. Sessions are hermetic on both sides: the operator's global config

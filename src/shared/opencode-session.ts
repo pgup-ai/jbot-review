@@ -6,6 +6,7 @@ import type { TelemetryStopReason } from './telemetry.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
+  CLOSED_BOOK_AGENT,
   DENY_ALL,
   MAIN_AGENT,
   PLAIN_AGENT,
@@ -19,6 +20,7 @@ import {
 } from './opencode-config.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import { WRAP_UP_PROMPT } from './prompt.ts';
+import { suppliedOverlap, type SuppliedContext } from './review-read-locations.ts';
 import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import {
   extractPromptTokenUsage,
@@ -371,6 +373,7 @@ export function recordAssistantTools(
   options: {
     experiment?: ReturnType<typeof readExplorationStats>;
     stopReason?: TelemetryStopReason;
+    supplied?: { context: SuppliedContext; workspace: string };
   } = {},
 ): void {
   for (const message of messages) {
@@ -392,6 +395,16 @@ export function recordAssistantTools(
         capability: OPENCODE_TELEMETRY_CAPABILITY,
         toolClass,
         inputBytes: serializedBytes(part.state.input),
+        ...(options.supplied
+          ? {
+              supplied: suppliedOverlap(
+                options.supplied.workspace,
+                part.name,
+                part.state.input ?? {},
+                options.supplied.context,
+              ),
+            }
+          : {}),
         exactRequest: createHash('sha256')
           .update(JSON.stringify([part.name, part.state.input]))
           .digest('hex'),
@@ -424,6 +437,7 @@ export function recordAssistantTools(
     budgetTier: 'observe-only',
     stopReason: options.stopReason ?? 'completed',
     ...(options.experiment ? { experiment: options.experiment } : {}),
+    ...(options.supplied ? { suppliedTracked: true } : {}),
     ...(messages.length > 0 ? { turnCount: messages.length } : {}),
   });
 }
@@ -604,7 +618,12 @@ async function promptHoldingSlot(
               value - (initialExperiment?.[key] ?? 0),
             ]),
           );
-        recordAssistantTools(telemetry, label, turn, { experiment, stopReason });
+        const supplied = runtime.suppliedContext?.(abortLabel);
+        recordAssistantTools(telemetry, label, turn, {
+          experiment,
+          stopReason,
+          supplied: supplied && { context: supplied, workspace: runtime.workspace },
+        });
       }
       const turnUsage = sumUsage(turn);
       log(`${label} ${formatTokenUsage(turnUsage)}`);
@@ -626,7 +645,9 @@ async function promptHoldingSlot(
     }
 
     const agent = sessionsByClient.get(client)?.get(sessionID)?.agent ?? MAIN_AGENT;
-    const canWrapUp = agent !== WRAPUP_AGENT && !TOOL_LESS_AGENTS.has(agent);
+    // A wrap-up turn never wraps up again; closed-book stays in place so its tools stay denied.
+    const canWrapUp =
+      agent !== WRAPUP_AGENT && !TOOL_LESS_AGENTS.has(agent) && spec.text !== WRAP_UP_PROMPT;
     const reserve =
       canWrapUp && spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
     let requestWrapUp: ((budgetMs: number) => void) | undefined;
@@ -651,8 +672,9 @@ async function promptHoldingSlot(
         );
         await interruptBestEffort(client, sessionID, label, log);
         await recordTurn([], 'aborted');
-        await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT }, control());
-        rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
+        const wrapUpAgent = agent === CLOSED_BOOK_AGENT ? agent : WRAPUP_AGENT;
+        await client.session.switchAgent({ sessionID, agent: wrapUpAgent }, control());
+        rememberSession(client, sessionID, { agent: wrapUpAgent });
         try {
           const wrapped = await promptHoldingSlot(runtime, sessionID, {
             ...spec,
@@ -735,8 +757,13 @@ function formatUnknown(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
-export function agentForModel(singleShot: boolean, reviewerAgent = false): string {
+export function agentForModel(
+  singleShot: boolean,
+  reviewerAgent = false,
+  toolLess = false,
+): string {
   if (singleShot) return PLAIN_AGENT;
+  if (toolLess) return CLOSED_BOOK_AGENT;
   return reviewerAgent ? REVIEWER_AGENT : MAIN_AGENT;
 }
 

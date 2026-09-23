@@ -99,6 +99,59 @@ describe('recordAssistantTools', () => {
     assert.equal(batch!.finish!.diffFileHeaders, 2);
     assert.equal(session!.session!.turnCount, 1);
   });
+
+  it('marks reads and searches of context-pack ranges for the session that got the pack', () => {
+    const starts: { supplied?: unknown }[] = [];
+    let finished: { suppliedTracked?: boolean } | undefined;
+    const telemetry = {
+      startTool: (input: { supplied?: unknown }) => {
+        starts.push(input);
+        return () => {};
+      },
+      finishSession: (input: { suppliedTracked?: boolean }) => {
+        finished = input;
+      },
+    } as never;
+    const tool = (id: string, name: string, input: Record<string, unknown>) => ({
+      type: 'tool',
+      id,
+      name,
+      state: { status: 'completed', input, content: [] },
+      time: { created: 1, completed: 2 },
+    });
+    recordAssistantTools(
+      telemetry,
+      'review',
+      [
+        {
+          id: 'm1',
+          type: 'assistant',
+          time: { created: 1, completed: 2 },
+          content: [
+            tool('t1', 'read', { path: '/w/src/a.ts', offset: 10, limit: 5 }),
+            tool('t2', 'grep', { pattern: 'LedgerService' }),
+            tool('t3', 'read', { path: '/w/src/b.ts' }),
+          ],
+        },
+      ] as never,
+      {
+        supplied: {
+          workspace: '/w',
+          context: {
+            ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
+            lines: new Map([['src/a.ts', 400]]),
+            symbols: new Set(['LedgerService']),
+            directories: new Set(),
+          },
+        },
+      },
+    );
+    assert.deepEqual(
+      starts.map((start) => start.supplied),
+      ['read', 'search', false],
+    );
+    assert.equal(finished?.suppliedTracked, true);
+  });
 });
 
 describe('parseChangesSinceLastReviewSummary', () => {

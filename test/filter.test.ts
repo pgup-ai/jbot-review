@@ -697,23 +697,46 @@ describe('resolveFindingAnchors', () => {
     const valid = finding({ path: 'a.ts', line: 2, evidence: 'const total = order.total;' });
     const declared = finding({ path: 'a.ts', line: 0, evidence: 'return total;' });
     const noEvidence = finding({ path: 'a.ts', line: 99 });
+    const numbered = finding({
+      path: 'a.ts',
+      line: 99,
+      evidence: '1  const a = 1;\n2 +const total = order.total;',
+    });
 
     const moved = resolveFindingAnchors(
-      [bogus, valid, declared, noEvidence],
+      [bogus, valid, declared, noEvidence, numbered],
       addable,
       patchByPath,
       true,
     );
 
-    assert.deepEqual(moved, [bogus]);
+    assert.deepEqual(moved, [bogus, numbered]);
     assert.equal(bogus.line, 3, 're-anchored in place so every consumer agrees');
     assert.equal(valid.line, 2, 'an anchor corroborated by its evidence is left alone');
     assert.equal(declared.line, 0, 'line 0 stays an explicit file-level signal');
     assert.equal(noEvidence.line, 99, 'nothing to match without evidence');
+    assert.deepEqual(
+      [numbered.line, numbered.evidence],
+      [2, 'const a = 1;\nconst total = order.total;'],
+      'a quote copied from a numbered page diff anchors and comes out as plain code',
+    );
+    const blank = finding({ path: 'e.ts', line: 99, evidence: '1  a();\n2\n3 +b();' });
+    resolveFindingAnchors(
+      [blank],
+      new Map([['e.ts', new Set([3])]]),
+      new Map([['e.ts', ['@@ -1,2 +1,3 @@', ' a();', ' ', '+b();'].join('\n')]]),
+      true,
+    );
+    assert.deepEqual(
+      [blank.line, blank.evidence],
+      [3, 'a();\n\nb();'],
+      "a blank line's number quoted without its trailing spaces still counts as numbered",
+    );
 
-    const off = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
+    const off = finding({ path: 'a.ts', line: 99, evidence: '3 +return total;' });
     assert.deepEqual(resolveFindingAnchors([off], addable, patchByPath, false), []);
     assert.equal(off.line, 99, 'inert when evidence quotes are disabled');
+    assert.equal(off.evidence, 'return total;', 'but the verifier still gets plain code');
   });
 
   it('leaves a finding alone when nothing matches its quote', () => {
@@ -769,6 +792,18 @@ describe('resolveFindingAnchors', () => {
       true,
     );
     assert.equal(mixed.line, 2, 'a context+added duplicate never moves an addable claim');
+
+    // Source starting with digits matches as written, even as a line prefix, so it is
+    // never read as a copied line number.
+    const digitsPatch = ['@@ -0,0 +1,2 @@', '+15 + 1 + total; // base', '+1 + total;'].join('\n');
+    const digits = finding({ path: 'd.ts', line: 2, evidence: '15 + 1 + total;' });
+    resolveFindingAnchors(
+      [digits],
+      new Map([['d.ts', new Set([1, 2])]]),
+      new Map([['d.ts', digitsPatch]]),
+      true,
+    );
+    assert.deepEqual([digits.line, digits.evidence], [1, '15 + 1 + total;']);
   });
 
   it('lets dedupe collapse one issue the model anchored to two different wrong lines', () => {

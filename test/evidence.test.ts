@@ -4,7 +4,16 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdtemp, writeFile, rm, symlink, readFile, readdir, utimes } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  writeFile,
+  rm,
+  symlink,
+  readFile,
+  readdir,
+  utimes,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -13,6 +22,7 @@ import {
   changedEvidenceLines,
   resolveEvidenceImport,
   evidenceMode,
+  parseTsconfigPaths,
 } from '../src/shared/evidence.ts';
 import { normalizeOptions, requestFindingVerdicts } from '../src/shared/runner.ts';
 import { EvidenceDiskCache, evidenceHash } from '../src/shared/evidence-cache.ts';
@@ -586,4 +596,233 @@ test('persistent cache reuses indexes and exact judgments with zero rebilling; c
     await new EvidenceDiskCache(cacheDir, cacheDir + '-other').get('jev-v1:' + rows[0].requestHash),
     undefined,
   );
+});
+
+test('indexes decorated NestJS sources and generic arrows in .ts files', () => {
+  const service = indexEvidenceSource(
+    'ledger.service.ts',
+    [
+      '@Injectable()',
+      'export class LedgerService {',
+      '  constructor(@Inject(TOKEN) private readonly repo: LedgerRepository) {}',
+      // Quoted: with a parameter decorator in the file, neither decorator plugin parses a decorated [computed] key.
+      "  @Transform(trim) 'status.in'?: string[];",
+      '  post(id: string) {',
+      '    return this.repo.save(id);',
+      '  }',
+      '}',
+      'export const first = <T>(items: T[]) => items[0];',
+    ].join('\n'),
+  );
+  assert.ok(service.definitions.some((d) => d.symbol === 'LedgerService'));
+  assert.ok(service.definitions.some((d) => d.symbol === 'first'));
+  assert.ok(service.uses.some((u) => u.symbol === 'repo' && u.line === 6));
+  assert.ok(
+    indexEvidenceSource('view.tsx', 'export const View = () => <div />;').definitions.length,
+  );
+  const dto = indexEvidenceSource(
+    'query.dto.ts',
+    "export class QueryDto {\n  @Transform(trim)\n  ['status.in']?: string[];\n}",
+  );
+  assert.ok(dto.definitions.some((d) => d.symbol === 'QueryDto'));
+});
+
+test('rich index records members, types, re-exports, injected services and this-member calls', () => {
+  const text = [
+    '@Injectable()',
+    'export class LedgerService {',
+    '  private readonly limit = 5;',
+    '  constructor(private readonly repo: LedgerRepository, plain: number) {}',
+    '  post(id: string) {',
+    '    return [id].map((x) => this.repo.save(x));',
+    '  }',
+    '}',
+    'export interface Entry { id: string }',
+    "export { LedgerRepository as Repo } from './repo';",
+    "export * from './types';",
+    "export * as ns from './ns';",
+    'const handlers = { run() { return 1; }, go: () => 2 };',
+  ].join('\n');
+  const index = indexEvidenceSource('ledger.service.ts', text, { rich: true });
+  const declared = (symbol: string) => index.declarations.find((d) => d.symbol === symbol);
+  assert.deepEqual(declared('LedgerService'), {
+    symbol: 'LedgerService',
+    start: 1,
+    end: 8,
+    kind: 'class',
+  });
+  assert.deepEqual(declared('post'), {
+    symbol: 'post',
+    start: 5,
+    end: 7,
+    kind: 'method',
+    owner: 'LedgerService',
+  });
+  assert.deepEqual(
+    ['limit', 'constructor', 'Entry', 'run', 'go', 'handlers'].map((s) => declared(s)?.kind),
+    ['property', 'constructor', 'type', 'function', 'function', 'variable'],
+  );
+  assert.deepEqual(index.injected, [
+    { owner: 'LedgerService', name: 'repo', type: 'LedgerRepository' },
+  ]);
+  assert.deepEqual(index.memberCalls, [
+    { target: 'repo', member: 'save', line: 6 },
+    { target: '', member: 'repo', line: 6 },
+  ]);
+  assert.deepEqual(index.callbacks, [{ start: 6, end: 6 }]);
+  assert.deepEqual(index.reexports, [
+    { exported: 'Repo', imported: 'LedgerRepository', from: './repo' },
+    { exported: '*', imported: '*', from: './types' },
+    { exported: 'ns', imported: '*', from: './ns' },
+  ]);
+  const outer = indexEvidenceSource(
+    'outer.ts',
+    'class Outer { make() { return class { run() {} }; } }',
+    { rich: true },
+  );
+  assert.deepEqual(
+    outer.declarations.map((d) => `${d.owner ?? ''}.${d.symbol}`),
+    ['.Outer', 'Outer.make'],
+  );
+  const chained = indexEvidenceSource(
+    'q.ts',
+    [
+      'class Q {',
+      '  #repo: R;',
+      '  run() {',
+      '    return this.#repo',
+      '      .find();',
+      '  }',
+      '  go() { return this.repo?.save(); }',
+      '}',
+    ].join('\n'),
+    { rich: true },
+  );
+  assert.deepEqual(chained.memberCalls, [
+    { target: 'repo', member: 'find', line: 5 },
+    { target: '', member: 'repo', line: 4 },
+    { target: 'repo', member: 'save', line: 7 },
+    { target: '', member: 'repo', line: 7 },
+  ]);
+  assert.equal(
+    indexEvidenceSource('h.ts', 'class H { handle = () => 1; }', { rich: true }).declarations.find(
+      (d) => d.symbol === 'handle',
+    )?.kind,
+    'method',
+  );
+  const computedKey = indexEvidenceSource(
+    'c.ts',
+    'const KEY = "x"; class C { [KEY]() { return 1; } }',
+    { rich: true },
+  );
+  assert.ok(!computedKey.declarations.some((d) => d.owner === 'C' && d.symbol === 'KEY'));
+  assert.deepEqual(Object.keys(indexEvidenceSource('ledger.service.ts', text)), [
+    'definitions',
+    'imports',
+    'uses',
+  ]);
+});
+
+test('resolves tsconfig path aliases to tracked files only', () => {
+  const aliases = parseTsconfigPaths(`{
+    // comment with "quotes"
+    "compilerOptions": {
+      "paths": {
+        "@app/shared": ["libs/shared/src"],
+        "@app/shared/*": ["libs/shared/src/*"], /* trailing */
+        "@evil/*": ["../../etc/*"],
+      },
+    },
+  }`);
+  const tracked = new Set([
+    'libs/shared/src/index.ts',
+    'libs/shared/src/utils/money.ts',
+    'apps/a/src/b.ts',
+  ]);
+  const from = 'apps/a/src/c.ts';
+  assert.equal(
+    resolveEvidenceImport(from, '@app/shared', tracked, aliases),
+    'libs/shared/src/index.ts',
+  );
+  assert.equal(
+    resolveEvidenceImport(from, '@app/shared/utils/money', tracked, aliases),
+    'libs/shared/src/utils/money.ts',
+  );
+  assert.equal(resolveEvidenceImport(from, './b.js', tracked, aliases), 'apps/a/src/b.ts');
+  assert.equal(resolveEvidenceImport(from, '@evil/passwd', tracked, aliases), undefined);
+  assert.equal(resolveEvidenceImport(from, '@app/shared/utils/money', tracked), undefined);
+  assert.throws(() => parseTsconfigPaths('{'));
+  // The longer, more specific wildcard prefix wins over a shorter overlapping one, like tsc.
+  const overlapping = parseTsconfigPaths(`{
+    "compilerOptions": {
+      "paths": {
+        "@app/*": ["libs/app/*"],
+        "@app/shared/*": ["libs/shared/src/*"]
+      }
+    }
+  }`);
+  const overlappingTracked = new Set([
+    'libs/shared/src/utils/money.ts',
+    'libs/app/shared/utils/money.ts',
+  ]);
+  assert.equal(
+    resolveEvidenceImport(from, '@app/shared/utils/money', overlappingTracked, overlapping),
+    'libs/shared/src/utils/money.ts',
+  );
+  assert.deepEqual(parseTsconfigPaths('\uFEFF{}'), []);
+  const many = Object.fromEntries(
+    Array.from({ length: 300 }, (_, i) => [
+      `@a${i}/*`,
+      Array.from({ length: 20 }, (_, j) => `lib${i}/${j}/*`),
+    ]),
+  );
+  const capped = parseTsconfigPaths(JSON.stringify({ compilerOptions: { paths: many } }));
+  assert.equal(capped.length, 256);
+  assert.ok(capped.every((alias) => alias.targets.length === 8));
+});
+
+test('pack provider reads tracked head sources with tsconfig aliases and word references', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'pack-provider-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const store = new EvidenceStore(workspace, []);
+  // A failed inventory read is not cached: after `git init` the same store retries it.
+  await assert.rejects(store.packProvider(AbortSignal.timeout(4000)));
+  execFileSync('git', ['init', '-q', workspace]);
+  await mkdir(join(workspace, 'libs/money/src'), { recursive: true });
+  await writeFile(
+    join(workspace, 'tsconfig.json'),
+    '{ // aliases\n "compilerOptions": { "paths": { "@app/money": ["libs/money/src"] } } }',
+  );
+  await writeFile(join(workspace, 'libs/money/src/index.ts'), "export * from './total';");
+  await writeFile(
+    join(workspace, 'libs/money/src/total.ts'),
+    'export function total(n: number) {\n  return n;\n}',
+  );
+  await writeFile(join(workspace, 'libs/money/src/broken.ts'), 'export function (');
+  await writeFile(
+    join(workspace, 'libs/money/src/cr.ts'),
+    'export const a = 1;\rexport const b = 2;',
+  );
+  await writeFile(join(workspace, 'untracked.ts'), 'export const total = 1;');
+  execFileSync('git', ['add', 'tsconfig.json', 'libs'], { cwd: workspace });
+  const provider = await store.packProvider(AbortSignal.timeout(4000));
+  assert.deepEqual(provider.aliases, [
+    { prefix: '@app/money', wildcard: false, targets: ['libs/money/src'] },
+  ]);
+  assert.equal(
+    (await provider.load('libs/money/src/total.ts'))?.index.declarations[0]?.symbol,
+    'total',
+  );
+  assert.equal(await provider.load('untracked.ts'), undefined);
+  assert.equal(await provider.load('libs/money/src/broken.ts'), undefined);
+  assert.equal(await provider.load('libs/money/src/cr.ts'), undefined);
+  // A developer's color.ui=always must not wrap the line numbers in escape codes.
+  execFileSync('git', ['config', 'color.ui', 'always'], { cwd: workspace });
+  assert.deepEqual(await provider.references('total'), [
+    { path: 'libs/money/src/index.ts', line: 1 },
+    { path: 'libs/money/src/total.ts', line: 1 },
+  ]);
+  assert.deepEqual(await provider.references('total', ['libs/money/src/total.ts']), [
+    { path: 'libs/money/src/total.ts', line: 1 },
+  ]);
 });

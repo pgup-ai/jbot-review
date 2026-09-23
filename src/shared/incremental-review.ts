@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { posix } from 'node:path';
 import { completedReviewHead, type PrFile } from './github.ts';
-import { indexEvidenceSource, resolveEvidenceImport, JS_SOURCE } from './evidence.ts';
+import { indexEvidenceSource, resolveEvidenceImport, JS_SOURCE, JS_GLOBS } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
 
@@ -223,6 +223,15 @@ export async function planIncrementalReview(input: {
         )
       )
         return full('unsupported-module-dependencies');
+      // String-keyed wiring (events, queues, DI tokens) is invisible to the symbol graph.
+      if (
+        texts.some((text) =>
+          /@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)\(\s*['"`{[]|\.(?:emit|emitAsync|publish)\(\s*['"`]/.test(
+            text,
+          ),
+        )
+      )
+        return full('string-keyed-dependencies');
       if (
         texts.some((text) =>
           indexEvidenceSource(file.filename, text).imports.some((binding) =>
@@ -260,14 +269,7 @@ export async function planIncrementalReview(input: {
         ...terms.flatMap((term) => ['-e', term]),
         ref,
         '--',
-        '*.ts',
-        '*.tsx',
-        '*.js',
-        '*.jsx',
-        '*.mts',
-        '*.cts',
-        '*.mjs',
-        '*.cjs',
+        ...JS_GLOBS,
       );
       if (
         references

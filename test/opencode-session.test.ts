@@ -197,7 +197,15 @@ describe('promptInSession', () => {
         ? { text: '{"findings":[]}' }
         : { hang: true, text, tools: [{ name: 'read', input: { filePath: 'guard.ts' } }] },
     );
-    const rt = runtime(fake);
+    const pack = {
+      ranges: new Map(),
+      lines: new Map(),
+      symbols: new Set(),
+      directories: new Set(),
+    };
+    const rt = runtime(fake, {
+      suppliedContext: (session) => (session === 'review' ? pack : undefined),
+    });
     const recorder = createTelemetryRecorder(true);
     configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
     const reads = [],
@@ -234,6 +242,7 @@ describe('promptInSession', () => {
     assert.equal(main.stopReason, 'aborted');
     assert.equal(wrap.toolCalls, 0);
     assert.equal(wrap.stopReason, 'completed');
+    assert.deepEqual([wrap.suppliedRereads, wrap.suppliedSearches], [0, 0]);
     assert.deepEqual(
       usage.map((row) => [row.label, row.input]),
       [

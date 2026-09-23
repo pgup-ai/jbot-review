@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { Semaphore } from '../src/shared/opencode.ts';
 import { test } from 'node:test';
 import {
+  addContextPack,
   buildShardPlans,
   buildAuxiliaryPlans,
   prioritizeAuxiliaryPlans,
@@ -43,6 +44,7 @@ import {
   limitReviewBackendSessions,
   type ReviewBackend,
 } from '../src/shared/session-concurrency.ts';
+import type { ReviewResult } from '../src/shared/types.ts';
 
 const renderPrompt = (context: string) => assembleReviewPrompt(context, 'Repository rules.');
 const budget = reviewPromptBudget('cline');
@@ -396,8 +398,11 @@ test('late diff pages receive actual unchanged caller code and verifier selectio
   };
   const all = [...filler, file];
   const plans = buildShardPlans({ ...base, shards: [[file]], evidenceReserveBytes: 8192 });
-  await addReviewEvidence(plans, new EvidenceStore(workspace, all), renderPrompt, budget, () => {});
+  const usage = '## Changed symbol usage\n- `total` — referenced by unchanged: consumer.ts';
+  const store = new EvidenceStore(workspace, all);
+  await addReviewEvidence(plans, store, renderPrompt, budget, () => {}, usage);
   assert.match(plans[0].context, /charge = amount\(1\) \* 100/);
+  assert.ok(plans[0].context.endsWith(usage) && plans[0].baseContext.endsWith(usage));
   assert.ok(measureReviewPrompt(renderPrompt(plans[0].context), budget).fits);
   const other = buildShardPlans({ ...base, shards: [filler] });
   assert.match(
@@ -545,4 +550,105 @@ test('auxiliary planning frees guideline space for a long changed line without d
       }),
     /one diff line/,
   );
+});
+
+test('the context pack sits before the page diff, and pages it cannot serve fall back', async () => {
+  const budget = reviewPromptBudget('opencode', { contextTokens: 200_000 });
+  const file = {
+    filename: 'money.ts',
+    patch:
+      '@@ -1,3 +1,3 @@\n export function total(n: number) {\n-  return n;\n+  return n * 100;\n }',
+  };
+  const page = () =>
+    buildShardPlans({
+      coreContext: '## Pull request\nTitle: money',
+      context7Block: '',
+      shards: [[file]],
+      renderPrompt: (context) => assembleReviewPrompt(context, '', '', false, true),
+      budget,
+      evidenceReserveBytes: 8192,
+      numberedDiff: true,
+    })[0];
+  const pack = {
+    text: '## Context pack\nPACKED',
+    supplied: {
+      ranges: new Map(),
+      lines: new Map(),
+      symbols: new Set<string>(),
+      directories: new Set<string>(),
+    },
+    state: 'complete' as const,
+    omitted: 0,
+    uncollected: 0,
+    slices: { surrounding: { items: 1, bytes: 1 } },
+  };
+  const plans = [page(), page(), page(), page(), page()];
+  const before = { context: plans[3].context, baseContext: plans[3].baseContext };
+  const results = await addContextPack({
+    plans,
+    build: async (plan) => {
+      if (plan === plans[1])
+        return { ...pack, uncollected: 2, slices: { directories: { items: 1, bytes: 10 } } };
+      if (plan === plans[2]) throw new Error('boom');
+      if (plan === plans[3]) return { ...pack, text: '## Context pack\n' + 'x'.repeat(300_000) };
+      if (plan === plans[4]) return { ...pack, state: 'partial' as const };
+      return pack;
+    },
+    renderPrompt: (context) =>
+      assembleReviewPrompt(context, '', '', false, true, { contextPack: true }),
+    budget,
+    log: () => {},
+  });
+  assert.deepEqual(
+    results.map(({ row }) => [row.state, row.reason]),
+    [
+      ['complete', undefined],
+      ['fallback', 'empty'],
+      ['fallback', 'error'],
+      ['fallback', 'overflow'],
+      ['fallback', 'partial'],
+    ],
+  );
+  assert.equal(results[1].row.uncollected, 2);
+  assert.match(plans[0].context, /PACKED\n\n## Diff hunks\n[\s\S]*\n2 \+  return n \* 100;\n/);
+  assert.ok(plans[0].baseContext.includes('PACKED'));
+  assert.ok(!plans[1].context.includes('PACKED'));
+  assert.deepEqual({ context: plans[3].context, baseContext: plans[3].baseContext }, before);
+  assert.deepEqual(
+    plans.map((plan) => plan.contextPack),
+    [true, undefined, undefined, undefined, undefined],
+  );
+});
+
+test('only the page that got a context pack asks its backend for the pack prompt', async () => {
+  const shards = ['a.ts', 'b.ts'].map((filename) => [
+    { filename, patch: '@@ -1 +1 @@\n-old\n+new' },
+  ]);
+  const plans = buildShardPlans({ ...base, shards });
+  plans[0].contextPack = true;
+  const received = new Map<string | undefined, boolean | undefined>();
+  await runShardedReview({
+    backend: {
+      name: 'fake',
+      async runReview(_model, _context, _guidelines, _log, options): Promise<ReviewResult> {
+        received.set(options?.label, options?.contextPack);
+        if (options?.label === 'review-shard-1') throw new Error('Upstream idle timeout exceeded');
+        return { summary: '', findings: [], addressedPriorComments: [] };
+      },
+    } as ReviewBackend,
+    model: 'test/model',
+    guidelinesForPrompt: '',
+    shardPlans: plans,
+    changedFiles: shards.flat().map((f) => f.filename),
+    context7Active: false,
+    context7ApiKey: '',
+    log: () => {},
+  });
+  assert.deepEqual(
+    [...received.keys()],
+    ['review-shard-1', 'review-shard-2', 'review-shard-1-retry'],
+  );
+  assert.equal(received.get('review-shard-1'), true);
+  assert.equal(received.get('review-shard-1-retry'), true);
+  assert.ok(!received.get('review-shard-2'));
 });

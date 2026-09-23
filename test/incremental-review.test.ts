@@ -252,6 +252,32 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    for (const [decorator, tripped] of [
+      ["@OnEvent('ledger.posted')", true],
+      ["@MessagePattern({ cmd: 'sum' })", true],
+      ['@OnEvent(LedgerEvents.Posted)', false],
+    ] as const) {
+      git('checkout', '-q', '--detach', head);
+      const listener = (returned: number) =>
+        `import { OnEvent } from '@nestjs/event-emitter';\nexport class L {\n  ${decorator}\n  handle() {\n    return ${returned};\n  }\n}\n`;
+      write('ledger/listener.ts', listener(1));
+      const prior = commit();
+      write('ledger/listener.ts', listener(2));
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBody: body(prior, base),
+        files: [
+          ...files,
+          { filename: 'ledger/listener.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 2;' },
+        ],
+      });
+      assert.equal(
+        plan.reason,
+        tripped ? 'string-keyed-dependencies' : 'bounded-followup',
+        decorator,
+      );
+    }
     git('checkout', '-q', '--detach', head);
     write('core/limit.ts', 'export function limit() {\n  return 10;\n}\n');
     assert.equal(

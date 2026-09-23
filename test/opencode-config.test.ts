@@ -4,8 +4,10 @@ import { cliBackendForProvider } from '../src/shared/backend-selection.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
 import { isPoolsideProvider } from '../src/shared/poolside.ts';
 import {
+  CLOSED_BOOK_AGENT,
   PLAIN_AGENT,
   REVIEWER_AGENT,
+  VERIFY_AGENT,
   WRAPUP_AGENT,
   buildConfig,
   modelOptionsByModel,
@@ -46,13 +48,19 @@ describe('buildConfig', () => {
     assert.equal(config.$schema, 'https://opencode.ai/config.json');
     assert.deepEqual(
       Object.keys(config.agents).sort(),
-      [PLAIN_AGENT, REVIEWER_AGENT, WRAPUP_AGENT].sort(),
+      [CLOSED_BOOK_AGENT, PLAIN_AGENT, REVIEWER_AGENT, VERIFY_AGENT, WRAPUP_AGENT].sort(),
     );
-    assert.deepEqual(config.agents[WRAPUP_AGENT].permissions, permissionRules());
+    // Closed-book keeps the tool list a gateway checks for; the plugin denies each call.
+    for (const agent of [WRAPUP_AGENT, CLOSED_BOOK_AGENT])
+      assert.deepEqual(config.agents[agent].permissions, permissionRules());
     assert.deepEqual(config.agents[PLAIN_AGENT].permissions, [
       { action: '*', resource: '*', effect: 'deny' },
     ]);
     assert.equal(config.agents[REVIEWER_AGENT].system, 'Review only.');
+    assert.deepEqual(
+      [config.agents[VERIFY_AGENT].system, config.agents[VERIFY_AGENT].steps],
+      ['Review only.', 6],
+    );
     assert.equal(config.providers, undefined);
     const cached = buildConfig({
       models: [

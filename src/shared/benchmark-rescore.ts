@@ -38,6 +38,15 @@ const FAILURE_CLASSES = new Set<BenchmarkFailureClass>([
 const PROGRAM_METRICS = Object.keys(
   emptyBenchmarkProgramMetrics(),
 ) as (keyof BenchmarkProgramMetrics)[];
+// Rows written before these metrics existed lack them.
+const OPTIONAL_METRICS = new Set<keyof BenchmarkProgramMetrics>([
+  'mainTurns',
+  'mainExecutionMs',
+  'packsServed',
+  'mainReads',
+  'mainSuppliedRereads',
+  'mainSuppliedSearches',
+]);
 
 function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -136,7 +145,13 @@ function validateRow(
     throw new Error(`Invalid program metrics for adjudicated benchmark case ${benchmarkCase.id}.`);
   }
   const program = row.program;
-  if (PROGRAM_METRICS.some((metric) => !isNonNegativeNumber(program[metric]))) {
+  if (
+    PROGRAM_METRICS.some(
+      (metric) =>
+        !isNonNegativeNumber(program[metric]) &&
+        !(program[metric] === undefined && OPTIONAL_METRICS.has(metric)),
+    )
+  ) {
     throw new Error(`Invalid program metrics for adjudicated benchmark case ${benchmarkCase.id}.`);
   }
   return row as unknown as BenchmarkCaseRow;

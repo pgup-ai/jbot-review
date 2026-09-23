@@ -12,6 +12,7 @@ import {
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT7_REASON_BUDGET,
+  CONTEXT_PACK_REVIEW_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
@@ -34,6 +35,9 @@ import {
   buildContextTrimNotice,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
+  compactReviewPageContexts,
+  formatContextPack,
+  formatContextPackItem,
   formatFindingsForVerification,
   selectLensKeys,
   withNoToolsReviewDirective,
@@ -633,15 +637,18 @@ describe('assembleFindingVerificationPrompt', () => {
     );
   });
 
-  it('defaults to the agentic prompt that reads the actual code', () => {
-    assert.match(assembleFindingVerificationPrompt('CTX', findings), /read\s+the actual code/);
+  it('defaults to the agentic prompt that can read the checkout', () => {
+    assert.match(
+      assembleFindingVerificationPrompt('CTX', findings),
+      /for anything else a finding depends on/,
+    );
   });
 
   it('single-shot mode judges from the diff and forbids browsing, keeping discipline', () => {
     const prompt = assembleFindingVerificationPrompt('CTX', findings, true);
 
     assert.match(prompt, /NOT browsing the repository/);
-    assert.doesNotMatch(prompt, /read\s+the actual code/);
+    assert.doesNotMatch(prompt, /for anything else a finding depends on/);
     // preserves the adversarial refute-by-default + framework-abstention discipline
     assert.match(prompt, /each finding is WRONG/);
     assert.match(prompt, /library\/framework behaves internally/);
@@ -751,7 +758,7 @@ describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
   });
 
   it('requires citing the violated rule in every finding', () => {
-    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /MUST name or quote the specific written rule/);
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /MUST quote the specific written rule/);
   });
 
   it('backticks the document name in the example finding title, per the shared title rule', () => {
@@ -904,5 +911,140 @@ describe('buildContextTrimNotice', () => {
       buildContextTrimNotice(['blast radius', 'summary scope']),
       /blast radius, summary scope/,
     );
+  });
+});
+
+describe('context pack prompt', () => {
+  it('leaves what to read to the model on pack pages and keeps the other prompts', () => {
+    assert.equal(
+      (CONTEXT_PACK_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? []).length,
+      1,
+    );
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /decide for yourself what,\s+if anything, you need/);
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /do not run git diff for this page's files/);
+    for (const directive of [
+      /Start with targeted reads of\s+callers/,
+      /find its callers and\s+callees/,
+      /Missing evidence is a reason/,
+      /read the caller, check/,
+      /search the repo for an/,
+      /beyond the first hop/,
+    ])
+      assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, directive);
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /find its callers and\s+callees/);
+    // Backends that deny every tool are not offered the checkout.
+    const noTools = assembleReviewPrompt('ctx', '', '', false, true, {
+      contextPack: true,
+      toolsAvailable: false,
+    });
+    assert.match(noTools, /No repository reads are available/);
+    assert.doesNotMatch(noTools, /available through tools/);
+    assert.ok(
+      assembleReviewPrompt('ctx', '', '', false, true, { contextPack: true }).startsWith(
+        CONTEXT_PACK_REVIEW_PROMPT,
+      ),
+    );
+  });
+
+  it('renders rows with diff pointers and truncation markers, lists, and the omitted list', () => {
+    assert.equal(
+      formatContextPackItem({
+        slice: 'surrounding',
+        path: 'a.ts',
+        label: 'A.run',
+        rows: [
+          [1, 'run() {'],
+          [2, '  x();'],
+          [6, '}'],
+        ],
+        end: 8,
+        inDiff: new Set([3, 4, 5]),
+        otherPages: [1, 2, 6],
+      }),
+      [
+        '#### a.ts:1-8 (A.run; changed on another page: 1-2, 6)',
+        '1: run() {',
+        '2:   x();',
+        "[lines 3-5: in this page's diff]",
+        '6: }',
+        '[lines 7-8 omitted]',
+      ].join('\n'),
+    );
+    assert.equal(
+      formatContextPackItem({
+        slice: 'directories',
+        path: '',
+        label: '',
+        rows: [],
+        list: { kind: 'directory', subject: 'src', entries: ['a.ts*', 'lib/'] },
+      }),
+      '- src/: a.ts*, lib/',
+    );
+    assert.equal(
+      formatContextPackItem({
+        slice: 'changes',
+        path: 'b.ts',
+        label: '',
+        rows: [],
+        diff: '@@ -1 +1 @@\n1 +x',
+      }),
+      '#### b.ts\n```diff\n@@ -1 +1 @@\n1 +x\n```',
+    );
+    const pack = formatContextPack({
+      items: [],
+      omitted: [{ slice: 'callers', path: 'b.ts', label: '', rows: [[9, 'x']] }],
+      uncollected: 1,
+    });
+    assert.match(pack, /^## Context pack/);
+    assert.match(pack, /do\s+not re-read them/);
+    assert.match(pack, /not evidence that none\s+exist/);
+    assert.match(
+      pack,
+      /### Omitted\n- 1 item\(s\) not collected within the pack's time and file limits\n- b\.ts:9-9 \(callers\)/,
+    );
+    const capped = formatContextPack({
+      items: [],
+      omitted: Array.from({ length: 80 }, () => ({
+        slice: 'callers' as const,
+        path: `${'a'.repeat(60)}.ts`,
+        label: '',
+        rows: [[1, 'x']] as [number, string][],
+      })),
+      uncollected: 0,
+    });
+    const omittedSection = capped.slice(capped.indexOf('### Omitted'));
+    assert.ok(Buffer.byteLength(omittedSection, 'utf8') < 2048 + 40);
+    assert.match(omittedSection, /\n- \+\d+ more$/);
+  });
+});
+
+describe('compactReviewPageContexts', () => {
+  it('shares one compaction decision; only compliance pages keep the usage list', () => {
+    const join = (...parts: string[]) => parts.filter(Boolean).join('\n\n');
+    const usage = `## Changed symbol usage\n${'- `total` is used by consumer.ts\n'.repeat(30)}`;
+    const exploration = '## Exploration evidence\nEXPLORED';
+    // The large core is just over the threshold with the usage list and under it without.
+    const fill =
+      16 * 1024 +
+      10 -
+      Buffer.byteLength(join(UNTRUSTED_PR_CONTENT_NOTE, '## Metadata', usage, exploration));
+    for (const filler of [0, fill]) {
+      const metadata = `## Metadata${'x'.repeat(filler)}`;
+      const pages = compactReviewPageContexts({
+        core: join(UNTRUSTED_PR_CONTENT_NOTE, metadata, usage, exploration),
+        mainCore: join(UNTRUSTED_PR_CONTENT_NOTE, metadata, exploration),
+        scope: '## Pull request\nTitle: money',
+        summary: '',
+        focus: '',
+        usage,
+        exploration,
+      });
+      assert.equal(pages.compacted, filler > 0);
+      assert.ok(pages.full.includes('## Changed symbol usage'));
+      assert.ok(!pages.main.includes('## Changed symbol usage'));
+      assert.ok(pages.main.includes('EXPLORED'));
+      assert.equal(pages.full.includes('## Metadata'), !pages.compacted);
+      assert.equal(pages.main.includes('## Metadata'), !pages.compacted);
+    }
   });
 });

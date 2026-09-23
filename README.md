@@ -1007,8 +1007,8 @@ and precision against seeded defects.
 ### Review experiment preset
 
 `JBOT_REVIEW_EXPERIMENT` is the only operator control for the Jev/retrieval
-experiments. **`diff-batches` is the default**; set `off` to disable the batching
-hints. Complete diff paging, deterministic caller context and coverage accounting remain enabled in every
+experiments. **`context-pack` is the default**; set `diff-batches` for the
+previous default, or `off` to disable the batching hints. Complete diff paging, deterministic caller context and coverage accounting remain enabled in every
 preset. Finder pages also compact repeated metadata above 16 KiB while retaining
 PR intent, guidelines, caller evidence and mandatory diff content; the log records
 the bytes saved. This is independent of the older `JBOT_CONTEXT_TRIM` experiment.
@@ -1016,13 +1016,20 @@ Batching has not established a reliable end-to-end speedup. The presets
 are mutually exclusive. Batching hints require repository shell tools; Pi,
 CommandCode and tool-less backends do not receive them.
 
-| Value                    | Behavior                                                                            | Evidence / recommendation                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `off`                    | Complete paged review without batching hints                                        | Rollback for the batching default.                                                                                                                      |
-| `diff-batches` (default) | Bounded batched reads for supporting diffs in other tasks, when needed              | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow. |
-| `adaptive`               | Batching plus completed-auxiliary reuse for routine documentation follow-ups        | Opt-in experiment; full main review and verification remain enabled.                                                                                    |
-| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                       |
-| `jev`                    | Jev ranks caller excerpts from changed exported symbols                             | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
+| Value                    | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Evidence / recommendation                                                                                                                                                                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `off`                    | Complete paged review without batching hints                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Rollback for the batching default.                                                                                                                                                                                                                                           |
+| `diff-batches`           | Bounded batched reads for supporting diffs in other tasks, when needed                                                                                                                                                                                                                                                                                                                                                                                                                                            | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow.                                                                                                                      |
+| `adaptive`               | Batching plus completed-auxiliary reuse for routine documentation follow-ups                                                                                                                                                                                                                                                                                                                                                                                                                                      | Opt-in experiment; full main review and verification remain enabled.                                                                                                                                                                                                         |
+| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads                                                                                                                                                                                                                                                                                                                                                                                                                               | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                                                                                                                                            |
+| `jev`                    | Jev ranks caller excerpts from changed exported symbols                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.                                                                                                                        |
+| `context-pack` (default) | `diff-batches`, plus a per-page context pack before the first turn: the code around each change, the definitions it uses, import-linked callers, the diffs of changed files the page imports from other pages, and a directory map. Main and guideline-compliance pages get the pack and a line-numbered diff that lists whitespace-only lines; pack pages drop caller evidence and the changed-symbol usage list. The finder's guideline excerpt drops pointer-only docs, and verification gets the slim context | Default. Live A/Bs on a private repository's PRs cut review turns 30–45% on a fast model and 8% on `deepseek-v4.1-flash`; accepted-issue recall stayed within run-to-run noise. `npm run replay:context-pack` scores packs offline. OpenCode also reports supplied re-reads. |
+
+On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
+from the pack and the numbered diff, and guideline compliance keeps its own
+session with tools. Finding verification starts with a tool-less pass. Its
+evidence-backed confirmations are final; the other findings get a re-check capped
+at six tool turns.
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
 compares historical benefits, quality failures and sample limits. The
@@ -1097,13 +1104,15 @@ JBOT_REVIEW_EXPERIMENT=diff-batches npm run review:local -- --base origin/main
 JBOT_REVIEW_EXPERIMENT=adaptive npm run review:local -- --base origin/main
 JBOT_REVIEW_EXPERIMENT=linked npm run review:local -- --base origin/main
 JBOT_REVIEW_EXPERIMENT=jev npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=context-pack npm run review:local -- --base origin/main
 ```
 
 To disable the experiments, set `JBOT_REVIEW_EXPERIMENT=off`. Explicit environment
-values override local `.env`; unknown values disable the experiments. Removed
-flags cannot reactivate them. Keep the TypeSafe key in the ignored `.env` or a
-hosted secret. Only `jev` sends bounded diff/source fragments to TypeSafe;
-`off`, `diff-batches`, `adaptive` and `linked` make no Jev API call.
+values override local `.env`; unknown values disable the experiments. An empty
+value keeps the default. Removed flags cannot reactivate them. Keep the TypeSafe
+key in the ignored `.env` or a hosted secret. Only `jev` sends bounded
+diff/source fragments to TypeSafe; `off`, `diff-batches`, `adaptive`, `linked`
+and `context-pack` make no Jev API call.
 
 The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
 source files, and bounds the complete JSON request to 30,000 bytes. Preparation

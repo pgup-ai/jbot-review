@@ -1,5 +1,7 @@
 import { relative, resolve } from 'node:path';
 
+const SHELL_TOOLS = ['shell', 'bash', 'execute', 'exec'];
+
 export function reviewReadLocations(
   workspace: string,
   tool: string,
@@ -33,7 +35,7 @@ export function reviewReadLocations(
     );
     return locations;
   }
-  if (!['shell', 'bash', 'execute', 'exec'].includes(tool)) return [];
+  if (!SHELL_TOOLS.includes(tool)) return [];
   const command = input.command;
   // Observe a tiny literal grammar; never evaluate shell syntax or replay its output.
   if (
@@ -72,4 +74,91 @@ export function reviewReadLocations(
     if (offset === tokens.length) return [];
   }
   return locations.slice(0, 64);
+}
+
+/** What a page showed: pack and diff line ranges by path, pack symbols, and listed directories. */
+export interface SuppliedContext {
+  ranges: Map<string, [number, number][]>;
+  symbols: Set<string>;
+  directories: Set<string>;
+  /** Line counts of the files in ranges. */
+  lines: Map<string, number>;
+}
+
+/** Several packs seen by one session; compliance pages share a session label. */
+export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedContext {
+  const merged: SuppliedContext = {
+    ranges: new Map(),
+    symbols: new Set(),
+    directories: new Set(),
+    lines: new Map(),
+  };
+  for (const context of contexts) {
+    for (const [path, ranges] of context.ranges)
+      merged.ranges.set(path, [...(merged.ranges.get(path) ?? []), ...ranges]);
+    for (const [path, count] of context.lines) merged.lines.set(path, count);
+    for (const symbol of context.symbols) merged.symbols.add(symbol);
+    for (const directory of context.directories) merged.directories.add(directory);
+  }
+  return merged;
+}
+
+/** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
+function shellSearchPattern(command: string): string | undefined {
+  const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(
+    (m) => m[1] ?? m[2] ?? m[3],
+  );
+  for (let i = 0; i < tokens.length; i++) {
+    const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
+    if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
+    for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
+      if (/^(?:\|\|?|&&|;)$/.test(tokens[j])) break;
+      if (tokens[j] === '-e') return tokens[j + 1];
+      // These flags take a value, which is not the pattern.
+      if (/^-[ABCmtgf]$|^--(?:include|exclude|glob|type)$/.test(tokens[j])) j++;
+      else if (!tokens[j].startsWith('-')) return tokens[j];
+    }
+  }
+  return undefined;
+}
+
+/** Identifiers in a pattern; escapes are blanked so `\bFoo\b` yields `Foo`. */
+function searchTokens(pattern: string): string[] {
+  return pattern.replace(/\\[\s\S]/g, ' ').match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
+}
+
+export function suppliedOverlap(
+  workspace: string,
+  tool: string,
+  input: Record<string, unknown>,
+  supplied: SuppliedContext,
+): 'read' | 'search' | false {
+  for (const location of reviewReadLocations(workspace, tool, input)) {
+    const ranges = supplied.ranges.get(location.path);
+    const total = supplied.lines.get(location.path);
+    // Clamp whole-file and default-window reads to the file, so only mostly-supplied reads count.
+    const last = Math.min(location.endLine, total ?? 0);
+    if (!ranges || last < location.line) continue;
+    let covered = 0;
+    for (let line = location.line; line <= last; line++)
+      if (ranges.some(([start, end]) => line >= start && line <= end)) covered++;
+    if (covered * 2 >= last - location.line + 1) return 'read';
+  }
+  const dirInput = input.path ?? input.filePath;
+  if (
+    tool === 'read' &&
+    typeof dirInput === 'string' &&
+    supplied.directories.has(relative(workspace, resolve(workspace, dirInput)) || '.')
+  )
+    return 'read';
+  const pattern =
+    tool === 'grep'
+      ? input.pattern
+      : SHELL_TOOLS.includes(tool) && typeof input.command === 'string'
+        ? shellSearchPattern(input.command)
+        : undefined;
+  return typeof pattern === 'string' &&
+    searchTokens(pattern).some((token) => supplied.symbols.has(token))
+    ? 'search'
+    : false;
 }

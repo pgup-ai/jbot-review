@@ -7,7 +7,7 @@
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /** Walks a patch, yielding every NEW-side line (added or context) with its number. */
-function* newSideLines(
+export function* newSideLines(
   patch: string,
 ): Generator<{ line: number; content: string; added: boolean }> {
   let newLine = 0;
@@ -172,4 +172,21 @@ function matchWindow(
     end = side[i + target.length - 1].line;
   }
   return { matches, anchor, start, end };
+}
+
+/**
+ * Drops line numbers copied from a numbered page diff. Source can start with digits too, so
+ * only a quote that matches nothing as written, and something once unnumbered, changes.
+ */
+export function unnumberedEvidence(patch: string | undefined, evidence: string): string {
+  const lineNumber = /^\s*\d+(?: [ +-]?|$)/;
+  const lines = evidence.split('\n');
+  if (!patch || !lines.every((line) => !line.trim() || lineNumber.test(line))) return evidence;
+  const plain = lines
+    .map((line) => line.replace(lineNumber, ''))
+    .join('\n')
+    .trim();
+  const found = (quote: string) =>
+    evidenceWindow(patch, quote) !== undefined || prefixMatches(patch, quote).length > 0;
+  return !found(evidence) && found(plain) ? plain : evidence;
 }

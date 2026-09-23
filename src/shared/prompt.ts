@@ -6,6 +6,7 @@ import { GIT_DIFF_ARGS } from './git.ts';
 import {
   PATH_PATTERNS,
   buildDiffHunksBlockWithMetadata,
+  formatLineRanges,
   type ChangeShape,
 } from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
@@ -442,6 +443,15 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
+const CONTEXT_PACK_EXPLORATION_POLICY = `## Repository exploration policy
+
+Review every changed hunk in the embedded diff. The context pack below holds
+code around the changes, the definitions they use, and import-linked callers.
+The rest of the checkout is available through tools: decide for yourself what,
+if anything, you need beyond the pack, and issue independent reads together in
+one turn. Report supported findings and identify material uncertainties without
+asserting unverified premises.`;
+
 export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
 
 // Lens body for backends whose read-only mode denies every tool: the base's
@@ -527,6 +537,13 @@ function replacePromptSection(prompt: string, current: string, replacement: stri
   return `${prompt.slice(0, start)}${replacement}${prompt.slice(start + current.length)}`;
 }
 
+const EMBEDDED_FIRST_COVERAGE_STEPS = `1. Cover the file's full diff hunks under the repository exploration policy.
+2. For each changed or new function, type, or constant: find its callers and
+   callees — including UNCHANGED code elsewhere in the file or repo — and
+   verify the change does not break their assumptions. A new gate, early
+   return, narrowed type, or changed default frequently breaks an unchanged
+   code path far from the diff.`;
+
 /** Prompt-only Phase 3 treatment. REVIEW_PROMPT remains the production control. */
 export const EMBEDDED_FIRST_REVIEW_PROMPT = [
   [
@@ -554,16 +571,71 @@ export const EMBEDDED_FIRST_REVIEW_PROMPT = [
    return, narrowed type, or changed default frequently breaks an unchanged
    code path far from the diff. Use grep on the symbol name; a "Changed
    symbol usage" section below may list known call sites to start from.`,
-    `1. Cover the file's full diff hunks under the repository exploration policy.
-2. For each changed or new function, type, or constant: find its callers and
-   callees — including UNCHANGED code elsewhere in the file or repo — and
-   verify the change does not break their assumptions. A new gate, early
-   return, narrowed type, or changed default frequently breaks an unchanged
-   code path far from the diff.`,
+    EMBEDDED_FIRST_COVERAGE_STEPS,
   ],
 ].reduce(
   (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),
   REVIEW_PROMPT,
+);
+
+/** JBOT_REVIEW_EXPERIMENT=context-pack: the embedded-first review, starting from the page's context pack. */
+// Pack pages keep what to check and the evidence rules, and leave what to read to the model.
+export const CONTEXT_PACK_REVIEW_PROMPT = [
+  [EMBEDDED_FIRST_EXPLORATION_POLICY, CONTEXT_PACK_EXPLORATION_POLICY],
+  [
+    `diff. Follow the repository exploration policy before using the command.`,
+    `diff. This page's complete diff is embedded below with new-side line numbers,
+  so do not run git diff for this page's files.`,
+  ],
+  [
+    `2. For each changed or new function, type, or constant: find its callers and
+   callees — including UNCHANGED code elsewhere in the file or repo — and
+   verify the change does not break their assumptions. A new gate, early
+   return, narrowed type, or changed default frequently breaks an unchanged
+   code path far from the diff.`,
+    `2. Check that each change keeps the assumptions of its callers and callees,
+   including unchanged code: a new gate, early return, narrowed type, or
+   changed default frequently breaks a code path far from the diff.`,
+  ],
+  [
+    `Investigate plausible regressions before deciding whether to report them. Follow
+callers, defaults, configuration, and tests until you can establish the trigger
+and impact. Missing evidence is a reason to investigate further. Keep published
+claims grounded in inspected code;`,
+    `Report a regression once you can state its trigger and impact. Keep published
+claims grounded in code you have seen;`,
+  ],
+  [
+    `- Inspect the diff and nearby callers, definitions, contracts, tests, migrations,
+  and error paths needed to verify changed behavior.
+- Be thorough on every changed file and its direct callers, callees, and tests.
+  Do not explore code unrelated to the diff.`,
+    `- Be thorough on every changed file. Do not explore code unrelated to the diff.`,
+  ],
+  [
+    `- Before accepting a new helper, type, or abstraction, search the repo for an
+  existing one that already does the job; flag duplication and point to the
+  existing code.`,
+    `- Flag a new helper, type, or abstraction that duplicates one the repo already
+  has, and point to the existing code.`,
+  ],
+  [
+    ` — verify the trigger path first (read the caller, check
+the type, grep the symbol) and upgrade confidence, or downgrade severity.`,
+    `: establish the trigger path and upgrade confidence, or
+downgrade severity.`,
+  ],
+].reduce(
+  (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),
+  EMBEDDED_FIRST_REVIEW_PROMPT,
+);
+
+const CONTEXT_PACK_NO_TOOLS_REVIEW_PROMPT = replacePromptSection(
+  CONTEXT_PACK_REVIEW_PROMPT,
+  `The rest of the checkout is available through tools: decide for yourself what,
+if anything, you need beyond the pack, and issue independent reads together in
+one turn.`,
+  `No repository reads are available: judge from the diff and the pack.`,
 );
 
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
@@ -673,6 +745,140 @@ export function formatBlastRadiusContext(
       return `- \`${symbol}\` — referenced by unchanged: ${shown.join(', ')}${more}`;
     }),
   ].join('\n');
+}
+
+export type ContextPackSlice =
+  'surrounding' | 'definitions' | 'callers' | 'changes' | 'directories';
+
+/** One context-pack item: numbered source rows, or a single list line. */
+export interface ContextPackEntry {
+  slice: ContextPackSlice;
+  path: string;
+  label: string;
+  /** Ascending source rows; each gap between them renders as one marker. */
+  rows: [line: number, text: string][];
+  /** Last line of the underlying range when the rows stop earlier. */
+  end?: number;
+  inDiff?: Set<number>;
+  /** Lines in the span that this PR changes on another page. */
+  otherPages?: number[];
+  /** Another page's numbered patch for this file. */
+  diff?: string;
+  calls?: string;
+  list?: {
+    kind: 'other-callers' | 'unverified' | 'all-shown' | 'directory';
+    subject: string;
+    entries: string[];
+  };
+}
+
+const CONTEXT_PACK_NOTE = `## Context pack
+
+These excerpts were read before this review started: code around the changes on
+this page, the definitions the changes use, and import-linked call sites of the
+changed symbols. They cover only the ranges shown; anything not shown, including
+Omitted items, has not been read. Treat the shown ranges as already read and do
+not re-read them. Line numbers match the new side of the diff. Callers are
+limited to import-linked call sites; a missing caller is not evidence that none
+exist. An item header names the lines this PR changes on another page, and
+"Changes on other pages" holds those files' diffs; their pages own their review.`;
+
+const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
+  surrounding: '### Surrounding code',
+  definitions: '### Definitions used by the change',
+  callers: '### Callers of changed symbols',
+  changes: '### Changes on other pages',
+  directories: '### Directory map (* marks files this PR changes)',
+};
+
+const CONTEXT_PACK_OMITTED_BYTES = 2048;
+
+function contextPackSpan(item: ContextPackEntry): [first: number, last: number] {
+  const first = item.rows[0][0];
+  return [first, Math.max(item.rows.at(-1)![0], item.end ?? 0)];
+}
+
+export function formatContextPackItem(item: ContextPackEntry): string {
+  if (item.list) {
+    const { kind, subject, entries } = item.list;
+    const shown = entries.join(', ');
+    if (kind === 'directory') return `- ${subject}/: ${shown}`;
+    if (kind === 'all-shown')
+      return `No references to \`${subject}\` in JS or TS files beyond this page's diff and the excerpts above.`;
+    return kind === 'other-callers'
+      ? `Other import-linked callers of \`${subject}\`: ${shown}`
+      : `Unverified name matches for \`${subject}\` (no import link found): ${shown}`;
+  }
+  if (item.diff) return `#### ${item.path}\n\`\`\`diff\n${item.diff}\n\`\`\``;
+  const [first, last] = contextPackSpan(item);
+  const title = [
+    [item.label, item.calls && `calls ${item.calls}`].filter(Boolean).join(', '),
+    item.otherPages?.length && `changed on another page: ${formatLineRanges(item.otherPages)}`,
+  ]
+    .filter(Boolean)
+    .join('; ');
+  const lines = [`#### ${item.path}:${first}-${last}${title ? ` (${title})` : ''}`];
+  const gap = (from: number, to: number) => {
+    let inDiff = true;
+    for (let line = from; line <= to && inDiff; line++) inDiff = item.inDiff?.has(line) ?? false;
+    lines.push(
+      inDiff ? `[lines ${from}-${to}: in this page's diff]` : `[lines ${from}-${to} omitted]`,
+    );
+  };
+  let previous = first;
+  for (const [line, text] of item.rows) {
+    if (line > previous + 1) gap(previous + 1, line - 1);
+    lines.push(`${line}: ${text}`);
+    previous = line;
+  }
+  if (last > previous) gap(previous + 1, last);
+  return lines.join('\n');
+}
+
+/** Whole entries only, so a cut never leaves a partial path or range. */
+function formatOmittedList(entries: string[]): string {
+  const lines = ['### Omitted'];
+  let bytes = Buffer.byteLength(lines[0], 'utf8');
+  for (const entry of entries) {
+    const size = Buffer.byteLength(entry, 'utf8') + 1;
+    if (bytes + size > CONTEXT_PACK_OMITTED_BYTES) break;
+    lines.push(entry);
+    bytes += size;
+  }
+  const remaining = entries.length - (lines.length - 1);
+  if (remaining > 0) lines.push(`- +${remaining} more`);
+  return lines.join('\n');
+}
+
+export function formatContextPack(pack: {
+  items: ContextPackEntry[];
+  omitted: ContextPackEntry[];
+  uncollected: number;
+}): string {
+  const sections = (Object.keys(CONTEXT_PACK_TITLES) as ContextPackSlice[]).flatMap((slice) => {
+    const items = pack.items.filter((item) => item.slice === slice);
+    return items.length
+      ? [[CONTEXT_PACK_TITLES[slice], ...items.map(formatContextPackItem)].join('\n\n')]
+      : [];
+  });
+  // The uncollected count goes first so the Omitted cap never drops it.
+  const omitted = [
+    ...(pack.uncollected
+      ? [`- ${pack.uncollected} item(s) not collected within the pack's time and file limits`]
+      : []),
+    // A cut all-shown claim leaves the default: callers may exist.
+    ...pack.omitted
+      .filter((item) => item.list?.kind !== 'all-shown')
+      .map((item) => {
+        if (item.list) return `- ${item.list.subject} (${item.slice})`;
+        if (item.diff) return `- ${item.path} (${item.slice})`;
+        const [first, last] = contextPackSpan(item);
+        return `- ${item.path}:${first}-${last} (${item.slice})`;
+      }),
+  ];
+  return [CONTEXT_PACK_NOTE, ...sections, omitted.length ? formatOmittedList(omitted) : '']
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export interface JevCandidate {
@@ -838,7 +1044,7 @@ export const GUIDELINE_REVIEW_LENS = `## Written-rule check for this pass
 
 Also check every assigned hunk against the supplied repository guidelines,
 rule by rule. Report only observed conflicts with an explicit written rule;
-name or quote it and cite its inspected location as \`path/to/rule.md:42\`.
+quote it and name the file it comes from.
 Do not invent rules or infer tool usage, authorship, or generation history
 from file style. A recommendation needs a concrete benefit on changed code.
 For written-rule violations use P1 only for a mandatory/blocking rule with
@@ -1260,7 +1466,7 @@ export function assembleReviewPrompt(
   evidenceQuotes = false,
   embeddedFirstPrompt = false,
   options: {
-    /** False on backends that deny every tool; only lens bodies change (the main prompt keeps its directive). */
+    /** False on backends that deny every tool; lens bodies and pack pages change (other main prompts keep their directive). */
     toolsAvailable?: boolean;
     /**
      * JBOT_SHARED_PREFIX_PROMPT: context, then guidelines, then instructions,
@@ -1268,17 +1474,31 @@ export function assembleReviewPrompt(
      * reminder stays last (invariant #5).
      */
     contextFirst?: boolean;
+    /** context-pack main pages; overrides embeddedFirstPrompt=false. Lens prompts ignore it. */
+    contextPack?: boolean;
   } = {},
 ): string {
   const focusedLens = Object.values(REVIEW_LENSES).some((lens) => lensAddendum.startsWith(lens));
+  const packPage = !focusedLens && options.contextPack;
   const instructions = focusedLens
     ? buildLensReviewPrompt(embeddedFirstPrompt, options.toolsAvailable ?? true)
-    : embeddedFirstPrompt
-      ? EMBEDDED_FIRST_REVIEW_PROMPT
-      : REVIEW_PROMPT;
+    : packPage
+      ? options.toolsAvailable === false
+        ? CONTEXT_PACK_NO_TOOLS_REVIEW_PROMPT
+        : CONTEXT_PACK_REVIEW_PROMPT
+      : embeddedFirstPrompt
+        ? EMBEDDED_FIRST_REVIEW_PROMPT
+        : REVIEW_PROMPT;
   const guidelineBlock = guidelines ? ['## Repository review guidelines\n', guidelines] : [];
+  // Pack wording stays off other prompts so their shared-prefix bytes are unchanged.
+  const orientation = packPage
+    ? CONTEXT_FIRST_ORIENTATION.replace(
+        'diff hunks, guidelines',
+        'diff hunks, context pack, guidelines',
+      )
+    : CONTEXT_FIRST_ORIENTATION;
   const parts = options.contextFirst
-    ? [prContext, ...guidelineBlock, CONTEXT_FIRST_ORIENTATION, instructions]
+    ? [prContext, ...guidelineBlock, orientation, instructions]
     : [instructions, ...guidelineBlock, prContext];
   if (lensAddendum) parts.push(lensAddendum);
   if (evidenceQuotes) parts.push(EVIDENCE_INSTRUCTION);
@@ -1390,8 +1610,8 @@ ${REVIEW_COMMAND_POLICY}
 - Report one finding per violation, anchored to a line ADDED by this PR, or
   to line 0 of the changed file when no single added line carries the
   violation.
-- Every finding body MUST name or quote the specific written rule it violates
-  and cite its inspected repository location as \`path/to/rule.md:42\`.
+- Every finding body MUST quote the specific written rule it violates and name
+  the file it comes from, such as \`TECHNICAL_STANDARDS.md\`.
 - A P3 recommendation still needs an observed conflict and a concrete benefit.
   Do not infer tool usage, authorship, or generation history from file style.
 - Do not report issues in code this PR did not touch.
@@ -1421,7 +1641,7 @@ JSON string values; escape newlines inside string values as \\n.
       "kind": "maintainability",
       "confidence": "high",
       "title": "Floating promise violates \`TECHNICAL_STANDARDS.md\`",
-      "body": "\`TECHNICAL_STANDARDS.md:7\` says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
+      "body": "\`TECHNICAL_STANDARDS.md\` says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
     }
   ]
 }
@@ -1441,6 +1661,23 @@ the JSON. Do not wrap it in markdown fences. Markdown is allowed only inside
 JSON string values; escape newlines inside string values as \\n. Do not write
 an audit recap, completion note, question, or "what would you like next"
 message.`;
+
+/** context-pack compliance pages: appended to the page's PR context. */
+export const COMPLIANCE_PACK_NOTE = `## Page audit notes
+
+- The "Diff hunks" section below embeds this page's complete diff with new-side
+  line numbers, so do not run git diff for this page's files. Other pages of
+  this PR are audited by parallel tasks.
+- A context pack before the diff, when present, holds code jbot already read for
+  this page: the code around the changes, the definitions they use, and their
+  callers.
+- Lines under a "Whitespace only" note were moved or re-indented by this PR, not
+  written by it.
+
+## Repository exploration policy
+
+Audit the embedded hunks, and read more code or guidance whenever a rule check
+needs it.`;
 
 export function assembleGuidelineSweepPrompt(guidelines: string): string {
   return assembleGuidelineCompliancePrompt(
@@ -1471,8 +1708,9 @@ that each finding is WRONG. Your job is to try to refute it.
 
 ## How to work
 
-- The full repository is checked out on the PR branch. For each finding, read
-  the actual code at and around the cited location — never judge from the
+- The "Cited and related repository source excerpts" section below holds the
+  code around each cited location, and the full repository is checked out on
+  the PR branch for anything else a finding depends on. Never judge from the
   finding text alone.
 - Reproduce the claimed trigger path concretely: what input or state reaches
   this code, and does the claimed wrong result actually occur? Check guards,
@@ -1778,6 +2016,9 @@ export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you descr
 export const PERMISSION_DENIED_MESSAGE =
   'jbot-review runs headless; nothing can answer a permission prompt.';
 
+export const TOOLS_OFF_MESSAGE =
+  'Tools are off for this pass; answer from the evidence in the prompt.';
+
 export function buildJsonRepairPrompt(parseError: string): string {
   return [
     'Your previous response could not be parsed as JSON.',
@@ -1913,6 +2154,29 @@ export function compactReviewPageContext(
     .filter(Boolean)
     .join('\n\n');
   return Buffer.byteLength(compact) < Buffer.byteLength(context) ? compact : context;
+}
+
+/**
+ * Decides compaction once, on the core with the usage list, so main pages that swap the list
+ * out cannot slip under the threshold and keep metadata that compliance pages drop.
+ */
+export function compactReviewPageContexts(params: {
+  core: string;
+  /** The core with its usage block swapped for exploration evidence; absent, main equals full. */
+  mainCore?: string;
+  scope: string;
+  summary: string;
+  focus: string;
+  usage: string;
+  exploration: string;
+}): { full: string; main: string; compacted: boolean } {
+  const page = (evidence: string) =>
+    compactReviewPageContext(params.core, params.scope, params.summary, params.focus, evidence);
+  const full = page([params.usage, params.exploration].filter(Boolean).join('\n\n'));
+  const compacted = full !== params.core;
+  const main =
+    params.mainCore === undefined ? full : compacted ? page(params.exploration) : params.mainCore;
+  return { full, main, compacted };
 }
 
 export function buildIncrementalReviewContext(

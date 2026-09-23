@@ -727,3 +727,59 @@ it('records uncertain P3 and nit verdicts without relying on a severity change',
     [true, true, false],
   );
 });
+
+describe('context pack telemetry', () => {
+  it('records context-pack rows, and supplied counters only for sessions that got a pack', () => {
+    const recorder = createTelemetryRecorder(true);
+    const tools = createToolTelemetryAccumulator(recorder, 'salt');
+    const call = {
+      backend: 'opencode',
+      capability: 'observable' as const,
+      toolClass: 'file-read' as const,
+      inputBytes: 1,
+    };
+    const done = { success: true, outputBytesBeforeCap: 1, outputBytesAfterCap: 1 };
+    const finish = (session: string, suppliedTracked?: boolean) =>
+      tools.finishSession({
+        session,
+        backend: 'opencode',
+        capability: 'observable',
+        budgetTier: 'observe-only',
+        stopReason: 'completed',
+        ...(suppliedTracked ? { suppliedTracked } : {}),
+      });
+    tools.startTool({ ...call, session: 'review', supplied: 'read' })(done);
+    tools.startTool({ ...call, session: 'review', supplied: false })(done);
+    tools.startTool({ ...call, toolClass: 'search', session: 'review', supplied: 'search' })(done);
+    finish('review', true);
+    // The concurrency wrapper finishes the session again, without the flag.
+    finish('review');
+    finish('review-shard-2', true);
+    tools.startTool({ ...call, session: 'lens' })(done);
+    finish('lens');
+    recorder.recordContextPack({
+      session: 'review',
+      state: 'complete',
+      buildMs: 5,
+      roomBytes: 10,
+      bytes: 3,
+      omitted: 0,
+      uncollected: 0,
+      slices: {},
+    });
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const explored = Object.fromEntries(
+      rows.filter((row) => row.kind === 'exploration').map((row) => [row.session, row]),
+    );
+    assert.deepEqual([explored.review.suppliedRereads, explored.review.suppliedSearches], [1, 1]);
+    assert.deepEqual(
+      [explored['review-shard-2'].suppliedRereads, explored['review-shard-2'].suppliedSearches],
+      [0, 0],
+    );
+    assert.equal('suppliedRereads' in explored.lens, false);
+    assert.equal(rows.filter((row) => row.kind === 'context-pack').length, 1);
+  });
+});

@@ -24,6 +24,8 @@ export interface ToolTelemetryStart {
   page?: string;
   diffScope?: 'whole' | 'path';
   exactRequest?: string;
+  /** Re-read or re-searched context-pack content; absent when the session got no pack. */
+  supplied?: 'read' | 'search' | false;
 }
 
 export interface ToolTelemetryFinish {
@@ -45,6 +47,8 @@ export interface ExplorationTelemetryFinish {
   turnCount?: number;
   explorationMode?: ExplorationMode;
   experiment?: Record<string, number>;
+  /** The session got a context pack, so its supplied counters apply even at zero. */
+  suppliedTracked?: boolean;
 }
 
 export interface ToolTelemetryAccumulator {
@@ -65,6 +69,7 @@ interface SessionCounters {
   diffFileHeaders?: number;
   multiFileDiffCalls?: number;
   exact?: { repeats: number; unchanged: number; changed: number; unchangedDurationMs: number };
+  supplied?: { rereads: number; searches: number };
 }
 
 const EMPTY: ToolTelemetryAccumulator = {
@@ -180,6 +185,11 @@ export function createToolTelemetryAccumulator(
         }
         if (duplicate && input.toolClass === 'file-read') counters.duplicateReads += 1;
         if (duplicate && input.toolClass === 'search') counters.repeatedSearches += 1;
+        if (input.supplied !== undefined) {
+          const supplied = (counters.supplied ??= { rereads: 0, searches: 0 });
+          if (input.supplied === 'read') supplied.rereads += 1;
+          if (input.supplied === 'search') supplied.searches += 1;
+        }
         if (rows >= MAX_TOOL_TELEMETRY_ROWS) {
           counters.droppedToolRows += 1;
           return;
@@ -208,6 +218,7 @@ export function createToolTelemetryAccumulator(
     },
     finishSession(input) {
       const counters = countersFor(input.backend, input.session);
+      if (input.suppliedTracked) counters.supplied ??= { rereads: 0, searches: 0 };
       const row: ExplorationTelemetryRow = {
         kind: 'exploration',
         session: input.session,
@@ -239,6 +250,12 @@ export function createToolTelemetryAccumulator(
               unchangedRepeatCalls: counters.exact.unchanged,
               changedRepeatCalls: counters.exact.changed,
               unchangedRepeatDurationMs: counters.exact.unchangedDurationMs,
+            }
+          : {}),
+        ...(counters.supplied
+          ? {
+              suppliedRereads: counters.supplied.rereads,
+              suppliedSearches: counters.supplied.searches,
             }
           : {}),
       };

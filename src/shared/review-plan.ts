@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { CONTEXT_PACK_MAX_BYTES, type ContextPack } from './context-pack.ts';
 import type { PrFile } from './github.ts';
 import type { EvidenceStore } from './evidence.ts';
+import type { SuppliedContext } from './review-read-locations.ts';
+import type { ContextPackTelemetryRow } from './telemetry.ts';
 import { findingSourceLocations } from './finding-context.ts';
 import type { Finding } from './types.ts';
 import {
@@ -85,12 +88,25 @@ export interface ShardPlan {
   units?: DiffUnit[];
   promptBytes?: number;
   guidelines?: string;
+  /** The page's embedded diff block; a context pack goes right before it. */
+  diffText?: string;
+  contextPack?: boolean;
 }
 
 export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
   const score = (plan: ShardPlan) =>
     Math.max(0, ...(plan.units ?? []).map((unit) => diffRiskScore(unit.file)));
   return [...plans].sort((a, b) => score(b) - score(a));
+}
+
+export function planPageFiles(units: DiffUnit[]): PrFile[] {
+  return [...new Set(units.map((unit) => unit.file.filename))].map((filename) => ({
+    ...units.find((unit) => unit.file.filename === filename)!.file,
+    patch: units
+      .filter((unit) => unit.file.filename === filename)
+      .map((unit) => unit.file.patch)
+      .join('\n'),
+  }));
 }
 
 function diffUnits(file: PrFile): DiffUnit[] {
@@ -147,6 +163,7 @@ export function buildShardPlans(params: {
   minimumDiffBytes?: number;
   embeddedFirstPrompt?: boolean;
   diffFirst?: boolean;
+  numberedDiff?: boolean;
   batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
 }): ShardPlan[] {
   const files = params.shards.flat();
@@ -158,14 +175,11 @@ export function buildShardPlans(params: {
     : params.coreContext;
   const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
     const assignedFiles = [...new Set(units.map((u) => u.file.filename))];
-    const pageFiles = assignedFiles.map((filename) => ({
-      ...units.find((u) => u.file.filename === filename)!.file,
-      patch: units
-        .filter((u) => u.file.filename === filename)
-        .map((u) => u.file.patch)
-        .join('\n'),
-    }));
-    const diff = buildDiffHunksBlockWithMetadata(pageFiles, COMPLETE_DIFF_OPTIONS);
+    const pageFiles = planPageFiles(units);
+    const diff = buildDiffHunksBlockWithMetadata(pageFiles, {
+      ...COMPLETE_DIFF_OPTIONS,
+      numbered: params.numberedDiff,
+    });
     const assignment = buildShardAssignmentBlock(
       assignedFiles,
       index,
@@ -193,6 +207,7 @@ export function buildShardPlans(params: {
       context,
       baseContext,
       assignedFiles,
+      diffText: diff.text,
       diffCoverage: {
         ...diffHunksCoverage(pageFiles, diff),
         completeFiles: assignedFiles.filter((path) =>
@@ -347,15 +362,8 @@ export function targetedDiff(
         );
       }),
     );
-  const files = [...new Set(units.map((u) => u.file.filename))].map((filename) => ({
-    filename,
-    patch: units
-      .filter((u) => u.file.filename === filename)
-      .map((u) => u.file.patch)
-      .join('\n'),
-  }));
   return buildTargetedDiffBlock(
-    files,
+    planPageFiles(units),
     units.flatMap((unit) => unit.adjacent ?? []),
   );
 }
@@ -376,6 +384,8 @@ export async function addReviewEvidence(
   renderPrompt: (context: string, guidelines?: string) => string,
   budget: ReviewPromptBudget,
   log: (message: string) => void,
+  /** Appended after the caller evidence; planning reserved its room. */
+  trailer = '',
 ): Promise<void> {
   let next = 0;
   const deadline = Date.now() + 5000;
@@ -411,8 +421,9 @@ export async function addReviewEvidence(
           REVIEW_EVIDENCE_BYTES - 2,
           'Caller evidence',
         );
-        plan.context += `\n\n${block}`;
-        plan.baseContext += `\n\n${block}`;
+        const addition = trailer ? `${block}\n\n${trailer}` : block;
+        plan.context += `\n\n${addition}`;
+        plan.baseContext += `\n\n${addition}`;
         const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
         if (!measured.fits)
           throw new Error(
@@ -425,4 +436,88 @@ export async function addReviewEvidence(
       }
     }),
   );
+}
+
+interface ContextPackResult {
+  row: Omit<ContextPackTelemetryRow, 'kind'>;
+  supplied?: SuppliedContext;
+}
+
+/** Puts each page's context pack before its diff; pages it cannot serve are left unchanged. */
+export async function addContextPack(params: {
+  plans: ShardPlan[];
+  build: (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) => Promise<ContextPack>;
+  /** The pack-aware page prompt; it sizes both the room and the final fit. */
+  renderPrompt: (context: string, guidelines?: string) => string;
+  budget: ReviewPromptBudget;
+  log: (message: string) => void;
+}): Promise<ContextPackResult[]> {
+  const { plans, renderPrompt, budget } = params;
+  const signal = AbortSignal.timeout(5000);
+  const results: ContextPackResult[] = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, plans.length) }, async () => {
+      while (next < plans.length) {
+        const index = next++;
+        const plan = plans[index];
+        const started = Date.now();
+        const roomBytes = Math.max(
+          0,
+          inputCapacity(budget) -
+            Buffer.byteLength(renderPrompt(plan.context, plan.guidelines)) -
+            1024,
+        );
+        const pack = await params
+          .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
+          .catch(() => undefined);
+        // A directory map alone would cost the page its caller evidence for no code, and a
+        // partial pack may be missing callers, so both keep today's evidence instead.
+        let reason: ContextPackResult['row']['reason'] = !pack
+          ? 'error'
+          : pack.state === 'partial'
+            ? 'partial'
+            : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
+              ? undefined
+              : 'empty';
+        if (pack && !reason) {
+          const previous = { context: plan.context, baseContext: plan.baseContext };
+          plan.context = withContextPack(plan.context, plan.diffText, pack.text);
+          plan.baseContext = withContextPack(plan.baseContext, plan.diffText, pack.text);
+          const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
+          if (measured.fits) {
+            plan.promptBytes = measured.promptBytes;
+            plan.contextPack = true;
+          } else {
+            Object.assign(plan, previous);
+            reason = 'overflow';
+          }
+        }
+        const served = reason ? undefined : pack;
+        const row: ContextPackResult['row'] = {
+          session: plan.label,
+          state: served?.state ?? 'fallback',
+          ...(reason ? { reason } : {}),
+          buildMs: Date.now() - started,
+          roomBytes,
+          bytes: served ? Buffer.byteLength(served.text) : 0,
+          omitted: served?.omitted ?? 0,
+          // Also kept on fallback pages, so a deadline-starved empty page stays visible.
+          uncollected: pack?.uncollected ?? 0,
+          slices: served?.slices ?? {},
+        };
+        results[index] = { row, supplied: served?.supplied };
+        const { session: _session, slices: _slices, ...logged } = row;
+        params.log(`Context pack (${plan.label}): ${JSON.stringify(logged)}.`);
+      }
+    }),
+  );
+  return results;
+}
+
+function withContextPack(context: string, diffText: string | undefined, pack: string): string {
+  const at = diffText ? context.lastIndexOf(diffText) : -1;
+  return at < 0
+    ? `${context}\n\n${pack}`
+    : `${context.slice(0, at)}${pack}\n\n${context.slice(at)}`;
 }

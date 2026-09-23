@@ -28,6 +28,9 @@ export interface ReviewBackend {
       deadlineAt?: number;
       lensAddendum?: string;
       contextFirst?: boolean;
+      contextPack?: boolean;
+      /** Tools off; backends without that mode ignore it. */
+      toolLess?: boolean;
       label?: string;
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;
@@ -63,6 +66,8 @@ export interface ReviewBackend {
      * backends without per-session option support ignore it.
      */
     modelOptions?: Record<string, unknown>,
+    /** `single-shot` runs tools off, `capped` a few tool turns; other backends ignore it. */
+    mode?: 'single-shot' | 'capped',
   ): Promise<FindingVerdict[] | undefined>;
   runChangesSinceLastReview(
     model: string,

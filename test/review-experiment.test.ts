@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { reviewExperiment } from '../src/shared/review-experiment.ts';
+import { reviewExperiment, toolLessAuxiliary } from '../src/shared/review-experiment.ts';
 import { normalizeOptions } from '../src/shared/runner.ts';
 import { runConfiguration } from '../src/shared/run-telemetry.ts';
 
@@ -23,6 +23,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   const off = reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'off' });
   assert.deepEqual(off, {
     preset: 'off',
+    contextPack: false,
     jevPrefetch: 'off',
     explorationEvidence: 'off',
     verificationEvidence: 'off',
@@ -53,8 +54,15 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       preset: 'adaptive',
       exploration: { ...off.exploration, batchDiffRecovery: true },
     },
+    {
+      ...off,
+      preset: 'context-pack',
+      contextPack: true,
+      exploration: { ...off.exploration, batchDiffRecovery: true },
+    },
   ];
-  assert.deepEqual(reviewExperiment({}), expected[1]);
+  assert.deepEqual(reviewExperiment({}), expected[4]);
+  assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[4]);
   const hashes = new Set<string>();
   for (const preset of expected) {
     const experiment = reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: preset.preset });
@@ -68,9 +76,24 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     assert.deepEqual(configuration.explorationExperiment, preset.exploration);
     hashes.add(configurationHash);
   }
-  assert.equal(hashes.size, 4);
+  assert.equal(hashes.size, 5);
   off.reuse.shared = true;
   off.exploration.readEvidence = 'linked';
   assert.equal(reviewExperiment({}).reuse.shared, false);
   assert.equal(reviewExperiment({}).exploration.readEvidence, false);
+});
+
+test('context-pack runs auxiliary passes tool-less only on opencode with an agentic aux model', () => {
+  const pack = reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'context-pack' });
+  assert.equal(toolLessAuxiliary(pack, 'opencode', true), true);
+  assert.equal(toolLessAuxiliary(pack, 'opencode', false), false);
+  assert.equal(toolLessAuxiliary(pack, 'pi', true), false);
+  assert.equal(
+    toolLessAuxiliary(
+      reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'diff-batches' }),
+      'opencode',
+      true,
+    ),
+    false,
+  );
 });

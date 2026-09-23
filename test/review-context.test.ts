@@ -752,6 +752,38 @@ describe('discoverGuidelineDocs', () => {
 });
 
 describe('formatFinderGuidelines', () => {
+  it('drops pointer stubs and agent skills from context-pack finders and says where they went', () => {
+    const discovered = {
+      docs: [
+        { label: 'AGENTS.md', relevance: 1 as const, text: `# Rules\n${'RULE_TEXT '.repeat(80)}` },
+        { label: '.cursor/BUGBOT.md', relevance: 1 as const, text: 'Read AGENTS.md. POINTER_TEXT' },
+        {
+          label: 'CLAUDE.md',
+          relevance: 1 as const,
+          text: 'See DESIGN.md.\nAlways run migrations before deploying. MIXED_RULE',
+        },
+        {
+          label: '.agents/skills/audit/SKILL.md',
+          relevance: 2 as const,
+          text: `## Required reading\nSKILL_TEXT ${'x'.repeat(700)}`,
+        },
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    };
+    const pack = formatFinderGuidelines(discovered, { contextPack: true });
+    assert.match(pack, /RULE_TEXT[\s\S]*MIXED_RULE|MIXED_RULE[\s\S]*RULE_TEXT/);
+    assert.doesNotMatch(pack, /POINTER_TEXT|SKILL_TEXT/);
+    assert.match(
+      pack,
+      /omitted file\(s\): \.cursor\/BUGBOT\.md, \.agents\/skills\/audit\/SKILL\.md\. The full set is reviewed by the separate guideline-compliance pass\./,
+    );
+    assert.match(
+      formatFinderGuidelines(discovered),
+      /POINTER_TEXT[\s\S]*SKILL_TEXT|SKILL_TEXT[\s\S]*POINTER_TEXT/,
+    );
+  });
+
   it('omits lens procedures while retaining nested, ambiguous, and fenced contract evidence', () => {
     const discovered = {
       docs: [

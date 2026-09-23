@@ -30,6 +30,40 @@ describe('benchmark runner decisions', () => {
           cacheReadTokens: 3,
           estimatedCostUsd: 0.25,
         }),
+        JSON.stringify({
+          kind: 'exploration',
+          session: 'review-shard-1',
+          turnCount: 4,
+          suppliedRereads: 2,
+          suppliedSearches: 1,
+        }),
+        JSON.stringify({
+          kind: 'exploration',
+          session: 'review-shard-2',
+          turnCount: 3,
+          suppliedRereads: -1,
+        }),
+        JSON.stringify({ kind: 'exploration', session: 'review-shard-2-retry', turnCount: 2 }),
+        JSON.stringify({
+          kind: 'exploration',
+          session: 'review-interactions',
+          turnCount: 9,
+          suppliedRereads: 5,
+          suppliedSearches: 5,
+        }),
+        JSON.stringify({ kind: 'exploration', session: 'review', turnCount: -1 }),
+        JSON.stringify({ kind: 'phase', phase: 'main-execution', scope: 'run', durationMs: 1200 }),
+        JSON.stringify({
+          kind: 'phase',
+          phase: 'main-execution',
+          scope: 'session',
+          session: 'review-shard-1',
+          durationMs: 900,
+        }),
+        JSON.stringify({ kind: 'context-pack', session: 'review-interactions', state: 'complete' }),
+        JSON.stringify({ kind: 'context-pack', session: 'review-shard-1', state: 'fallback' }),
+        JSON.stringify({ kind: 'tool', session: 'review-shard-1', toolClass: 'file-read' }),
+        JSON.stringify({ kind: 'tool', session: 'review-interactions', toolClass: 'file-read' }),
       ].join('\n'),
     );
     assert.deepEqual(metrics, {
@@ -39,6 +73,12 @@ describe('benchmark runner decisions', () => {
       cacheReadTokens: 3,
       costUsd: 0.25,
       sessions: 1,
+      mainTurns: 9,
+      mainExecutionMs: 1200,
+      packsServed: 1,
+      mainReads: 1,
+      mainSuppliedRereads: 2,
+      mainSuppliedSearches: 1,
     });
   });
 

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewReadLocations } from '../src/shared/review-read-locations.ts';
+import {
+  mergeSuppliedContexts,
+  reviewReadLocations,
+  suppliedOverlap,
+} from '../src/shared/review-read-locations.ts';
 
 test('literal shell reads preserve their directory and range without evaluating shell syntax', () => {
   const reads = (command: string, extra = {}) =>
@@ -45,4 +49,74 @@ test('literal shell reads preserve their directory and range without evaluating 
     'cat a.ts && git diff',
   ])
     assert.deepEqual(reads(command), [], command);
+});
+
+test('supplied overlap separates re-reads and searches of context-pack content', () => {
+  // Two packs merged, as compliance pages that share a session label are.
+  const supplied = mergeSuppliedContexts([
+    {
+      ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
+      symbols: new Set(['LedgerService']),
+      directories: new Set(['src']),
+      lines: new Map([['src/a.ts', 400]]),
+    },
+    {
+      ranges: new Map<string, [number, number][]>([['src/small.ts', [[1, 30]]]]),
+      symbols: new Set<string>(),
+      directories: new Set(['.']),
+      lines: new Map([['src/small.ts', 30]]),
+    },
+  ]);
+  const read = (input: Record<string, unknown>) => suppliedOverlap('/w', 'read', input, supplied);
+  assert.equal(read({ filePath: '/w/src/a.ts', offset: 10, limit: 5 }), 'read');
+  assert.equal(read({ filePath: '/w/src/a.ts', offset: 1, limit: 5 }), false);
+  // No limit defaults to a 2000-line window, clamped to a 400-line file.
+  assert.equal(read({ filePath: '/w/src/a.ts', offset: 1 }), false);
+  assert.equal(read({ filePath: '/w/src' }), 'read');
+  assert.equal(read({ filePath: '/w' }), 'read');
+  // A fully supplied small file: the clamp lets a default or whole-file read count.
+  assert.equal(read({ filePath: '/w/src/small.ts' }), 'read');
+  assert.equal(read({ filePath: '/w/src/small.ts', offset: 50 }), false);
+  assert.equal(suppliedOverlap('/w', 'shell', { command: 'cat src/small.ts' }, supplied), 'read');
+  assert.equal(
+    suppliedOverlap('/w', 'grep', { pattern: 'unrelated', path: 'src' }, supplied),
+    false,
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'grep', { pattern: 'LedgerService|other' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'grep -rn LedgerService src' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'grep -n "\\bLedgerService\\b" src' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: "rg -n -C 3 'LedgerService' src" }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'rg --files | grep LedgerService' }, supplied),
+    'search',
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'git log --grep=LedgerService' }, supplied),
+    false,
+  );
+  assert.equal(
+    suppliedOverlap(
+      '/w',
+      'shell',
+      { command: 'grep -rn Unrelated scripts/run' },
+      { ...supplied, symbols: new Set(['run']) },
+    ),
+    false,
+  );
+  assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'sed -n 15,16p src/a.ts' }, supplied),
+    'read',
+  );
 });

@@ -1,5 +1,10 @@
 import { formatUnverifiedFinding } from './prompt.ts';
-import { anchorByEvidenceSnippet, evidenceWindow, rescueAnchorByEvidence } from './patch.ts';
+import {
+  anchorByEvidenceSnippet,
+  evidenceWindow,
+  rescueAnchorByEvidence,
+  unnumberedEvidence,
+} from './patch.ts';
 import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
 
 /** Drops noise files (lockfiles, generated, minified) before the agent sees them. */
@@ -282,6 +287,10 @@ export function checkConfirmationEvidence(
   };
 }
 
+export function resolvesFinding(finding: Finding, verdict: FindingVerdict): boolean {
+  return !confirmedFinding(finding, verdict).verificationUncertain;
+}
+
 function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
   if (!isUnresolvedFinding(finding)) return finding;
   const confirmed = verdict.finding;
@@ -401,6 +410,9 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
  * Line 0 is left alone: the prompt defines it as a finding no single added line
  * can carry, and its evidence necessarily quotes adjacent code rather than the
  * defect.
+ *
+ * Evidence always drops line numbers copied from a numbered page diff, line 0
+ * and quotes-off included: verifier prompts quote it.
  */
 export function resolveFindingAnchors(
   findings: Finding[],
@@ -408,11 +420,11 @@ export function resolveFindingAnchors(
   patchByPath: ReadonlyMap<string, string>,
   evidenceQuotes: boolean,
 ): Finding[] {
-  if (!evidenceQuotes) return [];
   const moved: Finding[] = [];
   for (const f of findings) {
-    if (f.line === 0 || !f.evidence) continue;
     const patch = patchByPath.get(f.path);
+    if (f.evidence) f.evidence = unnumberedEvidence(patch, f.evidence);
+    if (!evidenceQuotes || f.line === 0 || !f.evidence) continue;
     let target: number | undefined;
     if (addable.get(f.path)?.has(f.line)) {
       // An addable claim moves only on provable inconsistency: the quote

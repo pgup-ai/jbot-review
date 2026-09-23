@@ -12,6 +12,7 @@ import {
   isDocOnlyChange,
   samePatchSet,
   shardFilesForReview,
+  whitespaceOnlyLines,
 } from '../src/shared/diff-context.ts';
 import type { PrFile } from '../src/shared/github.ts';
 
@@ -100,6 +101,52 @@ describe('buildDiffHunksBlock', () => {
     assert.match(block, /### Hunks not embedded \(diff budget reached\)/);
     assert.match(block, /- docs\/b\.md/);
     assert.match(block, /### src\/auth\/a\.ts/);
+  });
+
+  it('numbers new-side lines per hunk and says so in the heading', () => {
+    const patch = [
+      '@@ -8,3 +8,4 @@ function f() {',
+      ' const a = 1;',
+      '-const b = 2;',
+      '+const b = 3;',
+      '+const c = 4;',
+      ' return a;',
+      '@@ -98 +99,2 @@',
+      ' x();',
+      '+y();',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const numbered = [
+      '@@ -8,3 +8,4 @@ function f() {',
+      ' 8  const a = 1;',
+      '   -const b = 2;',
+      ' 9 +const b = 3;',
+      '10 +const c = 4;',
+      '11  return a;',
+      '@@ -98 +99,2 @@',
+      ' 99  x();',
+      '100 +y();',
+      '    \\ No newline at end of file',
+    ].join('\n');
+    const note =
+      "Each new-side line starts with its line number; cite it for a finding's line " +
+      'instead of re-reading the file to count lines. A "Whitespace only" line under a ' +
+      'file lists added lines whose text matches a removed line apart from whitespace: the PR moved or re-indented that code, it did not write it.';
+    const files = [{ filename: 'src/f.ts', patch }];
+    assert.equal(
+      buildDiffHunksBlock(files, { numbered: true }),
+      buildDiffHunksBlock(files)
+        .replace('risk first.\n', `risk first.\n${note}\n`)
+        .replace(patch, numbered),
+    );
+    // Re-indented lines are listed; a context line ends the change block they can match in.
+    const wrapped =
+      '@@ -1,4 +1,6 @@\n-  x();\n-  y();\n+run(() => {\n+    x();\n+    y();\n+});\n z();\n+x();';
+    assert.deepEqual(whitespaceOnlyLines(wrapped), [2, 3]);
+    assert.match(
+      buildDiffHunksBlock([{ filename: 'src/w.ts', patch: wrapped }], { numbered: true }),
+      /### src\/w\.ts\nWhitespace only: 2-3\n```diff/,
+    );
   });
 
   it('reports which files were truncated or omitted by the diff budget', () => {

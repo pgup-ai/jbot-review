@@ -20,6 +20,7 @@
     "corpus:import-history": "tsx scripts/review-history-import.ts",
     "corpus:adjudicate": "tsx scripts/review-adjudication.ts",
     "performance:review": "tsx scripts/review-performance.ts",
+    "replay:context-pack": "tsx scripts/context-pack-replay.ts",
     "gateway": "tsx src/gateway/server.ts",
     "gateway:demo": "tsx src/gateway/demo.ts",
     "models:update": "tsx scripts/update-model-catalog.ts",
