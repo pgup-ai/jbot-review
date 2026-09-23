@@ -188,6 +188,27 @@ test('the budget cuts whole items from the end and lists them as omitted', async
   assert.equal((await buildContextPack(PAGE, CHANGED, provider(), 100)).text, '');
 });
 
+test('changed symbols past the cap are named in Omitted', async () => {
+  const path = 'apps/api/src/many.ts';
+  const source = Array.from(
+    { length: 21 },
+    (_, i) => `export function f${i}() {\n  return ${i + 1};\n}`,
+  ).join('\n');
+  const patch = [
+    '@@ -1,63 +1,63 @@',
+    ...Array.from({ length: 21 }, (_, i) => [
+      ` export function f${i}() {`,
+      `-  return ${i};`,
+      `+  return ${i + 1};`,
+      ' }',
+    ]).flat(),
+  ].join('\n');
+  const page = [{ filename: path, patch }];
+  const pack = await buildContextPack(page, page, provider({ ...REPO, [path]: source }), 64 * 1024);
+  const omitted = pack.text.slice(pack.text.indexOf('### Omitted'));
+  assert.match(omitted, /^### Omitted\n- f20 \(callers\)$/);
+});
+
 test('a source the provider cannot deliver makes the pack partial', async () => {
   const failing = { ...provider(), load: async () => Promise.reject(new Error('timeout')) };
   const pack = await buildContextPack(PAGE, CHANGED, failing, 64 * 1024);

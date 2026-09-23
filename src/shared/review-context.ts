@@ -1390,10 +1390,19 @@ export function formatFinderGuidelines(
       ? 0
       : doc.relevance;
   const procedureOmissions: string[] = [];
-  // A short doc naming other docs, or an agent skill, sends a finder reading instead of reviewing.
-  const pointer = (doc: GuidelineDoc) =>
-    (Buffer.byteLength(doc.text) < 600 && /\.md\b/i.test(doc.text)) ||
-    /(^|\/)(\.agents\/|SKILL\.md$)/i.test(doc.label);
+  // A short doc whose every line names another doc, or an agent skill, sends a finder reading instead of reviewing.
+  const pointer = (doc: GuidelineDoc) => {
+    const lines = doc.text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    return (
+      (Buffer.byteLength(doc.text) < 600 &&
+        lines.length > 0 &&
+        lines.every((line) => /\.md\b/i.test(line))) ||
+      /(^|\/)(\.agents\/|SKILL\.md$)/i.test(doc.label)
+    );
+  };
   const pointers =
     options.contextPack && !options.lens
       ? discovered.docs.filter(pointer).map((doc) => doc.label)

@@ -758,6 +758,11 @@ describe('formatFinderGuidelines', () => {
         { label: 'AGENTS.md', relevance: 1 as const, text: `# Rules\n${'RULE_TEXT '.repeat(80)}` },
         { label: '.cursor/BUGBOT.md', relevance: 1 as const, text: 'Read AGENTS.md. POINTER_TEXT' },
         {
+          label: 'CLAUDE.md',
+          relevance: 1 as const,
+          text: 'See DESIGN.md.\nAlways run migrations before deploying. MIXED_RULE',
+        },
+        {
           label: '.agents/skills/audit/SKILL.md',
           relevance: 2 as const,
           text: `## Required reading\nSKILL_TEXT ${'x'.repeat(700)}`,
@@ -767,7 +772,7 @@ describe('formatFinderGuidelines', () => {
       budgetExhausted: false,
     };
     const pack = formatFinderGuidelines(discovered, { contextPack: true });
-    assert.match(pack, /RULE_TEXT/);
+    assert.match(pack, /RULE_TEXT[\s\S]*MIXED_RULE|MIXED_RULE[\s\S]*RULE_TEXT/);
     assert.doesNotMatch(pack, /POINTER_TEXT|SKILL_TEXT/);
     assert.match(
       pack,

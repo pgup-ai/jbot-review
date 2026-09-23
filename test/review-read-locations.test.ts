@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewReadLocations, suppliedOverlap } from '../src/shared/review-read-locations.ts';
+import {
+  mergeSuppliedContexts,
+  reviewReadLocations,
+  suppliedOverlap,
+} from '../src/shared/review-read-locations.ts';
 
 test('literal shell reads preserve their directory and range without evaluating shell syntax', () => {
   const reads = (command: string, extra = {}) =>
@@ -48,18 +52,21 @@ test('literal shell reads preserve their directory and range without evaluating 
 });
 
 test('supplied overlap separates re-reads and searches of context-pack content', () => {
-  const supplied = {
-    ranges: new Map<string, [number, number][]>([
-      ['src/a.ts', [[12, 20]]],
-      ['src/small.ts', [[1, 30]]],
-    ]),
-    symbols: new Set(['LedgerService']),
-    directories: new Set(['src', '.']),
-    lines: new Map([
-      ['src/a.ts', 400],
-      ['src/small.ts', 30],
-    ]),
-  };
+  // Two packs merged, as compliance pages that share a session label are.
+  const supplied = mergeSuppliedContexts([
+    {
+      ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
+      symbols: new Set(['LedgerService']),
+      directories: new Set(['src']),
+      lines: new Map([['src/a.ts', 400]]),
+    },
+    {
+      ranges: new Map<string, [number, number][]>([['src/small.ts', [[1, 30]]]]),
+      symbols: new Set<string>(),
+      directories: new Set(['.']),
+      lines: new Map([['src/small.ts', 30]]),
+    },
+  ]);
   const read = (input: Record<string, unknown>) => suppliedOverlap('/w', 'read', input, supplied);
   assert.equal(read({ filePath: '/w/src/a.ts', offset: 10, limit: 5 }), 'read');
   assert.equal(read({ filePath: '/w/src/a.ts', offset: 1, limit: 5 }), false);

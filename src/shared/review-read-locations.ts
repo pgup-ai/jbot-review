@@ -85,6 +85,24 @@ export interface SuppliedContext {
   lines: Map<string, number>;
 }
 
+/** Several packs seen by one session; compliance pages share a session label. */
+export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedContext {
+  const merged: SuppliedContext = {
+    ranges: new Map(),
+    symbols: new Set(),
+    directories: new Set(),
+    lines: new Map(),
+  };
+  for (const context of contexts) {
+    for (const [path, ranges] of context.ranges)
+      merged.ranges.set(path, [...(merged.ranges.get(path) ?? []), ...ranges]);
+    for (const [path, count] of context.lines) merged.lines.set(path, count);
+    for (const symbol of context.symbols) merged.symbols.add(symbol);
+    for (const directory of context.directories) merged.directories.add(directory);
+  }
+  return merged;
+}
+
 /** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
 function shellSearchPattern(command: string): string | undefined {
   const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(

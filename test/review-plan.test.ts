@@ -582,7 +582,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     uncollected: 0,
     slices: { surrounding: { items: 1, bytes: 1 } },
   };
-  const plans = [page(), page(), page(), page()];
+  const plans = [page(), page(), page(), page(), page()];
   const before = { context: plans[3].context, baseContext: plans[3].baseContext };
   const results = await addContextPack({
     plans,
@@ -591,6 +591,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
         return { ...pack, uncollected: 2, slices: { directories: { items: 1, bytes: 10 } } };
       if (plan === plans[2]) throw new Error('boom');
       if (plan === plans[3]) return { ...pack, text: '## Context pack\n' + 'x'.repeat(300_000) };
+      if (plan === plans[4]) return { ...pack, state: 'partial' as const };
       return pack;
     },
     renderPrompt: (context) =>
@@ -605,6 +606,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
       ['fallback', 'empty'],
       ['fallback', 'error'],
       ['fallback', 'overflow'],
+      ['fallback', 'partial'],
     ],
   );
   assert.equal(results[1].row.uncollected, 2);
@@ -614,7 +616,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
   assert.deepEqual({ context: plans[3].context, baseContext: plans[3].baseContext }, before);
   assert.deepEqual(
     plans.map((plan) => plan.contextPack),
-    [true, undefined, undefined, undefined],
+    [true, undefined, undefined, undefined, undefined],
   );
 });
 

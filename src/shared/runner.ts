@@ -22,7 +22,7 @@ import {
   type ShardPlan,
 } from './review-plan.ts';
 import { buildContextPack } from './context-pack.ts';
-import type { SuppliedContext } from './review-read-locations.ts';
+import { mergeSuppliedContexts, type SuppliedContext } from './review-read-locations.ts';
 import { catalogModelLimits } from './pi.ts';
 import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
@@ -3010,15 +3010,19 @@ async function runReviewPipeline(params: {
         embeddedFirstPrompt: packPages,
         numberedDiff: packPages,
       });
-      if (packPages)
-        for (const { row } of await addContextPack({
+      if (packPages) {
+        const packs = await addContextPack({
           plans,
           build: buildPagePack,
           renderPrompt: render,
           budget: auxPromptBudget,
           log,
-        }))
-          telemetry.recordContextPack(row);
+        });
+        const supplied = packs.flatMap((pack) => (pack.supplied ? [pack.supplied] : []));
+        if (supplied.length)
+          packSupplied.set('guideline-compliance', mergeSuppliedContexts(supplied));
+        for (const { row } of packs) telemetry.recordContextPack(row);
+      }
       await addReviewEvidence(
         plans.filter((plan) => !plan.contextPack),
         evidence,

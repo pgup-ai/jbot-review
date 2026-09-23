@@ -471,12 +471,15 @@ export async function addContextPack(params: {
         const pack = await params
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
           .catch(() => undefined);
-        // A directory map alone would cost the page its caller evidence for no code.
+        // A directory map alone would cost the page its caller evidence for no code, and a
+        // partial pack may be missing callers, so both keep today's evidence instead.
         let reason: ContextPackResult['row']['reason'] = !pack
           ? 'error'
-          : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
-            ? undefined
-            : 'empty';
+          : pack.state === 'partial'
+            ? 'partial'
+            : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
+              ? undefined
+              : 'empty';
         if (pack && !reason) {
           const previous = { context: plan.context, baseContext: plan.baseContext };
           plan.context = withContextPack(plan.context, plan.diffText, pack.text);

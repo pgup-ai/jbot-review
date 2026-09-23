@@ -463,7 +463,7 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
   for (const symbol of extractChangedExportedSymbols(files))
     if (![...found.values()].some((s) => !s.owner && s.symbol === symbol))
       found.set(`\0${symbol}`, { path: '', symbol, weight: 0 });
-  return [...found.values()].sort((a, b) => b.weight - a.weight).slice(0, MAX_CHANGED_SYMBOLS);
+  return [...found.values()].sort((a, b) => b.weight - a.weight);
 }
 
 /** Whether `path` imports the target, or for a member its class, from the declaring module. */
@@ -490,13 +490,13 @@ async function linked(
 }
 
 async function callerEntries(
-  files: PrFile[],
+  targets: (Located & { span?: Declaration })[],
   reader: PackReader,
   diff: Lines,
   shown: Lines,
 ): Promise<ContextPackEntry[]> {
   const entries: ContextPackEntry[] = [];
-  for (const target of changedSymbols(files, reader)) {
+  for (const target of targets) {
     const pkg = packageOf(target.path);
     // Member names collide often, so only files that name the class are searched.
     const paths = target.owner
@@ -661,7 +661,8 @@ export async function buildContextPack(
   );
   const surrounding = surroundingEntries(files, reader, diff, shown);
   const definitions = await definitionEntries(files, reader, diff, shown);
-  const callers = await callerEntries(files, reader, diff, shown);
+  const symbols = changedSymbols(files, reader);
+  const callers = await callerEntries(symbols.slice(0, MAX_CHANGED_SYMBOLS), reader, diff, shown);
   const ordered = [
     ...surrounding,
     ...definitions,
@@ -681,7 +682,10 @@ export async function buildContextPack(
     if (lines.length) item.otherPages = lines;
   }
   const kept: ContextPackEntry[] = [];
-  const omitted: ContextPackEntry[] = [];
+  // Symbols past the cap get no caller search, so Omitted names them.
+  const omitted = symbols
+    .slice(MAX_CHANGED_SYMBOLS)
+    .map((symbol) => listEntry('other-callers', qualified(symbol), []));
   const render = () =>
     kept.length ? formatContextPack({ items: kept, omitted, uncollected: reader.failures }) : '';
   let used = Buffer.byteLength(
