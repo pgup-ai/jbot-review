@@ -35,6 +35,7 @@ import {
   buildContextTrimNotice,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
+  compactReviewPageContexts,
   formatContextPack,
   formatContextPackItem,
   formatFindingsForVerification,
@@ -987,5 +988,36 @@ describe('context pack prompt', () => {
     const omittedSection = capped.slice(capped.indexOf('### Omitted'));
     assert.ok(Buffer.byteLength(omittedSection, 'utf8') < 2048 + 40);
     assert.match(omittedSection, /\n- \+\d+ more$/);
+  });
+});
+
+describe('compactReviewPageContexts', () => {
+  it('shares one compaction decision; only compliance pages keep the usage list', () => {
+    const join = (...parts: string[]) => parts.filter(Boolean).join('\n\n');
+    const usage = `## Changed symbol usage\n${'- `total` is used by consumer.ts\n'.repeat(30)}`;
+    const exploration = '## Exploration evidence\nEXPLORED';
+    // The large core is just over the threshold with the usage list and under it without.
+    const fill =
+      16 * 1024 +
+      10 -
+      Buffer.byteLength(join(UNTRUSTED_PR_CONTENT_NOTE, '## Metadata', usage, exploration));
+    for (const filler of [0, fill]) {
+      const metadata = `## Metadata${'x'.repeat(filler)}`;
+      const pages = compactReviewPageContexts({
+        core: join(UNTRUSTED_PR_CONTENT_NOTE, metadata, usage, exploration),
+        mainCore: join(UNTRUSTED_PR_CONTENT_NOTE, metadata, exploration),
+        scope: '## Pull request\nTitle: money',
+        summary: '',
+        focus: '',
+        usage,
+        exploration,
+      });
+      assert.equal(pages.compacted, filler > 0);
+      assert.ok(pages.full.includes('## Changed symbol usage'));
+      assert.ok(!pages.main.includes('## Changed symbol usage'));
+      assert.ok(pages.main.includes('EXPLORED'));
+      assert.equal(pages.full.includes('## Metadata'), !pages.compacted);
+      assert.equal(pages.main.includes('## Metadata'), !pages.compacted);
+    }
   });
 });

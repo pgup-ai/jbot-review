@@ -2067,6 +2067,30 @@ export function compactReviewPageContext(
   return Buffer.byteLength(compact) < Buffer.byteLength(context) ? compact : context;
 }
 
+/**
+ * Decides compaction once, on the core with the usage list, so main pages that swap the list
+ * out cannot slip under the threshold and keep metadata that compliance pages drop.
+ */
+export function compactReviewPageContexts(params: {
+  /** The trimmed core, usage list included. */
+  core: string;
+  /** The core with its usage block swapped for exploration evidence; absent, main equals full. */
+  mainCore?: string;
+  scope: string;
+  summary: string;
+  focus: string;
+  usage: string;
+  exploration: string;
+}): { full: string; main: string; compacted: boolean } {
+  const page = (evidence: string) =>
+    compactReviewPageContext(params.core, params.scope, params.summary, params.focus, evidence);
+  const full = page([params.usage, params.exploration].filter(Boolean).join('\n\n'));
+  const compacted = full !== params.core;
+  const main =
+    params.mainCore === undefined ? full : compacted ? page(params.exploration) : params.mainCore;
+  return { full, main, compacted };
+}
+
 export function buildIncrementalReviewContext(
   scope: import('./incremental-review.ts').IncrementalReviewPlan,
   allFiles: import('./github.ts').PrFile[],

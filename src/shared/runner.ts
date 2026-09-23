@@ -167,7 +167,7 @@ import {
   buildAddressedPriorCommentsContext,
   buildContext7PromptBlock,
   buildContextTrimNotice,
-  compactReviewPageContext,
+  compactReviewPageContexts,
   buildReviewFocusBlock,
   assembleReviewPrompt,
   assembleGuidelineCompliancePrompt,
@@ -2651,41 +2651,34 @@ async function runReviewPipeline(params: {
             buildContextTrimNotice(dropped),
           );
 
-    const pageContext = (core: string, evidence: string) =>
-      joinContext(
-        compactReviewPageContext(
-          core,
-          buildReviewScopeContext(
-            { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
-            false,
-          ),
-          summaryScopeBlock,
-          reviewFocusBlock,
-          evidence,
-        ),
-        incrementalContext,
-      );
-    const fullCoreContext = pageContext(
-      trimmedCoreContext,
-      joinContext(blastRadiusBlock, explorationEvidence),
-    );
     // The pack's import-linked callers stand in for the usage list; compliance pages keep it.
-    const usageBlock = kept.find((block) => block.name === SUPPLEMENTARY_BLOCK_NAMES.blastRadius);
-    const mainCoreContext =
-      options.experiment.contextPack && usageBlock
-        ? pageContext(
-            joinContext(
-              UNTRUSTED_PR_CONTENT_NOTE,
-              baseCoreContext,
-              ...kept.map((block) => (block === usageBlock ? explorationEvidence : block.text)),
-              buildContextTrimNotice(dropped),
-            ),
-            explorationEvidence,
-          )
-        : fullCoreContext;
-    if (fullCoreContext !== trimmedCoreContext)
+    const usageBlock = options.experiment.contextPack
+      ? kept.find((block) => block.name === SUPPLEMENTARY_BLOCK_NAMES.blastRadius)
+      : undefined;
+    const pageCores = compactReviewPageContexts({
+      core: trimmedCoreContext,
+      mainCore:
+        usageBlock &&
+        joinContext(
+          UNTRUSTED_PR_CONTENT_NOTE,
+          baseCoreContext,
+          ...kept.map((block) => (block === usageBlock ? explorationEvidence : block.text)),
+          buildContextTrimNotice(dropped),
+        ),
+      scope: buildReviewScopeContext(
+        { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
+        false,
+      ),
+      summary: summaryScopeBlock,
+      focus: reviewFocusBlock,
+      usage: blastRadiusBlock,
+      exploration: explorationEvidence,
+    });
+    const fullCoreContext = joinContext(pageCores.full, incrementalContext);
+    const mainCoreContext = joinContext(pageCores.main, incrementalContext);
+    if (pageCores.compacted)
       log(
-        `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(fullCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
+        `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(mainCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
       );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
