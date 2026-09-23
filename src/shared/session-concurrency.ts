@@ -29,7 +29,7 @@ export interface ReviewBackend {
       lensAddendum?: string;
       contextFirst?: boolean;
       contextPack?: boolean;
-      /** Answer from the embedded evidence with tools off; backends without that mode ignore it. */
+      /** Tools off; backends without that mode ignore it. */
       toolLess?: boolean;
       label?: string;
       timeoutMs?: number;
@@ -66,10 +66,7 @@ export interface ReviewBackend {
      * backends without per-session option support ignore it.
      */
     modelOptions?: Record<string, unknown>,
-    /**
-     * context-pack preset: `single-shot` judges from the supplied code with tools off,
-     * `capped` re-checks within a few tool turns. Backends without these modes ignore it.
-     */
+    /** `single-shot` runs tools off, `capped` a few tool turns; other backends ignore it. */
     mode?: 'single-shot' | 'capped',
   ): Promise<FindingVerdict[] | undefined>;
   runChangesSinceLastReview(

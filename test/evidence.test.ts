@@ -799,7 +799,6 @@ test('pack provider reads tracked head sources with tsconfig aliases and word re
     'export function total(n: number) {\n  return n;\n}',
   );
   await writeFile(join(workspace, 'libs/money/src/broken.ts'), 'export function (');
-  // Babel counts a lone CR as a line break; git grep and the pack's rows do not.
   await writeFile(
     join(workspace, 'libs/money/src/cr.ts'),
     'export const a = 1;\rexport const b = 2;',

@@ -2614,8 +2614,11 @@ async function runReviewPipeline(params: {
     }
     candidateLensKeys = candidateLensKeys.filter((key) => !reusedAux.has(`review-${key}`));
     guidelineCandidate &&= !reusedAux.has('guideline-compliance');
-    // Pack runs on opencode answer the lens and the first verification pass from supplied code, tools off.
-    const toolLessAux = options.experiment.contextPack && auxBackend.name === 'opencode';
+    // Only opencode has tool-less lens and verification modes; a single-shot model is tool-less already.
+    const toolLessAux =
+      options.experiment.contextPack &&
+      auxBackend.name === 'opencode' &&
+      modelSupportsAgenticTools(auxProviderID, auxModelID);
     const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
@@ -2998,7 +3001,6 @@ async function runReviewPipeline(params: {
               },
             )
           : assembleGuidelineCompliancePrompt(context, rules);
-      // Compliance pages and tool-less lens pages get the main pages' numbered diff and context pack.
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
       const plans = buildAuxiliaryPlans({
         coreContext: lens
@@ -4275,7 +4277,6 @@ export async function requestFindingVerdicts(params: {
   targets: Finding[];
   timeoutMs?: number;
   modelOptions?: Record<string, unknown>;
-  /** A tool-less pass first; only its confirmations are final, the rest get a capped check. */
   toolLessFirst?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;

@@ -7,9 +7,7 @@ export const MAIN_AGENT = 'plan';
 export const REVIEWER_AGENT = 'jbot-reviewer';
 export const WRAPUP_AGENT = 'jbot-wrapup';
 export const PLAIN_AGENT = 'jbot-plain';
-/** Re-checks what the tool-less verifier could not confirm, within a few tool turns. */
 export const VERIFY_AGENT = 'jbot-verify';
-const VERIFY_STEPS = 6;
 export const TOOL_LESS_AGENTS: ReadonlySet<string> = new Set([PLAIN_AGENT]);
 
 export interface PermissionRule {
@@ -242,7 +240,7 @@ export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
         mode: 'primary',
         description: 'jbot-review: step-capped finding verification',
         system: input.reviewerSystem,
-        steps: VERIFY_STEPS,
+        steps: 6,
       },
     },
     ...(Object.keys(providers).length ? { providers } : {}),
