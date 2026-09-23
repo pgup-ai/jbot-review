@@ -61,8 +61,8 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       exploration: { ...off.exploration, batchDiffRecovery: true },
     },
   ];
-  assert.deepEqual(reviewExperiment({}), expected[1]);
-  assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[1]);
+  assert.deepEqual(reviewExperiment({}), expected[4]);
+  assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[4]);
   const hashes = new Set<string>();
   for (const preset of expected) {
     const experiment = reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: preset.preset });

@@ -19,7 +19,7 @@ export interface ReviewExperiment {
 
 export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewExperiment {
   // An unset repository variable arrives as '' and must keep the default.
-  const value = env.JBOT_REVIEW_EXPERIMENT || 'diff-batches';
+  const value = env.JBOT_REVIEW_EXPERIMENT || 'context-pack';
   const preset =
     value === 'diff-batches' ||
     value === 'linked' ||
