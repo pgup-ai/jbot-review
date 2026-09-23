@@ -76,7 +76,7 @@ export function reviewReadLocations(
   return locations.slice(0, 64);
 }
 
-/** What a page's context pack delivered: line ranges by path, symbols, and listed directories. */
+/** What a page showed: pack and diff line ranges by path, pack symbols, and listed directories. */
 export interface SuppliedContext {
   ranges: Map<string, [number, number][]>;
   symbols: Set<string>;
@@ -112,7 +112,7 @@ function searchTokens(pattern: string): string[] {
   return pattern.replace(/\\[\s\S]/g, ' ').match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
 }
 
-/** Whether a tool call re-reads or re-searches what the session's context pack already supplied. */
+/** Whether a tool call re-reads or re-searches what the session's page already supplied. */
 export function suppliedOverlap(
   workspace: string,
   tool: string,
@@ -134,7 +134,7 @@ export function suppliedOverlap(
   if (
     tool === 'read' &&
     typeof dirInput === 'string' &&
-    supplied.directories.has(relative(workspace, resolve(workspace, dirInput)))
+    supplied.directories.has(relative(workspace, resolve(workspace, dirInput)) || '.')
   )
     return 'read';
   const pattern =

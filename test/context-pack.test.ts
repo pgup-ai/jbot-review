@@ -68,6 +68,18 @@ const PAGE = [
   },
 ];
 const CHANGED = new Set(PAGE.map((file) => file.filename));
+const FORMAT_PAGE = [
+  {
+    filename: 'apps/api/src/format.ts',
+    patch: [
+      '@@ -1,3 +1,3 @@',
+      ' export function formatId(id: string) {',
+      '-  return id;',
+      '+  return `L-${id}`;',
+      ' }',
+    ].join('\n'),
+  },
+];
 const ALIASES: PathAlias[] = [
   { prefix: '@app/ledger', wildcard: false, targets: ['libs/ledger/src'] },
 ];
@@ -111,11 +123,55 @@ test('surrounding code adds the enclosing method and constructor lines the diff 
     pack.text,
     /- apps\/api\/src\/: format\.ts, ledger\.controller\.ts, ledger\.service\.ts\*, legacy\.ts/,
   );
+  assert.match(pack.text, /\n- apps\/api\/: src\/\n\n- apps\/: api\/\n\n- \.\/: apps\/, libs\/$/);
   assert.deepEqual(pack.supplied.ranges.get('apps/api/src/ledger.service.ts'), [
     [7, 8],
     [10, 17],
   ]);
-  assert.deepEqual([...pack.supplied.directories], ['apps/api/src']);
+  assert.deepEqual([...pack.supplied.directories], ['apps/api/src', 'apps/api', 'apps', '.']);
+});
+
+test('surrounding code encloses changes in top-level variables and in class bodies', async () => {
+  const path = 'apps/api/src/retry.ts';
+  const source = [
+    "import { Injectable, Scope } from '@nestjs/common';",
+    "import { withRetry } from './retry-policy';",
+    '',
+    'export const retried = withRetry(',
+    '  async (id: string) => {',
+    '    const key = id.trim();',
+    '    return key;',
+    '  },',
+    '  { attempts: 5 },',
+    ');',
+    '',
+    '@Injectable({ scope: Scope.REQUEST })',
+    'export class RetryService {',
+    '  run(id: string) {',
+    '    return retried(id);',
+    '  }',
+    '}',
+  ].join('\n');
+  const patch = [
+    '@@ -8,3 +8,3 @@',
+    '   },',
+    '-  { attempts: 3 },',
+    '+  { attempts: 5 },',
+    ' );',
+    '@@ -11,3 +11,3 @@',
+    ' ',
+    '-@Injectable()',
+    '+@Injectable({ scope: Scope.REQUEST })',
+    ' export class RetryService {',
+  ].join('\n');
+  const pack = await buildContextPack(
+    [{ filename: path, patch }],
+    new Set([path]),
+    provider({ ...REPO, [path]: source }),
+    64 * 1024,
+  );
+  assert.match(pack.text, /#### apps\/api\/src\/retry\.ts:4-10 \(retried\)\n4: export const/);
+  assert.match(pack.text, /#### apps\/api\/src\/retry\.ts:14-17 \(RetryService\)\n14: {3}run/);
 });
 
 test('the budget cuts whole items from the end and lists them as omitted', async () => {
@@ -124,7 +180,8 @@ test('the budget cuts whole items from the end and lists them as omitted', async
   const tight = await buildContextPack(PAGE, CHANGED, provider(), budget);
   assert.ok(Buffer.byteLength(tight.text) <= budget);
   assert.match(tight.text, /### Omitted\n- apps\/api\/src \(directories\)/);
-  assert.equal(tight.omitted, 1);
+  // An ancestor's Omitted line costs about what its listing saves, so the whole map goes.
+  assert.equal(tight.omitted, 4);
   assert.equal((await buildContextPack(PAGE, CHANGED, provider(), 100)).text, '');
 });
 
@@ -162,22 +219,11 @@ test('callers need an import link, and other name matches stay listed as unverif
   );
   assert.deepEqual(pack.supplied.ranges.get('apps/api/src/ledger.controller.ts'), [[3, 9]]);
   assert.equal(pack.supplied.symbols.has('post'), true);
+  assert.doesNotMatch(pack.text, /No references to/);
   // The caller excerpt is formatId's call in post, not ledger.service.ts's import block.
-  const page = [
-    {
-      filename: 'apps/api/src/format.ts',
-      patch: [
-        '@@ -1,3 +1,3 @@',
-        ' export function formatId(id: string) {',
-        '-  return id;',
-        '+  return `L-${id}`;',
-        ' }',
-      ].join('\n'),
-    },
-  ];
   const formatPack = await buildContextPack(
-    page,
-    new Set([page[0].filename]),
+    FORMAT_PAGE,
+    new Set([FORMAT_PAGE[0].filename]),
     provider(),
     64 * 1024,
   );
@@ -186,6 +232,14 @@ test('callers need an import link, and other name matches stay listed as unverif
     /#### apps\/api\/src\/ledger\.service\.ts:10-18 \(LedgerService\.post, calls formatId\)/,
   );
   assert.doesNotMatch(formatPack.text, /ledger\.service\.ts:1-/);
+  // The import in ledger.service.ts is not shown, but its file's call is.
+  assert.match(
+    formatPack.text,
+    /18: \}\n\nNo references to `formatId` beyond this page's diff and the excerpts above\./,
+  );
+  // The diff shows all of format.ts, so a re-read of it counts as supplied.
+  assert.equal(formatPack.supplied.lines.get('apps/api/src/format.ts'), 3);
+  assert.deepEqual(formatPack.supplied.ranges.get('apps/api/src/format.ts'), [[1, 3]]);
   const controller = REPO['apps/api/src/ledger.controller.ts'].replace(
     '    return',
     '    this.service.post(id);\n'.repeat(3) + '    return',
@@ -198,4 +252,36 @@ test('callers need an import link, and other name matches stay listed as unverif
   );
   assert.equal(clustered.text.match(/calls LedgerService\.post\)/g)?.length, 1);
   assert.doesNotMatch(clustered.text, /Other import-linked callers/);
+});
+
+test('an all-shown claim needs a complete search and every match shown', async () => {
+  const text = async (page: typeof PAGE, source: PackSourceProvider, budget = 64 * 1024) =>
+    (await buildContextPack(page, new Set([page[0].filename]), source, budget)).text;
+  const long = REPO['apps/api/src/ledger.service.ts'].replace(
+    'key));',
+    `key)); // ${'x'.repeat(2000)}`,
+  );
+  // A failed search, a file matched only at an aliased import, or a cut caller excerpt.
+  for (const [source, budget] of [
+    [{ ...provider(), references: () => Promise.reject(new Error('timeout')) }, 64 * 1024],
+    [
+      provider({
+        ...REPO,
+        'apps/api/src/alias.ts': "import { formatId as fmt } from './format';\nfmt('x');",
+      }),
+      64 * 1024,
+    ],
+    [provider({ ...REPO, 'apps/api/src/ledger.service.ts': long }), 1500],
+  ] as const)
+    assert.doesNotMatch(await text(FORMAT_PAGE, source, budget), /No references to/);
+  // A member search covers only files that name the class, so a match elsewhere voids the claim.
+  assert.match(
+    await text(PAGE, provider({ ...REPO, 'apps/api/src/legacy.ts': '' })),
+    /No references to `LedgerService\.post` beyond/,
+  );
+  const unrelated = 'export const send = (http: { post(): void }) => http.post();';
+  assert.doesNotMatch(
+    await text(PAGE, provider({ ...REPO, 'apps/api/src/legacy.ts': unrelated })),
+    /No references to/,
+  );
 });

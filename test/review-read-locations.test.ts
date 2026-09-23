@@ -54,7 +54,7 @@ test('supplied overlap separates re-reads and searches of context-pack content',
       ['src/small.ts', [[1, 30]]],
     ]),
     symbols: new Set(['LedgerService']),
-    directories: new Set(['src']),
+    directories: new Set(['src', '.']),
     lines: new Map([
       ['src/a.ts', 400],
       ['src/small.ts', 30],
@@ -66,6 +66,7 @@ test('supplied overlap separates re-reads and searches of context-pack content',
   // No limit defaults to a 2000-line window, clamped to a 400-line file.
   assert.equal(read({ filePath: '/w/src/a.ts', offset: 1 }), false);
   assert.equal(read({ filePath: '/w/src' }), 'read');
+  assert.equal(read({ filePath: '/w' }), 'read');
   // A fully supplied small file: the clamp lets a default or whole-file read count.
   assert.equal(read({ filePath: '/w/src/small.ts' }), 'read');
   assert.equal(read({ filePath: '/w/src/small.ts', offset: 50 }), false);

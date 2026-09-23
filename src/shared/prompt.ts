@@ -722,7 +722,7 @@ export interface ContextPackEntry {
   /** For a caller: the changed symbol it uses. */
   calls?: string;
   list?: {
-    kind: 'other-callers' | 'unverified' | 'directory';
+    kind: 'other-callers' | 'unverified' | 'all-shown' | 'directory';
     subject: string;
     entries: string[];
   };
@@ -757,6 +757,8 @@ export function formatContextPackItem(item: ContextPackEntry): string {
     const { kind, subject, entries } = item.list;
     const shown = entries.join(', ');
     if (kind === 'directory') return `- ${subject}/: ${shown}`;
+    if (kind === 'all-shown')
+      return `No references to \`${subject}\` beyond this page's diff and the excerpts above.`;
     return kind === 'other-callers'
       ? `Other import-linked callers of \`${subject}\`: ${shown}`
       : `Unverified name matches for \`${subject}\` (no import link found): ${shown}`;

@@ -24,7 +24,7 @@ const WHOLE_DEFINITION_LINES = 150;
 const WINDOW_LINES = 20;
 const CONSTRUCTOR_LINES = 60;
 const FIELD_LINES = 3;
-const MAX_DIRECTORIES = 10;
+const MAX_DIRECTORIES = 16;
 const MAX_DIRECTORY_NAMES = 40;
 const ENCLOSING = new Set<DeclarationKind>([
   'function',
@@ -74,6 +74,7 @@ class PackReader {
   readonly sources = new Map<string, PackSource | undefined>();
   private readonly matches = new Map<string, Promise<{ path: string; line: number }[]>>();
   readonly refused = new Set<string>();
+  readonly unsearched = new Set<string>();
   failures = 0;
 
   constructor(readonly provider: PackSourceProvider) {}
@@ -97,6 +98,7 @@ class PackReader {
         key,
         this.provider.references(symbol, paths).catch(() => {
           this.failures++;
+          this.unsearched.add(symbol);
           return [];
         }),
       );
@@ -178,7 +180,11 @@ function surroundingEntries(
     if (!source || !file.patch) continue;
     const changed = changedEvidenceLines(file.patch);
     const { declarations, callbacks } = source.index;
-    const enclosing = declarations.filter((d) => ENCLOSING.has(d.kind));
+    const enclosing = declarations.filter(
+      (d) =>
+        ENCLOSING.has(d.kind) ||
+        ((d.kind === 'variable' || d.kind === 'class') && !local(source.index, d)),
+    );
     const ranges: { start: number; end: number; label: string }[] = [];
     for (const line of changed) {
       const named = innermost(enclosing, line);
@@ -501,10 +507,11 @@ async function callerEntries(
   const entries: ContextPackEntry[] = [];
   for (const target of changedSymbols(files, reader)) {
     const pkg = packageOf(target.path);
+    const found = target.owner
+      ? await memberReferences(reader, target)
+      : await reader.references(target.symbol);
     // Rank before capping, so the most useful hits are kept and load first.
-    const hits = (
-      target.owner ? await memberReferences(reader, target) : await reader.references(target.symbol)
-    )
+    const hits = found
       .map((hit) => ({
         hit,
         test: PATH_PATTERNS.tests.test(hit.path),
@@ -521,6 +528,7 @@ async function callerEntries(
       .map(({ hit }) => hit);
     const callers: { path: string; line: number }[] = [];
     const unverified: string[] = [];
+    const imports = new Set<{ path: string; line: number }>();
     for (const hit of hits) {
       if (
         (hit.path === target.path && target.span && within(target.span, hit.line)) ||
@@ -531,8 +539,8 @@ async function callerEntries(
       // A refused read already counts as uncollected; hits in unusable files stay unverified.
       if (reader.refused.has(hit.path)) continue;
       // An import names the symbol but calls nothing.
-      if (source?.index.imports.some((i) => i.line === hit.line)) continue;
-      if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
+      if (source?.index.imports.some((i) => i.line === hit.line)) imports.add(hit);
+      else if (source && (await linked(reader, hit.path, source, target))) callers.push(hit);
       else unverified.push(`${hit.path}:${hit.line}`);
     }
     const subject = qualified(target);
@@ -564,35 +572,50 @@ async function callerEntries(
       markShown(shown, item);
       excerpts++;
     }
+    const seen = (hit: { path: string; line: number }) => shown.get(hit.path)?.has(hit.line);
     if (rest.length) entries.push(listEntry('other-callers', subject, rest));
     if (unverified.length) entries.push(listEntry('unverified', subject, unverified));
+    else if (
+      found.length <= MAX_REFERENCES &&
+      // An import calls nothing, but a file matched only at its import may call through an alias.
+      hits.every(
+        (hit) =>
+          seen(hit) || (imports.has(hit) && hits.some((h) => h.path === hit.path && seen(h))),
+      ) &&
+      // The member search skips files that never name the class, so those must hold no match.
+      (!target.owner || (await reader.references(target.symbol)).length === found.length) &&
+      ![target.symbol, target.owner].some((name) => name && reader.unsearched.has(name))
+    )
+      entries.push(listEntry('all-shown', subject, []));
   }
   return entries;
 }
 
-/** Each changed file's directory: its tracked files and immediate subdirectories. */
+/** Changed files' directories, then their ancestors: tracked files and immediate subdirectories. */
 function directoryEntries(
   files: PrFile[],
   changed: Set<string>,
   tracked: Set<string>,
 ): ContextPackEntry[] {
-  return [...new Set(files.map((file) => posix.dirname(file.filename)))]
-    .slice(0, MAX_DIRECTORIES)
-    .map((directory) => {
-      const prefix = directory === '.' ? '' : `${directory}/`;
-      const names = new Set<string>();
-      for (const path of tracked) {
-        if (!path.startsWith(prefix)) continue;
-        const [name, ...rest] = path.slice(prefix.length).split('/');
-        names.add(rest.length ? `${name}/` : changed.has(path) ? `${name}*` : name);
-      }
-      const sorted = [...names].sort();
-      const more = sorted.length - MAX_DIRECTORY_NAMES;
-      return listEntry('directory', directory, [
-        ...sorted.slice(0, MAX_DIRECTORY_NAMES),
-        ...(more > 0 ? [`+${more} more`] : []),
-      ]);
-    });
+  const directories = new Set(files.map((file) => posix.dirname(file.filename)));
+  // A Set also visits entries added while iterating, so ancestors follow closest-first.
+  for (const directory of directories)
+    if (directory !== '.') directories.add(posix.dirname(directory));
+  return [...directories].slice(0, MAX_DIRECTORIES).map((directory) => {
+    const prefix = directory === '.' ? '' : `${directory}/`;
+    const names = new Set<string>();
+    for (const path of tracked) {
+      if (!path.startsWith(prefix)) continue;
+      const [name, ...rest] = path.slice(prefix.length).split('/');
+      names.add(rest.length ? `${name}/` : changed.has(path) ? `${name}*` : name);
+    }
+    const sorted = [...names].sort();
+    const more = sorted.length - MAX_DIRECTORY_NAMES;
+    return listEntry('directory', directory, [
+      ...sorted.slice(0, MAX_DIRECTORY_NAMES),
+      ...(more > 0 ? [`+${more} more`] : []),
+    ]);
+  });
 }
 
 export async function buildContextPack(
@@ -629,6 +652,8 @@ export async function buildContextPack(
     formatContextPack({ items: [], omitted: [], uncollected: reader.failures }),
   );
   for (const item of ordered) {
+    // An all-shown claim counts every excerpt before it as shown.
+    if (item.list?.kind === 'all-shown' && omitted.some((o) => !o.list)) continue;
     const bytes = Buffer.byteLength(formatContextPackItem(item)) + 2;
     if (used + bytes <= budgetBytes) {
       kept.push(item);
@@ -648,6 +673,12 @@ export async function buildContextPack(
     symbols: new Set(),
     directories: new Set(),
   };
+  // The page's diff counts too, so a re-read of it registers like a re-read of the pack.
+  const visible: Lines = new Map(
+    [...diff]
+      .filter(([path, lines]) => lines.size && reader.sources.get(path))
+      .map(([path, lines]) => [path, new Set(lines)]),
+  );
   const slices: ContextPack['slices'] = {};
   for (const item of kept) {
     const stat = (slices[item.slice] ??= { items: 0, bytes: 0 });
@@ -657,18 +688,17 @@ export async function buildContextPack(
     else if (item.list) supplied.symbols.add(item.list.subject.split('.').pop()!);
     if (item.slice === 'definitions') supplied.symbols.add(item.label.split('.').pop()!);
     if (item.calls) supplied.symbols.add(item.calls.split('.').pop()!);
-    if (!item.rows.length) continue;
-    const rows = new Set(item.rows.map(([line]) => line));
-    const ranges = supplied.ranges.get(item.path) ?? [];
-    // Gap markers cite the page's diff lines inside the item's span, so those count as shown.
-    for (const line of range(item.rows[0][0], Math.max(item.rows.at(-1)![0], item.end ?? 0))) {
-      if (!rows.has(line) && !item.inDiff?.has(line)) continue;
+    if (item.rows.length) markShown(visible, item);
+  }
+  for (const [path, lines] of visible) {
+    const ranges: [number, number][] = [];
+    for (const line of [...lines].sort((a, b) => a - b)) {
       const last = ranges.at(-1);
       if (last && line === last[1] + 1) last[1] = line;
       else ranges.push([line, line]);
     }
-    supplied.ranges.set(item.path, ranges);
-    supplied.lines.set(item.path, reader.sources.get(item.path)!.lines.length);
+    supplied.ranges.set(path, ranges);
+    supplied.lines.set(path, reader.sources.get(path)!.lines.length);
   }
   return {
     text,
