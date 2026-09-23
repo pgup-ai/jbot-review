@@ -445,19 +445,12 @@ and identify material uncertainties without asserting unverified premises.`;
 
 const CONTEXT_PACK_EXPLORATION_POLICY = `## Repository exploration policy
 
-Review every changed hunk in the embedded diff. Start from the context pack
-below: it holds code around the changes, the definitions they use, and
-import-linked callers. Use tools for what it does not show: code under Omitted
-or outside the excerpted ranges, callers beyond those shown, history,
-configuration, and tests. Issue independent reads together in one turn; never
-guess the input of a dependent lookup. Follow dependencies beyond the first hop
-when the evidence reveals a plausible broken contract or unresolved finding.
-Continue paginated or truncated results when the needed evidence is missing.
-
-Once the changed hunks and plausible failure paths are covered, return the final
-JSON. Do not keep exploring solely for completeness or reread the embedded diff
-unless a specific uncertainty requires it. Report supported findings and
-identify material uncertainties without asserting unverified premises.`;
+Review every changed hunk in the embedded diff. The context pack below holds
+code around the changes, the definitions they use, and import-linked callers.
+The rest of the checkout is available through tools: decide for yourself what,
+if anything, you need beyond the pack, and issue independent reads together in
+one turn. Report supported findings and identify material uncertainties without
+asserting unverified premises.`;
 
 export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
 
@@ -586,6 +579,7 @@ export const EMBEDDED_FIRST_REVIEW_PROMPT = [
 );
 
 /** JBOT_REVIEW_EXPERIMENT=context-pack: the embedded-first review, starting from the page's context pack. */
+// Pack pages keep what to check and the evidence rules, and leave what to read to the model.
 export const CONTEXT_PACK_REVIEW_PROMPT = [
   [EMBEDDED_FIRST_EXPLORATION_POLICY, CONTEXT_PACK_EXPLORATION_POLICY],
   [
@@ -594,9 +588,42 @@ export const CONTEXT_PACK_REVIEW_PROMPT = [
   so do not run git diff for this page's files.`,
   ],
   [
-    EMBEDDED_FIRST_COVERAGE_STEPS,
-    `${EMBEDDED_FIRST_COVERAGE_STEPS} Use the context pack's callers and
-   definitions as the starting set.`,
+    `2. For each changed or new function, type, or constant: find its callers and
+   callees — including UNCHANGED code elsewhere in the file or repo — and
+   verify the change does not break their assumptions. A new gate, early
+   return, narrowed type, or changed default frequently breaks an unchanged
+   code path far from the diff.`,
+    `2. Check that each change keeps the assumptions of its callers and callees,
+   including unchanged code: a new gate, early return, narrowed type, or
+   changed default frequently breaks a code path far from the diff.`,
+  ],
+  [
+    `Investigate plausible regressions before deciding whether to report them. Follow
+callers, defaults, configuration, and tests until you can establish the trigger
+and impact. Missing evidence is a reason to investigate further. Keep published
+claims grounded in inspected code;`,
+    `Report a regression once you can state its trigger and impact. Keep published
+claims grounded in code you have seen;`,
+  ],
+  [
+    `- Inspect the diff and nearby callers, definitions, contracts, tests, migrations,
+  and error paths needed to verify changed behavior.
+- Be thorough on every changed file and its direct callers, callees, and tests.
+  Do not explore code unrelated to the diff.`,
+    `- Be thorough on every changed file. Do not explore code unrelated to the diff.`,
+  ],
+  [
+    `- Before accepting a new helper, type, or abstraction, search the repo for an
+  existing one that already does the job; flag duplication and point to the
+  existing code.`,
+    `- Flag a new helper, type, or abstraction that duplicates one the repo already
+  has, and point to the existing code.`,
+  ],
+  [
+    ` — verify the trigger path first (read the caller, check
+the type, grep the symbol) and upgrade confidence, or downgrade severity.`,
+    `: establish the trigger path and upgrade confidence, or
+downgrade severity.`,
   ],
 ].reduce(
   (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),

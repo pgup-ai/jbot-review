@@ -912,18 +912,23 @@ describe('buildContextTrimNotice', () => {
 });
 
 describe('context pack prompt', () => {
-  it('replaces the exploration policy and extends coverage step 2 once', () => {
+  it('leaves what to read to the model on pack pages and keeps the other prompts', () => {
     assert.equal(
       (CONTEXT_PACK_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? []).length,
       1,
     );
-    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /Issue independent reads\s+together in one turn/);
-    assert.match(
-      CONTEXT_PACK_REVIEW_PROMPT,
-      /Use the context pack's callers and\s+definitions as the starting set/,
-    );
+    assert.match(CONTEXT_PACK_REVIEW_PROMPT, /decide for yourself what,\s+if anything, you need/);
     assert.match(CONTEXT_PACK_REVIEW_PROMPT, /do not run git diff for this page's files/);
-    assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, /Start with targeted reads of\s+callers/);
+    for (const directive of [
+      /Start with targeted reads of\s+callers/,
+      /find its callers and\s+callees/,
+      /Missing evidence is a reason/,
+      /read the caller, check/,
+      /search the repo for an/,
+      /beyond the first hop/,
+    ])
+      assert.doesNotMatch(CONTEXT_PACK_REVIEW_PROMPT, directive);
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /find its callers and\s+callees/);
     assert.ok(
       assembleReviewPrompt('ctx', '', '', false, true, { contextPack: true }).startsWith(
         CONTEXT_PACK_REVIEW_PROMPT,
