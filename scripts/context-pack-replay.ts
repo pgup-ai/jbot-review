@@ -19,8 +19,8 @@ interface ReplayRun {
   head: string;
   base: string;
   /**
-   * Live pack budget: the sum over pages of min(64 KiB, input capacity - page prompt without
-   * caller evidence - 1 KiB), from the run's logs.
+   * Live pack budget: the sum over pages of min(64 KiB, max(0, input capacity - page prompt
+   * without caller evidence - 1 KiB)), from the run's logs.
    */
   packBytes: number;
   sessions: {
