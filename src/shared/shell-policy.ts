@@ -52,6 +52,7 @@ export const BASH_PERMISSIONS = {
   'git worktree remove*': 'deny',
   'rm*': 'deny',
   'node*': 'deny',
+  './node_modules/*': 'deny',
   'npx*': 'deny',
   'npm*': 'deny',
   'pnpm*': 'deny',

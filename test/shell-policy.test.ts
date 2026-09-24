@@ -51,6 +51,7 @@ describe('BASH_PERMISSIONS', () => {
       // Running code resolves packages from jbot's image, not the reviewed repo.
       `node -e "require('zod')"`,
       'node_modules/.bin/tsc --noEmit',
+      './node_modules/.bin/vitest run',
       'npx vitest run',
       'pnpm exec tsc',
       'python3 -c "print(1)"',
