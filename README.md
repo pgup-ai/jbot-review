@@ -1527,7 +1527,10 @@ Dockerfile          # container image
 
 `plan` is OpenCode's built-in read-only agent: it can read, grep, and glob but
 cannot edit files. Using it keeps the review safe and avoids non-interactive
-permission prompts that hang a CI job. Agent selection is intentionally fixed for
+permission prompts that hang a CI job. Its shell also refuses commands that
+change the checkout (`git commit`, `git stash`, `rm`, …) or run code (`node`,
+`npx`, `python`, …), since a package that code loads comes from jbot's image,
+not the reviewed repo. Agent selection is intentionally fixed for
 CI reviews; there is no supported `AGENT` env override.
 
 ## Notes

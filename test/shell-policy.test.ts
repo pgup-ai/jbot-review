@@ -48,6 +48,12 @@ describe('BASH_PERMISSIONS', () => {
       'git submodule deinit lib',
       'git worktree remove --force wt',
       'rm -rf src',
+      // Running code resolves packages from jbot's image, not the reviewed repo.
+      `node -e "require('zod')"`,
+      'node_modules/.bin/tsc --noEmit',
+      'npx vitest run',
+      'pnpm exec tsc',
+      'python3 -c "print(1)"',
     ]) {
       assert.ok(isDenied(command), `expected deny for: ${command}`);
     }
@@ -73,6 +79,7 @@ describe('BASH_PERMISSIONS', () => {
       'git submodule status',
       'git worktree list',
       'grep -rn foo src',
+      'cat node_modules/zod/package.json',
     ]) {
       assert.ok(!isDenied(command), `must not deny: ${command}`);
     }
