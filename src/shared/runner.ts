@@ -3250,19 +3250,21 @@ async function runReviewPipeline(params: {
       });
       return { targets, verdicts };
     };
-    // Optional bookkeeping runs while finders settle, except on a single aux slot, where
-    // a running one would hold verification's only slot; what is still running is dropped.
-    const auxSingleSlot =
-      sessionCap === 1 ||
-      providerSessionConcurrency(auxProviderID) === 1 ||
-      serializedBackends.has(auxBaseBackend);
+    const verifyOverlap = options.verifyOverlapGrace && verificationEnabled;
+    // Optional bookkeeping runs while finders settle, except when overlap verification would
+    // queue behind it on a single aux slot; what is still running is dropped.
+    const optionalEarly =
+      verifyOverlap &&
+      (sessionCap === 1 ||
+        providerSessionConcurrency(auxProviderID) === 1 ||
+        serializedBackends.has(auxBaseBackend));
     const finishOptional = () => {
       const skip = (label: string) => () => {
         abandonedAuxLabels.add(label);
         auxBackend.abortSessionsByLabel?.(label, log);
         telemetry.recordCoverage({ session: label, state: 'skipped' });
         log(
-          `Optional ${label} skipped: still running when ${auxSingleSlot ? 'main review completed' : 'the finders settled'}.`,
+          `Optional ${label} skipped: still running when ${optionalEarly ? 'main review completed' : 'the finders settled'}.`,
         );
       };
       return Promise.all([
@@ -3270,11 +3272,10 @@ async function runReviewPipeline(params: {
         takeSettledAuxiliary(changesSinceLastReview, '', skip(changesSinceLastReview.label)),
       ]);
     };
-    const optionalAtMainEnd = auxSingleSlot ? finishOptional() : undefined;
-    const overlapVerification =
-      options.verifyOverlapGrace && verificationEnabled
-        ? startOverlapVerification().catch(() => 'skipped' as const)
-        : undefined;
+    const optionalAtMainEnd = optionalEarly ? finishOptional() : undefined;
+    const overlapVerification = verifyOverlap
+      ? startOverlapVerification().catch(() => 'skipped' as const)
+      : undefined;
     const releaseReservations = () => {
       sessionSlots.releaseReservation();
       providerLimiters.releaseReservations();
