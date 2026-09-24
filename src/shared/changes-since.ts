@@ -28,9 +28,17 @@ export async function collectChangesSinceContext(
     baseSha && (await subjectsOf('--no-merges', range)).length > subjects.length
       ? baseSha
       : undefined;
-  // A conflict resolution in the PR's merge commit is PR work; `--cc` prints only resolutions.
-  if (baseMerged && (await git('log', '--merges', '--cc', '--format=', ...own)).trim())
-    subjects = await subjectsOf(...own);
+  // A conflict resolution in the PR's merge commit is PR work; `--cc` names only resolved files.
+  const resolved = baseMerged
+    ? [
+        ...new Set(
+          (await git('log', '--merges', '--cc', '--name-only', '--format=', ...own))
+            .split('\n')
+            .filter(Boolean),
+        ),
+      ]
+    : [];
+  if (resolved.length > 0) subjects = await subjectsOf(...own);
   if (subjects.length === 0) return undefined;
   const diff = embedDiff
     ? await collectGitOutput(
@@ -69,6 +77,11 @@ export async function collectChangesSinceContext(
       );
     } catch {
       stat = null;
+    }
+    // `--stat` measures a merge against its first parent, so resolutions are named, first.
+    if (stat && resolved.length > 0) {
+      const note = `Conflict resolutions in merge commits: ${resolved.join(', ')}\n`;
+      stat = { text: note + stat.text, totalBytes: Buffer.byteLength(note) + stat.totalBytes };
     }
   }
   return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat, baseMerged);

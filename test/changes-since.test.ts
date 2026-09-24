@@ -191,6 +191,8 @@ it('leaves base-branch commits merged into the PR out of the delta, but not its 
       base,
     );
     assert.match(resolutionOnly ?? '', /\+\+export const a = 4;/);
+    assert.match(resolutionOnly ?? '', /Conflict resolutions in merge commits: app\.ts/);
+    assert.doesNotMatch(resolutionOnly ?? '', /other-pr\.ts/);
 
     git('checkout', 'main');
     writeFileSync(join(workspace, 'z.ts'), 'export const z = 1;\n');
