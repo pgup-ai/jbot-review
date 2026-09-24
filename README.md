@@ -1411,7 +1411,10 @@ Matched headings from the same file are combined. A whole-file entry wins over
 section entries; mixing named headings with numbered-rule routes also keeps the
 whole file. A missing or ambiguous heading falls back to the whole file.
 Omitted sections are disclosed. Files without a matched section route retain
-normal discovery, and all guideline byte limits still apply.
+normal discovery, and all guideline byte limits still apply. A numbered rule such
+as `TS-13.1` also brings its parent's own text (§13 up to its first sub-rule)
+when that text is at most 2 KB, since a parent usually states the defaults its
+sub-rules refine.
 
 Guideline files load whole, up to 128 KB each and 1 MB in total. Within each
 file, the sections that name a changed directory or file go first, so a session

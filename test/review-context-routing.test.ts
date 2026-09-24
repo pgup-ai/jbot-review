@@ -135,6 +135,33 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(text, /Omitted from this bundle[\s\S]*partially loaded/);
   });
 
+  it("adds a routed sub-rule's short parent defaults but not its siblings or a long lead-in", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-parent-'));
+    roots.push(root);
+    writeRoutedRepo(root, {
+      rules: 'TS-13.1, TS-16.2',
+      doc: [
+        '## 13. Defaults',
+        'NO-PESSIMISTIC-LOCKS',
+        '## 13.1 Threading',
+        'THREAD-VERSIONS',
+        '## 13.2 Other',
+        'SIBLING-RULE',
+        '## 16. Long lead-in',
+        'x'.repeat(3000),
+        '### 16.2 Parity',
+        'PARITY-RULE',
+      ].join('\n'),
+    });
+    const docs = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    assert.deepEqual(
+      docs.map((doc) => doc.label.replace(/.*\(/, '(')),
+      ['(§13)', '(§13.1)', '(§16.2)'],
+    );
+    assert.match(docs[0].text, /NO-PESSIMISTIC-LOCKS/);
+    assert.doesNotMatch(docs.map((doc) => doc.text).join('\n'), /SIBLING-RULE|x{3000}/);
+  });
+
   it('names a cited section absent from the source instead of dropping it silently', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-missing-'));
     roots.push(root);

@@ -771,6 +771,7 @@ const MAX_GUIDELINE_FRAGMENT_BYTES = 4 * 1024;
 // A rule doc is read in full to locate a section (which can sit past the
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
+const MAX_PARENT_RULE_BYTES = 2 * 1024;
 
 // Routes are PR-controlled and can cite hundreds of sections with arbitrarily
 // long dotted ids, so their omission metadata needs its own bound.
@@ -1054,6 +1055,22 @@ export async function discoverGuidelineDocs(
     // the MAX_RULE_DOC_BYTES read) — named in the omission note, never dropped
     // silently.
     const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.section);
+    // A sub-rule refines its parent's defaults (TS-13.1 under §13): add each uncited
+    // parent's own text, up to its first sub-heading, when it is short enough to be
+    // defaults. A longer lead-in is a rule body the route did not cite.
+    const parents = uniqueSections.flatMap((section) => {
+      const parts = section.split('.');
+      return parts.slice(1).map((_, index) => parts.slice(0, index + 1).join('.'));
+    });
+    for (const parent of new Set(parents)) {
+      if (uniqueSections.includes(parent)) continue;
+      const lines = extractRuleSection(source.text, parent)?.split('\n') ?? [];
+      const next = markdownHeadings(lines).find(({ line }) => line > 0)?.line;
+      const own = lines.slice(0, next).join('\n').trim();
+      if (own.includes('\n') && Buffer.byteLength(own) <= MAX_PARENT_RULE_BYTES)
+        found.push({ section: parent, text: own });
+    }
+    found.sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
     // A nested child (`### 6.1` under `## 6`) is already inside its selected
     // parent's extract — drop the duplicate so it is neither emitted nor budgeted
     // twice. Strictly-larger guard: equal-length distinct sections keep both.
