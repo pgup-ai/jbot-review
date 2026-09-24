@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { normalizeOptions } from '../src/shared/runner.ts';
 import {
   effectiveReasoningEffort,
+  modelPolicy,
   runConfiguration,
   runIdentity,
   roleTelemetry,
@@ -110,6 +111,24 @@ test('configuration fingerprints policy changes while excluding credentials and 
       .configuration.sdkEngine,
     'unrecognized',
   );
+});
+
+test('a pool draw is not a policy change; explicit options and a single model are', () => {
+  const pool = normalizeOptions({ modelPool: ['opencode/a', 'poolside/b'] });
+  const policy = (options: typeof pool, model: string) =>
+    JSON.stringify(modelPolicy(options, { model, auxModel: model }));
+  // Provider defaults follow the draw: 'low' on most providers, 'default' on Poolside.
+  assert.equal(
+    policy({ ...pool, modelOptions: { reasoningEffort: 'low' } }, 'opencode/a'),
+    policy({ ...pool, modelOptions: { reasoningEffort: 'default' } }, 'poolside/b'),
+  );
+  const explicit = { ...pool, modelOptionsExplicit: true };
+  assert.notEqual(
+    policy({ ...explicit, modelOptions: { reasoningEffort: 'low' } }, 'opencode/a'),
+    policy({ ...explicit, modelOptions: { reasoningEffort: 'high' } }, 'opencode/a'),
+  );
+  const single = normalizeOptions({});
+  assert.notEqual(policy(single, 'opencode/a'), policy(single, 'opencode/b'));
 });
 
 test('attempt identity distinguishes reruns without confusing the reviewed SHA with the reviewer revision', () => {

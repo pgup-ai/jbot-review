@@ -71,6 +71,21 @@ export function runConfiguration(
   };
 }
 
+/** A pool's draw and the provider defaults it brings are not policy; the pool itself is. */
+export function modelPolicy(
+  options: ReviewRunOptions,
+  draw: { model: string; auxModel: string; baseURL?: string },
+) {
+  const pooled = (options.modelPool?.length ?? 0) > 1;
+  const policy =
+    pooled && !options.modelOptionsExplicit ? { ...options, modelOptions: undefined } : options;
+  return {
+    ...(pooled ? {} : { ...draw, auxBaseURL: options.auxBaseURL }),
+    modelOptions: policy.modelOptions,
+    configuration: runConfiguration(policy, draw.model).configurationHash,
+  };
+}
+
 export function runIdentity(env: NodeJS.ProcessEnv) {
   return {
     reviewerRevision:

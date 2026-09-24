@@ -79,6 +79,7 @@ import {
   type TelemetryRecorder,
 } from './telemetry.ts';
 import {
+  modelPolicy,
   runConfiguration,
   runIdentity,
   effectiveReasoningEffort,
@@ -1527,18 +1528,13 @@ async function runReviewPipeline(params: {
   const policyGuidelines = JSON.stringify(applicable);
 
   const fullReviewFiles = files;
-  const pooled = (options.modelPool?.length ?? 0) > 1;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
-    // The configuration hash covers a model pool; the member a push draws is not a policy change.
-    ...(pooled ? {} : { model, auxModel, baseURL, auxBaseURL: options.auxBaseURL }),
-    // Explicit options apply to every draw; defaults follow the drawn provider.
-    ...(!pooled || options.modelOptionsExplicit ? { modelOptions: options.modelOptions } : {}),
+    ...modelPolicy(options, { model, auxModel, baseURL }),
     guidelines: policyGuidelines,
     title: pullTitle,
     body: pullBody,
     reviewer: runIdentity(process.env).reviewerRevision,
-    configuration: runConfiguration(options, model).configurationHash,
   });
   const scopeStartedAt = Date.now();
   const reviewScope = await planIncrementalReview({
