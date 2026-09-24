@@ -1523,8 +1523,8 @@ async function runReviewPipeline(params: {
     `Guideline scope: ${discoveredGuidelines.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - discoveredGuidelines.docs.length} explicitly scoped documents excluded.`,
   );
   const guidelines = formatGuidelines(discoveredGuidelines);
-  // Reuse and incremental policies hash the rules, not their order for this diff.
-  const policyGuidelines = formatGuidelines(applicable);
+  // Reuse and incremental policies hash every applicable rule, not this diff's ranked render.
+  const policyGuidelines = JSON.stringify(applicable);
   const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
     forFiles: changedFiles,
   });
