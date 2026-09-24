@@ -357,7 +357,7 @@ function unverifiedFinding(finding: Finding, reason?: string, unavailable = fals
     confidence: 'low',
     verificationUncertain: true,
     verificationUnavailable: unavailable || undefined,
-    publishUnverified: publish || undefined,
+    publishUnverified: publish ? finding.severity : undefined,
   };
 }
 
@@ -491,24 +491,29 @@ export function filterFindings(
   findings: Finding[],
   options: { minSeverity: Severity; maxFindings: number },
 ): Finding[] {
+  const shown = (severity: Severity) =>
+    SEVERITY_RANK[severity] <= SEVERITY_RANK[options.minSeverity];
+  let published = findings.filter(
+    (finding) => !isUnresolvedFinding(finding) && shown(finding.severity),
+  );
+  if (options.maxFindings > 0)
+    published = [...published]
+      .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+      .slice(0, options.maxFindings);
+  // Unverified posts obey the same display limits, judged by their original severity.
+  const room =
+    options.maxFindings > 0 ? Math.max(0, options.maxFindings - published.length) : Infinity;
   const unresolved = findings.filter(isUnresolvedFinding);
   const publishable = new Set(
-    unresolved.filter((finding) => finding.publishUnverified).slice(0, MAX_PUBLISHED_UNVERIFIED),
+    unresolved
+      .filter((finding) => finding.publishUnverified && shown(finding.publishUnverified))
+      .slice(0, Math.min(MAX_PUBLISHED_UNVERIFIED, room)),
   );
   const capped = unresolved.map((finding) =>
     finding.publishUnverified && !publishable.has(finding)
       ? { ...finding, publishUnverified: undefined }
       : finding,
   );
-  let published = findings.filter(
-    (finding) =>
-      !isUnresolvedFinding(finding) &&
-      SEVERITY_RANK[finding.severity] <= SEVERITY_RANK[options.minSeverity],
-  );
-  if (options.maxFindings > 0)
-    published = [...published]
-      .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
-      .slice(0, options.maxFindings);
   return [...published, ...capped];
 }
 

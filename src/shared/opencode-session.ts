@@ -877,13 +877,11 @@ export function startProgressLogger(
   const controller = new AbortController();
   void (async () => {
     // Rate-limit fail-fast rides on this stream, so a dropped one is resubscribed.
-    for (
-      let backoffMs = 100;
-      !controller.signal.aborted;
-      backoffMs = Math.min(backoffMs * 2, 30_000)
-    ) {
+    for (let backoffMs = 100; !controller.signal.aborted;) {
+      let received = false;
       try {
         for await (const event of client.event.subscribe({ signal: controller.signal })) {
+          received = true;
           // payload sits under `data` (measured)
           const raw = event as {
             type?: string;
@@ -923,7 +921,10 @@ export function startProgressLogger(
           log(`(progress stream ended: ${error instanceof Error ? error.message : String(error)})`);
         }
       }
+      // Only consecutive failures back off; a stream that delivered events starts over.
+      if (received) backoffMs = 100;
       await sleep(backoffMs, undefined, { signal: controller.signal }).catch(() => undefined);
+      backoffMs = Math.min(backoffMs * 2, 30_000);
     }
   })();
   return () => controller.abort();

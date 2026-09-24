@@ -407,13 +407,26 @@ describe('applyFindingVerdicts', () => {
         },
       ],
     ).findings;
-    assert.equal(failed.publishUnverified, true);
+    assert.equal(failed.publishUnverified, 'P1');
     assert.doesNotMatch(failed.body, /org_x/);
     const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
       minSeverity: 'nit',
       maxFindings: 0,
     });
     assert.equal(unchecked.filter((f) => f.publishUnverified).length, 2);
+    const flagged = applyFindingVerdicts(findings, selected, []).findings;
+    for (const [limits, posted] of [
+      [{ minSeverity: 'nit', maxFindings: 2 }, 1],
+      [{ minSeverity: 'P1', maxFindings: 0 }, 1],
+      [{ minSeverity: 'P0', maxFindings: 0 }, 0],
+    ] as const)
+      assert.equal(
+        filterFindings(
+          [finding({ severity: 'P3', title: 'confirmed' }), ...flagged],
+          limits,
+        ).filter((f) => f.publishUnverified).length,
+        posted,
+      );
     const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
     assert.equal(routed.inline.length, 2);
     assert.equal(routed.withheld.length, 3);
