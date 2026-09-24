@@ -25,20 +25,20 @@ Used the changed source and installed CommandCode 1.56.2. The small fixture chan
 up the first array element. Runs used the real local pipeline with finding
 verification explicitly enabled, full diff delivery, and no GitHub posting.
 
-| Run                                                      | Result                                                                                          |                           Time |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -----------------------------: |
-| CommandCode / Muse Spark 1.3 Contributor, low            | Main review and verification completed; retained the seeded bug; verifier made two native reads | 17.8s total; 7.9s verification |
-| Pi / OpenRouter Ling 3.0 Flash Fin free                  | Main review and verification completed; retained the seeded bug                                 |                     7.2s total |
-| Pi direct verification, same free model                  | Read both files using native tools; confirmed the seeded bug                                    |                           7.0s |
-| CommandCode / Muse Spark, nine historical FMS candidates | 25 native calls completed; no final verdict before timeout                                      |                       180s cap |
-| Pi / Nemotron 3.5 Lightning free, same nine candidates   | One tool call observed; no final verdict before timeout                                         |                       180s cap |
+| Run                                                                     | Result                                                                                          |                           Time |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -----------------------------: |
+| CommandCode / Muse Spark 1.3 Contributor, low                           | Main review and verification completed; retained the seeded bug; verifier made two native reads | 17.8s total; 7.9s verification |
+| Pi / OpenRouter Ling 3.0 Flash Fin free                                 | Main review and verification completed; retained the seeded bug                                 |                     7.2s total |
+| Pi direct verification, same free model                                 | Read both files using native tools; confirmed the seeded bug                                    |                           7.0s |
+| CommandCode / Muse Spark, nine historical private-repository candidates | 25 native calls completed; no final verdict before timeout                                      |                       180s cap |
+| Pi / Nemotron 3.5 Lightning free, same nine candidates                  | One tool call observed; no final verdict before timeout                                         |                       180s cap |
 
 The first free MiniMax route returned 404 (free route unavailable); that was not
 a review result. Initial local pipeline attempts also exposed operator settings:
 `PROVIDER=devin` and `JBOT_SDK_ENGINE=opencode` in the local environment. The rows
 above explicitly selected the intended provider/engine and verification setting.
 
-The earlier standalone native-CLI experiment completed the nine FMS verdicts in
+The earlier standalone native-CLI experiment completed the nine verdicts in
 145.8s versus a custom-tool timeout at 180s, but this repeat did not reproduce
 that completion. These runs prove native tool wiring and a simple known-bug
 path, not a general latency or accuracy improvement. The fixture's P1 rating is
@@ -170,7 +170,7 @@ Cline remains tool-less; its CLI's global auto-approval was not enabled.
 Run 35640189001 reviewed the full PR, not just the +3/-2 follow-up commit.
 It delivered 118 hunks through seven main pages and five joint auxiliary pages.
 The native session cost estimate was $1.4279; auxiliary interactions accounted
-for $1.0987. These are estimates, not additional GOAT-plan billing.
+for $1.0987. These are estimates, not additional subscription billing.
 
 The planner used a 128,000-token fallback for Muse Contributor and DeepSeek
 Flash Fast. CommandCode 1.56.2's bundled catalog gives them 1,048,576 and

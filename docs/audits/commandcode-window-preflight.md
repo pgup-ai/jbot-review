@@ -2,7 +2,7 @@
 
 ## Exhausted key selection
 
-[Depot attempt 893dwdtv35](https://depot.dev/orgs/sr28q68rf1/workflows/92hdkcx8g6/jobs/bm5xnkt3s0?attempt=893dwdtv35)
+Depot attempt `893dwdtv35`
 failed after preflight had already reported all three keys as window-limited:
 two had exhausted their weekly allowance; the third had used 14.1 of its
 14 five-hour credits. Selection fell back to that third key because it still

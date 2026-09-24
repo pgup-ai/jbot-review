@@ -3,8 +3,8 @@
 Follow-up to [the auxiliary session timeout audit](2026-09-11-auxiliary-session-timeouts.md).
 Question: do the `review-interactions` and `review-frontend` lens passes carry
 redundant material, and is that why they are the slowest auxiliary sessions?
-Same corpus (145 attempts on `integral-xyz/fms` via Depot and
-`integral-xyz/fms-frontend` via GitHub, 2026-09-09 to 09-11), plus the prompt
+Same corpus (145 attempts on a private backend repository via Depot and a
+private frontend repository via GitHub, 2026-09-09 to 09-11), plus the prompt
 source at `3081775`. Observational; nothing changed.
 
 ## Answer
@@ -119,7 +119,7 @@ Per lens:
 | guideline           |               84 |            65 (77%) |           24 |         4/4 (100%) |                   0 |
 
 Posted counts include findings re-anchored from their evidence quote
-(`rescued`); telemetry covers the 43 fms-frontend artifacts only.
+(`rescued`); telemetry covers the 43 frontend-repository artifacts only.
 
 Cross-session duplication is negligible: one finding was dropped as a
 duplicate across all 43 artifacts, and interactions and frontend never landed

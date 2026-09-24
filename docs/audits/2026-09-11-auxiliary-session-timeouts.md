@@ -2,8 +2,8 @@
 
 Why auxiliary review sessions (lens passes, guideline check, addressed check,
 changes-since summary) still time out or come back incomplete, from the last
-two days of `J-Bot Code Review` runs on `integral-xyz/fms` (Depot CI) and
-`integral-xyz/fms-frontend` (GitHub Actions). Observational only: no code,
+two days of `J-Bot Code Review` runs on a private backend repository (Depot CI)
+and a private frontend repository (GitHub Actions). Observational only: no code,
 configuration, or pool change was made.
 
 ## Answer
@@ -111,28 +111,28 @@ Every abandonment fired at exactly 300 s after the main pass. In all
 20 cases the main pass was fast and the auxiliary route was one of three
 slow ones.
 
-| Attempt                                                                                            | Main model                                    | Main s | Aux session                 | Aux route                                  | Ran for s | Job wall s |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------- | -----: | --------------------------- | ------------------------------------------ | --------: | ---------: |
-| [msf4xsvkzn](https://depot.dev/orgs/sr28q68rf1/workflows/vf280tvv4k)                               | `commandcode/gpt-5.6-luna`                    |      9 | `review-interactions`       | `opencode-go/deepseek-flash`               |       304 |        399 |
-| [4zc0kxxd11](https://depot.dev/orgs/sr28q68rf1/workflows/ksv0vh73fr)                               | `commandcode/gpt-5.6-luna`                    |     13 | `guideline-compliance`      | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
-| [4zc0kxxd11](https://depot.dev/orgs/sr28q68rf1/workflows/ksv0vh73fr)                               | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
-| [cs0q9wm8zk](https://depot.dev/orgs/sr28q68rf1/workflows/tm3ctkv5nf)                               | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `opencode-go/deepseek-flash`               |       301 |        410 |
-| [vkqqp7kfln](https://depot.dev/orgs/sr28q68rf1/workflows/sk45z90v19)                               | `opencode/muse-spark-1.3-contributor-free`    |     32 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       346 |        390 |
-| [wzc4nfkx6s](https://depot.dev/orgs/sr28q68rf1/workflows/b0zdsc8lm5)                               | `cline/cline-free/muse-spark-1.3-contributor` |     44 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       344 |        398 |
-| [qv1r88prvm](https://depot.dev/orgs/sr28q68rf1/workflows/2khg16rn8q)                               | `commandcode/deepseek/deepseek-v4-flash-fast` |     45 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       345 |        448 |
-| [34506830729 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34506830729/attempts/1) | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-interactions`       | `opencode-go/deepseek-flash`               |       334 |        442 |
-| [34506830729 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34506830729/attempts/1) | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-frontend`           | `opencode-go/deepseek-flash`               |       334 |        442 |
-| [34506830729 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34506830729/attempts/1) | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       334 |        442 |
-| [qvpwpdh6dz](https://depot.dev/orgs/sr28q68rf1/workflows/mvlwnd1l4k)                               | `opencode/muse-spark-1.3-contributor-free`    |     69 | `guideline-compliance`      | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
-| [qvpwpdh6dz](https://depot.dev/orgs/sr28q68rf1/workflows/mvlwnd1l4k)                               | `opencode/muse-spark-1.3-contributor-free`    |     69 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
-| [34418701096 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34418701096/attempts/1) | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `changes-since-last-review` | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
-| [34418701096 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34418701096/attempts/1) | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `addressed-prior-comments`  | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
-| [fzcqmjnxsc](https://depot.dev/orgs/sr28q68rf1/workflows/s15zjwwvxs)                               | `commandcode/deepseek/deepseek-v4-flash-fast` |     86 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       372 |        536 |
-| [dvt6b8n1m9](https://depot.dev/orgs/sr28q68rf1/workflows/3135b7991c)                               | `opencode-go/muse-spark-1.3-contributor`      |    110 | `review-interactions`       | `opencode-go/deepseek-flash`               |       410 |        495 |
-| [rt12jhsl0z](https://depot.dev/orgs/sr28q68rf1/workflows/z4f96q111f)                               | `opencode-go/muse-spark-1.3-contributor`      |    128 | `review-interactions`       | `opencode-go/deepseek-flash`               |       428 |        564 |
-| [r4h8bfxz4h](https://depot.dev/orgs/sr28q68rf1/workflows/xv646h37b0)                               | `opencode/muse-spark-1.3-contributor-free`    |    159 | `review-interactions`       | `opencode-go/deepseek-flash`               |       459 |        512 |
-| [r4h8bfxz4h](https://depot.dev/orgs/sr28q68rf1/workflows/xv646h37b0)                               | `opencode/muse-spark-1.3-contributor-free`    |    159 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       459 |        512 |
-| [34417502223 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34417502223/attempts/1) | `opencode-go/omen-alpha`                      |    290 | `review-frontend`           | `commandcode/z-ai/glm-5.3-flash`           |       611 |        932 |
+| Attempt        | Main model                                    | Main s | Aux session                 | Aux route                                  | Ran for s | Job wall s |
+| -------------- | --------------------------------------------- | -----: | --------------------------- | ------------------------------------------ | --------: | ---------: |
+| msf4xsvkzn     | `commandcode/gpt-5.6-luna`                    |      9 | `review-interactions`       | `opencode-go/deepseek-flash`               |       304 |        399 |
+| 4zc0kxxd11     | `commandcode/gpt-5.6-luna`                    |     13 | `guideline-compliance`      | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
+| 4zc0kxxd11     | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
+| cs0q9wm8zk     | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `opencode-go/deepseek-flash`               |       301 |        410 |
+| vkqqp7kfln     | `opencode/muse-spark-1.3-contributor-free`    |     32 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       346 |        390 |
+| wzc4nfkx6s     | `cline/cline-free/muse-spark-1.3-contributor` |     44 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       344 |        398 |
+| qv1r88prvm     | `commandcode/deepseek/deepseek-v4-flash-fast` |     45 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       345 |        448 |
+| 34506830729 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-interactions`       | `opencode-go/deepseek-flash`               |       334 |        442 |
+| 34506830729 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-frontend`           | `opencode-go/deepseek-flash`               |       334 |        442 |
+| 34506830729 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       334 |        442 |
+| qvpwpdh6dz     | `opencode/muse-spark-1.3-contributor-free`    |     69 | `guideline-compliance`      | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
+| qvpwpdh6dz     | `opencode/muse-spark-1.3-contributor-free`    |     69 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
+| 34418701096 a1 | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `changes-since-last-review` | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
+| 34418701096 a1 | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `addressed-prior-comments`  | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
+| fzcqmjnxsc     | `commandcode/deepseek/deepseek-v4-flash-fast` |     86 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       372 |        536 |
+| dvt6b8n1m9     | `opencode-go/muse-spark-1.3-contributor`      |    110 | `review-interactions`       | `opencode-go/deepseek-flash`               |       410 |        495 |
+| rt12jhsl0z     | `opencode-go/muse-spark-1.3-contributor`      |    128 | `review-interactions`       | `opencode-go/deepseek-flash`               |       428 |        564 |
+| r4h8bfxz4h     | `opencode/muse-spark-1.3-contributor-free`    |    159 | `review-interactions`       | `opencode-go/deepseek-flash`               |       459 |        512 |
+| r4h8bfxz4h     | `opencode/muse-spark-1.3-contributor-free`    |    159 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       459 |        512 |
+| 34417502223 a1 | `opencode-go/omen-alpha`                      |    290 | `review-frontend`           | `commandcode/z-ai/glm-5.3-flash`           |       611 |        932 |
 
 Cost: these attempts spent 345–450 s (one 642 s) of wall time after
 the main pass, then discarded the work. Median job wall for incomplete Depot
@@ -172,7 +172,7 @@ in the current pool.
   30 auxiliary sessions from 2026-09-10 13:09 to 2026-09-11 01:41 UTC,
   every one within 5–45 s. As main it failed permanently in
   10 attempts because the fresh-session retry keeps the same model
-  (example: [bdnp69mcmv](https://depot.dev/orgs/sr28q68rf1/workflows/q16v804d4d): main, retry and three
+  (example: bdnp69mcmv: main, retry and three
   auxiliary sessions all exit 9 within 32 s). It is no longer in the current
   pool.
 - `commandcode/deepseek/deepseek-v4.1-flash` returned `unknown model` for
@@ -191,15 +191,15 @@ manual rerun (attempt counts up to 4).
 7 stalled on `Free usage exceeded, subscribe to Go` and one more failed on
 `Rate limit exceeded (Console)`.
 
-| Attempt                                                                                            | Free route role | Attempt status | Longest retry loop s | Job wall s | Outcome                       |
-| -------------------------------------------------------------------------------------------------- | --------------- | -------------- | -------------------: | ---------: | ----------------------------- |
-| [34418701096 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34418701096/attempts/1) | aux             | success        |                  302 |        489 | incomplete                    |
-| [67p56rsl10](https://depot.dev/orgs/sr28q68rf1/workflows/zz0mts012r)                               | aux             | finished       |                   61 |        171 | incomplete                    |
-| [34529776672 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34529776672/attempts/1) | main            | success        |                 1386 |       1556 | permanently: review timed out |
-| [34531496667 a1](https://github.com/integral-xyz/fms-frontend/actions/runs/34531496667/attempts/1) | main+aux        | cancelled      |                  121 |        239 |                               |
-| [k77k30fps5](https://depot.dev/orgs/sr28q68rf1/workflows/jdpl71pcfq)                               | main+aux        | failed         |                 1447 |       1506 | permanently: review timed out |
-| [k77k30fps5](https://depot.dev/orgs/sr28q68rf1/workflows/jdpl71pcfq)                               | main+aux        | cancelled      |                  542 |        618 |                               |
-| [00sjrwxjsh](https://depot.dev/orgs/sr28q68rf1/workflows/2jngfsd8xq)                               | aux             | cancelled      |                   61 |        124 |                               |
+| Attempt        | Free route role | Attempt status | Longest retry loop s | Job wall s | Outcome                       |
+| -------------- | --------------- | -------------- | -------------------: | ---------: | ----------------------------- |
+| 34418701096 a1 | aux             | success        |                  302 |        489 | incomplete                    |
+| 67p56rsl10     | aux             | finished       |                   61 |        171 | incomplete                    |
+| 34529776672 a1 | main            | success        |                 1386 |       1556 | permanently: review timed out |
+| 34531496667 a1 | main+aux        | cancelled      |                  121 |        239 |                               |
+| k77k30fps5     | main+aux        | failed         |                 1447 |       1506 | permanently: review timed out |
+| k77k30fps5     | main+aux        | cancelled      |                  542 |        618 |                               |
+| 00sjrwxjsh     | aux             | cancelled      |                   61 |        124 |                               |
 
 opencode's session status stays `retry attempt 1` for the whole window;
 `waitForAssistantMessage` in `src/shared/opencode.ts` logs it as progress and
@@ -210,12 +210,12 @@ abandons them.
 
 ## 4. The 600 s interactions cap
 
-| Attempt                                                                                            | Aux route                                     | Ran for s |               Main s | Context bytes |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------- | --------: | -------------------: | ------------: |
-| [1p5s3s3g6g](https://depot.dev/orgs/sr28q68rf1/workflows/1kw9msmtc3)                               | `commandcode/z-ai/glm-5.3-flash`              |       600 | — (main also failed) |        454990 |
-| [9jvx47rsbk](https://depot.dev/orgs/sr28q68rf1/workflows/3jrk6v8p77)                               | `commandcode/deepseek/deepseek-v4.1-flash`    |       600 |                  289 |             — |
-| [k77k30fps5](https://depot.dev/orgs/sr28q68rf1/workflows/jdpl71pcfq)                               | `opencode/muse-spark-1.3-contributor-free`    |       588 | — (main also failed) |             — |
-| [34482201625 a3](https://github.com/integral-xyz/fms-frontend/actions/runs/34482201625/attempts/3) | `commandcode/deepseek/deepseek-v4-flash-fast` |       600 |                  471 |        205575 |
+| Attempt        | Aux route                                     | Ran for s |               Main s | Context bytes |
+| -------------- | --------------------------------------------- | --------: | -------------------: | ------------: |
+| 1p5s3s3g6g     | `commandcode/z-ai/glm-5.3-flash`              |       600 | — (main also failed) |        454990 |
+| 9jvx47rsbk     | `commandcode/deepseek/deepseek-v4.1-flash`    |       600 |                  289 |             — |
+| k77k30fps5     | `opencode/muse-spark-1.3-contributor-free`    |       588 | — (main also failed) |             — |
+| 34482201625 a3 | `commandcode/deepseek/deepseek-v4-flash-fast` |       600 |                  471 |        205575 |
 
 In three of four cases the grace would have expired within seconds of the cap
 anyway. Only the 471 s main case lost time the grace would still have allowed.
@@ -223,9 +223,9 @@ The cap is a minor contributor.
 
 ## Other observations
 
-- fms-frontend had an `Invalid API key` window on 2026-09-11 13:01–13:51 UTC:
+- The frontend repository had an `Invalid API key` window on 2026-09-11 13:01–13:51 UTC:
   every OpenCode-routed session failed in 4–22 s until reruns rotated the pool
-  onto CommandCode ([34602002974](https://github.com/integral-xyz/fms-frontend/actions/runs/34602002974) took four attempts).
+  onto CommandCode (34602002974 took four attempts).
   Auth failures are non-retryable and should not consume an attempt per pool
   entry.
 - 21 attempts were cancelled mid-review by the per-PR concurrency

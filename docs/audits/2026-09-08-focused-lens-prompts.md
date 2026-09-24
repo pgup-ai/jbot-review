@@ -20,7 +20,7 @@ bytes for frontend (about 10% each).
 
 ## Experiment
 
-- Target: frozen `integral-xyz/fms-frontend` PR #2240, head
+- Target: a frozen pull request from a private frontend repository, head
   `a3b2d011fa2071f3e13ed2d61a7a482caa0f2cb4`; merge base
   `217e7bd9b42b453542270339e3f1e5498edf8e33`; all 13 changed files.
 - Control: latest-main revision `55acee0be119b54e3670f2b440ca0d6b871273c3`.

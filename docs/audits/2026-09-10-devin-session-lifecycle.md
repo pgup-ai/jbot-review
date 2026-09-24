@@ -82,7 +82,7 @@ used main `884fc22` plus the working changes and base `0c75310`.
 
 ## Incomplete-review reporting and Docker follow-up
 
-The [FMS #3751 review](https://github.com/integral-xyz/fms/pull/3751#pullrequestreview-5170033936)
+One review on a private production repository
 corresponds to Depot job `bw00w06sqn` in workflow `sk45z90v19`. Its log records
 zero main findings, zero guideline findings, and no verification call.
 Interactions alone exceeded the five-minute post-main grace. No findings were
