@@ -1,4 +1,11 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -169,18 +176,38 @@ export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEn
  * Failure output minus Cline's `@/` mention warnings: it reads the diff's
  * `'@/api/x'` imports as file mentions and logs one harmless ENOENT each
  * (probed on 3.0.61), which would bury the real error under the log cap. The
- * swallowed closing quote and punctuation mark them; a real missing file has
+ * swallowed closing quote or backtick marks them; a real missing file has
  * neither.
  */
 const CLINE_MENTION_WARNING =
-  /^\[warning\] ENOENT: no such file or directory, statx? '\/.*["'][;,]?'$/;
+  /^\[warning\] ENOENT: no such file or directory, statx? '\/.*["'`][;,]?'$/;
 
-export function clineFailureDetail(stderr: string, stdout: string): string {
+export function clineFailureDetail(stderr: string, stdout: string, logged = ''): string {
   const lines = stderr.split('\n');
   const kept = lines.filter((line) => !CLINE_MENTION_WARNING.test(line));
   const dropped = lines.length - kept.length;
   const text = truncateForLog(kept.join('\n').trim() || stdout, 1000);
-  return dropped ? `${text} (${dropped} @-mention ENOENT warnings dropped)` : text;
+  const detail = dropped ? `${text} (${dropped} @-mention ENOENT warnings dropped)` : text;
+  return logged ? `${detail} (cline.log: ${logged})` : detail;
+}
+
+/** Some Cline failures appear only in its own log, not on stderr. */
+function clineLoggedErrors(dir: string): string {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, '.cline', 'data', 'logs', 'cline.log'), 'utf8');
+  } catch {
+    return '';
+  }
+  const errors = text.split('\n').flatMap((line) => {
+    try {
+      const entry = JSON.parse(line) as { level: number; msg?: string; err?: { message?: string } };
+      return entry.level >= 50 ? [[entry.msg, entry.err?.message].filter(Boolean).join(': ')] : [];
+    } catch {
+      return [];
+    }
+  });
+  return truncateForLog(errors.slice(-3).join(' | '), 600);
 }
 
 /** The clean final message is the `run_result` event's `text` (NDJSON stdout). */
@@ -379,8 +406,49 @@ async function runClinePrompt(
 ): Promise<string> {
   const fullPrompt = buildClinePromptArg(prompt);
   assertClinePromptArgWithinBudget(label, fullPrompt);
-  const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
+  const deadline = Date.now() + timeoutMs;
+  const timeoutMessage = formatClinePromptTimeoutMessage(label, model, timeoutMs);
+  const run = () =>
+    runClineOnce(model, fullPrompt, home, Math.max(0, deadline - Date.now()), timeoutMessage, log);
+  let result = await run();
+  // Cline can exit 0 without printing anything; one fresh run is cheap.
+  if (result.exitCode === 0 && !result.stdout && !result.stderr) {
+    log(`${label} prompt exited without output via cline; retrying once.`);
+    result = await run();
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `cline ${label} exited ${result.exitCode}: ${clineFailureDetail(result.stderr, result.stdout, result.logged)}`,
+    );
+  }
+  const finalMessage = parseClineFinalMessage(result.stdout).trim();
+  log(
+    `${label} prompt complete via cline: stdout=${result.stdout.length} chars last-message=${finalMessage.length} chars`,
+  );
+  // No run_result message = the run failed or produced nothing; fail loud rather
+  // than parse the noisy event stream.
+  if (!finalMessage) {
+    throw new Error(
+      `cline ${label} produced no run_result message; stderr: ${clineFailureDetail(
+        result.stderr,
+        result.stdout,
+        result.logged,
+      )}`,
+    );
+  }
+  return finalMessage;
+}
+
+async function runClineOnce(
+  model: string,
+  promptArg: string,
+  home: string | undefined,
+  timeoutMs: number,
+  timeoutMessage: string,
+  log: (msg: string) => void,
+) {
+  const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
   try {
     // Per-process HOME: copy providers.json so concurrent sessions don't race on the
     // file cline rewrites when it refreshes the token.
@@ -391,33 +459,13 @@ async function runClinePrompt(
     // (.cline/hooks, .clinerules); a tool-less review needs none of the checkout.
     const cwd = join(dir, 'workspace');
     mkdirSync(cwd);
-    const args = buildClineCliArgs({ model, promptArg: fullPrompt });
-    const result = await runCliProcess(CLINE_CLI_BIN, args, {
+    const result = await runCliProcess(CLINE_CLI_BIN, buildClineCliArgs({ model, promptArg }), {
       cwd,
       env: clineEnvForHome(dir),
       timeoutMs,
-      timeoutMessage: formatClinePromptTimeoutMessage(label, model, timeoutMs),
+      timeoutMessage,
     });
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `cline ${label} exited ${result.exitCode}: ${clineFailureDetail(result.stderr, result.stdout)}`,
-      );
-    }
-    const finalMessage = parseClineFinalMessage(result.stdout).trim();
-    log(
-      `${label} prompt complete via cline: stdout=${result.stdout.length} chars last-message=${finalMessage.length} chars`,
-    );
-    // No run_result message = the run failed or produced nothing; fail loud rather
-    // than parse the noisy event stream.
-    if (!finalMessage) {
-      throw new Error(
-        `cline ${label} produced no run_result message; stderr: ${clineFailureDetail(
-          result.stderr,
-          result.stdout,
-        )}`,
-      );
-    }
-    return finalMessage;
+    return { ...result, logged: clineLoggedErrors(dir) };
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(
       (error: NodeJS.ErrnoException) => log(`Cline temporary-home cleanup failed: ${error.code}.`),
