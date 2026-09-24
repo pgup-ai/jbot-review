@@ -52,6 +52,14 @@ export function isUnresolvedFinding(
   );
 }
 
+export function isWithheldFinding(
+  finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain' | 'publishUnverified'>,
+): boolean {
+  return isUnresolvedFinding(finding) && !finding.publishUnverified;
+}
+
+const MAX_PUBLISHED_UNVERIFIED = 2;
+
 export const SEVERITY_RANK: Record<Severity, number> = {
   P0: 0,
   P1: 1,
@@ -326,18 +334,30 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
     confidence: 'medium',
     verificationUncertain: undefined,
     verificationUnavailable: undefined,
+    publishUnverified: undefined,
   };
 }
 
 function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {
+  // No verdict is not a judgment: a concrete blocking claim stays visible, labeled.
+  const publish =
+    unavailable &&
+    !isUnresolvedFinding(finding) &&
+    SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2;
   return {
     ...finding,
-    ...formatUnverifiedFinding(finding, reason, unavailable),
+    // A failed verifier's reason can carry raw provider errors; a posted comment gets none.
+    ...formatUnverifiedFinding(
+      finding,
+      publish ? 'Finding verification did not complete.' : reason,
+      unavailable,
+    ),
     severity: finding.severity === 'nit' ? 'nit' : 'P3',
     kind: 'investigate',
     confidence: 'low',
     verificationUncertain: true,
     verificationUnavailable: unavailable || undefined,
+    publishUnverified: publish ? finding.severity : undefined,
   };
 }
 
@@ -471,17 +491,31 @@ export function filterFindings(
   findings: Finding[],
   options: { minSeverity: Severity; maxFindings: number },
 ): Finding[] {
-  const unresolved = findings.filter(isUnresolvedFinding);
+  const shown = (severity: Severity) =>
+    SEVERITY_RANK[severity] <= SEVERITY_RANK[options.minSeverity];
   let published = findings.filter(
-    (finding) =>
-      !isUnresolvedFinding(finding) &&
-      SEVERITY_RANK[finding.severity] <= SEVERITY_RANK[options.minSeverity],
+    (finding) => !isUnresolvedFinding(finding) && shown(finding.severity),
   );
   if (options.maxFindings > 0)
     published = [...published]
       .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
       .slice(0, options.maxFindings);
-  return [...published, ...unresolved];
+  // Unverified posts obey the same display limits, judged by their original severity.
+  const room =
+    options.maxFindings > 0 ? Math.max(0, options.maxFindings - published.length) : Infinity;
+  const unresolved = findings.filter(isUnresolvedFinding);
+  const publishable = new Set(
+    unresolved
+      .filter((finding) => finding.publishUnverified && shown(finding.publishUnverified))
+      .sort((a, b) => SEVERITY_RANK[a.publishUnverified!] - SEVERITY_RANK[b.publishUnverified!])
+      .slice(0, Math.min(MAX_PUBLISHED_UNVERIFIED, room)),
+  );
+  const capped = unresolved.map((finding) =>
+    finding.publishUnverified && !publishable.has(finding)
+      ? { ...finding, publishUnverified: undefined }
+      : finding,
+  );
+  return [...published, ...capped];
 }
 
 export interface AnchoredFindings {
@@ -516,7 +550,7 @@ export function anchorFindings(
     withheld: [],
   };
   for (const f of findings) {
-    if (isUnresolvedFinding(f)) result.withheld.push(f);
+    if (isWithheldFinding(f)) result.withheld.push(f);
     else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
     else if (hasHeadSha && addable.has(f.path)) {

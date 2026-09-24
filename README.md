@@ -395,7 +395,7 @@ the review itself is unaffected._
 | `auto-approve`            | `false`            | Approve the exact reviewed head when the run produces no findings before display filters, all prior jbot threads are resolved, and GitHub reports the PR open, non-draft, and mergeable. Existing same-head jbot approvals are not duplicated. GitHub branch protection still decides whether the PR can merge.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                                                                        |
-| `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain candidates remain in diagnostics and are withheld from PR comments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain candidates remain in diagnostics and are withheld from PR comments, except as described under [Finding evidence](#finding-evidence).                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `review-shards`           | `1`                | Initial file groups: `1`, `0` for automatic grouping, or `N`. Oversized groups and files are automatically paged against the full prompt budget. Every page must complete; additional pages wait under the session concurrency limit.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). See [review scheduling](#review-scheduling) for finder deadlines, verification reserves and incomplete coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `max-concurrent-sessions` | `3`                | Maximum simultaneous model sessions. `0` also selects the bounded default of `3`; set a positive limit appropriate for your provider tier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -908,7 +908,10 @@ candidates, P3 and nits, enter severity-ordered batches of ten. Findings arrivin
 follow-up check. Verification shares the remaining verification time budget;
 Failed or missing verdicts retain candidates as `not-completed` diagnostics and
 report incomplete coverage. An uncertain verdict is `inconclusive`, not an
-unattempted check. Both remain withheld from PR findings.
+unattempted check. Both remain withheld from PR findings, with one exception: a
+concrete P0–P2 finding whose verification returned no verdict is posted labeled
+Unverified, at most two a run, within `max-findings` and `min-severity` (judged by
+its original severity) and outside the severity counts.
 
 ## Local review
 
@@ -1083,7 +1086,8 @@ Guidelines may share an interactions session, so reuse does not always remove a
 whole model session.
 
 Every preset withholds uncertain, investigation-only and low-confidence candidates
-from inline, file-level and review-body findings. Their full details remain in
+from inline, file-level and review-body findings (the one exception is under
+[Finding evidence](#finding-evidence)). Their full details remain in
 run logs and local output; the PR receives only a count and a verification-limit
 notice. They still prevent automatic approval and an all-clear result. This rule
 adds no model pass, repository scan or configuration flag. Concrete investigation
@@ -1091,8 +1095,8 @@ candidates still enter the existing verification batches. Confirmation promotes
 one only when the verifier supplies a factual title, classification, severity,
 trigger/impact explanation and a quote present in source supplied for that candidate.
 Prepared evidence counts only when it fits and reaches the verifier. Code preserves
-the candidate location. Uncertainty and provider/budget
-failures remain withheld, with different diagnostic labels.
+the candidate location. Otherwise, uncertainty and provider or budget failures
+remain withheld, with different diagnostic labels.
 
 The dogfood workflow uploads `unverified-findings.json` alongside telemetry. Its
 head-pinned candidates distinguish `inconclusive`, `not-completed`, and

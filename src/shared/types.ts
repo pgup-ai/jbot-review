@@ -99,6 +99,8 @@ export interface Finding {
   /** Set by verification, never accepted from model output. */
   verificationUncertain?: boolean;
   verificationUnavailable?: boolean;
+  /** Original severity of an unchecked concrete P0–P2 claim, posted labeled Unverified (at most two a run). */
+  publishUnverified?: Severity;
 }
 
 export interface AddressedPriorComment {

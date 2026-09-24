@@ -63,6 +63,7 @@ import {
   resolvesFinding,
   isNoiseFile,
   isUnresolvedFinding,
+  isWithheldFinding,
   isPrCleanAfterRun,
   openFindingThreadIds,
   recheckReasons,
@@ -3529,7 +3530,7 @@ async function runReviewPipeline(params: {
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, 'unverified-findings.json'),
-        JSON.stringify(candidateDiagnostics(headSha, withheld), null, 2) + '\n',
+        JSON.stringify(candidateDiagnostics(headSha, filteredFindings), null, 2) + '\n',
         { mode: 0o644 },
       );
       // Docker creates this artifact as root; the host uploader runs as the runner user.
@@ -5521,10 +5522,10 @@ export function buildBody(
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
   const orphanedSection = renderOrphanedSection(
-    orphaned.filter((finding) => !isUnresolvedFinding(finding)),
+    orphaned.filter((finding) => !isWithheldFinding(finding)),
   );
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
-  const unpublishedCount = all.filter(isUnresolvedFinding).length;
+  const unpublishedCount = all.filter(isWithheldFinding).length;
   if (unpublishedCount > 0)
     lines.push(
       `**Verification limits:** ${unpublishedCount} candidate${unpublishedCount === 1 ? '' : 's'} withheld from PR comments. ${experiment?.diagnosticsUrl ? `[Inspect candidates and verification outcomes](${experiment.diagnosticsUrl}) in the run artifacts (\`unverified-findings.json\`).` : 'Details are retained in the run logs and unverified-findings.json.'}`,

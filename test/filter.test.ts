@@ -371,10 +371,81 @@ describe('applyFindingVerdicts', () => {
       assert.equal(f.verificationUnavailable, true);
       assert.match(f.body, /Verification not completed/);
       assert.equal(f.confidence, 'low');
-      assert.match(f.body, /Finding verification did not return a verdict/);
+      assert.match(
+        f.body,
+        f.publishUnverified
+          ? /Finding verification did not complete\./
+          : /Finding verification did not return a verdict/,
+      );
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
+
+    assert.deepEqual(
+      result.filter((f) => f.publishUnverified).map((f) => f.title),
+      ['Unverified concern: uncertain me', 'Unverified concern: confirm me'],
+    );
+    const inconclusive = applyFindingVerdicts(findings, selected, [
+      { index: 1, verdict: 'uncertain', reason: 'Unclear.' },
+    ]).findings.find((f) => f.title.includes('uncertain me'));
+    assert.equal(inconclusive?.publishUnverified, undefined);
+    const [speculative] = applyFindingVerdicts(
+      [finding({ severity: 'P1', kind: 'investigate' })],
+      [0],
+      [],
+    ).findings;
+    assert.equal(speculative.publishUnverified, undefined);
+    const [failed] = applyFindingVerdicts(
+      [finding({ severity: 'P1' })],
+      [0],
+      [
+        {
+          index: 0,
+          verdict: 'uncertain',
+          unavailable: true,
+          reason: 'exited 1: {"user_id":"org_x"}',
+        },
+      ],
+    ).findings;
+    assert.equal(failed.publishUnverified, 'P1');
+    assert.doesNotMatch(failed.body, /org_x/);
+    const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
+      minSeverity: 'nit',
+      maxFindings: 0,
+    });
+    assert.equal(unchecked.filter((f) => f.publishUnverified).length, 2);
+    const flagged = applyFindingVerdicts(findings, selected, []).findings;
+    for (const [limits, posted] of [
+      [{ minSeverity: 'nit', maxFindings: 2 }, 1],
+      [{ minSeverity: 'P1', maxFindings: 0 }, 1],
+      [{ minSeverity: 'P0', maxFindings: 0 }, 0],
+    ] as const)
+      assert.equal(
+        filterFindings(
+          [finding({ severity: 'P3', title: 'confirmed' }), ...flagged],
+          limits,
+        ).filter((f) => f.publishUnverified).length,
+        posted,
+      );
+    const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
+    assert.equal(routed.inline.length, 2);
+    assert.equal(routed.withheld.length, 3);
+    assert.ok(routed.inline.every((f) => f.verificationUncertain));
+  });
+
+  it('gives the limited Unverified slots to the most severe unchecked findings', () => {
+    const ordered = filterFindings(
+      applyFindingVerdicts(
+        (['P2', 'P2', 'P0'] as const).map((severity) => finding({ severity })),
+        [0, 1, 2],
+        [],
+      ).findings,
+      { minSeverity: 'nit', maxFindings: 0 },
+    );
+    assert.deepEqual(
+      ordered.filter((f) => f.publishUnverified).map((f) => f.publishUnverified),
+      ['P2', 'P0'],
+    );
   });
 });
 
