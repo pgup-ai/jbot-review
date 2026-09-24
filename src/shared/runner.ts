@@ -65,6 +65,7 @@ import {
   isUnresolvedFinding,
   isPrCleanAfterRun,
   openFindingThreadIds,
+  recheckReasons,
   selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
@@ -595,10 +596,7 @@ function createCommandCodeBackend(
   };
 }
 
-function createClineBackend(
-  workspace: string,
-  clineHome: string,
-): ReviewBackend & { stop(): Promise<void> } {
+function createClineBackend(clineHome: string): ReviewBackend & { stop(): Promise<void> } {
   const processes = createCliProcessScope();
   return {
     name: CLINE_PROVIDER_ID,
@@ -607,7 +605,7 @@ function createClineBackend(
     observability: CLINE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       processes.run(options?.label ?? 'review', () =>
-        runClineReview(workspace, model, prContext, guidelines, log, {
+        runClineReview(model, prContext, guidelines, log, {
           ...options,
           home: clineHome,
         }),
@@ -615,7 +613,6 @@ function createClineBackend(
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       processes.run('addressed-prior-comments', () =>
         runClineAddressedPriorCommentsCheck(
-          workspace,
           model,
           prContext,
           log,
@@ -627,7 +624,6 @@ function createClineBackend(
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       processes.run('guideline-compliance', () =>
         runClineGuidelineComplianceCheck(
-          workspace,
           model,
           prContext,
           guidelines,
@@ -640,7 +636,6 @@ function createClineBackend(
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       processes.run('finding-verification', () =>
         runClineFindingVerification(
-          workspace,
           model,
           prContext,
           findings,
@@ -653,7 +648,6 @@ function createClineBackend(
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       processes.run('changes-since-last-review', () =>
         runClineChangesSinceLastReview(
-          workspace,
           model,
           deltaContext,
           log,
@@ -2140,7 +2134,7 @@ async function runReviewPipeline(params: {
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
     // The shared ACP permission policy permits shell execution; Cline needs a
     // stricter permission hook before this tool-less route can be replaced.
-    clineBackend = createClineBackend(workspace, clineHome);
+    clineBackend = createClineBackend(clineHome);
   }
 
   if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {
@@ -4481,8 +4475,11 @@ export async function requestFindingVerdicts(params: {
             verdict.verdict === 'confirmed' && resolvesFinding(targets[verdict.index], verdict),
         );
         const rest = targets.filter((_, index) => !confirmed.some((v) => v.index === index));
+        const why = recheckReasons(
+          rest.map((target) => first?.find((v) => v.index === targets.indexOf(target))?.verdict),
+        );
         params.log(
-          `Tool-less verification confirmed ${confirmed.length}/${targets.length}; re-checking ${rest.length} with tools.`,
+          `Tool-less verification confirmed ${confirmed.length}/${targets.length}; re-checking ${rest.length} with tools${why ? ` (${why})` : ''}.`,
         );
         // A failed re-check leaves its findings unverified; the confirmations stand.
         const capped = rest.length
