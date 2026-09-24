@@ -3250,6 +3250,27 @@ async function runReviewPipeline(params: {
       });
       return { targets, verdicts };
     };
+    // Optional bookkeeping runs while finders settle, except on a single aux slot, where
+    // a running one would hold verification's only slot; what is still running is dropped.
+    const auxSingleSlot =
+      sessionCap === 1 ||
+      providerSessionConcurrency(auxProviderID) === 1 ||
+      serializedBackends.has(auxBaseBackend);
+    const finishOptional = () => {
+      const skip = (label: string) => () => {
+        abandonedAuxLabels.add(label);
+        auxBackend.abortSessionsByLabel?.(label, log);
+        telemetry.recordCoverage({ session: label, state: 'skipped' });
+        log(
+          `Optional ${label} skipped: still running when ${auxSingleSlot ? 'main review completed' : 'the finders settled'}.`,
+        );
+      };
+      return Promise.all([
+        takeSettledAuxiliary(addressedPriorCheck, [], skip(addressedPriorCheck.label)),
+        takeSettledAuxiliary(changesSinceLastReview, '', skip(changesSinceLastReview.label)),
+      ]);
+    };
+    const optionalAtMainEnd = auxSingleSlot ? finishOptional() : undefined;
     const overlapVerification =
       options.verifyOverlapGrace && verificationEnabled
         ? startOverlapVerification().catch(() => 'skipped' as const)
@@ -3329,18 +3350,8 @@ async function runReviewPipeline(params: {
       ),
     ]);
     graceDone();
-    // Optional bookkeeping runs while finders settle; only what is still running then is dropped.
-    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
-      takeSettledAuxiliary(session, fallback, () => {
-        abandonedAuxLabels.add(session.label);
-        auxBackend.abortSessionsByLabel?.(session.label, log);
-        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
-        log(`Optional ${session.label} skipped: still running when the finders settled.`);
-      });
-    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
-      finishOptional(addressedPriorCheck, []),
-      finishOptional(changesSinceLastReview, ''),
-    ]);
+    const [verifiedAddressedPriorComments, changesSinceText] = await (optionalAtMainEnd ??
+      finishOptional());
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
