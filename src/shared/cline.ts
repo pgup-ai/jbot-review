@@ -360,7 +360,7 @@ export async function runClineFindingVerification(
   void onTokenUsage;
   const raw = await runClinePrompt(
     model,
-    assembleFindingVerificationPrompt(prContext, findings),
+    assembleFindingVerificationPrompt(prContext, findings, true),
     'finding-verification',
     log,
     home,

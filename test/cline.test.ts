@@ -19,6 +19,7 @@ import {
   formatClinePromptTimeoutMessage,
   isClineProvider,
   parseClineFinalMessage,
+  runClineFindingVerification,
   runClineReview,
   stripClineModelReasoning,
   writeClineAuth,
@@ -323,5 +324,36 @@ describe('Cline CLI provider helpers', () => {
     const { cwd, entries } = JSON.parse(readFileSync(seen, 'utf8'));
     assert.notEqual(cwd, process.cwd());
     assert.deepEqual(entries, []);
+  });
+
+  it('verifies findings with the no-tools prompt', async (t) => {
+    const bin = mkdtempSync(join(tmpdir(), 'cline-verify-'));
+    const originalPath = process.env.PATH;
+    t.after(() => {
+      process.env.PATH = originalPath;
+      rmSync(bin, { recursive: true, force: true });
+    });
+    process.env.PATH = `${bin}:${originalPath}`;
+    writeClineAuth('{"providers":{}}', bin);
+    const seen = join(bin, 'prompt.txt');
+    const text = JSON.stringify({ verdicts: [{ index: 0, verdict: 'uncertain', reason: 'r' }] });
+    writeFileSync(
+      join(bin, 'cline'),
+      `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(seen)}, process.argv.at(-1));\nconsole.log(${JSON.stringify(JSON.stringify({ type: 'run_result', text }))});\n`,
+      { mode: 0o700 },
+    );
+    const finding = { path: 'a.ts', line: 1, severity: 'P2', title: 't', body: 'b' };
+    await runClineFindingVerification(
+      'cline/default',
+      'ctx',
+      [finding],
+      () => {},
+      5000,
+      undefined,
+      bin,
+    );
+    const prompt = readFileSync(seen, 'utf8');
+    assert.match(prompt, /have no tools on this call/);
+    assert.doesNotMatch(prompt, /full repository is checked out/);
   });
 });
