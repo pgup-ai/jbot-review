@@ -3020,9 +3020,14 @@ async function runReviewPipeline(params: {
             )
           : assembleGuidelineCompliancePrompt(context, rules);
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
+      // The pack's callers replace the usage list; pages it cannot serve get it back as a trailer.
+      const usageTrailer = lens && packPages ? blastRadiusBlock : '';
       const plans = buildAuxiliaryPlans({
         coreContext: lens
-          ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
+          ? joinContext(
+              UNTRUSTED_PR_CONTENT_NOTE,
+              ...lensContextBlocks.filter((block) => block !== usageTrailer),
+            )
           : packPages
             ? joinContext(fullCoreContext, COMPLIANCE_PACK_NOTE)
             : fullCoreContext,
@@ -3032,7 +3037,8 @@ async function runReviewPipeline(params: {
         renderPrompt: render,
         guidelines: lens ? lensRules : complianceGuidelines,
         guidelineLabels: (followupGuidelines ?? discoveredGuidelines).docs.map((doc) => doc.label),
-        evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
+        evidenceReserveBytes:
+          REVIEW_EVIDENCE_BYTES + (usageTrailer ? Buffer.byteLength(usageTrailer) + 2 : 0),
         embeddedFirstPrompt: packPages,
         numberedDiff: packPages,
       });
@@ -3051,6 +3057,7 @@ async function runReviewPipeline(params: {
         render,
         auxPromptBudget,
         log,
+        usageTrailer,
       );
       const ordered = prioritizeAuxiliaryPlans(plans);
       // Label pack rows the way the pages' sessions are labelled, after risk ordering.
