@@ -199,10 +199,38 @@ it('leaves base-branch commits merged into the PR out of the delta, but not its 
     const cleanBase = commitAll('third PR');
     git('checkout', 'pr');
     git('merge', '--no-edit', 'main');
+    const cleanHead = git('rev-parse', 'HEAD');
     assert.equal(
-      await collectChangesSinceContext(workspace, head, git('rev-parse', 'HEAD'), true, cleanBase),
+      await collectChangesSinceContext(workspace, head, cleanHead, true, cleanBase),
       undefined,
     );
+
+    // The base advances by a merge commit alone, carrying its own change.
+    writeFileSync(join(workspace, 'evil.ts'), 'export const evil = 1;\n');
+    git('add', 'evil.ts');
+    const evilBase = git(
+      'commit-tree',
+      git('write-tree'),
+      '-p',
+      cleanBase,
+      '-p',
+      cleanHead,
+      '-m',
+      'evil',
+    );
+    git('reset', '-q', '--hard');
+    git('merge', '--no-edit', evilBase);
+    writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 3;\n');
+    const evilHead = commitAll('tune again');
+    const afterEvil = await collectChangesSinceContext(
+      workspace,
+      cleanHead,
+      evilHead,
+      true,
+      evilBase,
+    );
+    assert.match(afterEvil ?? '', /tune again/);
+    assert.doesNotMatch(afterEvil ?? '', /evil/);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

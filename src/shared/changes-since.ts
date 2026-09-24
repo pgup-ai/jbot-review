@@ -27,10 +27,10 @@ export async function collectChangesSinceContext(
   // A merge from the base branch brings its commits into the range; they are not this PR's changes.
   const own = baseSha ? [range, `^${baseSha}`] : [range];
   let subjects = await subjectsOf('--no-merges', ...own);
+  const withMerges = baseSha ? await subjectsOf(...own) : [];
+  // Merges count too: a base can advance by a merge commit alone.
   const baseMerged =
-    baseSha && (await subjectsOf('--no-merges', range)).length > subjects.length
-      ? baseSha
-      : undefined;
+    baseSha && (await subjectsOf(range)).length > withMerges.length ? baseSha : undefined;
   // A conflict resolution in the PR's merge commit is PR work; `--cc` names only resolved files.
   const resolved = baseMerged
     ? [
@@ -41,7 +41,7 @@ export async function collectChangesSinceContext(
         ),
       ]
     : [];
-  if (resolved.length > 0) subjects = await subjectsOf(...own);
+  if (resolved.length > 0) subjects = withMerges;
   if (subjects.length === 0) return undefined;
   const diff = embedDiff
     ? await collectGitOutput(
