@@ -194,6 +194,11 @@ export interface ModelConfig {
    * (ties upward) so the provider never rejects the call (TASK-157).
    */
   reasoningEfforts?: readonly string[];
+  /**
+   * False when the provider accepts no `tool_choice` but "auto". opencode sends
+   * "none" on a step-capped agent's last step, so these models run uncapped.
+   */
+  forcedToolChoice?: boolean;
 }
 
 const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
@@ -216,6 +221,12 @@ const EFFORT_RESTRICTED_MODELS = {
   'mimo-v2.5': { reasoningEfforts: ['medium', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
+// "only `"auto"` is supported for `tool_choice`" (opencode-go and Zen free, 2026-09-24).
+const AUTO_TOOL_CHOICE_MODELS = {
+  'muse-spark-1.3': { forcedToolChoice: false },
+  'muse-spark-1.3-contributor': { forcedToolChoice: false },
+} satisfies Record<string, ModelConfig>;
+
 /**
  * Both Zen routes front one catalog, so a per-model quirk found on either
  * applies to both.
@@ -223,6 +234,7 @@ const EFFORT_RESTRICTED_MODELS = {
 const OPENCODE_ZEN_MODELS = {
   ...GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   ...EFFORT_RESTRICTED_MODELS,
+  ...AUTO_TOOL_CHOICE_MODELS,
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends
@@ -472,6 +484,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
  */
 function modelConfigFor(providerID: string, modelID: string): ModelConfig | undefined {
   return PROVIDERS[providerID]?.models?.[modelID.replace(/-free$/, '')];
+}
+
+export function modelAcceptsForcedToolChoice(providerID: string, modelID: string): boolean {
+  return modelConfigFor(providerID, modelID)?.forcedToolChoice !== false;
 }
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {

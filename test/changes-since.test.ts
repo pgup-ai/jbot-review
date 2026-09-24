@@ -139,3 +139,50 @@ it('embeds only the committed re-review delta when subjects contain no details',
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+it('leaves base-branch commits merged into the PR out of the delta', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-merge-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
+      cwd: workspace,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+  try {
+    git('init', '-b', 'main');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 1;\n');
+    git('add', '.');
+    git('commit', '-m', 'root');
+    git('checkout', '-b', 'pr');
+    writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 1;\n');
+    git('add', '.');
+    git('commit', '-m', 'add feature');
+    const reviewed = git('rev-parse', 'HEAD');
+    git('checkout', 'main');
+    writeFileSync(join(workspace, 'other-pr.ts'), 'export const otherPr = true;\n');
+    git('add', '.');
+    git('commit', '-m', 'other PR landed');
+    const base = git('rev-parse', 'HEAD');
+    git('checkout', 'pr');
+    git('merge', '--no-edit', 'main');
+    writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 2;\n');
+    git('commit', '-am', 'tune feature');
+    const head = git('rev-parse', 'HEAD');
+
+    const merged = await collectChangesSinceContext(workspace, reviewed, head, true, base);
+    assert.ok(merged);
+    assert.match(merged, /tune feature/);
+    assert.match(merged, /\+export const feature = 2;/);
+    assert.match(merged, new RegExp(`git log -p --no-merges ${reviewed}\\.\\.${head} \\^${base}`));
+    assert.doesNotMatch(merged, /other PR landed|otherPr|other-pr\.ts/);
+    assert.equal(
+      await collectChangesSinceContext(workspace, reviewed, git('rev-parse', 'HEAD^'), true, base),
+      undefined,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

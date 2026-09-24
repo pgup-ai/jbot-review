@@ -1,5 +1,5 @@
 import { parseModelName } from '@symma/protocol';
-import { modelSupportsAgenticTools } from './config.ts';
+import { modelAcceptsForcedToolChoice, modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { VERIFY_AGENT, type OptionTier } from './opencode-config.ts';
@@ -445,8 +445,9 @@ export async function runFindingVerification(
   mode?: 'single-shot' | 'capped',
 ): Promise<FindingVerdict[] | undefined> {
   const singleShot = isSingleShotModel(model) || mode === 'single-shot';
+  const { providerID, modelID } = parseModelName(model);
   const agent =
-    mode === 'capped'
+    mode === 'capped' && modelAcceptsForcedToolChoice(providerID, modelID)
       ? VERIFY_AGENT
       : agentForModel(isSingleShotModel(model), runtime.reviewerAgent, mode === 'single-shot');
   const forkFrom = runtime.verifyFork ? singleReviewSession(runtime) : undefined;

@@ -3088,6 +3088,7 @@ async function runReviewPipeline(params: {
           // Summarize re-reviews even when finder prompts exclude prior comments.
           reviewedHead,
           headSha,
+          baseSha,
           enabled:
             shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
             auxSessionsEnabled,
@@ -5145,6 +5146,7 @@ export function startChangesSinceLastReviewSummary(params: {
   embedDiff: boolean;
   reviewedHead?: string;
   headSha?: string;
+  baseSha?: string;
   enabled: boolean;
   isAbandoned: () => boolean;
   timeoutMs?: number;
@@ -5169,6 +5171,7 @@ export function startChangesSinceLastReviewSummary(params: {
       reviewedHead,
       headSha,
       params.embedDiff,
+      params.baseSha,
     );
     if (params.isAbandoned()) return '';
     if (deltaContext === undefined) {

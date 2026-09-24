@@ -14,20 +14,33 @@ export async function collectChangesSinceContext(
   fromSha: string,
   toSha: string,
   embedDiff: boolean,
+  baseSha?: string,
 ): Promise<string | undefined> {
   const options = { cwd: workspace, timeout: 15_000, maxBuffer: 8 * 1024 * 1024 };
   const range = `${fromSha}..${toSha}`;
-  const { stdout } = await execFileAsync(
-    'git',
-    ['log', '--no-merges', '--format=%h %s', range],
-    options,
-  );
-  const subjects = stdout.split('\n').filter(Boolean);
+  const log = async (...args: string[]) =>
+    (await execFileAsync('git', ['log', '--no-merges', '--format=%h %s', ...args], options)).stdout
+      .split('\n')
+      .filter(Boolean);
+  // A merge from the base branch brings its commits into the range; they are not this PR's changes.
+  const subjects = await log(range, ...(baseSha ? [`^${baseSha}`] : []));
   if (subjects.length === 0) return undefined;
+  const baseMerged = baseSha && (await log(range)).length > subjects.length ? baseSha : undefined;
+  // A range diff would carry the merged base changes too; the PR commits' own patches do not.
+  const delta = baseMerged
+    ? (...args: string[]) => [
+        'log',
+        '--no-merges',
+        '--format=commit %h %s',
+        ...args,
+        range,
+        `^${baseMerged}`,
+      ]
+    : (...args: string[]) => ['diff', ...args, range, '--'];
   const diff = embedDiff
     ? await collectGitOutput(
         workspace,
-        ['diff', '--no-color', '--no-ext-diff', '--no-textconv', range, '--'],
+        delta('-p', '--no-color', '--no-ext-diff', '--no-textconv'),
         CHANGES_SINCE_DIFF_BUDGET,
       )
     : undefined;
@@ -36,14 +49,14 @@ export async function collectChangesSinceContext(
     try {
       stat = await collectGitOutput(
         workspace,
-        ['diff', '--stat=120', '--no-ext-diff', '--no-textconv', range, '--'],
+        delta('--stat=120', '--no-ext-diff', '--no-textconv'),
         CHANGES_SINCE_STAT_BUDGET,
       );
     } catch {
       stat = null;
     }
   }
-  return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat);
+  return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat, baseMerged);
 }
 
 function collectGitOutput(

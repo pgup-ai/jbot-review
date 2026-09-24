@@ -1346,10 +1346,14 @@ export function buildChangesSinceContextBlock(
   commitSubjects: string[],
   diff?: { text: string; totalBytes: number },
   stat?: { text: string; totalBytes: number } | null,
+  baseMerged?: string,
 ): string {
+  const inspect = baseMerged
+    ? `The branch merged base-branch commits since then; they are not this PR's changes and are excluded below. Inspect this PR's own changes with \`git log -p --no-merges ${reviewedHead}..${headSha} ^${baseMerged}\`, not a plain diff of the range.`
+    : `Inspect exactly what changed with \`git diff ${reviewedHead}..${headSha}\`.`;
   const header = `## Changes since last review
 
-The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}\`. Inspect exactly what changed with \`git diff ${reviewedHead}..${headSha}\`. Commits added since the last review:`;
+The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}\`. ${inspect} Commits added since the last review:`;
   const kept: string[] = [];
   // Measure in UTF-8 bytes (not String.length code units) so the cap holds for
   // non-ASCII commit subjects — matches the byte budgets in diff-context.ts.
@@ -1412,7 +1416,7 @@ Respond with a SINGLE raw JSON object and NOTHING else — no text before or aft
 
 export const CHANGES_SINCE_LAST_REVIEW_PROMPT = [
   CHANGES_SINCE_INTRO,
-  `- The "Changes since last review" section below gives the last reviewed head, the current head, and the commits added between them. The full repository is checked out on the PR branch and git is available — run the \`git diff\` command shown there to see exactly what those commits changed.
+  `- The "Changes since last review" section below gives the last reviewed head, the current head, and the commits added between them. The full repository is checked out on the PR branch and git is available — run the git command shown there to see exactly what those commits changed.
 ${CHANGES_SINCE_SHARED_RULES}`,
   CHANGES_SINCE_OUTPUT,
 ].join('\n\n');
