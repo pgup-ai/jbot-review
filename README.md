@@ -434,7 +434,7 @@ posting to GitHub.
 See the [comparison results and limitations](docs/audits/incremental-followup-review.md).
 
 CommandCode MiMo v2.6 Flash, Pro and Pro UltraSpeed have no adjustable reasoning
-effort in CLI 1.62.0 or 1.62.1. J-Bot omits `--effort` and logs `effort=not-configurable`;
+effort in CLI 1.62.0 through 1.65.2. J-Bot omits `--effort` and logs `effort=not-configurable`;
 the global low default does not control these models. Other models without a
 mapped effort log `effort=cli-default`.
 Xiaomi's [Responses API documentation](https://mimo.mi.com/docs/en-US/api/chat/responses)

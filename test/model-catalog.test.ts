@@ -86,13 +86,8 @@ describe('model catalog', () => {
     assert.match(catalog, /`codex debug models`/);
     assert.match(catalog, /`grok models`/);
     assert.match(catalog, /authenticated remote catalog/);
-    for (const model of [
-      'cline/cline-free/deepseek-v4.1-flash',
-      'cline/z-ai/glm-5.3-flash',
-      'cline/cline-free/solar-pro4',
-    ]) {
-      assert.ok(catalog.includes(`- \`${model}\` **(free)**`));
-    }
+    // Cline's free list is live upstream data; pin the marker, not model IDs.
+    assert.match(catalog, /^- `cline\/[^`]+` \*\*\(free\)\*\*$/m);
     assert.doesNotMatch(catalog, /`kilo\/kilo\/[^`]+`/);
   });
 

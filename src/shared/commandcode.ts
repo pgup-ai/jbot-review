@@ -64,7 +64,7 @@ const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
 
-// Context windows from the pinned CommandCode 1.62.0 catalog.
+// Context windows from the pinned CommandCode 1.65.2 catalog.
 export const COMMANDCODE_MODEL_LIMITS: Record<string, { contextTokens: number }> = {
   'xiaomi/mimo-v2.6-pro': { contextTokens: 1_048_576 },
   'xiaomi/mimo-v2.6-pro-ultraspeed': { contextTokens: 1_048_576 },
@@ -77,6 +77,7 @@ export const COMMANDCODE_MODEL_LIMITS: Record<string, { contextTokens: number }>
   'deepseek/deepseek-v4-flash-fast': { contextTokens: 1_000_000 },
   'deepseek/deepseek-v4-flash': { contextTokens: 1_000_000 },
   'deepseek/deepseek-v4.1-flash': { contextTokens: 1_000_000 },
+  'stealth/space-bunny-alpha': { contextTokens: 1_000_000 },
 };
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
@@ -180,7 +181,8 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
   'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'qwen/qwen3.8-omni-flash': { tiers: ['low', 'medium', 'xhigh'] },
-  // CLI 1.62.0 exposes no adjustable effort for MiMo v2.6.
+  'stealth/space-bunny-alpha': { tiers: ['low', 'medium', 'high'] },
+  // CLI 1.65.2 exposes no adjustable effort for MiMo v2.6.
   'xiaomi/mimo-v2.6-flash': { tiers: [] },
   'xiaomi/mimo-v2.6-pro': { tiers: [] },
   'xiaomi/mimo-v2.6-pro-ultraspeed': { tiers: [] },
