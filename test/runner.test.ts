@@ -1861,6 +1861,7 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
   for (const run of ['answers', 'first fails', 're-check fails'] as const) {
     const calls: string[] = [];
     const coverage: string[] = [];
+    const logs: string[] = [];
     const verdicts = await requestFindingVerdicts({
       workspace: '/unused',
       model: 'test/model',
@@ -1868,7 +1869,7 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
       sourceContext: async () => 'cited source',
       targets,
       toolLessFirst: true,
-      log: () => {},
+      log: (message) => logs.push(message),
       onCoverage: (row) => coverage.push(row.state),
       backend: {
         async runFindingVerification(_model, _context, findings, ...rest) {
@@ -1908,6 +1909,13 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
           : ['1:confirmed'],
     );
     assert.deepEqual(coverage, [run === 're-check fails' ? 'failed' : 'completed']);
+    assert.ok(
+      logs.includes(
+        run === 'first fails'
+          ? 'Tool-less verification confirmed 0/4; re-checking 4 with tools (no verdict 4).'
+          : 'Tool-less verification confirmed 1/4; re-checking 3 with tools (refuted 1, unbacked confirmation 2).',
+      ),
+    );
   }
 });
 
