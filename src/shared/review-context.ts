@@ -418,14 +418,15 @@ export function rankGuidelineSections(
 ): DiscoveredGuidelines {
   const split = discovered.docs.map((doc) => {
     const lines = doc.text.split('\n');
-    const headings = new Set(markdownHeadings(lines).map(({ line }) => line));
-    const starts = [0, ...[...headings].filter((line) => line > 0), lines.length];
+    const levels = new Map(markdownHeadings(lines).map(({ line, level }) => [line, level]));
+    const starts = [0, ...[...levels.keys()].filter((line) => line > 0), lines.length];
     return starts.slice(0, -1).map((start, index) => {
       const text = lines.slice(start, starts[index + 1]).join('\n');
       return {
         text,
+        level: levels.get(start) ?? 0,
         words: termText(text),
-        heading: headings.has(start) ? termText(lines[start]) : '',
+        heading: levels.has(start) ? termText(lines[start]) : '',
       };
     });
   });
@@ -450,6 +451,7 @@ export function rankGuidelineSections(
     docs: discovered.docs.map((doc, index) => {
       const scored = split[index].map((section, order) => ({
         text: section.text,
+        level: section.level,
         order,
         score: weights.reduce(
           (sum, { term, weight }) =>
@@ -460,8 +462,26 @@ export function rankGuidelineSections(
         ),
       }));
       if (!scored.some(({ score }) => score > 0)) return doc;
-      scored.sort((a, b) => b.score - a.score || a.order - b.order);
-      return { ...doc, text: scored.map(({ text }) => text).join('\n') };
+      const emitted = new Set<number>();
+      const parts: string[] = [];
+      for (const section of [...scored].sort((a, b) => b.score - a.score || a.order - b.order)) {
+        // A moved subsection keeps its short `##`-and-deeper parents' lead-in ahead of it;
+        // a `#` overview stays put, or small budgets would open on it again.
+        const parents = [];
+        for (let level = section.level, i = section.order - 1; i >= 0 && level > 2; i--) {
+          const parent = scored[i];
+          if (!parent.level || parent.level >= level) continue;
+          if (parent.level === 1) break;
+          if (Buffer.byteLength(parent.text) <= MAX_PARENT_RULE_BYTES) parents.unshift(parent);
+          level = parent.level;
+        }
+        for (const { order, text } of [...parents, section]) {
+          if (emitted.has(order)) continue;
+          emitted.add(order);
+          parts.push(text);
+        }
+      }
+      return { ...doc, text: parts.join('\n') };
     }),
   };
 }
