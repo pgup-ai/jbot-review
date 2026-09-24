@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     reviewShards: parseNumberInput('review-shards', 1),
     dynamicFanout: parseBooleanInput('dynamic-fanout', true),
     promptCache: parseBooleanInput('prompt-cache', true),
-    skipDocOnly: parseBooleanInput('skip-doc-only', true),
+    skipDocOnly: parseBooleanInput('skip-doc-only', false),
     // Only PR-event runs may skip an unchanged diff; an explicit ask
     // (comment trigger, manual dispatch) always reviews.
     skipUnchanged:

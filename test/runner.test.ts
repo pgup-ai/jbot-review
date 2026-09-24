@@ -810,7 +810,7 @@ describe('runPrReview local mode and early exits', () => {
         files: [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b' }],
         commits: [],
       },
-      options: { dryRun: true },
+      options: { dryRun: true, skipDocOnly: true },
       log: (msg) => logs.push(msg),
     });
     assert.ok(logs.some((msg) => /doc-only/i.test(msg)));
@@ -933,7 +933,7 @@ describe('runPrReview local mode and early exits', () => {
         ...base,
         octokit: octokit as unknown as Octokit,
         headSha: 'headsha',
-        options: { autoApprove: true },
+        options: { autoApprove: true, skipDocOnly: true },
         log: () => {},
       });
 

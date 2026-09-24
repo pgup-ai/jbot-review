@@ -3978,7 +3978,7 @@ export function normalizeOptions(
     modelOptions: options?.modelOptions ?? {},
     modelOptionsExplicit: options?.modelOptionsExplicit ?? false,
     promptCache: options?.promptCache ?? true,
-    skipDocOnly: options?.skipDocOnly ?? true,
+    skipDocOnly: options?.skipDocOnly ?? false,
     skipUnchanged: options?.skipUnchanged ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
     // Throttled tiers serialize upstream; a cap keeps queued work out of session deadlines.
