@@ -655,8 +655,8 @@ async function review(
     auxPiModelAvailable,
   });
   const configuredModelOptions = comparison
-    ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider))
-    : parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider));
+    ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider, modelID))
+    : parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider, modelID));
   const resolvedModelOptions =
     supportedModelOptions(providerID, modelID, configuredModelOptions) ?? {};
   if (arenaRunState) {

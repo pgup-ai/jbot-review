@@ -118,18 +118,17 @@ function reasoningOptions(providerID: string, effort: string): Record<string, un
   return provider?.custom && !provider.defaultModel ? {} : { reasoningEffort: effort };
 }
 
-export function defaultModelOptions(providerID: string): Record<string, unknown> {
-  return reasoningOptions(providerID, 'low');
+export function defaultModelOptions(providerID: string, modelID: string): Record<string, unknown> {
+  return reasoningOptions(
+    providerID,
+    modelConfigFor(providerID, modelID)?.defaultReasoningEffort ?? 'low',
+  );
 }
 
 /**
  * Options are scoped per model id: auxiliary sessions using the main model
  * share its effort, including explicit overrides.
  */
-export function defaultAuxModelOptions(providerID: string): Record<string, unknown> {
-  return reasoningOptions(providerID, 'low');
-}
-
 /**
  * The aux model's options, or undefined when it shares the main model's entry
  * and therefore its effort. Identity is provider-scoped: two providers can
@@ -142,7 +141,7 @@ export function auxModelOptionsFor(
   auxModelID: string,
 ): Record<string, unknown> | undefined {
   if (auxProviderID === providerID && auxModelID === modelID) return undefined;
-  return defaultAuxModelOptions(auxProviderID);
+  return defaultModelOptions(auxProviderID, auxModelID);
 }
 
 export function needsAuxOpencodeConfig(
@@ -199,6 +198,8 @@ export interface ModelConfig {
    * "none" on a step-capped agent's last step, so these models run uncapped.
    */
   forcedToolChoice?: boolean;
+  /** Effort when no model-options input is given, for a model that barely reasons at `low`. */
+  defaultReasoningEffort?: string;
 }
 
 const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
@@ -228,6 +229,14 @@ const AUTO_TOOL_CHOICE_MODELS = {
 } satisfies Record<string, ModelConfig>;
 
 /**
+ * At `low` space-bunny reasons ~1k tokens a session and found 2.5 of 27 known
+ * fms issues; at `high`, 6.5 (4 PRs x 2 runs, 2026-09-24), at ~3.7x wall time.
+ */
+const DEEP_DEFAULT_MODELS = {
+  'space-bunny': { defaultReasoningEffort: 'high' },
+} satisfies Record<string, ModelConfig>;
+
+/**
  * Both Zen routes front one catalog, so a per-model quirk found on either
  * applies to both.
  */
@@ -235,6 +244,7 @@ const OPENCODE_ZEN_MODELS = {
   ...GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   ...EFFORT_RESTRICTED_MODELS,
   ...AUTO_TOOL_CHOICE_MODELS,
+  ...DEEP_DEFAULT_MODELS,
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends

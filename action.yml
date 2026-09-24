@@ -191,7 +191,7 @@ inputs:
     required: false
     default: 'true'
   model-options:
-    description: 'JSON provider options for the main model. Defaults to {"reasoningEffort":"low"}; Poolside uses {"reasoningEffort":"default"}, and custom endpoints without a model catalog use {}. Explicit options override the default, subject to model-supported effort tiers. A distinct auxiliary model defaults to low; auxiliary sessions using the main model share its options. Verification defaults to low and reduces higher main efforts by one tier. CommandCode maps effort to supported CLI tiers; unknown models keep the CLI default. Other CLI backends do not consume these options; Devin encodes effort in its model ID.'
+    description: 'JSON provider options for the main model. Defaults to {"reasoningEffort":"low"} (high for space-bunny, which barely reasons at low); Poolside uses {"reasoningEffort":"default"}, and custom endpoints without a model catalog use {}. Explicit options override the default, subject to model-supported effort tiers. A distinct auxiliary model gets its own default; auxiliary sessions using the main model share its options. Verification defaults to low and reduces higher main efforts by one tier. CommandCode maps effort to supported CLI tiers; unknown models keep the CLI default. Other CLI backends do not consume these options; Devin encodes effort in its model ID.'
     required: false
   prompt-cache:
     description: 'Enable opencode prompt caching (provider setCacheKey). Parallel shards and re-reviews share an identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported omit the cache key. Per-session cache hits are logged.'
