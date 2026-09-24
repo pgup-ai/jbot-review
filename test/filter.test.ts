@@ -371,7 +371,12 @@ describe('applyFindingVerdicts', () => {
       assert.equal(f.verificationUnavailable, true);
       assert.match(f.body, /Verification not completed/);
       assert.equal(f.confidence, 'low');
-      assert.match(f.body, /Finding verification did not return a verdict/);
+      assert.match(
+        f.body,
+        f.publishUnverified
+          ? /Finding verification did not complete\./
+          : /Finding verification did not return a verdict/,
+      );
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
@@ -390,6 +395,20 @@ describe('applyFindingVerdicts', () => {
       [],
     ).findings;
     assert.equal(speculative.publishUnverified, undefined);
+    const [failed] = applyFindingVerdicts(
+      [finding({ severity: 'P1' })],
+      [0],
+      [
+        {
+          index: 0,
+          verdict: 'uncertain',
+          unavailable: true,
+          reason: 'exited 1: {"user_id":"org_x"}',
+        },
+      ],
+    ).findings;
+    assert.equal(failed.publishUnverified, true);
+    assert.doesNotMatch(failed.body, /org_x/);
     const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
       minSeverity: 'nit',
       maxFindings: 0,

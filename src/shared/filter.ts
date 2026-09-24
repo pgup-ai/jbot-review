@@ -339,20 +339,25 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
 }
 
 function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {
+  // No verdict is not a judgment: a concrete blocking claim stays visible, labeled.
+  const publish =
+    unavailable &&
+    !isUnresolvedFinding(finding) &&
+    SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2;
   return {
     ...finding,
-    ...formatUnverifiedFinding(finding, reason, unavailable),
+    // A failed verifier's reason can carry raw provider errors; a posted comment gets none.
+    ...formatUnverifiedFinding(
+      finding,
+      publish ? 'Finding verification did not complete.' : reason,
+      unavailable,
+    ),
     severity: finding.severity === 'nit' ? 'nit' : 'P3',
     kind: 'investigate',
     confidence: 'low',
     verificationUncertain: true,
     verificationUnavailable: unavailable || undefined,
-    // No verdict is not a judgment: a concrete blocking claim stays visible, labeled.
-    publishUnverified:
-      (unavailable &&
-        !isUnresolvedFinding(finding) &&
-        SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2) ||
-      undefined,
+    publishUnverified: publish || undefined,
   };
 }
 
