@@ -52,6 +52,14 @@ export function isUnresolvedFinding(
   );
 }
 
+export function isWithheldFinding(
+  finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain' | 'publishUnverified'>,
+): boolean {
+  return isUnresolvedFinding(finding) && !finding.publishUnverified;
+}
+
+const MAX_PUBLISHED_UNVERIFIED = 2;
+
 export const SEVERITY_RANK: Record<Severity, number> = {
   P0: 0,
   P1: 1,
@@ -326,6 +334,7 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
     confidence: 'medium',
     verificationUncertain: undefined,
     verificationUnavailable: undefined,
+    publishUnverified: undefined,
   };
 }
 
@@ -338,6 +347,12 @@ function unverifiedFinding(finding: Finding, reason?: string, unavailable = fals
     confidence: 'low',
     verificationUncertain: true,
     verificationUnavailable: unavailable || undefined,
+    // No verdict is not a judgment: a concrete blocking claim stays visible, labeled.
+    publishUnverified:
+      (unavailable &&
+        !isUnresolvedFinding(finding) &&
+        SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2) ||
+      undefined,
   };
 }
 
@@ -471,7 +486,14 @@ export function filterFindings(
   findings: Finding[],
   options: { minSeverity: Severity; maxFindings: number },
 ): Finding[] {
-  const unresolved = findings.filter(isUnresolvedFinding);
+  let publishable = MAX_PUBLISHED_UNVERIFIED;
+  const unresolved = findings
+    .filter(isUnresolvedFinding)
+    .map((finding) =>
+      finding.publishUnverified && publishable-- <= 0
+        ? { ...finding, publishUnverified: undefined }
+        : finding,
+    );
   let published = findings.filter(
     (finding) =>
       !isUnresolvedFinding(finding) &&
@@ -516,7 +538,7 @@ export function anchorFindings(
     withheld: [],
   };
   for (const f of findings) {
-    if (isUnresolvedFinding(f)) result.withheld.push(f);
+    if (isWithheldFinding(f)) result.withheld.push(f);
     else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
     else if (hasHeadSha && addable.has(f.path)) {

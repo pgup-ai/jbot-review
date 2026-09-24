@@ -375,6 +375,29 @@ describe('applyFindingVerdicts', () => {
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
+
+    assert.deepEqual(
+      result.filter((f) => f.publishUnverified).map((f) => f.title),
+      ['Unverified concern: uncertain me', 'Unverified concern: confirm me'],
+    );
+    const inconclusive = applyFindingVerdicts(findings, selected, [
+      { index: 1, verdict: 'uncertain', reason: 'Unclear.' },
+    ]).findings.find((f) => f.title.includes('uncertain me'));
+    assert.equal(inconclusive?.publishUnverified, undefined);
+    const [speculative] = applyFindingVerdicts(
+      [finding({ severity: 'P1', kind: 'investigate' })],
+      [0],
+      [],
+    ).findings;
+    assert.equal(speculative.publishUnverified, undefined);
+    const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
+      minSeverity: 'nit',
+      maxFindings: 0,
+    });
+    const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
+    assert.equal(routed.inline.length, 2);
+    assert.equal(routed.withheld.length, 3);
+    assert.ok(routed.inline.every((f) => f.verificationUncertain));
   });
 });
 
