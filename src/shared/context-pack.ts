@@ -53,6 +53,7 @@ export interface PackSource {
 export interface PackSourceProvider {
   tracked: Set<string>;
   aliases: PathAlias[];
+  /** Undefined when the file cannot be read or indexed; rejects only when the pack's limits or deadline refuse it. */
   load(path: string): Promise<PackSource | undefined>;
   /** Word matches as path and 1-based line; `paths` limits the search to those files. */
   references(symbol: string, paths?: string[]): Promise<{ path: string; line: number }[]>;
