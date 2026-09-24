@@ -17,6 +17,7 @@ import {
   formatFinderGuidelines,
   formatGuidelines,
   formatLinkedIssues,
+  rankGuidelineSections,
   selectFinderGuidelineText,
   selectGuidelineSections,
   truncatePrBody,
@@ -43,6 +44,42 @@ it('selects complete heading subtrees and rejects missing, fenced or ambiguous t
   assert.doesNotMatch(scoped, /Run tests|Use tabs/);
   assert.equal(selectGuidelineSections(text, ['Fake']), undefined);
   assert.equal(selectGuidelineSections(text + '\n## Contracts\nOther', ['Contracts']), undefined);
+});
+
+it('moves the sections that name a changed path ahead of the rest of each doc', () => {
+  const discovered = {
+    docs: [
+      '# Rules\nLedger basics\n## Deploys\nShip ledger builds\n```md\n# Not a heading\n```\n## Refunds\nLedger refunds stay append-only',
+      '# Style\nLedger naming',
+      '# Other\nLedger tabs',
+    ].map((text, index) => ({ label: `doc-${index}.md`, text, relevance: 1 as const })),
+    referenced: [],
+    budgetExhausted: false,
+  };
+  const ranked = rankGuidelineSections(discovered, ['apps/ledger/src/refunds/refund.service.ts']);
+  assert.equal(
+    ranked.docs[0].text,
+    '## Refunds\nLedger refunds stay append-only\n# Rules\nLedger basics\n## Deploys\nShip ledger builds\n```md\n# Not a heading\n```',
+  );
+  // "ledger" is in every section, so it tells none apart.
+  assert.deepEqual(ranked.docs.slice(1), discovered.docs.slice(1));
+});
+
+it('names the skipped sections of a cut doc in the full guidance notice', () => {
+  const text = [
+    '# Big',
+    '## Kept',
+    'x'.repeat(100 * 1024),
+    '## Skipped one',
+    'y',
+    '## Skipped two',
+  ];
+  const full = formatGuidelines({
+    docs: [{ label: 'big.md', text: text.join('\n'), relevance: 1 }],
+    referenced: [],
+    budgetExhausted: false,
+  });
+  assert.match(full, /skipped sections by file: big\.md \(Skipped one, Skipped two\)\./);
 });
 
 describe('formatContextBudget', () => {
@@ -155,10 +192,10 @@ describe('discoverGuidelines', () => {
   it('lists governance references that exceed the guidance budget instead of dropping them', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance'), { recursive: true });
-      // 23 x 24KB files exhaust the bounded candidate pool before the last reference.
-      const bigBody = 'x'.repeat(25 * 1024);
+      // 9 x 120 KB files exhaust the bounded candidate pool before the last reference.
+      const bigBody = 'x'.repeat(120 * 1024);
       const references: string[] = [];
-      for (let index = 1; index <= 23; index += 1) {
+      for (let index = 1; index <= 9; index += 1) {
         await writeFile(
           join(repo, '.pr-governance', `BIG_${index}.md`),
           `# Big ${index}\n${bigBody}`,
@@ -211,9 +248,9 @@ describe('discoverGuidelines', () => {
   it('lists root-guideline references that exceed the guidance budget instead of dropping them', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, 'docs'), { recursive: true });
-      const bigBody = 'x'.repeat(25 * 1024);
+      const bigBody = 'x'.repeat(120 * 1024);
       const references: string[] = [];
-      for (let index = 1; index <= 22; index += 1) {
+      for (let index = 1; index <= 9; index += 1) {
         await writeFile(join(repo, 'docs', `BIG_${index}.md`), `# Big ${index}\n${bigBody}`);
         references.push(`- \`docs/BIG_${index}.md\``);
       }
@@ -357,19 +394,23 @@ describe('discoverGuidelines', () => {
     });
   });
 
-  it('truncates large guideline files instead of inlining them fully', async () => {
+  it('loads guideline files whole up to the per-file cap and truncates past it', async () => {
     await withTempRepo(async (repo) => {
       await writeFile(
+        join(repo, 'REVIEW.md'),
+        ['# Review', 'x'.repeat(100 * 1024), 'REVIEW_END'].join('\n'),
+      );
+      await writeFile(
         join(repo, 'AGENTS.md'),
-        ['# Agents', '世界'.repeat(6000), 'END_SHOULD_NOT_APPEAR'].join('\n'),
+        ['# Agents', '世界'.repeat(25000), 'END_SHOULD_NOT_APPEAR'].join('\n'),
       );
 
-      const guidelines = await discoverGuidelines(repo);
+      const { docs } = await discoverGuidelineDocs(repo);
+      const text = (label: string) => docs.find((doc) => doc.label === label)!.text;
 
-      assert.match(guidelines, /### AGENTS\.md \[part 1\/\d+\]\n# Agents/);
-      assert.match(guidelines, /Guidance truncated after \d+ bytes/);
-      assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
-      assert.doesNotMatch(guidelines, /\uFFFD/);
+      assert.match(text('REVIEW.md'), /REVIEW_END$/);
+      assert.match(text('AGENTS.md'), /Guidance truncated after \d+ bytes/);
+      assert.doesNotMatch(text('AGENTS.md'), /END_SHOULD_NOT_APPEAR|\uFFFD/);
     });
   });
 });

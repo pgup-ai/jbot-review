@@ -273,6 +273,7 @@ import {
   formatDiffScope,
   formatReviewCommits,
   formatContextBudget,
+  rankGuidelineSections,
   selectFinderGuidelineText,
   truncatePrBody,
   type LinkedIssue,
@@ -1516,11 +1517,14 @@ async function runReviewPipeline(params: {
   );
 
   const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
-  const discoveredGuidelines = applicableGuidelines(loadedGuidelines, changedFiles);
+  const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
+  const discoveredGuidelines = rankGuidelineSections(applicable, changedFiles);
   log(
     `Guideline scope: ${discoveredGuidelines.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - discoveredGuidelines.docs.length} explicitly scoped documents excluded.`,
   );
   const guidelines = formatGuidelines(discoveredGuidelines);
+  // Reuse and incremental policies hash the rules, not their order for this diff.
+  const policyGuidelines = formatGuidelines(applicable);
   const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
     forFiles: changedFiles,
   });
@@ -1538,7 +1542,7 @@ async function runReviewPipeline(params: {
     baseURL,
     auxBaseURL: options.auxBaseURL,
     modelOptions: options.modelOptions,
-    guidelines,
+    guidelines: policyGuidelines,
     title: pullTitle,
     body: pullBody,
     reviewer: runIdentity(process.env).reviewerRevision,
@@ -2542,10 +2546,10 @@ async function runReviewPipeline(params: {
         ...Object.keys(REVIEW_LENSES).map((key) => `review-${key}`),
       ].map((session) =>
         session === 'guideline-compliance'
-          ? assembleGuidelineCompliancePrompt('', guidelines)
+          ? assembleGuidelineCompliancePrompt('', policyGuidelines)
           : assembleReviewPrompt(
               '',
-              guidelines,
+              policyGuidelines,
               REVIEW_LENSES[session.slice(7)],
               options.evidenceQuotes,
               options.embeddedFirstPrompt,

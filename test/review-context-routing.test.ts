@@ -124,7 +124,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
         .flatMap((section) => [
           `## ${section}. Section`,
           `SECTION-${section}-MARKER`,
-          'x'.repeat(8000),
+          'x'.repeat(20000),
         ])
         .join('\n'),
     });
@@ -236,13 +236,13 @@ describe('discoverGuidelineDocs with diff routing', () => {
   it('keeps body+note within the per-file cap when the selected section is truncated', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-trunc-'));
     roots.push(root);
-    // A single ~40 KB section forces truncation; the note + its "(truncated)" marker must still fit.
-    writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Big\n${'x'.repeat(40000)}` });
+    // A single ~140 KB section forces truncation; the note + its "(truncated)" marker must still fit.
+    writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Big\n${'x'.repeat(140000)}` });
     const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
     const text = sections.map((doc) => doc.text).join('\n');
     assert.match(text, /partially loaded/, 'the truncation is disclosed');
     assert.ok(
-      sections.reduce((total, doc) => total + Buffer.byteLength(doc.text, 'utf8'), 0) <= 24 * 1024,
+      sections.reduce((total, doc) => total + Buffer.byteLength(doc.text, 'utf8'), 0) <= 128 * 1024,
       'body plus the truncation note stays within the per-file cap',
     );
   });
@@ -269,7 +269,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-fits-'));
     roots.push(root);
     const heading = '## 1. Fits\n';
-    const body = 'x'.repeat(24 * 1024 - Buffer.byteLength(heading));
+    const body = 'x'.repeat(128 * 1024 - Buffer.byteLength(heading));
     writeRoutedRepo(root, { rules: 'TS-1', doc: `${heading}${body}` });
     const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
     const text = sections.map((doc) => doc.text).join('\n');

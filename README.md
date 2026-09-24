@@ -1413,6 +1413,12 @@ whole file. A missing or ambiguous heading falls back to the whole file.
 Omitted sections are disclosed. Files without a matched section route retain
 normal discovery, and all guideline byte limits still apply.
 
+Guideline files load whole, up to 128 KB each and 1 MB in total. Within each
+file, the sections that name a changed directory or file go first, so a session
+whose byte budget cannot hold the whole file keeps those sections instead of its
+opening. When guideline compliance cannot fit every section, its budget note
+names each file's skipped sections so it can open the ones that apply.
+
 No additional routing file or flag is needed. Logs report
 scope exclusions, guideline parts, prompt bytes, and page completion. The existing
 guideline discovery limits and omission notices still apply.
