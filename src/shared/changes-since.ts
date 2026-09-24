@@ -6,8 +6,11 @@ import {
   CHANGES_SINCE_DIFF_BUDGET,
   CHANGES_SINCE_STAT_BUDGET,
 } from './prompt.ts';
+import { boundedJoin } from './review-context.ts';
 
 const execFileAsync = promisify(execFile);
+// Leaves the stat most of CHANGES_SINCE_STAT_BUDGET however many files a merge resolved.
+const RESOLUTION_NOTE_BYTES = 2 * 1024;
 
 export async function collectChangesSinceContext(
   workspace: string,
@@ -80,7 +83,7 @@ export async function collectChangesSinceContext(
     }
     // `--stat` measures a merge against its first parent, so resolutions are named, first.
     if (stat && resolved.length > 0) {
-      const note = `Conflict resolutions in merge commits: ${resolved.join(', ')}\n`;
+      const note = `Conflict resolutions in merge commits: ${boundedJoin(resolved, RESOLUTION_NOTE_BYTES)}\n`;
       stat = { text: note + stat.text, totalBytes: Buffer.byteLength(note) + stat.totalBytes };
     }
   }
