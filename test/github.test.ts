@@ -843,11 +843,11 @@ describe('listClosingIssues', () => {
 
 describe('review posting', () => {
   it('links standalone file-level comments from the submitted review body', async () => {
-    let request: { body?: string } | undefined;
+    let request: { body?: string; commit_id?: string } | undefined;
     const octokit = {
       rest: {
         pulls: {
-          createReview: async (params: { body?: string }) => {
+          createReview: async (params: { body?: string; commit_id?: string }) => {
             request = params;
           },
         },
@@ -872,6 +872,7 @@ describe('review posting', () => {
     // footer, or finalization waits forever for a thread that never existed.
     assert.match(request?.body ?? '', /jbot-review:threads:2 -->/);
     assert.match(request?.body ?? '', /jbot-review:linked-comments:200,201 -->$/);
+    assert.equal(request?.commit_id, 'headsha', 'a push landing mid-review must not move it');
 
     await postReview(
       octokit as unknown as Octokit,

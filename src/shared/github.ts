@@ -780,6 +780,7 @@ export async function postReview(
       owner,
       repo,
       pull_number: pullNumber,
+      commit_id: headSha,
       event: verdict,
       body: formatReviewBody(base, inlineFindings.length + linkedIds.length, linkedIds),
       comments: inlineFindings.map((f) => ({
@@ -821,6 +822,7 @@ export async function postReview(
   // Nothing posted with the batch, so every surviving thread is a linked one.
   const salvagedLinkedIds = [...new Set([...linkedIds, ...salvagedIds])];
 
+  // Unpinned: this body anchors no line, and must post even if GitHub refused the reviewed head.
   try {
     await octokit.rest.pulls.createReview({
       owner,
