@@ -1672,6 +1672,9 @@ async function runReviewPipeline(params: {
     options.experiment.reuse,
   );
   const packSupplied = new Map<string, SuppliedContext>();
+  // Served main-page packs by changed file, so tool-less verification sees what the finders saw.
+  const verifierPacks = new Map<string, string[]>();
+  const verifierPacksFor = (finding: Finding) => verifierPacks.get(finding.path) ?? [];
   const findingSources =
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
@@ -2769,10 +2772,13 @@ async function runReviewPipeline(params: {
         log,
         usageTrailer,
       );
-      for (const { row, supplied } of packs) {
+      for (const [index, { row, supplied, text }] of packs.entries()) {
         if (supplied)
           for (const label of [row.session, `${row.session}-retry`])
             packSupplied.set(label, supplied);
+        if (text)
+          for (const file of shardPlans[index].assignedFiles)
+            verifierPacks.set(file, [...(verifierPacks.get(file) ?? []), text]);
         telemetry.recordContextPack(row);
       }
     } else await addReviewEvidence(shardPlans, evidence, renderMainPrompt, mainPromptBudget, log);
@@ -3216,6 +3222,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
+        packsFor: verifierPacksFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3393,6 +3400,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
+        packsFor: verifierPacksFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3418,6 +3426,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
+        packsFor: verifierPacksFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -4233,6 +4242,7 @@ async function verifyFindings(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
+  packsFor?: (finding: Finding) => string[];
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4285,6 +4295,8 @@ export async function requestFindingVerdicts(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
+  /** Context packs of the targets' pages for the tool-less pass; each goes in only while it fits. */
+  packsFor?: (finding: Finding) => string[];
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4358,6 +4370,26 @@ export async function requestFindingVerdicts(params: {
       } else if (params.prepareEvidence) {
         params.log('Skipping optional evidence preparation to preserve verification time.');
       }
+      // Only the tool-less pass gets packs; the capped re-check reads what it needs.
+      let toolLessContext = context;
+      const packed = new Set<string>();
+      if (params.toolLessFirst)
+        for (const pack of new Set(targets.flatMap((target) => params.packsFor?.(target) ?? []))) {
+          const enriched = joinContext(toolLessContext, pack);
+          if (
+            params.promptBudget &&
+            !measureReviewPrompt(
+              assembleFindingVerificationPrompt(enriched, targets, true),
+              params.promptBudget,
+            ).fits
+          ) {
+            params.log('Context pack omitted from verification: assembled prompt exceeds budget.');
+            continue;
+          }
+          toolLessContext = enriched;
+          sourceContext = joinContext(sourceContext, pack);
+          packed.add(pack);
+        }
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4366,7 +4398,7 @@ export async function requestFindingVerdicts(params: {
       const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') =>
         params.backend.runFindingVerification(
           params.model,
-          context,
+          mode === 'single-shot' ? toolLessContext : context,
           findings,
           params.log,
           remaining(),
@@ -4384,6 +4416,7 @@ export async function requestFindingVerdicts(params: {
               await (params.sourceContext?.([target]) ??
                 buildFindingSourceContext(params.workspace, [target])),
               preparedSources.get(target) ?? '',
+              ...(params.packsFor?.(target) ?? []).filter((pack) => packed.has(pack)),
             ),
           );
         }

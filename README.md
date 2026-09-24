@@ -1031,7 +1031,8 @@ the page back to caller evidence.
 
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own
-session with tools. Finding verification starts with a tool-less pass. Its
+session with tools. Finding verification starts with a tool-less pass that also
+gets the main-page packs of the findings' files while they fit its budget. Its
 evidence-backed confirmations are final; the other findings get a re-check capped
 at six tool turns.
 
