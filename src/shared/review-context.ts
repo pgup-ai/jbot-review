@@ -396,11 +396,15 @@ export function applicableGuidelines(
 /** Citations must name the file (`FILE.md §N`, `FILE.mdc §N`): a bare `§N` could be any doc's. */
 export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): string[] {
   const sections = new Set<string>();
+  const pathOf = (doc: GuidelineDoc) => doc.label.replace(/ \(.*\)$/, '');
   for (const [, file, section] of text.matchAll(/([\w./-]+\.mdc?)`?\s*§\s*(\d+(?:\.\d+)*)/g)) {
+    const paths = new Set(
+      docs.map(pathOf).filter((path) => path === file || path.endsWith(`/${file}`)),
+    );
+    // An exact path wins; a name two files end in could mean either.
+    const path = paths.has(file) ? file : paths.size === 1 ? [...paths][0] : undefined;
     for (const doc of docs) {
-      const path = doc.label.replace(/ \(.*\)$/, '');
-      const found =
-        (path === file || path.endsWith(`/${file}`)) && extractRuleSection(doc.text, section);
+      const found = pathOf(doc) === path && extractRuleSection(doc.text, section);
       if (found) {
         sections.add(`### ${path} §${section}\n${found}`);
         break;

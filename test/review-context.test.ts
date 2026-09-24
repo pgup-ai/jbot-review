@@ -99,6 +99,11 @@ it('finds the loaded rule sections a finding cites', () => {
       relevance: 3 as const,
     },
     {
+      label: 'other/docs/RULES.md',
+      text: '## 3. Queues\nRetry with backoff.\n## 4. Other\ny',
+      relevance: 1 as const,
+    },
+    {
       label: 'docs/RULES.md',
       text: '# Rules\n## 3. Locks\nNo pessimistic locks.\n## 4. Other\nx',
       relevance: 1 as const,
@@ -111,7 +116,8 @@ it('finds the loaded rule sections a finding cites', () => {
   ];
   assert.deepEqual(
     citedGuidelineSections(
-      'Violates `STANDARDS.md` §6.2, docs/RULES.md §3 and security.mdc §2, not GONE.md §1.',
+      // An exact path beats a longer one ending in it; a bare name two files share is skipped.
+      'Violates `STANDARDS.md` §6.2, docs/RULES.md §3 and security.mdc §2, not RULES.md §4 or GONE.md §1.',
       docs,
     ),
     [
