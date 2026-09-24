@@ -1,4 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import {
@@ -31,16 +33,8 @@ export async function collectChangesSinceContext(
   // Merges count too: a base can advance by a merge commit alone.
   const baseMerged =
     baseSha && (await subjectsOf(range)).length > withMerges.length ? baseSha : undefined;
-  // A conflict resolution in the PR's merge commit is PR work; `--cc` names only resolved files.
-  const resolved = baseMerged
-    ? [
-        ...new Set(
-          (await git('log', '--merges', '--cc', '--name-only', '--format=', ...own))
-            .split('\n')
-            .filter(Boolean),
-        ),
-      ]
-    : [];
+  // A conflict resolution in the PR's merge commit is PR work.
+  const resolved = baseMerged ? await combinedDiffPaths(workspace, own) : [];
   if (resolved.length > 0) subjects = withMerges;
   if (subjects.length === 0) return undefined;
   const diff = embedDiff
@@ -88,6 +82,27 @@ export async function collectChangesSinceContext(
     }
   }
   return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat, baseMerged);
+}
+
+/**
+ * Files with combined-diff hunks in the range's merges, read line by line so a
+ * large resolution never fills a buffer. `--name-only` would also list a file
+ * both parents changed in separate hunks, which a clean merge resolves.
+ */
+async function combinedDiffPaths(workspace: string, range: string[]): Promise<string[]> {
+  const child = spawn('git', ['log', '--merges', '--cc', '--format=', '--no-color', ...range], {
+    cwd: workspace,
+    timeout: 15_000,
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const closed = once(child, 'close');
+  const paths = new Set<string>();
+  for await (const line of createInterface({ input: child.stdout }))
+    if (line.startsWith('diff --cc ')) paths.add(line.slice('diff --cc '.length));
+  const [code, signal] = await closed;
+  if (code !== 0) throw new Error(`git output failed (${signal ?? code})`);
+  return [...paths];
 }
 
 function collectGitOutput(

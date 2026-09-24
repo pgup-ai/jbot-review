@@ -231,6 +231,28 @@ it('leaves base-branch commits merged into the PR out of the delta, but not its 
     );
     assert.match(afterEvil ?? '', /tune again/);
     assert.doesNotMatch(afterEvil ?? '', /evil/);
+
+    // Both sides edit separate hunks of one file: a clean merge, nothing resolved.
+    writeFileSync(join(workspace, 'm.ts'), 'a\n1\n2\n3\n4\n5\n6\n7\n8\nz\n');
+    const shared = commitAll('add m');
+    git('checkout', 'main');
+    git('merge', '--no-edit', shared);
+    writeFileSync(join(workspace, 'm.ts'), 'a\n1\n2\n3\n4\n5\n6\n7\n8\nZ\n');
+    const sameFileBase = commitAll('base edits m');
+    git('checkout', 'pr');
+    writeFileSync(join(workspace, 'm.ts'), 'A\n1\n2\n3\n4\n5\n6\n7\n8\nz\n');
+    const beforeMerge = commitAll('pr edits m');
+    git('merge', '--no-edit', 'main');
+    assert.equal(
+      await collectChangesSinceContext(
+        workspace,
+        beforeMerge,
+        git('rev-parse', 'HEAD'),
+        true,
+        sameFileBase,
+      ),
+      undefined,
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
