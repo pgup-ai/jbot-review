@@ -61,7 +61,7 @@ export interface PackSourceProvider {
 export interface ContextPack {
   text: string;
   supplied: SuppliedContext;
-  /** Partial when a changed file's own source is missing; other uncollected reads are listed only. */
+  /** Partial when a changed JS/TS file's own source could not be read or indexed; other refused reads only count as uncollected. */
   state: 'complete' | 'partial';
   omitted: number;
   uncollected: number;
