@@ -1349,7 +1349,7 @@ export function buildChangesSinceContextBlock(
   baseMerged?: string,
 ): string {
   const inspect = baseMerged
-    ? `The branch merged base-branch commits since then; they are not this PR's changes and are excluded below. Inspect this PR's own changes with \`git log -p --no-merges ${reviewedHead}..${headSha} ^${baseMerged}\`, not a plain diff of the range.`
+    ? `The branch merged base-branch commits since then; they are not this PR's changes and are excluded below. Inspect this PR's own changes, including conflict resolutions in its merge commits, with \`git log --cc ${reviewedHead}..${headSha} ^${baseMerged}\`, not a plain diff of the range.`
     : `Inspect exactly what changed with \`git diff ${reviewedHead}..${headSha}\`.`;
   const header = `## Changes since last review
 

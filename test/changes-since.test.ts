@@ -140,7 +140,7 @@ it('embeds only the committed re-review delta when subjects contain no details',
   }
 });
 
-it('leaves base-branch commits merged into the PR out of the delta', async () => {
+it('leaves base-branch commits merged into the PR out of the delta, but not its conflict resolutions', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-merge-'));
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
@@ -148,38 +148,57 @@ it('leaves base-branch commits merged into the PR out of the delta', async () =>
       encoding: 'utf8',
       stdio: 'pipe',
     }).trim();
+  const commitAll = (message: string) => {
+    git('add', '.');
+    git('commit', '-m', message);
+    return git('rev-parse', 'HEAD');
+  };
   try {
     git('init', '-b', 'main');
     git('config', 'user.name', 'Test');
     git('config', 'user.email', 'test@example.com');
     git('config', 'commit.gpgsign', 'false');
     writeFileSync(join(workspace, 'app.ts'), 'export const a = 1;\n');
-    git('add', '.');
-    git('commit', '-m', 'root');
+    commitAll('root');
     git('checkout', '-b', 'pr');
     writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 1;\n');
-    git('add', '.');
-    git('commit', '-m', 'add feature');
-    const reviewed = git('rev-parse', 'HEAD');
+    const reviewed = commitAll('add feature');
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 3;\n');
+    const edited = commitAll('pr edits a');
     git('checkout', 'main');
     writeFileSync(join(workspace, 'other-pr.ts'), 'export const otherPr = true;\n');
-    git('add', '.');
-    git('commit', '-m', 'other PR landed');
-    const base = git('rev-parse', 'HEAD');
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 2;\n');
+    const base = commitAll('other PR landed');
     git('checkout', 'pr');
-    git('merge', '--no-edit', 'main');
+    assert.throws(() => git('merge', '--no-edit', 'main'));
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 4;\n');
+    const resolved = commitAll('resolve main');
     writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 2;\n');
-    git('commit', '-am', 'tune feature');
-    const head = git('rev-parse', 'HEAD');
+    const head = commitAll('tune feature');
 
     const merged = await collectChangesSinceContext(workspace, reviewed, head, true, base);
     assert.ok(merged);
     assert.match(merged, /tune feature/);
     assert.match(merged, /\+export const feature = 2;/);
-    assert.match(merged, new RegExp(`git log -p --no-merges ${reviewed}\\.\\.${head} \\^${base}`));
+    assert.match(merged, /\+\+export const a = 4;/);
+    assert.match(merged, new RegExp(`git log --cc ${reviewed}\\.\\.${head} \\^${base}`));
     assert.doesNotMatch(merged, /other PR landed|otherPr|other-pr\.ts/);
+    const resolutionOnly = await collectChangesSinceContext(
+      workspace,
+      edited,
+      resolved,
+      true,
+      base,
+    );
+    assert.match(resolutionOnly ?? '', /\+\+export const a = 4;/);
+
+    git('checkout', 'main');
+    writeFileSync(join(workspace, 'z.ts'), 'export const z = 1;\n');
+    const cleanBase = commitAll('third PR');
+    git('checkout', 'pr');
+    git('merge', '--no-edit', 'main');
     assert.equal(
-      await collectChangesSinceContext(workspace, reviewed, git('rev-parse', 'HEAD^'), true, base),
+      await collectChangesSinceContext(workspace, head, git('rev-parse', 'HEAD'), true, cleanBase),
       undefined,
     );
   } finally {
