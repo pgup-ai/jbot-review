@@ -393,10 +393,10 @@ export function applicableGuidelines(
   };
 }
 
-/** The loaded guideline sections a finding cites as `FILE.md §N`. */
+/** Citations must name the file (`FILE.md §N`, `FILE.mdc §N`): a bare `§N` could be any doc's. */
 export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): string[] {
   const sections = new Set<string>();
-  for (const [, file, section] of text.matchAll(/([\w./-]+\.md)`?\s*§\s*(\d+(?:\.\d+)*)/g)) {
+  for (const [, file, section] of text.matchAll(/([\w./-]+\.mdc?)`?\s*§\s*(\d+(?:\.\d+)*)/g)) {
     for (const doc of docs) {
       const path = doc.label.replace(/ \(.*\)$/, '');
       const found =

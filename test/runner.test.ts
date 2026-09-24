@@ -1957,6 +1957,10 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
   assert.doesNotMatch(seen.capped, /page pack/);
   assert.doesNotMatch(seen['single-shot'], /p{1000}/);
   assert.ok(logs.some((message) => /Tool-less context omitted from verification/.test(message)));
+  assert.match(
+    seen['single-shot'],
+    /\[1 supporting excerpt\(s\) .* left out to fit the prompt budget/,
+  );
   // c quoted code that only another page's pack showed, so it went to the re-check.
   assert.deepEqual(verdicts.map((v) => `${v.index}:${v.verdict}`).sort(), [
     '0:confirmed',

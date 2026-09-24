@@ -2016,6 +2016,10 @@ export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you descr
 export const PERMISSION_DENIED_MESSAGE =
   'jbot-review runs headless; nothing can answer a permission prompt.';
 
+/** Tool-less verification: budget left some supporting excerpts out. */
+export const verifierOmissionNote = (count: number) =>
+  `[${count} supporting excerpt(s) (page context or cited rule sections) left out to fit the prompt budget; their absence is not evidence.]`;
+
 export const TOOLS_OFF_MESSAGE =
   'Tools are off for this pass; answer from the evidence in the prompt.';
 

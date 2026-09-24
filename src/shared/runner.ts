@@ -173,6 +173,7 @@ import {
   assembleReviewPrompt,
   assembleGuidelineCompliancePrompt,
   assembleFindingVerificationPrompt,
+  verifierOmissionNote,
   COMPLIANCE_PACK_NOTE,
   selectLensKeys,
 } from './prompt.ts';
@@ -4405,27 +4406,33 @@ export async function requestFindingVerdicts(params: {
       // Only the tool-less pass gets this context; the capped re-check reads what it needs.
       let toolLessContext = context;
       const packed = new Set<string>();
+      const fits = (candidate: string) =>
+        !params.promptBudget ||
+        measureReviewPrompt(
+          assembleFindingVerificationPrompt(candidate, targets, true),
+          params.promptBudget,
+        ).fits;
+      let omitted = 0;
       if (params.toolLessFirst)
         for (const item of new Set(
           targets.flatMap((target) => params.toolLessContextFor?.(target) ?? []),
         )) {
           const enriched = joinContext(toolLessContext, item);
-          if (
-            params.promptBudget &&
-            !measureReviewPrompt(
-              assembleFindingVerificationPrompt(enriched, targets, true),
-              params.promptBudget,
-            ).fits
-          ) {
+          if (!fits(enriched)) {
             params.log(
               'Tool-less context omitted from verification: assembled prompt exceeds budget.',
             );
+            omitted++;
             continue;
           }
           toolLessContext = enriched;
           sourceContext = joinContext(sourceContext, item);
           packed.add(item);
         }
+      if (omitted) {
+        const noted = joinContext(toolLessContext, verifierOmissionNote(omitted));
+        if (fits(noted)) toolLessContext = noted;
+      }
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined

@@ -103,15 +103,21 @@ it('finds the loaded rule sections a finding cites', () => {
       text: '# Rules\n## 3. Locks\nNo pessimistic locks.\n## 4. Other\nx',
       relevance: 1 as const,
     },
+    {
+      label: '.cursor/rules/security.mdc',
+      text: '## 2. Secrets\nNever log tokens.',
+      relevance: 1 as const,
+    },
   ];
   assert.deepEqual(
     citedGuidelineSections(
-      'Violates `STANDARDS.md` §6.2 and docs/RULES.md §3, not GONE.md §1.',
+      'Violates `STANDARDS.md` §6.2, docs/RULES.md §3 and security.mdc §2, not GONE.md §1.',
       docs,
     ),
     [
       '### .pr-governance/design/STANDARDS.md §6.2\n## 6.2 Placement\nTests go in api-spec files.',
       '### docs/RULES.md §3\n## 3. Locks\nNo pessimistic locks.',
+      '### .cursor/rules/security.mdc §2\n## 2. Secrets\nNever log tokens.',
     ],
   );
 });
