@@ -69,8 +69,16 @@ it('moves the sections that name a changed path ahead of the rest of each doc', 
   assert.match(small.docs[0].text, /^## Refunds/);
   // A moved subsection brings its short `##` parent, not a long one or the `#` overview.
   const text = [
-    ...['# Guide', 'overview', '## Payments', 'Payment defaults', '### Refunds', 'refunds rule'],
-    ...['## Big', 'x'.repeat(3000), '### Chargebacks', 'chargebacks rule'],
+    '# Guide',
+    'overview',
+    '## Payments',
+    'Payment defaults',
+    '### Refunds',
+    'refunds rule',
+    '## Big',
+    'x'.repeat(3000),
+    '### Chargebacks',
+    'chargebacks rule',
   ].join('\n');
   const nested = rankGuidelineSections(
     { ...discovered, docs: [{ label: 'n.md', text, relevance: 1 }] },
