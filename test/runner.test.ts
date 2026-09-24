@@ -1931,7 +1931,7 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
     model: 'test/model',
     prContext: 'diff',
     sourceContext: async (findings) => findings.map((f) => `source of ${f.path}`).join('\n'),
-    packsFor: (finding) => packs[finding.path],
+    toolLessContextFor: (finding) => packs[finding.path],
     promptBudget: { ...reviewPromptBudget('test'), transportBytes: 40000 },
     targets,
     toolLessFirst: true,
@@ -1956,7 +1956,7 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
   assert.equal(seen['single-shot'].split('page pack: caller(a)').length, 2);
   assert.doesNotMatch(seen.capped, /page pack/);
   assert.doesNotMatch(seen['single-shot'], /p{1000}/);
-  assert.ok(logs.some((message) => /Context pack omitted from verification/.test(message)));
+  assert.ok(logs.some((message) => /Tool-less context omitted from verification/.test(message)));
   // c quoted code that only another page's pack showed, so it went to the re-check.
   assert.deepEqual(verdicts.map((v) => `${v.index}:${v.verdict}`).sort(), [
     '0:confirmed',

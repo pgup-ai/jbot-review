@@ -393,6 +393,23 @@ export function applicableGuidelines(
   };
 }
 
+/** The loaded guideline sections a finding cites as `FILE.md §N`. */
+export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): string[] {
+  const sections = new Set<string>();
+  for (const [, file, section] of text.matchAll(/([\w./-]+\.md)`?\s*§\s*(\d+(?:\.\d+)*)/g)) {
+    for (const doc of docs) {
+      const path = doc.label.replace(/ \(.*\)$/, '');
+      const found =
+        (path === file || path.endsWith(`/${file}`)) && extractRuleSection(doc.text, section);
+      if (found) {
+        sections.add(`### ${path} §${section}\n${found}`);
+        break;
+      }
+    }
+  }
+  return [...sections];
+}
+
 // Layout and layer words every repo shares; they name no feature.
 const GENERIC_PATH_WORD =
   /^(?:src|libs?|apps?|index|tests?|specs?|e2e|api|controllers?|services?|modules?|utils?|helpers|dtos?|entit(?:y|ies)|types|repositor(?:y|ies))$/;
