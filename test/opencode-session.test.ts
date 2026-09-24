@@ -9,6 +9,7 @@ import {
   startProgressLogger,
 } from '../src/shared/opencode-session.ts';
 import { DENY_ALL } from '../src/shared/opencode-config.ts';
+import { rateLimitStall } from '../src/shared/retry-policy.ts';
 import { fakeOpencodeServer, fakeRuntime as runtime } from './support/opencode-fake.ts';
 
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
@@ -431,5 +432,37 @@ describe('startProgressLogger', () => {
       'review tool: command=git diff --stat',
       'review execution failed: quota',
     ]);
+  });
+
+  it('stops a turn stuck behind a provider rate limit instead of waiting it out', async () => {
+    const error = { type: 'provider.rate-limit', message: 'Rate limit exceeded.', status: 429 };
+    const now = Date.now();
+    assert.equal(rateLimitStall({ attempt: 2, at: now + 5_000, error }, now), undefined);
+    assert.equal(
+      rateLimitStall({ attempt: 2, at: now + 900_000, error: { message: 'overloaded' } }, now),
+      undefined,
+    );
+    assert.match(rateLimitStall({ attempt: 4, at: now + 5_000, error }, now) ?? '', /attempt 4/);
+
+    const fake = fakeOpencodeServer(() => ({ hang: true }));
+    const rt = runtime(fake);
+    const lines: string[] = [];
+    const stop = startProgressLogger(rt.client, (m) => lines.push(m));
+    const model = 'opencode/muse-spark-1.3-contributor-free';
+    const id = await createReviewSession(rt, { label: 'review', model });
+    const turn = promptInSession(rt, id, { label: 'review', log, model, text: 'review this' });
+    while (fake.prompts.length < 1) await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 50));
+    fake.emit({
+      type: 'session.retry.scheduled',
+      data: { sessionID: id, attempt: 2, at: Date.now() + 900_000, error },
+    });
+    await assert.rejects(
+      turn,
+      /review prompt stopped on a provider rate limit: Rate limit exceeded\./,
+    );
+    stop();
+    assert.ok(fake.sessions.get(id)!.interrupted > 0);
+    assert.match(lines[0]!, /^review provider retry 2: Rate limit exceeded\.; not waiting it out$/);
   });
 });

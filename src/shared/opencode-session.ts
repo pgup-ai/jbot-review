@@ -20,6 +20,7 @@ import {
 } from './opencode-config.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import { WRAP_UP_PROMPT } from './prompt.ts';
+import { rateLimitStall, type ProviderRetry } from './retry-policy.ts';
 import { suppliedOverlap, type SuppliedContext } from './review-read-locations.ts';
 import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import {
@@ -168,6 +169,8 @@ export function configureOpencodeTelemetry(
 
 /** sessionID → label (progress logger) and current agent (wrap-up capability, restore); never removed, ids are unique per run. */
 const sessionsByClient = new WeakMap<object, Map<string, { label: string; agent: string }>>();
+/** Sessions interrupted because their provider rate limit outlasts the grace, with the reason. */
+const rateLimitedSessions = new WeakMap<object, Map<string, string>>();
 function rememberSession(
   client: OpenCodeClient,
   sessionID: string,
@@ -486,6 +489,12 @@ async function waitForTurn(
     new Error(
       `opencode ${spec.label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
     );
+  const rateLimited = () => {
+    const reason = rateLimitedSessions.get(client)?.get(sessionID);
+    if (!reason) return;
+    rateLimitedSessions.get(client)!.delete(sessionID);
+    return new Error(`opencode ${spec.label} prompt stopped on a provider rate limit: ${reason}`);
+  };
   for (;;) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw timedOut();
@@ -497,12 +506,16 @@ async function waitForTurn(
       break;
     } catch (error) {
       if (!isAbort(error)) throw error;
+      const limited = rateLimited();
+      if (limited) throw limited;
       if (remaining <= slice) throw timedOut();
       spec.log(
         `${spec.label} prompt still running (${Math.round((Date.now() - started) / 1000)}s)`,
       );
     }
   }
+  const limited = rateLimited();
+  if (limited) throw limited;
   for (let attempt = 0; ; attempt++) {
     const message = await latestAssistant(client, sessionID);
     if (message && message.id !== previousID && message.time.completed) return message;
@@ -852,7 +865,10 @@ function describeToolCall(props: Record<string, unknown>): string {
   return `${arg[0]}=${value.length > 120 ? `${value.slice(0, 120)}…` : value}`;
 }
 
-/** Best effort: a broken stream is logged once and never affects the review (invariant 3). */
+/**
+ * Best effort: a broken stream is logged once (invariant 3). Its one effect on a
+ * review is interrupting a turn stuck behind a provider rate limit.
+ */
 export function startProgressLogger(
   client: OpenCodeClient,
   log: (msg: string) => void,
@@ -873,6 +889,18 @@ export function startProgressLogger(
           log(
             `${label} execution failed: ${formatUnknown(props.error ?? props.message ?? 'unknown')}`,
           );
+        } else if (raw.type === 'session.retry.scheduled') {
+          const retry = props as unknown as ProviderRetry;
+          if (typeof retry.at !== 'number' || typeof retry.error?.message !== 'string') continue;
+          const reason = rateLimitStall(retry, Date.now());
+          log(
+            `${label} provider retry ${retry.attempt}: ${retry.error.message}${reason ? '; not waiting it out' : ''}`,
+          );
+          if (reason) {
+            const limited = rateLimitedSessions.get(client) ?? new Map<string, string>();
+            rateLimitedSessions.set(client, limited.set(sessionID!, reason));
+            void interruptBestEffort(client, sessionID!, label, log);
+          }
         } else if (raw.type === 'permission.asked') {
           log(
             `${label} permission asked (denied by the jbot plugin): ${formatUnknown(props.action ?? props)}`,

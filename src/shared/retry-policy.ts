@@ -102,3 +102,30 @@ export class StaleReviewError extends Error {
     this.name = 'StaleReviewError';
   }
 }
+
+export interface ProviderRetry {
+  attempt: number;
+  /** Epoch ms of the next attempt. */
+  at: number;
+  error: { type?: string; message: string; status?: number };
+}
+
+const RATE_LIMIT_GRACE_MS = 60_000;
+const RATE_LIMIT_MAX_ATTEMPT = 3;
+
+/**
+ * Why a rate-limited retry is not worth waiting out, or undefined. opencode
+ * scheduled the next attempt 15 min out on a Zen free 429 (measured
+ * 2026-09-24), leaving the session silent until the finder or aux timeout.
+ */
+export function rateLimitStall(retry: ProviderRetry, now: number): string | undefined {
+  const { error } = retry;
+  const limited =
+    error.type === 'provider.rate-limit' ||
+    error.status === 429 ||
+    /rate.?limit|free usage|quota/i.test(error.message);
+  const waitMs = retry.at - now;
+  if (!limited || (waitMs <= RATE_LIMIT_GRACE_MS && retry.attempt <= RATE_LIMIT_MAX_ATTEMPT))
+    return undefined;
+  return `${error.message} (attempt ${retry.attempt}, next in ${Math.max(0, Math.round(waitMs / 1000))}s)`;
+}
