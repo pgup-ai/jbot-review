@@ -61,6 +61,7 @@ export interface PackSourceProvider {
 export interface ContextPack {
   text: string;
   supplied: SuppliedContext;
+  /** Partial when a changed file's own source is missing; other uncollected reads are listed only. */
   state: 'complete' | 'partial';
   omitted: number;
   uncollected: number;
@@ -656,15 +657,11 @@ export async function buildContextPack(
       new Set(Array.from(newSideLines((file.patch ?? '').replace(/\n$/, '')), (l) => l.line)),
     ]),
   );
-  // A changed JS/TS file the provider could not index leaves the page without its callers.
-  for (const [path, lines] of diff)
-    if (
-      lines.size &&
-      JS_SOURCE.test(path) &&
-      !reader.sources.get(path) &&
-      !reader.refused.has(path)
-    )
-      reader.failures++;
+  // A changed JS/TS file the provider could not read or index leaves the page without its own code.
+  const missing = [...diff.entries()].filter(
+    ([path, lines]) => lines.size && JS_SOURCE.test(path) && !reader.sources.get(path),
+  );
+  for (const [path] of missing) if (!reader.refused.has(path)) reader.failures++;
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
   const changed: Lines = new Map(
     prFiles.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch ?? ''))]),
@@ -753,7 +750,7 @@ export async function buildContextPack(
   return {
     text,
     supplied,
-    state: reader.failures ? 'partial' : 'complete',
+    state: missing.length ? 'partial' : 'complete',
     omitted: omitted.length,
     uncollected: reader.failures,
     slices,

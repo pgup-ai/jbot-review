@@ -472,7 +472,7 @@ export async function addContextPack(params: {
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
           .catch(() => undefined);
         // A directory map alone would cost the page its caller evidence for no code, and a
-        // partial pack may be missing callers, so both keep today's evidence instead.
+        // partial pack is missing a changed file's own code, so both keep today's evidence.
         let reason: ContextPackResult['row']['reason'] = !pack
           ? 'error'
           : pack.state === 'partial'

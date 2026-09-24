@@ -1025,6 +1025,10 @@ CommandCode and tool-less backends do not receive them.
 | `jev`                    | Jev ranks caller excerpts from changed exported symbols                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.                                                                                                                        |
 | `context-pack` (default) | `diff-batches`, plus a per-page context pack before the first turn: the code around each change, the definitions it uses, import-linked callers, the diffs of changed files the page imports from other pages, and a directory map. Main and guideline-compliance pages get the pack and a line-numbered diff that lists whitespace-only lines; pack pages drop caller evidence and the changed-symbol usage list. The finder's guideline excerpt drops pointer-only docs, and verification gets the slim context | Default. Live A/Bs on a private repository's PRs cut review turns 30–45% on a fast model and 8% on `deepseek-v4.1-flash`; accepted-issue recall stayed within run-to-run noise. `npm run replay:context-pack` scores packs offline. OpenCode also reports supplied re-reads. |
 
+A pack that reaches its file or byte limit still serves what it collected and
+lists the rest; only a changed file it could not read sends the page back to
+caller evidence.
+
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own
 session with tools. Finding verification starts with a tool-less pass. Its
