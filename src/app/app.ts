@@ -85,7 +85,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
       cleanup = cloned.cleanup;
       workspaceDir = cloned.dir;
       const { model, auxModel } = pickReviewModels(cfg.modelPool, pr.head.sha);
-      const { providerID } = parseModelName(model);
+      const { providerID, modelID } = parseModelName(model);
       const { apiKey, baseURL } = cfg.credentials.get(providerID)!;
       const auxProviderID = parseModelName(auxModel).providerID;
       const auxCredential =
@@ -120,7 +120,10 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(providerID)),
+          modelOptions: parseEnvJsonObject(
+            'JBOT_MODEL_OPTIONS',
+            defaultModelOptions(providerID, modelID),
+          ),
           modelOptionsExplicit: Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
           promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
           skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', false),

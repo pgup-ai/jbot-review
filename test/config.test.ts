@@ -194,7 +194,9 @@ describe('poolside', () => {
     assert.equal(provider.custom, undefined);
     assert.deepEqual(provider.models?.['laguna-s-2.1'], { promptCache: false });
     assert.equal(modelSupportsPromptCache('poolside', 'laguna-s-2.1'), false);
-    assert.deepEqual(defaultModelOptions('poolside'), { reasoningEffort: 'default' });
+    assert.deepEqual(defaultModelOptions('poolside', 'laguna-s-2.1'), {
+      reasoningEffort: 'default',
+    });
   });
 });
 
@@ -380,10 +382,17 @@ describe('openai-compatible custom provider', () => {
     assert.equal(PROVIDERS.openai.keyEnv, 'OPENAI_API_KEY');
     assert.equal(PROVIDERS.openai.keyInput, 'openai-api-key');
     assert.equal('custom' in PROVIDERS.openai, false);
-    assert.deepEqual(defaultModelOptions('openai-compatible'), {});
+    assert.deepEqual(defaultModelOptions('openai-compatible', 'x'), {});
     for (const providerID of ['openai', 'tokenrouter', 'opencode', 'commandcode']) {
-      assert.deepEqual(defaultModelOptions(providerID), { reasoningEffort: 'low' });
+      assert.deepEqual(defaultModelOptions(providerID, 'm'), { reasoningEffort: 'low' });
     }
+    for (const providerID of ['opencode', 'opencode-go'])
+      assert.deepEqual(defaultModelOptions(providerID, 'space-bunny-free'), {
+        reasoningEffort: 'high',
+      });
+    assert.deepEqual(auxModelOptionsFor('opencode', 'm', 'opencode', 'space-bunny-free'), {
+      reasoningEffort: 'high',
+    });
   });
 
   it('requires and validates an HTTP(S) base URL', () => {
