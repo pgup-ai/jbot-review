@@ -81,6 +81,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
       token: job.installationToken,
     });
     cleanup = cloned.cleanup;
+    const { providerID, modelID } = parseModelName(job.model);
     await runPrReview({
       octokit,
       owner,
@@ -101,7 +102,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         verifyFindings: true,
         reviewShards: 1,
         timeBudgetMinutes: 30,
-        modelOptions: defaultModelOptions(parseModelName(job.model).providerID),
+        modelOptions: defaultModelOptions(providerID, modelID),
         commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
         guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
         embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),

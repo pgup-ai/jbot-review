@@ -947,7 +947,7 @@ export interface ReviewRunOptions {
   /**
    * Provider options for the MAIN model — e.g. {"reasoningEffort":"medium"}
    * to cap reasoning spend on heavy models. An aux model running an entry of
-   * its own gets defaultAuxModelOptions instead; one that IS the main model
+   * its own gets that model's default options instead; one that IS the main model
    * shares this.
    */
   modelOptions?: Record<string, unknown>;

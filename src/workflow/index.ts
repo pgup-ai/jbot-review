@@ -131,9 +131,12 @@ async function main(): Promise<void> {
       );
     }
     // The picks decide the providers, so their credentials are only known here.
-    const { providerID } = parseModelName(model);
+    const { providerID, modelID } = parseModelName(model);
     const { apiKey, baseURL } = credentials.get(providerID)!;
-    const modelOptions = parseJsonObjectInput('model-options', defaultModelOptions(providerID));
+    const modelOptions = parseJsonObjectInput(
+      'model-options',
+      defaultModelOptions(providerID, modelID),
+    );
     core.info(`Model options: ${JSON.stringify(modelOptions)}`);
     const auxProviderID = parseModelName(auxModel).providerID;
     const auxCredential = auxProviderID === providerID ? undefined : credentials.get(auxProviderID);
