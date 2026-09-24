@@ -478,8 +478,9 @@ export class EvidenceStore {
         const source = await this.read(path, signal, tracked);
         // The tracked reader swallows aborts, so a deadline surfaces here as a rejection.
         signal.throwIfAborted();
-        // A file cut at the read cap cannot be parsed or cited by line.
-        if (!source || source.truncated) return undefined;
+        if (!source) return undefined;
+        // A file cut at the read cap cannot be parsed or cited by line; like the file cap, it goes uncollected.
+        if (source.truncated) throw new Error('context pack read cap');
         files++;
         bytes += Buffer.byteLength(source.text);
         // Babel also ends lines at a lone \r, U+2028 and U+2029; split() and git grep do not.

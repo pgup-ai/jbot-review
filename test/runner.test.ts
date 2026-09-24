@@ -810,7 +810,7 @@ describe('runPrReview local mode and early exits', () => {
         files: [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b' }],
         commits: [],
       },
-      options: { dryRun: true },
+      options: { dryRun: true, skipDocOnly: true },
       log: (msg) => logs.push(msg),
     });
     assert.ok(logs.some((msg) => /doc-only/i.test(msg)));
@@ -933,7 +933,7 @@ describe('runPrReview local mode and early exits', () => {
         ...base,
         octokit: octokit as unknown as Octokit,
         headSha: 'headsha',
-        options: { autoApprove: true },
+        options: { autoApprove: true, skipDocOnly: true },
         log: () => {},
       });
 
@@ -1919,10 +1919,10 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
     title: name,
     body: 'claim',
   }));
-  const packs: Record<string, string[]> = {
-    'a.ts': ['page pack: caller(a)'],
-    'b.ts': ['page pack: caller(a)'],
-    'c.ts': ['p'.repeat(60000)],
+  const extras: Record<string, { packs: string[]; rules: string[] }> = {
+    'a.ts': { packs: ['page pack: caller(a)'], rules: [] },
+    'b.ts': { packs: ['page pack: caller(a)'], rules: [] },
+    'c.ts': { packs: ['p'.repeat(60000)], rules: ['### RULES.md §1\nNever call caller(a).'] },
   };
   const logs: string[] = [];
   const seen: Record<string, string> = {};
@@ -1931,7 +1931,7 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
     model: 'test/model',
     prContext: 'diff',
     sourceContext: async (findings) => findings.map((f) => `source of ${f.path}`).join('\n'),
-    packsFor: (finding) => packs[finding.path],
+    toolLessContextFor: (finding) => extras[finding.path],
     promptBudget: { ...reviewPromptBudget('test'), transportBytes: 40000 },
     targets,
     toolLessFirst: true,
@@ -1956,8 +1956,13 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
   assert.equal(seen['single-shot'].split('page pack: caller(a)').length, 2);
   assert.doesNotMatch(seen.capped, /page pack/);
   assert.doesNotMatch(seen['single-shot'], /p{1000}/);
-  assert.ok(logs.some((message) => /Context pack omitted from verification/.test(message)));
-  // c quoted code that only another page's pack showed, so it went to the re-check.
+  assert.ok(logs.some((message) => /Tool-less context omitted from verification/.test(message)));
+  assert.match(
+    seen['single-shot'],
+    /\[1 supporting excerpt\(s\) .* left out to fit the prompt budget/,
+  );
+  // c's quote is only in another page's pack and in its own cited rule, so it went to the re-check.
+  assert.match(seen['single-shot'], /Never call caller\(a\)/);
   assert.deepEqual(verdicts.map((v) => `${v.index}:${v.verdict}`).sort(), [
     '0:confirmed',
     '1:confirmed',

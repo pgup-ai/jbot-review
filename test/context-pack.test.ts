@@ -209,30 +209,34 @@ test('changed symbols past the cap are named in Omitted', async () => {
   assert.match(omitted, /^### Omitted\n- f20 \(callers\)$/);
 });
 
-test('a source the provider cannot deliver makes the pack partial', async () => {
-  // A rejected load, and a changed JS/TS file the provider could not index.
-  for (const load of [async () => Promise.reject(new Error('timeout')), async () => undefined]) {
-    const pack = await buildContextPack(PAGE, CHANGED, { ...provider(), load }, 64 * 1024);
-    assert.equal(pack.state, 'partial');
-    assert.equal(pack.uncollected, 1);
-    assert.match(pack.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
-  }
-  // A capped read of another file is listed as uncollected but keeps the pack.
-  const base = provider();
-  const capped = await buildContextPack(
+test('an unindexed changed file makes the pack partial; a refused read only goes uncollected', async () => {
+  const partial = await buildContextPack(
     PAGE,
     CHANGED,
-    {
-      ...base,
-      load: async (path) =>
-        PAGE.some((file) => file.filename === path)
-          ? base.load(path)
-          : Promise.reject(new Error('context pack file cap')),
-    },
+    { ...provider(), load: async () => undefined },
     64 * 1024,
   );
-  assert.equal(capped.state, 'complete');
-  assert.ok(capped.uncollected > 0);
+  assert.equal(partial.state, 'partial');
+  assert.equal(partial.uncollected, 1);
+  assert.match(partial.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
+  // A read refused at the pack's limits, of a changed file (past the read cap) or another file, keeps the pack.
+  const base = provider();
+  for (const changedRefused of [true, false]) {
+    const pack = await buildContextPack(
+      PAGE,
+      CHANGED,
+      {
+        ...base,
+        load: async (path) =>
+          PAGE.some((file) => file.filename === path) === changedRefused
+            ? Promise.reject(new Error('context pack read cap'))
+            : base.load(path),
+      },
+      64 * 1024,
+    );
+    assert.equal(pack.state, 'complete');
+    assert.ok(pack.uncollected > 0);
+  }
   const docs = [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b' }];
   const unindexed = { ...provider(), load: async () => undefined };
   assert.equal((await buildContextPack(docs, docs, unindexed, 64 * 1024)).state, 'complete');

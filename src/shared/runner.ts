@@ -79,6 +79,7 @@ import {
   type TelemetryRecorder,
 } from './telemetry.ts';
 import {
+  modelPolicy,
   runConfiguration,
   runIdentity,
   effectiveReasoningEffort,
@@ -173,6 +174,7 @@ import {
   assembleReviewPrompt,
   assembleGuidelineCompliancePrompt,
   assembleFindingVerificationPrompt,
+  verifierOmissionNote,
   COMPLIANCE_PACK_NOTE,
   selectLensKeys,
 } from './prompt.ts';
@@ -268,6 +270,7 @@ import {
   discoverGuidelineDocs,
   applicableGuidelines,
   canCheckGlobalGuidelinesInMain,
+  citedGuidelineSections,
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
@@ -1527,16 +1530,11 @@ async function runReviewPipeline(params: {
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
-    model,
-    auxModel,
-    baseURL,
-    auxBaseURL: options.auxBaseURL,
-    modelOptions: options.modelOptions,
+    ...modelPolicy(options, { model, auxModel, baseURL }),
     guidelines: policyGuidelines,
     title: pullTitle,
     body: pullBody,
     reviewer: runIdentity(process.env).reviewerRevision,
-    configuration: runConfiguration(options, model).configurationHash,
   });
   const scopeStartedAt = Date.now();
   const reviewScope = await planIncrementalReview({
@@ -1545,7 +1543,9 @@ async function runReviewPipeline(params: {
     head: headSha,
     base: baseSha,
     policy: scopePolicy,
-    priorBody: localDiff?.priorReview ?? priorJbotReviewGroups.at(-1)?.body,
+    priorBodies: localDiff?.priorReview
+      ? [localDiff.priorReview]
+      : priorJbotReviewGroups.map((group) => group.body),
     forceFull:
       !options.skipUnchanged ||
       options.autoApprove ||
@@ -1677,7 +1677,14 @@ async function runReviewPipeline(params: {
   const packSupplied = new Map<string, SuppliedContext>();
   // Served main-page packs by changed file, so tool-less verification sees what the finders saw.
   const verifierPacks = new Map<string, string[]>();
-  const verifierPacksFor = (finding: Finding) => verifierPacks.get(finding.path) ?? [];
+  // The tool-less verifier also gets the rule sections a finding cites; it cannot open them itself.
+  const toolLessContextFor = (finding: Finding) => ({
+    packs: verifierPacks.get(finding.path) ?? [],
+    rules: citedGuidelineSections(
+      [finding.title, finding.body, finding.evidence ?? ''].join('\n'),
+      applicable.docs,
+    ),
+  });
   const findingSources =
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
@@ -3232,7 +3239,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
-        packsFor: verifierPacksFor,
+        toolLessContextFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3422,7 +3429,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
-        packsFor: verifierPacksFor,
+        toolLessContextFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3448,7 +3455,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
-        packsFor: verifierPacksFor,
+        toolLessContextFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3971,7 +3978,7 @@ export function normalizeOptions(
     modelOptions: options?.modelOptions ?? {},
     modelOptionsExplicit: options?.modelOptionsExplicit ?? false,
     promptCache: options?.promptCache ?? true,
-    skipDocOnly: options?.skipDocOnly ?? true,
+    skipDocOnly: options?.skipDocOnly ?? false,
     skipUnchanged: options?.skipUnchanged ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
     // Throttled tiers serialize upstream; a cap keeps queued work out of session deadlines.
@@ -4264,7 +4271,7 @@ async function verifyFindings(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  packsFor?: (finding: Finding) => string[];
+  toolLessContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4317,8 +4324,8 @@ export async function requestFindingVerdicts(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  /** Context packs of the targets' pages for the tool-less pass; each goes in only while it fits. */
-  packsFor?: (finding: Finding) => string[];
+  /** Context the tool-less pass gets per target; each item goes in while it fits. */
+  toolLessContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4392,26 +4399,40 @@ export async function requestFindingVerdicts(params: {
       } else if (params.prepareEvidence) {
         params.log('Skipping optional evidence preparation to preserve verification time.');
       }
-      // Only the tool-less pass gets packs; the capped re-check reads what it needs.
+      // Only the tool-less pass gets this context; the capped re-check reads what it needs.
       let toolLessContext = context;
       const packed = new Set<string>();
-      if (params.toolLessFirst)
-        for (const pack of new Set(targets.flatMap((target) => params.packsFor?.(target) ?? []))) {
-          const enriched = joinContext(toolLessContext, pack);
-          if (
-            params.promptBudget &&
-            !measureReviewPrompt(
-              assembleFindingVerificationPrompt(enriched, targets, true),
-              params.promptBudget,
-            ).fits
-          ) {
-            params.log('Context pack omitted from verification: assembled prompt exceeds budget.');
+      const fits = (candidate: string) =>
+        !params.promptBudget ||
+        measureReviewPrompt(
+          assembleFindingVerificationPrompt(candidate, targets, true),
+          params.promptBudget,
+        ).fits;
+      let omitted = 0;
+      if (params.toolLessFirst) {
+        const extras = targets.map(
+          (target) => params.toolLessContextFor?.(target) ?? { packs: [], rules: [] },
+        );
+        const rules = new Set(extras.flatMap((extra) => extra.rules));
+        for (const item of new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules]))) {
+          const enriched = joinContext(toolLessContext, item);
+          if (!fits(enriched)) {
+            params.log(
+              'Tool-less context omitted from verification: assembled prompt exceeds budget.',
+            );
+            omitted++;
             continue;
           }
           toolLessContext = enriched;
-          sourceContext = joinContext(sourceContext, pack);
-          packed.add(pack);
+          // A quoted rule shows the rule exists, not that the code breaks it.
+          if (!rules.has(item)) sourceContext = joinContext(sourceContext, item);
+          packed.add(item);
         }
+      }
+      if (omitted) {
+        const noted = joinContext(toolLessContext, verifierOmissionNote(omitted));
+        if (fits(noted)) toolLessContext = noted;
+      }
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4438,7 +4459,9 @@ export async function requestFindingVerdicts(params: {
               await (params.sourceContext?.([target]) ??
                 buildFindingSourceContext(params.workspace, [target])),
               preparedSources.get(target) ?? '',
-              ...(params.packsFor?.(target) ?? []).filter((pack) => packed.has(pack)),
+              ...(params.toolLessContextFor?.(target).packs ?? []).filter((item) =>
+                packed.has(item),
+              ),
             ),
           );
         }

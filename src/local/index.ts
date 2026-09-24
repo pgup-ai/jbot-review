@@ -747,7 +747,7 @@ async function review(
         ? comparison.reviewConfig.modelOptions !== null
         : Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
       promptCache: config?.promptCache ?? parseEnvBoolean('JBOT_PROMPT_CACHE', true),
-      skipDocOnly: config?.skipDocOnly ?? parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
+      skipDocOnly: config?.skipDocOnly ?? parseEnvBoolean('JBOT_SKIP_DOC_ONLY', false),
       maxConcurrentSessions:
         config?.maxConcurrentSessions ?? parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
       reviewTelemetry: config?.reviewTelemetry ?? parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),

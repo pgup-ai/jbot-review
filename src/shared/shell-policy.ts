@@ -16,6 +16,10 @@
  * subcommand name (`git submodule update`, `git worktree remove`) it is denied
  * outright — that costs no read.
  *
+ * Interpreters and package runners are denied too: running code is not reading it,
+ * and a package it loads comes from jbot's image, not the reviewed repo (a verifier
+ * once reported jbot's zod as the project's).
+ *
  * The `*: allow` catch-all is load-bearing: opencode defaults UNMATCHED commands
  * to "ask" once a rule map exists, which would hang a headless run.
  */
@@ -47,6 +51,17 @@ export const BASH_PERMISSIONS = {
   'git submodule deinit*': 'deny',
   'git worktree remove*': 'deny',
   'rm*': 'deny',
+  'node*': 'deny',
+  './node_modules/*': 'deny',
+  'npx*': 'deny',
+  'npm*': 'deny',
+  'pnpm*': 'deny',
+  'yarn*': 'deny',
+  'bun*': 'deny',
+  'deno*': 'deny',
+  'tsx*': 'deny',
+  'ts-node*': 'deny',
+  'python*': 'deny',
 } as const;
 
 /**

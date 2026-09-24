@@ -11,6 +11,7 @@ import {
   discoverGuidelineDocs,
   applicableGuidelines,
   canCheckGlobalGuidelinesInMain,
+  citedGuidelineSections,
   discoverGuidelines,
   formatContextBudget,
   formatDiffScope,
@@ -87,6 +88,43 @@ it('moves the sections that name a changed path ahead of the rest of each doc', 
   assert.match(
     nested.docs[0].text,
     /^## Payments\nPayment defaults\n### Refunds\nrefunds rule\n### Chargebacks\nchargebacks rule\n# Guide\n/,
+  );
+});
+
+it('finds the loaded rule sections a finding cites', () => {
+  const docs = [
+    {
+      label: '.pr-governance/design/STANDARDS.md (§6.2)',
+      text: '## 6.2 Placement\nTests go in api-spec files.',
+      relevance: 3 as const,
+    },
+    {
+      label: 'other/docs/RULES.md',
+      text: '## 3. Queues\nRetry with backoff.\n## 4. Other\ny',
+      relevance: 1 as const,
+    },
+    {
+      label: 'docs/RULES.md',
+      text: '# Rules\n## 3. Locks\nNo pessimistic locks.\n## 4. Other\nx',
+      relevance: 1 as const,
+    },
+    {
+      label: '.cursor/rules/security.mdc',
+      text: '## 2. Secrets\nNever log tokens.',
+      relevance: 1 as const,
+    },
+  ];
+  assert.deepEqual(
+    citedGuidelineSections(
+      // An exact path beats a longer one ending in it; a bare name two files share is skipped.
+      'Violates `STANDARDS.md` §6.2, docs/RULES.md §3 and security.mdc §2, not RULES.md §4 or GONE.md §1.',
+      docs,
+    ),
+    [
+      '### .pr-governance/design/STANDARDS.md §6.2\n## 6.2 Placement\nTests go in api-spec files.',
+      '### docs/RULES.md §3\n## 3. Locks\nNo pessimistic locks.',
+      '### .cursor/rules/security.mdc §2\n## 2. Secrets\nNever log tokens.',
+    ],
   );
 });
 

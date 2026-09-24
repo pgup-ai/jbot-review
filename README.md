@@ -381,11 +381,11 @@ added only when a real review leaves zero new findings _and_ every prior
 finding thread is resolved, and removed when a review starts. So 🚀-present
 means "reviewed, all good"; 🚀-absent means a review is in flight or the PR
 has open findings. Addressed-thread replies and resolution always run
-regardless. A docs/diagram-only PR — or a push that leaves the diff
-byte-identical to the last posted review, typically an "Update branch" merge
-from main (see `skip-doc-only` / `skip-unchanged`) — is skipped before any
-model call and leaves the reaction unchanged (it isn't reviewed, so it
-neither earns nor loses the 🚀). _Reactions are best-effort: if they don't
+regardless. A push that leaves the diff byte-identical to the last posted
+review, typically an "Update branch" merge from main (see `skip-unchanged`), or
+a docs/diagram-only PR under `skip-doc-only: true`, is skipped before any model
+call and leaves the reaction unchanged (it isn't reviewed, so it neither earns
+nor loses the 🚀). _Reactions are best-effort: if they don't
 appear, grant the workflow `issues: write` (PR reactions use the issues API);
 the review itself is unaffected._
 
@@ -400,7 +400,7 @@ the review itself is unaffected._
 | `max-concurrent-sessions` | `3`                | Maximum simultaneous model sessions. `0` also selects the bounded default of `3`; set a positive limit appropriate for your provider tier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `model-options`           | provider-dependent | JSON provider options for the main model. Defaults to `{"reasoningEffort":"low"}`; Poolside uses `{"reasoningEffort":"default"}`, and custom endpoints without a model catalog use `{}`. Explicit options override the default, subject to model-supported effort tiers. A distinct auxiliary model defaults to low; auxiliary sessions using the main model share its options. Verification defaults to low and reduces higher main efforts by one tier. CommandCode maps effort to supported CLI tiers; unknown models keep the CLI default. Other CLI backends do not consume these options; Devin encodes effort in its model ID.                       |
 | `prompt-cache`            | `true`             | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                             |
-| `skip-doc-only`           | `true`             | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about. |
+| `skip-doc-only`           | `false`            | Set `true` to skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Off by default: review rules live in docs, so docs changes get reviewed. |
 | `skip-unchanged`          | `true`             | Skip the full review (no model call) when the merge-base-relative patch set is byte-identical to the one the last posted jbot review covered — the common "Update branch" merge from main. Anything uncertain (no completion footer on the latest review, incomplete coverage, compare failure or its 300-file cap, binary/patchless files) fails open to a full review, and comment-triggered, manually dispatched, or `auto-approve` runs always review (approval must re-attest the newest head). Set `false` to review every push.                                                                                                                      |
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -411,14 +411,16 @@ The first review and uncertain follow-ups use full review. Dynamic fan-out is
 already enabled by default. An explicit review request or the existing
 `skip-unchanged: false` setting forces full review.
 
-A follow-up can reuse the last posted, completed review when its base, model,
-guidelines and review settings still match. The first version handles small
-modifications to existing JavaScript/TypeScript files. It expands the selected
-files through declarations, references and their directories, delivering each
-selected file's **complete PR patch**, not only its latest edit. It falls back to
-full review for uncertain history or dependencies, references outside the PR,
-contract changes, default-export modules, unresolved relative imports, broad
-changes, open findings, tool-less reviewers, explicit
+A follow-up can reuse the latest posted review that completed a baseline when
+its base, model, guidelines and review settings still match. A model pool counts
+as one setting, so the member a push draws does not force full review, and a
+later review that left a finding unverified keeps the earlier baseline. The
+first version handles small modifications to existing JavaScript/TypeScript
+files. It expands the selected files through declarations, references and their
+directories, delivering each selected file's **complete PR patch**, not only its
+latest edit. It falls back to full review for uncertain history or dependencies,
+references outside the PR, contract changes, default-export modules, unresolved
+relative imports, broad changes, open findings, tool-less reviewers, explicit
 reruns and auto-approval. Verification stays enabled according to its existing
 setting. Reports identify incremental reviews; telemetry records the baseline,
 selected/total files and fallback reason. Quiet clean runs keep the last posted
@@ -1025,16 +1027,18 @@ CommandCode and tool-less backends do not receive them.
 | `jev`                    | Jev ranks caller excerpts from changed exported symbols                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.                                                                                                                        |
 | `context-pack` (default) | `diff-batches`, plus a per-page context pack before the first turn: the code around each change, the definitions it uses, import-linked callers, the diffs of changed files the page imports from other pages, and a directory map. Main and guideline-compliance pages get the pack and a line-numbered diff that lists whitespace-only lines; pack pages drop caller evidence and the changed-symbol usage list. The finder's guideline excerpt drops pointer-only docs, and verification gets the slim context | Default. Live A/Bs on a private repository's PRs cut review turns 30–45% on a fast model and 8% on `deepseek-v4.1-flash`; accepted-issue recall stayed within run-to-run noise. `npm run replay:context-pack` scores packs offline. OpenCode also reports supplied re-reads. |
 
-A pack that reaches its file or byte limit still serves what it collected and
-lists the rest. A changed JS/TS file the pack could not read or index still sends
-the page back to caller evidence.
+A pack that reaches its file, byte or 256 KB per-file read limit still serves what
+it collected and lists the rest, even when the file past the limit is one the page
+changes. A changed JS/TS file the pack could not read or index still sends the
+page back to caller evidence.
 
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own
 session with tools and the usage list. Finding verification starts with a
-tool-less pass that also gets the main-page packs of the findings' files while
-they fit its budget. Its evidence-backed confirmations are final; the other
-findings get a re-check capped at six tool turns.
+tool-less pass that also gets the main-page packs of the findings' files and the
+loaded guideline sections a finding cites as `FILE.md §N`, while they fit its
+budget. Its evidence-backed confirmations are final; the other findings get a
+re-check capped at six tool turns.
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
 compares historical benefits, quality failures and sample limits. The
@@ -1524,7 +1528,10 @@ Dockerfile          # container image
 
 `plan` is OpenCode's built-in read-only agent: it can read, grep, and glob but
 cannot edit files. Using it keeps the review safe and avoids non-interactive
-permission prompts that hang a CI job. Agent selection is intentionally fixed for
+permission prompts that hang a CI job. Its shell also refuses commands that
+change the checkout (`git commit`, `git stash`, `rm`, …) or run code (`node`,
+`npx`, `python`, …), since a package that code loads comes from jbot's image,
+not the reviewed repo. Agent selection is intentionally fixed for
 CI reviews; there is no supported `AGENT` env override.
 
 ## Notes
