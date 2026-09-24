@@ -193,6 +193,11 @@ export interface ModelConfig {
    * (ties upward) so the provider never rejects the call (TASK-157).
    */
   reasoningEfforts?: readonly string[];
+  /**
+   * False when the provider accepts no `tool_choice` but "auto". opencode sends
+   * "none" on a step-capped agent's last step, so these models run uncapped.
+   */
+  forcedToolChoice?: boolean;
   /** Effort when no model-options input is given, for a model that barely reasons at `low`. */
   defaultReasoningEffort?: string;
 }
@@ -217,6 +222,12 @@ const EFFORT_RESTRICTED_MODELS = {
   'mimo-v2.5': { reasoningEfforts: ['medium', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
+// "only `"auto"` is supported for `tool_choice`" (opencode-go and Zen free, 2026-09-24).
+const AUTO_TOOL_CHOICE_MODELS = {
+  'muse-spark-1.3': { forcedToolChoice: false },
+  'muse-spark-1.3-contributor': { forcedToolChoice: false },
+} satisfies Record<string, ModelConfig>;
+
 /**
  * At `low` space-bunny reasons ~1k tokens a session and found 2.5 of 27 known
  * fms issues; at `high`, 6.5 (4 PRs x 2 runs, 2026-09-24), at ~3.7x wall time.
@@ -232,6 +243,7 @@ const DEEP_DEFAULT_MODELS = {
 const OPENCODE_ZEN_MODELS = {
   ...GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   ...EFFORT_RESTRICTED_MODELS,
+  ...AUTO_TOOL_CHOICE_MODELS,
   ...DEEP_DEFAULT_MODELS,
 } satisfies Record<string, ModelConfig>;
 
@@ -482,6 +494,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
  */
 function modelConfigFor(providerID: string, modelID: string): ModelConfig | undefined {
   return PROVIDERS[providerID]?.models?.[modelID.replace(/-free$/, '')];
+}
+
+export function modelAcceptsForcedToolChoice(providerID: string, modelID: string): boolean {
+  return modelConfigFor(providerID, modelID)?.forcedToolChoice !== false;
 }
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {

@@ -8,19 +8,25 @@ import { it } from 'node:test';
 import { collectChangesSinceContext } from '../src/shared/changes-since.ts';
 import { CHANGES_SINCE_DIFF_BUDGET } from '../src/shared/prompt.ts';
 
-it('embeds only the committed re-review delta when subjects contain no details', async (t) => {
-  const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-'));
+/** A throwaway repo on `main` with hooks off and a committer set. */
+function testRepo(prefix: string) {
+  const workspace = mkdtempSync(join(tmpdir(), prefix));
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
       cwd: workspace,
       encoding: 'utf8',
       stdio: 'pipe',
     }).trim();
+  git('init', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'commit.gpgsign', 'false');
+  return { workspace, git };
+}
+
+it('embeds only the committed re-review delta when subjects contain no details', async (t) => {
+  const { workspace, git } = testRepo('jbot-summary-');
   try {
-    git('init');
-    git('config', 'user.name', 'Test');
-    git('config', 'user.email', 'test@example.com');
-    git('config', 'commit.gpgsign', 'false');
     writeFileSync(join(workspace, 'old.ts'), 'const unrelated = true;\n');
     git('add', '.');
     git('commit', '-m', 'update');
@@ -134,6 +140,114 @@ it('embeds only the committed re-review delta when subjects contain no details',
     await assert.rejects(
       collectChangesSinceContext(workspace, empty, large, true),
       /git output failed/,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+it('leaves base-branch commits merged into the PR out of the delta, but not its conflict resolutions', async () => {
+  const { workspace, git } = testRepo('jbot-summary-merge-');
+  const commitAll = (message: string) => {
+    git('add', '.');
+    git('commit', '-m', message);
+    return git('rev-parse', 'HEAD');
+  };
+  try {
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 1;\n');
+    commitAll('root');
+    git('checkout', '-b', 'pr');
+    writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 1;\n');
+    const reviewed = commitAll('add feature');
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 3;\n');
+    const edited = commitAll('pr edits a');
+    git('checkout', 'main');
+    writeFileSync(join(workspace, 'other-pr.ts'), 'export const otherPr = true;\n');
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 2;\n');
+    const base = commitAll('other PR landed');
+    git('checkout', 'pr');
+    assert.throws(() => git('merge', '--no-edit', 'main'));
+    writeFileSync(join(workspace, 'app.ts'), 'export const a = 4;\n');
+    const resolved = commitAll('resolve main');
+    writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 2;\n');
+    const head = commitAll('tune feature');
+
+    const merged = await collectChangesSinceContext(workspace, reviewed, head, true, base);
+    assert.ok(merged);
+    assert.match(merged, /tune feature/);
+    assert.match(merged, /\+export const feature = 2;/);
+    assert.match(merged, /\+\+export const a = 4;/);
+    assert.match(merged, new RegExp(`git log --cc ${reviewed}\\.\\.${head} \\^${base}`));
+    assert.doesNotMatch(merged, /other PR landed|otherPr|other-pr\.ts/);
+    const resolutionOnly = await collectChangesSinceContext(
+      workspace,
+      edited,
+      resolved,
+      true,
+      base,
+    );
+    assert.match(resolutionOnly ?? '', /\+\+export const a = 4;/);
+    assert.match(resolutionOnly ?? '', /Conflict resolutions in merge commits: app\.ts/);
+    assert.doesNotMatch(resolutionOnly ?? '', /other-pr\.ts/);
+
+    git('checkout', 'main');
+    writeFileSync(join(workspace, 'z.ts'), 'export const z = 1;\n');
+    const cleanBase = commitAll('third PR');
+    git('checkout', 'pr');
+    git('merge', '--no-edit', 'main');
+    const cleanHead = git('rev-parse', 'HEAD');
+    assert.equal(
+      await collectChangesSinceContext(workspace, head, cleanHead, true, cleanBase),
+      undefined,
+    );
+
+    // The base advances by a merge commit alone, carrying its own change.
+    writeFileSync(join(workspace, 'evil.ts'), 'export const evil = 1;\n');
+    git('add', 'evil.ts');
+    const evilBase = git(
+      'commit-tree',
+      git('write-tree'),
+      '-p',
+      cleanBase,
+      '-p',
+      cleanHead,
+      '-m',
+      'evil',
+    );
+    git('reset', '-q', '--hard');
+    git('merge', '--no-edit', evilBase);
+    writeFileSync(join(workspace, 'feature.ts'), 'export const feature = 3;\n');
+    const evilHead = commitAll('tune again');
+    const afterEvil = await collectChangesSinceContext(
+      workspace,
+      cleanHead,
+      evilHead,
+      true,
+      evilBase,
+    );
+    assert.match(afterEvil ?? '', /tune again/);
+    assert.doesNotMatch(afterEvil ?? '', /evil/);
+
+    // Both sides edit separate hunks of one file: a clean merge, nothing resolved.
+    writeFileSync(join(workspace, 'm.ts'), 'a\n1\n2\n3\n4\n5\n6\n7\n8\nz\n');
+    const shared = commitAll('add m');
+    git('checkout', 'main');
+    git('merge', '--no-edit', shared);
+    writeFileSync(join(workspace, 'm.ts'), 'a\n1\n2\n3\n4\n5\n6\n7\n8\nZ\n');
+    const sameFileBase = commitAll('base edits m');
+    git('checkout', 'pr');
+    writeFileSync(join(workspace, 'm.ts'), 'A\n1\n2\n3\n4\n5\n6\n7\n8\nz\n');
+    const beforeMerge = commitAll('pr edits m');
+    git('merge', '--no-edit', 'main');
+    assert.equal(
+      await collectChangesSinceContext(
+        workspace,
+        beforeMerge,
+        git('rev-parse', 'HEAD'),
+        true,
+        sameFileBase,
+      ),
+      undefined,
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });

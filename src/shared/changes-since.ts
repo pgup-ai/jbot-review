@@ -1,4 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import {
@@ -6,28 +8,49 @@ import {
   CHANGES_SINCE_DIFF_BUDGET,
   CHANGES_SINCE_STAT_BUDGET,
 } from './prompt.ts';
+import { boundedJoin } from './review-context.ts';
 
 const execFileAsync = promisify(execFile);
+// Leaves the stat most of CHANGES_SINCE_STAT_BUDGET however many files a merge resolved.
+const RESOLUTION_NOTE_BYTES = 2 * 1024;
 
 export async function collectChangesSinceContext(
   workspace: string,
   fromSha: string,
   toSha: string,
   embedDiff: boolean,
+  baseSha?: string,
 ): Promise<string | undefined> {
   const options = { cwd: workspace, timeout: 15_000, maxBuffer: 8 * 1024 * 1024 };
   const range = `${fromSha}..${toSha}`;
-  const { stdout } = await execFileAsync(
-    'git',
-    ['log', '--no-merges', '--format=%h %s', range],
-    options,
-  );
-  const subjects = stdout.split('\n').filter(Boolean);
+  const git = async (...args: string[]) => (await execFileAsync('git', args, options)).stdout;
+  const subjectsOf = async (...args: string[]) =>
+    (await git('log', '--format=%h %s', ...args)).split('\n').filter(Boolean);
+  // A merge from the base branch brings its commits into the range; they are not this PR's changes.
+  const own = baseSha ? [range, `^${baseSha}`] : [range];
+  let subjects = await subjectsOf('--no-merges', ...own);
+  const withMerges = baseSha ? await subjectsOf(...own) : [];
+  // Merges count too: a base can advance by a merge commit alone.
+  const baseMerged =
+    baseSha && (await subjectsOf(range)).length > withMerges.length ? baseSha : undefined;
+  // A conflict resolution in the PR's merge commit is PR work.
+  const resolved = baseMerged ? await combinedDiffPaths(workspace, own) : [];
+  if (resolved.length > 0) subjects = withMerges;
   if (subjects.length === 0) return undefined;
   const diff = embedDiff
     ? await collectGitOutput(
         workspace,
-        ['diff', '--no-color', '--no-ext-diff', '--no-textconv', range, '--'],
+        baseMerged
+          ? [
+              'log',
+              '--cc',
+              '--format=commit %h %s',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              ...own,
+            ]
+          : ['diff', '--no-color', '--no-ext-diff', '--no-textconv', range, '--'],
         CHANGES_SINCE_DIFF_BUDGET,
       )
     : undefined;
@@ -36,14 +59,50 @@ export async function collectChangesSinceContext(
     try {
       stat = await collectGitOutput(
         workspace,
-        ['diff', '--stat=120', '--no-ext-diff', '--no-textconv', range, '--'],
+        baseMerged
+          ? [
+              'log',
+              '--no-merges',
+              '--format=commit %h %s',
+              '--stat=120',
+              '--no-ext-diff',
+              '--no-textconv',
+              ...own,
+            ]
+          : ['diff', '--stat=120', '--no-ext-diff', '--no-textconv', range, '--'],
         CHANGES_SINCE_STAT_BUDGET,
       );
     } catch {
       stat = null;
     }
+    // `--stat` measures a merge against its first parent, so resolutions are named, first.
+    if (stat && resolved.length > 0) {
+      const note = `Conflict resolutions in merge commits: ${boundedJoin(resolved, RESOLUTION_NOTE_BYTES)}\n`;
+      stat = { text: note + stat.text, totalBytes: Buffer.byteLength(note) + stat.totalBytes };
+    }
   }
-  return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat);
+  return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat, baseMerged);
+}
+
+/**
+ * Files with combined-diff hunks in the range's merges, read line by line so a
+ * large resolution never fills a buffer. `--name-only` would also list a file
+ * both parents changed in separate hunks, which a clean merge resolves.
+ */
+async function combinedDiffPaths(workspace: string, range: string[]): Promise<string[]> {
+  const child = spawn('git', ['log', '--merges', '--cc', '--format=', '--no-color', ...range], {
+    cwd: workspace,
+    timeout: 15_000,
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const closed = once(child, 'close');
+  const paths = new Set<string>();
+  for await (const line of createInterface({ input: child.stdout }))
+    if (line.startsWith('diff --cc ')) paths.add(line.slice('diff --cc '.length));
+  const [code, signal] = await closed;
+  if (code !== 0) throw new Error(`git output failed (${signal ?? code})`);
+  return [...paths];
 }
 
 function collectGitOutput(

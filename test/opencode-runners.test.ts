@@ -145,7 +145,7 @@ describe('runReview on V2', () => {
     assert.ok(fake.prompts[0]!.body.text.includes(NO_TOOLS_REVIEW_DIRECTIVE.split('\n')[0]!));
   });
 
-  it('runs tool-less passes closed-book and the capped verification re-check on jbot-verify', async () => {
+  it('runs tool-less passes closed-book and the capped re-check on jbot-verify unless tool_choice is auto-only', async () => {
     const lens = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
     await runReview(runtime(lens), 'openai/gpt-5', 'ctx', '', log, { toolLess: true });
     assert.equal([...lens.sessions.values()][0]!.agent, 'jbot-closed-book');
@@ -163,9 +163,20 @@ describe('runReview on V2', () => {
         undefined,
         mode,
       );
+    await runFindingVerification(
+      runtime(verify),
+      'opencode-go/muse-spark-1.3-contributor',
+      'ctx',
+      [finding],
+      log,
+      undefined,
+      undefined,
+      undefined,
+      'capped',
+    );
     assert.deepEqual(
       [...verify.sessions.values()].map((session) => session.agent),
-      ['jbot-closed-book', 'jbot-verify'],
+      ['jbot-closed-book', 'jbot-verify', 'plan'],
     );
     assert.match(verify.prompts[0]!.body.text, /have no tools on this call/);
   });

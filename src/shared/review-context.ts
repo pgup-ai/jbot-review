@@ -819,7 +819,7 @@ const MAX_PARENT_RULE_BYTES = 2 * 1024;
 const MAX_OMISSION_NOTE_BYTES = 1024;
 
 /** Join items with ", " within maxBytes (for caps that fit the summary), summing the rest as "+N more". */
-function boundedJoin(items: string[], maxBytes: number): string {
+export function boundedJoin(items: string[], maxBytes: number): string {
   // Reserve room for a trailing ", +N more" so appending it can't breach the cap.
   const budget = maxBytes - 16;
   const shown: string[] = [];
