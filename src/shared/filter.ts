@@ -486,14 +486,15 @@ export function filterFindings(
   findings: Finding[],
   options: { minSeverity: Severity; maxFindings: number },
 ): Finding[] {
-  let publishable = MAX_PUBLISHED_UNVERIFIED;
-  const unresolved = findings
-    .filter(isUnresolvedFinding)
-    .map((finding) =>
-      finding.publishUnverified && publishable-- <= 0
-        ? { ...finding, publishUnverified: undefined }
-        : finding,
-    );
+  const unresolved = findings.filter(isUnresolvedFinding);
+  const publishable = new Set(
+    unresolved.filter((finding) => finding.publishUnverified).slice(0, MAX_PUBLISHED_UNVERIFIED),
+  );
+  const capped = unresolved.map((finding) =>
+    finding.publishUnverified && !publishable.has(finding)
+      ? { ...finding, publishUnverified: undefined }
+      : finding,
+  );
   let published = findings.filter(
     (finding) =>
       !isUnresolvedFinding(finding) &&
@@ -503,7 +504,7 @@ export function filterFindings(
     published = [...published]
       .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
       .slice(0, options.maxFindings);
-  return [...published, ...unresolved];
+  return [...published, ...capped];
 }
 
 export interface AnchoredFindings {

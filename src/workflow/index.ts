@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { isUnresolvedFinding } from '../shared/filter.ts';
+import { isWithheldFinding } from '../shared/filter.ts';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
@@ -166,7 +166,7 @@ async function main(): Promise<void> {
         modelOptions,
         modelOptionsExplicit: core.getInput('model-options').trim() !== '',
         onReviewResult: (result) => {
-          findingCount = result.findings.filter((finding) => !isUnresolvedFinding(finding)).length;
+          findingCount = result.findings.filter((finding) => !isWithheldFinding(finding)).length;
         },
       },
       log: (msg) => core.info(msg),

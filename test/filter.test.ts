@@ -394,6 +394,7 @@ describe('applyFindingVerdicts', () => {
       minSeverity: 'nit',
       maxFindings: 0,
     });
+    assert.equal(unchecked.filter((f) => f.publishUnverified).length, 2);
     const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
     assert.equal(routed.inline.length, 2);
     assert.equal(routed.withheld.length, 3);

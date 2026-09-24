@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { readExplorationStats } from './exploration-policy.ts';
 import type { TelemetryStopReason } from './telemetry.ts';
 import type { OpenCodeClient } from '@opencode/client';
@@ -875,42 +876,54 @@ export function startProgressLogger(
 ): () => void {
   const controller = new AbortController();
   void (async () => {
-    try {
-      for await (const event of client.event.subscribe({ signal: controller.signal })) {
-        // payload sits under `data` (measured)
-        const raw = event as { type?: string; data?: Record<string, unknown>; sessionID?: string };
-        const props = (raw.data ?? raw) as Record<string, unknown>;
-        const sessionID = (props.sessionID ?? raw.sessionID) as string | undefined;
-        const label = sessionID ? sessionsByClient.get(client)?.get(sessionID)?.label : undefined;
-        if (!label) continue;
-        if (raw.type === 'session.tool.called') {
-          log(`${label} tool: ${describeToolCall(props)}`);
-        } else if (raw.type === 'session.execution.failed') {
-          log(
-            `${label} execution failed: ${formatUnknown(props.error ?? props.message ?? 'unknown')}`,
-          );
-        } else if (raw.type === 'session.retry.scheduled') {
-          const retry = props as unknown as ProviderRetry;
-          if (typeof retry.at !== 'number' || typeof retry.error?.message !== 'string') continue;
-          const reason = rateLimitStall(retry, Date.now());
-          log(
-            `${label} provider retry ${retry.attempt}: ${retry.error.message}${reason ? '; not waiting it out' : ''}`,
-          );
-          if (reason) {
-            const limited = rateLimitedSessions.get(client) ?? new Map<string, string>();
-            rateLimitedSessions.set(client, limited.set(sessionID!, reason));
-            void interruptBestEffort(client, sessionID!, label, log);
+    // Rate-limit fail-fast rides on this stream, so a dropped one is resubscribed.
+    for (
+      let backoffMs = 100;
+      !controller.signal.aborted;
+      backoffMs = Math.min(backoffMs * 2, 30_000)
+    ) {
+      try {
+        for await (const event of client.event.subscribe({ signal: controller.signal })) {
+          // payload sits under `data` (measured)
+          const raw = event as {
+            type?: string;
+            data?: Record<string, unknown>;
+            sessionID?: string;
+          };
+          const props = (raw.data ?? raw) as Record<string, unknown>;
+          const sessionID = (props.sessionID ?? raw.sessionID) as string | undefined;
+          const label = sessionID ? sessionsByClient.get(client)?.get(sessionID)?.label : undefined;
+          if (!label) continue;
+          if (raw.type === 'session.tool.called') {
+            log(`${label} tool: ${describeToolCall(props)}`);
+          } else if (raw.type === 'session.execution.failed') {
+            log(
+              `${label} execution failed: ${formatUnknown(props.error ?? props.message ?? 'unknown')}`,
+            );
+          } else if (raw.type === 'session.retry.scheduled') {
+            const retry = props as unknown as ProviderRetry;
+            if (typeof retry.at !== 'number' || typeof retry.error?.message !== 'string') continue;
+            const reason = rateLimitStall(retry, Date.now());
+            log(
+              `${label} provider retry ${retry.attempt}: ${retry.error.message}${reason ? '; not waiting it out' : ''}`,
+            );
+            if (reason) {
+              const limited = rateLimitedSessions.get(client) ?? new Map<string, string>();
+              rateLimitedSessions.set(client, limited.set(sessionID!, reason));
+              void interruptBestEffort(client, sessionID!, label, log);
+            }
+          } else if (raw.type === 'permission.asked') {
+            log(
+              `${label} permission asked (denied by the jbot plugin): ${formatUnknown(props.action ?? props)}`,
+            );
           }
-        } else if (raw.type === 'permission.asked') {
-          log(
-            `${label} permission asked (denied by the jbot plugin): ${formatUnknown(props.action ?? props)}`,
-          );
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          log(`(progress stream ended: ${error instanceof Error ? error.message : String(error)})`);
         }
       }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        log(`(progress stream ended: ${error instanceof Error ? error.message : String(error)})`);
-      }
+      await sleep(backoffMs, undefined, { signal: controller.signal }).catch(() => undefined);
     }
   })();
   return () => controller.abort();
