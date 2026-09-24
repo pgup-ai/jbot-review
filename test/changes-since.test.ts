@@ -8,19 +8,25 @@ import { it } from 'node:test';
 import { collectChangesSinceContext } from '../src/shared/changes-since.ts';
 import { CHANGES_SINCE_DIFF_BUDGET } from '../src/shared/prompt.ts';
 
-it('embeds only the committed re-review delta when subjects contain no details', async (t) => {
-  const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-'));
+/** A throwaway repo on `main` with hooks off and a committer set. */
+function testRepo(prefix: string) {
+  const workspace = mkdtempSync(join(tmpdir(), prefix));
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
       cwd: workspace,
       encoding: 'utf8',
       stdio: 'pipe',
     }).trim();
+  git('init', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'commit.gpgsign', 'false');
+  return { workspace, git };
+}
+
+it('embeds only the committed re-review delta when subjects contain no details', async (t) => {
+  const { workspace, git } = testRepo('jbot-summary-');
   try {
-    git('init');
-    git('config', 'user.name', 'Test');
-    git('config', 'user.email', 'test@example.com');
-    git('config', 'commit.gpgsign', 'false');
     writeFileSync(join(workspace, 'old.ts'), 'const unrelated = true;\n');
     git('add', '.');
     git('commit', '-m', 'update');
@@ -141,23 +147,13 @@ it('embeds only the committed re-review delta when subjects contain no details',
 });
 
 it('leaves base-branch commits merged into the PR out of the delta, but not its conflict resolutions', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-merge-'));
-  const git = (...args: string[]) =>
-    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
-      cwd: workspace,
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
+  const { workspace, git } = testRepo('jbot-summary-merge-');
   const commitAll = (message: string) => {
     git('add', '.');
     git('commit', '-m', message);
     return git('rev-parse', 'HEAD');
   };
   try {
-    git('init', '-b', 'main');
-    git('config', 'user.name', 'Test');
-    git('config', 'user.email', 'test@example.com');
-    git('config', 'commit.gpgsign', 'false');
     writeFileSync(join(workspace, 'app.ts'), 'export const a = 1;\n');
     commitAll('root');
     git('checkout', '-b', 'pr');
