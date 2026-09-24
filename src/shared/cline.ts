@@ -214,7 +214,6 @@ export function formatClinePromptTimeoutMessage(
 }
 
 export async function runClineReview(
-  workspace: string,
   model: string,
   prContext: string,
   guidelines: string,
@@ -248,22 +247,13 @@ export async function runClineReview(
     { toolsAvailable: false, contextFirst: options.contextFirst, contextPack: options.contextPack },
   );
   log(`Prompt assembled (${label}, cline): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const raw = await runClinePrompt(
-    workspace,
-    model,
-    prompt,
-    label,
-    log,
-    options.home,
-    options.timeoutMs,
-  );
+  const raw = await runClinePrompt(model, prompt, label, log, options.home, options.timeoutMs);
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`${label} response unparseable; sending one JSON repair prompt via cline: ${message}`);
     const repaired = await runClinePrompt(
-      workspace,
       model,
       buildJsonRepairFollowupPrompt({
         originalPrompt: prompt,
@@ -282,7 +272,6 @@ export async function runClineReview(
 }
 
 export async function runClineAddressedPriorCommentsCheck(
-  workspace: string,
   model: string,
   prContext: string,
   log: (msg: string) => void,
@@ -292,7 +281,6 @@ export async function runClineAddressedPriorCommentsCheck(
 ): Promise<AddressedPriorComment[]> {
   void onTokenUsage;
   const raw = await runClinePrompt(
-    workspace,
     model,
     assembleAddressedPriorCommentsPrompt(prContext),
     'addressed-prior-comments',
@@ -304,7 +292,6 @@ export async function runClineAddressedPriorCommentsCheck(
 }
 
 export async function runClineGuidelineComplianceCheck(
-  workspace: string,
   model: string,
   prContext: string,
   guidelines: string,
@@ -320,7 +307,6 @@ export async function runClineGuidelineComplianceCheck(
     'Guidelines',
   );
   const raw = await runClinePrompt(
-    workspace,
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelinesForArgv),
     'guideline-compliance',
@@ -332,7 +318,6 @@ export async function runClineGuidelineComplianceCheck(
 }
 
 export async function runClineChangesSinceLastReview(
-  workspace: string,
   model: string,
   deltaContext: string,
   log: (msg: string) => void,
@@ -342,7 +327,6 @@ export async function runClineChangesSinceLastReview(
 ): Promise<string> {
   void onTokenUsage;
   const raw = await runClinePrompt(
-    workspace,
     model,
     assembleChangesSinceLastReviewPrompt(
       truncateUtf8WithNotice(
@@ -363,7 +347,6 @@ export async function runClineChangesSinceLastReview(
 }
 
 export async function runClineFindingVerification(
-  workspace: string,
   model: string,
   prContext: string,
   findings: VerifiableFinding[],
@@ -374,7 +357,6 @@ export async function runClineFindingVerification(
 ): Promise<FindingVerdict[] | undefined> {
   void onTokenUsage;
   const raw = await runClinePrompt(
-    workspace,
     model,
     assembleFindingVerificationPrompt(prContext, findings),
     'finding-verification',
@@ -386,7 +368,6 @@ export async function runClineFindingVerification(
 }
 
 async function runClinePrompt(
-  workspace: string,
   model: string,
   prompt: string,
   label: string,
@@ -404,9 +385,13 @@ async function runClinePrompt(
     const providers = clineProvidersPath(dir);
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
+    // Cline runs hooks and loads rules from its workspace, including ones a PR commits
+    // (.cline/hooks, .clinerules); a tool-less review needs none of the checkout.
+    const cwd = join(dir, 'workspace');
+    mkdirSync(cwd);
     const args = buildClineCliArgs({ model, promptArg: fullPrompt });
     const result = await runCliProcess(CLINE_CLI_BIN, args, {
-      cwd: workspace,
+      cwd,
       env: clineEnvForHome(dir),
       timeoutMs,
       timeoutMessage: formatClinePromptTimeoutMessage(label, model, timeoutMs),

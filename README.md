@@ -212,8 +212,9 @@ isolated temporary `HOME`, Codex into a temporary `CODEX_HOME`, and Qoder carrie
 its PAT through a one-time SDK auth payload while using a temporary `HOME`; each is
 removed after the run. Cursor reads its key straight from the env (no file); Devin writes
 `~/.local/share/devin/credentials.toml` under a separate temporary `HOME` per CLI
-invocation, removed after its process exits. Cline uses only
-the auth token — the file's `model`/`reasoning` are stripped — and has two billing
+invocation, removed after its process exits. Cline runs in an empty directory, so
+hooks and rules a PR commits never load, and uses only the auth token — the
+file's `model`/`reasoning` are stripped — and has two billing
 modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
 subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (no
 file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,

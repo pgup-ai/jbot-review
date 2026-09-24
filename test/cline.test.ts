@@ -245,7 +245,7 @@ describe('Cline CLI provider helpers', () => {
       { mode: 0o700 },
     );
     const result = scope.run('review-interactions', () =>
-      runClineReview(workspace, 'cline/default', 'context', '', () => {}, {
+      runClineReview('cline/default', 'context', '', () => {}, {
         home: workspace,
         timeoutMs: 10000,
       }),
@@ -293,21 +293,35 @@ describe('Cline CLI provider helpers', () => {
         }\n`,
         { mode: 0o700 },
       );
-      const result = runClineReview(
-        workspace,
-        'cline/default',
-        'context',
-        '',
-        (m) => logs.push(m),
-        {
-          home: workspace,
-          timeoutMs: 5000,
-        },
-      );
+      const result = runClineReview('cline/default', 'context', '', (m) => logs.push(m), {
+        home: workspace,
+        timeoutMs: 5000,
+      });
       if (fail) await assert.rejects(result, /original provider failure/);
       else assert.deepEqual((await result).findings, []);
     }
     assert.equal(logs.filter((m) => /cleanup failed: ENOTEMPTY/.test(m)).length, 2);
     assert.doesNotMatch(logs.join('\n'), /private filesystem detail/);
+  });
+
+  it('runs Cline in an empty directory so hooks and rules a PR commits never load', async (t) => {
+    const bin = mkdtempSync(join(tmpdir(), 'cline-cwd-'));
+    const originalPath = process.env.PATH;
+    t.after(() => {
+      process.env.PATH = originalPath;
+      rmSync(bin, { recursive: true, force: true });
+    });
+    process.env.PATH = `${bin}:${originalPath}`;
+    writeClineAuth('{"providers":{}}', bin);
+    const seen = join(bin, 'cwd.json');
+    writeFileSync(
+      join(bin, 'cline'),
+      `#!/usr/bin/env node\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync('.') }));\nconsole.log(JSON.stringify({type:"run_result",text:'{"summary":"","findings":[]}'}));\n`,
+      { mode: 0o700 },
+    );
+    await runClineReview('cline/default', 'context', '', () => {}, { home: bin, timeoutMs: 5000 });
+    const { cwd, entries } = JSON.parse(readFileSync(seen, 'utf8'));
+    assert.notEqual(cwd, process.cwd());
+    assert.deepEqual(entries, []);
   });
 });
