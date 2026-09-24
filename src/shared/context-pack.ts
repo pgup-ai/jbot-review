@@ -61,7 +61,7 @@ export interface PackSourceProvider {
 export interface ContextPack {
   text: string;
   supplied: SuppliedContext;
-  /** Partial when a changed JS/TS file's own source could not be read or indexed; other refused reads only count as uncollected. */
+  /** Partial when a changed JS/TS file could not be read or indexed; reads refused at the pack's limits count as uncollected. */
   state: 'complete' | 'partial';
   omitted: number;
   uncollected: number;
@@ -657,11 +657,13 @@ export async function buildContextPack(
       new Set(Array.from(newSideLines((file.patch ?? '').replace(/\n$/, '')), (l) => l.line)),
     ]),
   );
-  // A changed JS/TS file the provider could not read or index leaves the page without its own code.
+  // A changed JS/TS file the provider could not read or index leaves the page without its own code;
+  // one refused at the pack's limits, such as a file past the read cap, only goes uncollected.
   const missing = [...diff.entries()].filter(
-    ([path, lines]) => lines.size && JS_SOURCE.test(path) && !reader.sources.get(path),
+    ([path, lines]) =>
+      lines.size && JS_SOURCE.test(path) && !reader.sources.get(path) && !reader.refused.has(path),
   );
-  for (const [path] of missing) if (!reader.refused.has(path)) reader.failures++;
+  reader.failures += missing.length;
   const shown: Lines = new Map([...diff].map(([path, lines]) => [path, new Set(lines)]));
   const changed: Lines = new Map(
     prFiles.map((file) => [file.filename, new Set(changedEvidenceLines(file.patch ?? ''))]),
