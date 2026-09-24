@@ -3163,17 +3163,6 @@ async function runReviewPipeline(params: {
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
-    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
-      takeSettledAuxiliary(session, fallback, () => {
-        abandonedAuxLabels.add(session.label);
-        auxBackend.abortSessionsByLabel?.(session.label, log);
-        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
-        log(`Optional ${session.label} skipped: main review is complete; freeing session slots.`);
-      });
-    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
-      finishOptional(addressedPriorCheck, []),
-      finishOptional(changesSinceLastReview, ''),
-    ]);
     // Overlap only with auxiliary settling; the final pipeline owns telemetry and late arrivals.
     const startOverlapVerification = async (): Promise<
       { targets: Finding[]; verdicts: FindingVerdictList } | 'skipped'
@@ -3322,6 +3311,18 @@ async function runReviewPipeline(params: {
       ),
     ]);
     graceDone();
+    // Optional bookkeeping runs while finders settle; only what is still running then is dropped.
+    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
+      takeSettledAuxiliary(session, fallback, () => {
+        abandonedAuxLabels.add(session.label);
+        auxBackend.abortSessionsByLabel?.(session.label, log);
+        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
+        log(`Optional ${session.label} skipped: still running when the finders settled.`);
+      });
+    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
+      finishOptional(addressedPriorCheck, []),
+      finishOptional(changesSinceLastReview, ''),
+    ]);
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
