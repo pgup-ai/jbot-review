@@ -1526,18 +1526,13 @@ async function runReviewPipeline(params: {
   const policyGuidelines = JSON.stringify(applicable);
 
   const fullReviewFiles = files;
+  const pooled = (options.modelPool?.length ?? 0) > 1;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
     // The configuration hash covers a model pool; the member a push draws is not a policy change.
-    ...((options.modelPool?.length ?? 0) > 1
-      ? {}
-      : {
-          model,
-          auxModel,
-          baseURL,
-          auxBaseURL: options.auxBaseURL,
-          modelOptions: options.modelOptions,
-        }),
+    ...(pooled ? {} : { model, auxModel, baseURL, auxBaseURL: options.auxBaseURL }),
+    // Explicit options apply to every draw; defaults follow the drawn provider.
+    ...(!pooled || options.modelOptionsExplicit ? { modelOptions: options.modelOptions } : {}),
     guidelines: policyGuidelines,
     title: pullTitle,
     body: pullBody,
