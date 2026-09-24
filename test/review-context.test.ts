@@ -63,6 +63,10 @@ it('moves the sections that name a changed path ahead of the rest of each doc', 
   );
   // "ledger" is in every section, so it tells none apart.
   assert.deepEqual(ranked.docs.slice(1), discovered.docs.slice(1));
+  const small = rankGuidelineSections({ ...discovered, docs: discovered.docs.slice(0, 1) }, [
+    'x/refunds.ts',
+  ]);
+  assert.match(small.docs[0].text, /^## Refunds/);
 });
 
 it('names the skipped sections of a cut doc in the full guidance notice', () => {

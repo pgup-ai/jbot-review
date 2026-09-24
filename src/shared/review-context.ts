@@ -441,7 +441,7 @@ export function rankGuidelineSections(
   );
   const weights = [...terms].flatMap((term) => {
     const found = sections.filter(({ words }) => words.includes(` ${term} `)).length;
-    return found && found <= sections.length / 4
+    return found && found <= Math.max(1, sections.length / 4)
       ? [{ term: ` ${term} `, weight: Math.log(1 + sections.length / found) }]
       : [];
   });
