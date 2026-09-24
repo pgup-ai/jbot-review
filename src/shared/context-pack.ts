@@ -48,12 +48,11 @@ export interface PackSource {
 
 /**
  * Bounded, tracked-only head reads for one page; any rejection counts as an uncollected item.
- * `load` rejects at the deadline or the page's file or byte cap; an unusable file gives undefined.
+ * `load` rejects at the deadline or the page's file, byte or read cap; an unusable file gives undefined.
  */
 export interface PackSourceProvider {
   tracked: Set<string>;
   aliases: PathAlias[];
-  /** Undefined when the file cannot be read or indexed; rejects only when the pack's limits or deadline refuse it. */
   load(path: string): Promise<PackSource | undefined>;
   /** Word matches as path and 1-based line; `paths` limits the search to those files. */
   references(symbol: string, paths?: string[]): Promise<{ path: string; line: number }[]>;
