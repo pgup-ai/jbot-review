@@ -65,6 +65,7 @@ import {
   isUnresolvedFinding,
   isPrCleanAfterRun,
   openFindingThreadIds,
+  recheckReasons,
   selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
@@ -4474,14 +4475,9 @@ export async function requestFindingVerdicts(params: {
             verdict.verdict === 'confirmed' && resolvesFinding(targets[verdict.index], verdict),
         );
         const rest = targets.filter((_, index) => !confirmed.some((v) => v.index === index));
-        // Why each goes back: the pass's own verdict, a confirmation the evidence check rejected, or none.
-        const reasons = new Map<string, number>();
-        for (const target of rest) {
-          const own = first?.find((v) => v.index === targets.indexOf(target))?.verdict;
-          const reason = own === 'confirmed' ? 'unbacked confirmation' : (own ?? 'no verdict');
-          reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
-        }
-        const why = [...reasons].map(([reason, count]) => `${reason} ${count}`).join(', ');
+        const why = recheckReasons(
+          rest.map((target) => first?.find((v) => v.index === targets.indexOf(target))?.verdict),
+        );
         params.log(
           `Tool-less verification confirmed ${confirmed.length}/${targets.length}; re-checking ${rest.length} with tools${why ? ` (${why})` : ''}.`,
         );

@@ -12,6 +12,7 @@ import {
   isNoiseFile,
   isPrCleanAfterRun,
   openFindingThreadIds,
+  recheckReasons,
   resolveFindingAnchors,
   selectFindingIndexes,
   shouldPostReviewComment,
@@ -374,6 +375,16 @@ describe('applyFindingVerdicts', () => {
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
+  });
+});
+
+describe('recheckReasons', () => {
+  it('counts each re-checked finding by its own verdict, an unbacked confirmation, or none', () => {
+    assert.equal(
+      recheckReasons(['uncertain', 'refuted', 'confirmed', undefined, 'uncertain']),
+      'uncertain 2, refuted 1, unbacked confirmation 1, no verdict 1',
+    );
+    assert.equal(recheckReasons([]), '');
   });
 });
 

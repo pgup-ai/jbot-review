@@ -291,6 +291,16 @@ export function resolvesFinding(finding: Finding, verdict: FindingVerdict): bool
   return !confirmedFinding(finding, verdict).verificationUncertain;
 }
 
+/** Counts re-check reasons; a "confirmed" here is one the evidence check rejected. */
+export function recheckReasons(verdicts: (FindingVerdict['verdict'] | undefined)[]): string {
+  const counts = new Map<string, number>();
+  for (const verdict of verdicts) {
+    const reason = verdict === 'confirmed' ? 'unbacked confirmation' : (verdict ?? 'no verdict');
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts].map(([reason, count]) => `${reason} ${count}`).join(', ');
+}
+
 function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
   if (!isUnresolvedFinding(finding)) return finding;
   const confirmed = verdict.finding;
