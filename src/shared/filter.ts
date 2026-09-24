@@ -507,6 +507,7 @@ export function filterFindings(
   const publishable = new Set(
     unresolved
       .filter((finding) => finding.publishUnverified && shown(finding.publishUnverified))
+      .sort((a, b) => SEVERITY_RANK[a.publishUnverified!] - SEVERITY_RANK[b.publishUnverified!])
       .slice(0, Math.min(MAX_PUBLISHED_UNVERIFIED, room)),
   );
   const capped = unresolved.map((finding) =>

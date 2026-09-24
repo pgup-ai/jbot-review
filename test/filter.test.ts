@@ -414,6 +414,18 @@ describe('applyFindingVerdicts', () => {
       maxFindings: 0,
     });
     assert.equal(unchecked.filter((f) => f.publishUnverified).length, 2);
+    const ordered = filterFindings(
+      applyFindingVerdicts(
+        (['P2', 'P2', 'P0'] as const).map((severity) => finding({ severity })),
+        [0, 1, 2],
+        [],
+      ).findings,
+      { minSeverity: 'nit', maxFindings: 0 },
+    );
+    assert.deepEqual(
+      ordered.filter((f) => f.publishUnverified).map((f) => f.publishUnverified),
+      ['P2', 'P0'],
+    );
     const flagged = applyFindingVerdicts(findings, selected, []).findings;
     for (const [limits, posted] of [
       [{ minSeverity: 'nit', maxFindings: 2 }, 1],

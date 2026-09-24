@@ -3530,7 +3530,7 @@ async function runReviewPipeline(params: {
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, 'unverified-findings.json'),
-        JSON.stringify(candidateDiagnostics(headSha, withheld), null, 2) + '\n',
+        JSON.stringify(candidateDiagnostics(headSha, filteredFindings), null, 2) + '\n',
         { mode: 0o644 },
       );
       // Docker creates this artifact as root; the host uploader runs as the runner user.
