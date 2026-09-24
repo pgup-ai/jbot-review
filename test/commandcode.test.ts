@@ -155,7 +155,11 @@ describe('CommandCode CLI provider helpers', () => {
       assert.equal(effortOf(`commandcode/${glm}`, { reasoningEffort: 'medium' }), 'low');
     }
     // Models that declare medium get it for mains and low for aux sessions.
-    for (const model of ['gpt-5.6-luna', 'meta/muse-spark-1.3-contributor']) {
+    for (const model of [
+      'gpt-5.6-luna',
+      'meta/muse-spark-1.3-contributor',
+      'stealth/space-bunny-alpha',
+    ]) {
       assert.equal(effortOf(`commandcode/${model}`, { reasoningEffort: 'medium' }), 'medium');
       assert.equal(effortOf(`commandcode/${model}`, { reasoningEffort: 'low' }), 'low');
     }
@@ -163,6 +167,10 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(
       effortOf('commandcode/meta/muse-spark-1.3-contributor', { reasoningEffort: 'max' }, true),
       'xhigh',
+    );
+    assert.equal(
+      effortOf('commandcode/stealth/space-bunny-alpha', { reasoningEffort: 'max' }, true),
+      'high',
     );
     // Gapped ladder (low, medium, xhigh): an explicit high ties up to xhigh.
     const omni = 'commandcode/qwen/qwen3.8-omni-flash';
