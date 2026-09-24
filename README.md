@@ -411,14 +411,16 @@ The first review and uncertain follow-ups use full review. Dynamic fan-out is
 already enabled by default. An explicit review request or the existing
 `skip-unchanged: false` setting forces full review.
 
-A follow-up can reuse the last posted, completed review when its base, model,
-guidelines and review settings still match. The first version handles small
-modifications to existing JavaScript/TypeScript files. It expands the selected
-files through declarations, references and their directories, delivering each
-selected file's **complete PR patch**, not only its latest edit. It falls back to
-full review for uncertain history or dependencies, references outside the PR,
-contract changes, default-export modules, unresolved relative imports, broad
-changes, open findings, tool-less reviewers, explicit
+A follow-up can reuse the latest posted review that completed a baseline when
+its base, model, guidelines and review settings still match. A model pool counts
+as one setting, so the member a push draws does not force full review, and a
+later review that left a finding unverified keeps the earlier baseline. The
+first version handles small modifications to existing JavaScript/TypeScript
+files. It expands the selected files through declarations, references and their
+directories, delivering each selected file's **complete PR patch**, not only its
+latest edit. It falls back to full review for uncertain history or dependencies,
+references outside the PR, contract changes, default-export modules, unresolved
+relative imports, broad changes, open findings, tool-less reviewers, explicit
 reruns and auto-approval. Verification stays enabled according to its existing
 setting. Reports identify incremental reviews; telemetry records the baseline,
 selected/total files and fallback reason. Quiet clean runs keep the last posted

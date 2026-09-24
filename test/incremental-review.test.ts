@@ -166,7 +166,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       head,
       base,
       policy,
-      priorBody: body(reviewed, base),
+      // A later review that set no baseline does not hide the completed one before it.
+      priorBodies: [body(reviewed, base), 'A later review with an unverified finding.'],
     };
     const result = await planIncrementalReview(input);
     assert.equal(result.mode, 'incremental');
@@ -176,7 +177,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     );
     for (const [overrides, reason] of [
       [{ forceFull: true }, 'explicit-or-incomplete-review'],
-      [{ priorBody: '' }, 'no-completed-baseline'],
+      [{ priorBodies: [] }, 'no-completed-baseline'],
       [{ base: head }, 'base-changed'],
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
@@ -202,7 +203,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         await planIncrementalReview({
           ...input,
           head: commit(),
-          priorBody: body(outsideHead, base),
+          priorBodies: [body(outsideHead, base)],
         })
       ).reason,
       'references-outside-pr',
@@ -227,7 +228,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       const plan = await planIncrementalReview({
         ...input,
         head: commit(),
-        priorBody: body(prior, base),
+        priorBodies: [body(prior, base)],
         files: [...files, { filename: target, patch: '@@ -2 +2 @@\n- return 1;\n+ return 0;' }],
       });
       assert.equal(plan.mode, 'full', target);
@@ -243,7 +244,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         await planIncrementalReview({
           ...input,
           head: commit(),
-          priorBody: body(defaultBaseline, base),
+          priorBodies: [body(defaultBaseline, base)],
           files: [
             ...files,
             { filename: 'pkg/index.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 0;' },
@@ -266,7 +267,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       const plan = await planIncrementalReview({
         ...input,
         head: commit(),
-        priorBody: body(prior, base),
+        priorBodies: [body(prior, base)],
         files: [
           ...files,
           { filename: 'ledger/listener.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 2;' },

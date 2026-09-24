@@ -129,7 +129,8 @@ export async function planIncrementalReview(input: {
   head?: string;
   base?: string;
   policy: string;
-  priorBody?: string;
+  /** Prior jbot review bodies, oldest first. */
+  priorBodies?: string[];
   forceFull?: boolean;
   worktree?: boolean;
 }): Promise<IncrementalReviewPlan> {
@@ -139,7 +140,9 @@ export async function planIncrementalReview(input: {
     files: input.files,
   });
   if (input.forceFull) return full('explicit-or-incomplete-review');
-  const baseline = reviewBaseline(input.priorBody ?? '');
+  // A later review that could not set a baseline (a finding left unverified, a session
+  // incomplete) does not erase an earlier one: the follow-up still covers every change since it.
+  const baseline = (input.priorBodies ?? []).map(reviewBaseline).reverse().find(Boolean);
   if (!baseline) return full('no-completed-baseline');
   if (baseline.base !== input.base) return full('base-changed');
   if (baseline.policy !== input.policy) return full('policy-changed');

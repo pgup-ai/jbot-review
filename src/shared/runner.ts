@@ -1527,11 +1527,16 @@ async function runReviewPipeline(params: {
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
-    model,
-    auxModel,
-    baseURL,
-    auxBaseURL: options.auxBaseURL,
-    modelOptions: options.modelOptions,
+    // The configuration hash covers a model pool; the member a push draws is not a policy change.
+    ...((options.modelPool?.length ?? 0) > 1
+      ? {}
+      : {
+          model,
+          auxModel,
+          baseURL,
+          auxBaseURL: options.auxBaseURL,
+          modelOptions: options.modelOptions,
+        }),
     guidelines: policyGuidelines,
     title: pullTitle,
     body: pullBody,
@@ -1545,7 +1550,9 @@ async function runReviewPipeline(params: {
     head: headSha,
     base: baseSha,
     policy: scopePolicy,
-    priorBody: localDiff?.priorReview ?? priorJbotReviewGroups.at(-1)?.body,
+    priorBodies: localDiff?.priorReview
+      ? [localDiff.priorReview]
+      : priorJbotReviewGroups.map((group) => group.body),
     forceFull:
       !options.skipUnchanged ||
       options.autoApprove ||
