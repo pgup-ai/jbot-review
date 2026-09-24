@@ -1518,21 +1518,11 @@ async function runReviewPipeline(params: {
 
   const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
-  const discoveredGuidelines = rankGuidelineSections(applicable, changedFiles);
   log(
-    `Guideline scope: ${discoveredGuidelines.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - discoveredGuidelines.docs.length} explicitly scoped documents excluded.`,
+    `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
   );
-  const guidelines = formatGuidelines(discoveredGuidelines);
   // Reuse and incremental policies hash every applicable rule, not this diff's ranked render.
   const policyGuidelines = JSON.stringify(applicable);
-  const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
-    forFiles: changedFiles,
-  });
-  if (guidelines) {
-    log(
-      `Guidelines loaded (${Buffer.byteLength(guidelines)} bytes; finder slice ${Buffer.byteLength(finderGuidelines)} bytes).`,
-    );
-  }
 
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
@@ -1588,14 +1578,23 @@ async function runReviewPipeline(params: {
   };
   files = reviewScope.files;
   const incrementalContext = buildIncrementalReviewContext(reviewScope, fullReviewFiles);
+  const reviewedFiles = files.map((file) => file.filename);
+  // Rank by the files this review covers, which an incremental follow-up narrows.
+  const discoveredGuidelines = rankGuidelineSections(applicable, reviewedFiles);
+  const guidelines = formatGuidelines(discoveredGuidelines);
+  if (guidelines) {
+    const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
+      forFiles: reviewedFiles,
+    });
+    log(
+      `Guidelines loaded (${Buffer.byteLength(guidelines)} bytes; finder slice ${Buffer.byteLength(finderGuidelines)} bytes).`,
+    );
+  }
   const followupGuidelines =
     reviewScope.mode === 'incremental'
-      ? applicableGuidelines(
-          discoveredGuidelines,
-          files.map((file) => file.filename),
-        )
+      ? applicableGuidelines(discoveredGuidelines, reviewedFiles)
       : undefined;
-  changedFiles.splice(0, changedFiles.length, ...files.map((file) => file.filename));
+  changedFiles.splice(0, changedFiles.length, ...reviewedFiles);
   log(
     `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
   );
