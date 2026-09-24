@@ -273,6 +273,7 @@ import {
   formatDiffScope,
   formatReviewCommits,
   formatContextBudget,
+  rankGuidelineSections,
   selectFinderGuidelineText,
   truncatePrBody,
   type LinkedIssue,
@@ -1516,19 +1517,12 @@ async function runReviewPipeline(params: {
   );
 
   const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
-  const discoveredGuidelines = applicableGuidelines(loadedGuidelines, changedFiles);
+  const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
   log(
-    `Guideline scope: ${discoveredGuidelines.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - discoveredGuidelines.docs.length} explicitly scoped documents excluded.`,
+    `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
   );
-  const guidelines = formatGuidelines(discoveredGuidelines);
-  const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
-    forFiles: changedFiles,
-  });
-  if (guidelines) {
-    log(
-      `Guidelines loaded (${Buffer.byteLength(guidelines)} bytes; finder slice ${Buffer.byteLength(finderGuidelines)} bytes).`,
-    );
-  }
+  // Reuse and incremental policies hash every applicable rule, not this diff's ranked render.
+  const policyGuidelines = JSON.stringify(applicable);
 
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
@@ -1538,7 +1532,7 @@ async function runReviewPipeline(params: {
     baseURL,
     auxBaseURL: options.auxBaseURL,
     modelOptions: options.modelOptions,
-    guidelines,
+    guidelines: policyGuidelines,
     title: pullTitle,
     body: pullBody,
     reviewer: runIdentity(process.env).reviewerRevision,
@@ -1584,14 +1578,23 @@ async function runReviewPipeline(params: {
   };
   files = reviewScope.files;
   const incrementalContext = buildIncrementalReviewContext(reviewScope, fullReviewFiles);
+  const reviewedFiles = files.map((file) => file.filename);
+  // Rank by the files this review covers, which an incremental follow-up narrows.
+  const discoveredGuidelines = rankGuidelineSections(applicable, reviewedFiles);
+  const guidelines = formatGuidelines(discoveredGuidelines);
+  if (guidelines) {
+    const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
+      forFiles: reviewedFiles,
+    });
+    log(
+      `Guidelines loaded (${Buffer.byteLength(guidelines)} bytes; finder slice ${Buffer.byteLength(finderGuidelines)} bytes).`,
+    );
+  }
   const followupGuidelines =
     reviewScope.mode === 'incremental'
-      ? applicableGuidelines(
-          discoveredGuidelines,
-          files.map((file) => file.filename),
-        )
+      ? applicableGuidelines(discoveredGuidelines, reviewedFiles)
       : undefined;
-  changedFiles.splice(0, changedFiles.length, ...files.map((file) => file.filename));
+  changedFiles.splice(0, changedFiles.length, ...reviewedFiles);
   log(
     `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
   );
@@ -1672,6 +1675,9 @@ async function runReviewPipeline(params: {
     options.experiment.reuse,
   );
   const packSupplied = new Map<string, SuppliedContext>();
+  // Served main-page packs by changed file, so tool-less verification sees what the finders saw.
+  const verifierPacks = new Map<string, string[]>();
+  const verifierPacksFor = (finding: Finding) => verifierPacks.get(finding.path) ?? [];
   const findingSources =
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
@@ -2539,10 +2545,10 @@ async function runReviewPipeline(params: {
         ...Object.keys(REVIEW_LENSES).map((key) => `review-${key}`),
       ].map((session) =>
         session === 'guideline-compliance'
-          ? assembleGuidelineCompliancePrompt('', guidelines)
+          ? assembleGuidelineCompliancePrompt('', policyGuidelines)
           : assembleReviewPrompt(
               '',
-              guidelines,
+              policyGuidelines,
               REVIEW_LENSES[session.slice(7)],
               options.evidenceQuotes,
               options.embeddedFirstPrompt,
@@ -2769,10 +2775,13 @@ async function runReviewPipeline(params: {
         log,
         usageTrailer,
       );
-      for (const { row, supplied } of packs) {
+      for (const [index, { row, supplied, text }] of packs.entries()) {
         if (supplied)
           for (const label of [row.session, `${row.session}-retry`])
             packSupplied.set(label, supplied);
+        if (text)
+          for (const file of shardPlans[index].assignedFiles)
+            verifierPacks.set(file, [...(verifierPacks.get(file) ?? []), text]);
         telemetry.recordContextPack(row);
       }
     } else await addReviewEvidence(shardPlans, evidence, renderMainPrompt, mainPromptBudget, log);
@@ -3014,9 +3023,14 @@ async function runReviewPipeline(params: {
             )
           : assembleGuidelineCompliancePrompt(context, rules);
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
+      // The pack's callers replace the usage list; pages it cannot serve get it back as a trailer.
+      const usageTrailer = lens && packPages ? blastRadiusBlock : '';
       const plans = buildAuxiliaryPlans({
         coreContext: lens
-          ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
+          ? joinContext(
+              UNTRUSTED_PR_CONTENT_NOTE,
+              ...lensContextBlocks.filter((block) => block !== usageTrailer),
+            )
           : packPages
             ? joinContext(fullCoreContext, COMPLIANCE_PACK_NOTE)
             : fullCoreContext,
@@ -3026,7 +3040,8 @@ async function runReviewPipeline(params: {
         renderPrompt: render,
         guidelines: lens ? lensRules : complianceGuidelines,
         guidelineLabels: (followupGuidelines ?? discoveredGuidelines).docs.map((doc) => doc.label),
-        evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
+        evidenceReserveBytes:
+          REVIEW_EVIDENCE_BYTES + (usageTrailer ? Buffer.byteLength(usageTrailer) + 2 : 0),
         embeddedFirstPrompt: packPages,
         numberedDiff: packPages,
       });
@@ -3045,6 +3060,7 @@ async function runReviewPipeline(params: {
         render,
         auxPromptBudget,
         log,
+        usageTrailer,
       );
       const ordered = prioritizeAuxiliaryPlans(plans);
       // Label pack rows the way the pages' sessions are labelled, after risk ordering.
@@ -3163,17 +3179,6 @@ async function runReviewPipeline(params: {
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
-    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
-      takeSettledAuxiliary(session, fallback, () => {
-        abandonedAuxLabels.add(session.label);
-        auxBackend.abortSessionsByLabel?.(session.label, log);
-        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
-        log(`Optional ${session.label} skipped: main review is complete; freeing session slots.`);
-      });
-    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
-      finishOptional(addressedPriorCheck, []),
-      finishOptional(changesSinceLastReview, ''),
-    ]);
     // Overlap only with auxiliary settling; the final pipeline owns telemetry and late arrivals.
     const startOverlapVerification = async (): Promise<
       { targets: Finding[]; verdicts: FindingVerdictList } | 'skipped'
@@ -3227,6 +3232,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
+        packsFor: verifierPacksFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3243,10 +3249,32 @@ async function runReviewPipeline(params: {
       });
       return { targets, verdicts };
     };
-    const overlapVerification =
-      options.verifyOverlapGrace && verificationEnabled
-        ? startOverlapVerification().catch(() => 'skipped' as const)
-        : undefined;
+    const verifyOverlap = options.verifyOverlapGrace && verificationEnabled;
+    // Optional bookkeeping runs while finders settle, except when overlap verification would
+    // queue behind it on a single aux slot; what is still running is dropped.
+    const optionalEarly =
+      verifyOverlap &&
+      (sessionCap === 1 ||
+        providerSessionConcurrency(auxProviderID) === 1 ||
+        serializedBackends.has(auxBaseBackend));
+    const finishOptional = () => {
+      const skip = (label: string) => () => {
+        abandonedAuxLabels.add(label);
+        auxBackend.abortSessionsByLabel?.(label, log);
+        telemetry.recordCoverage({ session: label, state: 'skipped' });
+        log(
+          `Optional ${label} skipped: still running when ${optionalEarly ? 'main review completed' : 'the finders settled'}.`,
+        );
+      };
+      return Promise.all([
+        takeSettledAuxiliary(addressedPriorCheck, [], skip(addressedPriorCheck.label)),
+        takeSettledAuxiliary(changesSinceLastReview, '', skip(changesSinceLastReview.label)),
+      ]);
+    };
+    const optionalAtMainEnd = optionalEarly ? finishOptional() : undefined;
+    const overlapVerification = verifyOverlap
+      ? startOverlapVerification().catch(() => 'skipped' as const)
+      : undefined;
     const releaseReservations = () => {
       sessionSlots.releaseReservation();
       providerLimiters.releaseReservations();
@@ -3322,6 +3350,8 @@ async function runReviewPipeline(params: {
       ),
     ]);
     graceDone();
+    const [verifiedAddressedPriorComments, changesSinceText] = await (optionalAtMainEnd ??
+      finishOptional());
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -3392,6 +3422,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
+        packsFor: verifierPacksFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3417,6 +3448,7 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
+        packsFor: verifierPacksFor,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -4232,6 +4264,7 @@ async function verifyFindings(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
+  packsFor?: (finding: Finding) => string[];
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4284,6 +4317,8 @@ export async function requestFindingVerdicts(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
+  /** Context packs of the targets' pages for the tool-less pass; each goes in only while it fits. */
+  packsFor?: (finding: Finding) => string[];
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4357,6 +4392,26 @@ export async function requestFindingVerdicts(params: {
       } else if (params.prepareEvidence) {
         params.log('Skipping optional evidence preparation to preserve verification time.');
       }
+      // Only the tool-less pass gets packs; the capped re-check reads what it needs.
+      let toolLessContext = context;
+      const packed = new Set<string>();
+      if (params.toolLessFirst)
+        for (const pack of new Set(targets.flatMap((target) => params.packsFor?.(target) ?? []))) {
+          const enriched = joinContext(toolLessContext, pack);
+          if (
+            params.promptBudget &&
+            !measureReviewPrompt(
+              assembleFindingVerificationPrompt(enriched, targets, true),
+              params.promptBudget,
+            ).fits
+          ) {
+            params.log('Context pack omitted from verification: assembled prompt exceeds budget.');
+            continue;
+          }
+          toolLessContext = enriched;
+          sourceContext = joinContext(sourceContext, pack);
+          packed.add(pack);
+        }
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4365,7 +4420,7 @@ export async function requestFindingVerdicts(params: {
       const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') =>
         params.backend.runFindingVerification(
           params.model,
-          context,
+          mode === 'single-shot' ? toolLessContext : context,
           findings,
           params.log,
           remaining(),
@@ -4383,6 +4438,7 @@ export async function requestFindingVerdicts(params: {
               await (params.sourceContext?.([target]) ??
                 buildFindingSourceContext(params.workspace, [target])),
               preparedSources.get(target) ?? '',
+              ...(params.packsFor?.(target) ?? []).filter((pack) => packed.has(pack)),
             ),
           );
         }

@@ -1025,11 +1025,16 @@ CommandCode and tool-less backends do not receive them.
 | `jev`                    | Jev ranks caller excerpts from changed exported symbols                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.                                                                                                                        |
 | `context-pack` (default) | `diff-batches`, plus a per-page context pack before the first turn: the code around each change, the definitions it uses, import-linked callers, the diffs of changed files the page imports from other pages, and a directory map. Main and guideline-compliance pages get the pack and a line-numbered diff that lists whitespace-only lines; pack pages drop caller evidence and the changed-symbol usage list. The finder's guideline excerpt drops pointer-only docs, and verification gets the slim context | Default. Live A/Bs on a private repository's PRs cut review turns 30–45% on a fast model and 8% on `deepseek-v4.1-flash`; accepted-issue recall stayed within run-to-run noise. `npm run replay:context-pack` scores packs offline. OpenCode also reports supplied re-reads. |
 
+A pack that reaches its file or byte limit still serves what it collected and
+lists the rest. A changed JS/TS file the pack could not read or index still sends
+the page back to caller evidence.
+
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own
-session with tools. Finding verification starts with a tool-less pass. Its
-evidence-backed confirmations are final; the other findings get a re-check capped
-at six tool turns.
+session with tools and the usage list. Finding verification starts with a
+tool-less pass that also gets the main-page packs of the findings' files while
+they fit its budget. Its evidence-backed confirmations are final; the other
+findings get a re-check capped at six tool turns.
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
 compares historical benefits, quality failures and sample limits. The
@@ -1406,7 +1411,16 @@ Matched headings from the same file are combined. A whole-file entry wins over
 section entries; mixing named headings with numbered-rule routes also keeps the
 whole file. A missing or ambiguous heading falls back to the whole file.
 Omitted sections are disclosed. Files without a matched section route retain
-normal discovery, and all guideline byte limits still apply.
+normal discovery, and all guideline byte limits still apply. A numbered rule such
+as `TS-13.1` also brings its parent's own text (§13 up to its first sub-rule)
+when that text is at most 2 KB, since a parent usually states the defaults its
+sub-rules refine.
+
+Guideline files load whole, up to 128 KB each and 1 MB in total. Within each
+file, the sections that name a changed directory or file go first, so a session
+whose byte budget cannot hold the whole file keeps those sections instead of its
+opening. When guideline compliance cannot fit every section, its budget note
+names each file's skipped sections so it can open the ones that apply.
 
 No additional routing file or flag is needed. Logs report
 scope exclusions, guideline parts, prompt bytes, and page completion. The existing

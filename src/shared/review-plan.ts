@@ -441,6 +441,7 @@ export async function addReviewEvidence(
 interface ContextPackResult {
   row: Omit<ContextPackTelemetryRow, 'kind'>;
   supplied?: SuppliedContext;
+  text?: string;
 }
 
 /** Puts each page's context pack before its diff; pages it cannot serve are left unchanged. */
@@ -472,7 +473,7 @@ export async function addContextPack(params: {
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
           .catch(() => undefined);
         // A directory map alone would cost the page its caller evidence for no code, and a
-        // partial pack may be missing callers, so both keep today's evidence instead.
+        // partial pack is missing a changed file's own code, so both keep today's evidence.
         let reason: ContextPackResult['row']['reason'] = !pack
           ? 'error'
           : pack.state === 'partial'
@@ -506,7 +507,7 @@ export async function addContextPack(params: {
           uncollected: pack?.uncollected ?? 0,
           slices: served?.slices ?? {},
         };
-        results[index] = { row, supplied: served?.supplied };
+        results[index] = { row, supplied: served?.supplied, text: served?.text };
         const { session: _session, slices: _slices, ...logged } = row;
         params.log(`Context pack (${plan.label}): ${JSON.stringify(logged)}.`);
       }

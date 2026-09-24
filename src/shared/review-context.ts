@@ -393,6 +393,99 @@ export function applicableGuidelines(
   };
 }
 
+// Layout and layer words every repo shares; they name no feature.
+const GENERIC_PATH_WORD =
+  /^(?:src|libs?|apps?|index|tests?|specs?|e2e|api|controllers?|services?|modules?|utils?|helpers|dtos?|entit(?:y|ies)|types|repositor(?:y|ies))$/;
+
+/** Words of a path or prose, space-padded so ` term ` matches whole words. */
+function termText(text: string): string {
+  const words = text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  return ` ${words} `;
+}
+
+/**
+ * Moves each doc's sections that name a changed directory or file ahead of the
+ * rest, so a byte budget that cuts the doc keeps them instead of its opening.
+ * Terms are weighted by rarity; one in over a quarter of all sections is ignored.
+ */
+export function rankGuidelineSections(
+  discovered: DiscoveredGuidelines,
+  changedFiles: string[],
+): DiscoveredGuidelines {
+  const split = discovered.docs.map((doc) => {
+    const lines = doc.text.split('\n');
+    const levels = new Map(markdownHeadings(lines).map(({ line, level }) => [line, level]));
+    const starts = [0, ...[...levels.keys()].filter((line) => line > 0), lines.length];
+    return starts.slice(0, -1).map((start, index) => {
+      const text = lines.slice(start, starts[index + 1]).join('\n');
+      return {
+        text,
+        level: levels.get(start) ?? 0,
+        words: termText(text),
+        heading: levels.has(start) ? termText(lines[start]) : '',
+      };
+    });
+  });
+  const sections = split.flat();
+  const phrases = changedFiles
+    .flatMap((file) => file.replace(/\.[^./]+$/, '').split(/[/.]/))
+    .map((part) => termText(part).trim().split(' '))
+    .filter((words) => words.some((word) => !GENERIC_PATH_WORD.test(word)));
+  const terms = new Set(
+    [...phrases.map((words) => words.join(' ')), ...phrases.flat()].filter(
+      (term) => term.length >= 3 && !GENERIC_PATH_WORD.test(term),
+    ),
+  );
+  const weights = [...terms].flatMap((term) => {
+    const found = sections.filter(({ words }) => words.includes(` ${term} `)).length;
+    return found && found <= Math.max(1, sections.length / 4)
+      ? [{ term: ` ${term} `, weight: Math.log(1 + sections.length / found) }]
+      : [];
+  });
+  return {
+    ...discovered,
+    docs: discovered.docs.map((doc, index) => {
+      const scored = split[index].map((section, order) => ({
+        text: section.text,
+        level: section.level,
+        order,
+        score: weights.reduce(
+          (sum, { term, weight }) =>
+            section.words.includes(term)
+              ? sum + weight * (section.heading.includes(term) ? 2 : 1)
+              : sum,
+          0,
+        ),
+      }));
+      if (!scored.some(({ score }) => score > 0)) return doc;
+      const emitted = new Set<number>();
+      const parts: string[] = [];
+      for (const section of [...scored].sort((a, b) => b.score - a.score || a.order - b.order)) {
+        // A moved subsection keeps its short `##`-and-deeper parents' lead-in ahead of it;
+        // a `#` overview stays put, or small budgets would open on it again.
+        const parents = [];
+        for (let level = section.level, i = section.order - 1; i >= 0 && level > 2; i--) {
+          const parent = scored[i];
+          if (!parent.level || parent.level >= level) continue;
+          if (parent.level === 1) break;
+          if (Buffer.byteLength(parent.text) <= MAX_PARENT_RULE_BYTES) parents.unshift(parent);
+          level = parent.level;
+        }
+        for (const { order, text } of [...parents, section]) {
+          if (emitted.has(order)) continue;
+          emitted.add(order);
+          parts.push(text);
+        }
+      }
+      return { ...doc, text: parts.join('\n') };
+    }),
+  };
+}
+
 const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
 
 /**
@@ -690,13 +783,15 @@ const SCOPED_GUIDELINE_FILES = [
 ];
 
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
-const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
+// Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.
+const MAX_GUIDELINE_FILE_BYTES = 128 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
-const MAX_GUIDELINE_CANDIDATE_BYTES = 512 * 1024;
+const MAX_GUIDELINE_CANDIDATE_BYTES = 1024 * 1024;
 const MAX_GUIDELINE_FRAGMENT_BYTES = 4 * 1024;
 // A rule doc is read in full to locate a section (which can sit past the
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
+const MAX_PARENT_RULE_BYTES = 2 * 1024;
 
 // Routes are PR-controlled and can cite hundreds of sections with arbitrarily
 // long dotted ids, so their omission metadata needs its own bound.
@@ -980,6 +1075,22 @@ export async function discoverGuidelineDocs(
     // the MAX_RULE_DOC_BYTES read) — named in the omission note, never dropped
     // silently.
     const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.section);
+    // A sub-rule refines its parent's defaults (TS-13.1 under §13): add each uncited
+    // parent's own text, up to its first sub-heading, when it is short enough to be
+    // defaults. A longer lead-in is a rule body the route did not cite.
+    const parents = uniqueSections.flatMap((section) => {
+      const parts = section.split('.');
+      return parts.slice(1).map((_, index) => parts.slice(0, index + 1).join('.'));
+    });
+    for (const parent of new Set(parents)) {
+      if (uniqueSections.includes(parent)) continue;
+      const lines = extractRuleSection(source.text, parent)?.split('\n') ?? [];
+      const next = markdownHeadings(lines).find(({ line }) => line > 0)?.line;
+      const own = lines.slice(0, next).join('\n').trim();
+      if (own.includes('\n') && Buffer.byteLength(own) <= MAX_PARENT_RULE_BYTES)
+        found.push({ section: parent, text: own });
+    }
+    found.sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
     // A nested child (`### 6.1` under `## 6`) is already inside its selected
     // parent's extract — drop the duplicate so it is neither emitted nor budgeted
     // twice. Strictly-larger guard: equal-length distinct sections keep both.
@@ -1251,10 +1362,25 @@ function renderGuidelineFragment(fragment: GuidelineFragment): string {
   return `### ${fragment.label}\n${fragment.text}`;
 }
 
+/** Each omitted source with the headings of its sections past the included prefix. */
+function skippedSections(sources: GuidelineFragmentSource[], selected: GuidelineFragment[]) {
+  return sources.flatMap((source) => {
+    const included = selected
+      .filter((fragment) => fragment.sourceId === source.id)
+      .reduce((text, fragment) => text + fragment.text, '');
+    if (included.length === source.text.length) return [];
+    const from = included.split('\n').length - 1;
+    const headings = markdownHeadings(source.text.split('\n'))
+      .filter(({ line, title }) => line >= from && title)
+      .map(({ title }) => title);
+    return [headings.length ? `${source.label} (${boundedJoin(headings, 256)})` : source.label];
+  });
+}
+
 function renderGuidelineBlock(
   sources: GuidelineFragmentSource[],
   capBytes: number,
-  buildNotice: (omittedSourceLabels: string[]) => string,
+  buildNotice: (omittedSourceLabels: string[], skipped: () => string[]) => string,
 ): string {
   if (capBytes <= 0) return '';
   const fragments = buildFairGuidelineFragments(sources, capBytes, MAX_GUIDELINE_FRAGMENT_BYTES);
@@ -1263,7 +1389,7 @@ function renderGuidelineBlock(
 
   for (;;) {
     const notice = truncateUtf8(
-      buildNotice(plan.omittedSourceLabels),
+      buildNotice(plan.omittedSourceLabels, () => skippedSections(sources, plan.selected)),
       Math.min(3 * 1024, Math.floor(capBytes / 3)),
     );
     const separator = plan.text && notice ? '\n\n' : '';
@@ -1326,11 +1452,11 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
   return renderGuidelineBlock(
     guidelineSources(discovered.docs),
     MAX_GUIDELINE_TOTAL_BYTES,
-    (omitted) => {
+    (omitted, skipped) => {
       const notes: string[] = [];
       if (omitted.length > 0) {
         notes.push(
-          `Guidance fragments were omitted to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget; ${omittedLabelText(omitted)}.`,
+          `Guidance fragments were omitted to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget; skipped sections by file: ${boundedJoin(skipped(), MAX_SKIPPED_SECTIONS_BYTES)}.`,
         );
       }
       if (discovered.budgetExhausted) {
@@ -1360,6 +1486,8 @@ export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
 export const MAX_LENS_GUIDELINE_BYTES = 8 * 1024;
 // Rendered omitted-doc labels in the budget note (invariant #4 backstop).
 const MAX_OMITTED_LABEL_BYTES = 1024;
+// Skipped section headings tell a session with tools which part of a file to open.
+const MAX_SKIPPED_SECTIONS_BYTES = 1536;
 
 /**
  * Relevance-ranked, byte-capped render for finder sessions (shards + lenses).

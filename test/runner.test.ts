@@ -1911,6 +1911,60 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
   }
 });
 
+it('gives the tool-less verification pass page packs that fit and accepts quotes only from shown packs', async () => {
+  const targets: Finding[] = ['a', 'b', 'c'].map((name) => ({
+    path: `${name}.ts`,
+    line: 1,
+    severity: 'P2',
+    title: name,
+    body: 'claim',
+  }));
+  const packs: Record<string, string[]> = {
+    'a.ts': ['page pack: caller(a)'],
+    'b.ts': ['page pack: caller(a)'],
+    'c.ts': ['p'.repeat(60000)],
+  };
+  const logs: string[] = [];
+  const seen: Record<string, string> = {};
+  const verdicts = await requestFindingVerdicts({
+    workspace: '/unused',
+    model: 'test/model',
+    prContext: 'diff',
+    sourceContext: async (findings) => findings.map((f) => `source of ${f.path}`).join('\n'),
+    packsFor: (finding) => packs[finding.path],
+    promptBudget: { ...reviewPromptBudget('test'), transportBytes: 40000 },
+    targets,
+    toolLessFirst: true,
+    log: (message) => logs.push(message),
+    backend: {
+      async runFindingVerification(_model, context, findings, ...rest) {
+        const mode = String(rest.at(-1));
+        seen[mode] = context;
+        if (mode === 'capped')
+          return findings.map((_, index) => ({ index, verdict: 'refuted' as const }));
+        const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
+        return findings.map((_, index) => ({
+          index,
+          verdict: 'confirmed' as const,
+          reason: 'trigger',
+          finding: { ...finding, evidence: 'caller(a)' },
+        }));
+      },
+    },
+  });
+  // Shown once for the two findings on its page, never to the capped re-check; the oversized pack is left out.
+  assert.equal(seen['single-shot'].split('page pack: caller(a)').length, 2);
+  assert.doesNotMatch(seen.capped, /page pack/);
+  assert.doesNotMatch(seen['single-shot'], /p{1000}/);
+  assert.ok(logs.some((message) => /Context pack omitted from verification/.test(message)));
+  // c quoted code that only another page's pack showed, so it went to the re-check.
+  assert.deepEqual(verdicts.map((v) => `${v.index}:${v.verdict}`).sort(), [
+    '0:confirmed',
+    '1:confirmed',
+    '2:refuted',
+  ]);
+});
+
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
   const findings: Finding[] = Array.from({ length: 23 }, (_, i) => ({
     path: 'missing.ts',

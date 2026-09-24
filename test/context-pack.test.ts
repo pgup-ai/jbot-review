@@ -217,6 +217,22 @@ test('a source the provider cannot deliver makes the pack partial', async () => 
     assert.equal(pack.uncollected, 1);
     assert.match(pack.text, /- 1 item\(s\) not collected within the pack's time and file limits/);
   }
+  // A capped read of another file is listed as uncollected but keeps the pack.
+  const base = provider();
+  const capped = await buildContextPack(
+    PAGE,
+    CHANGED,
+    {
+      ...base,
+      load: async (path) =>
+        PAGE.some((file) => file.filename === path)
+          ? base.load(path)
+          : Promise.reject(new Error('context pack file cap')),
+    },
+    64 * 1024,
+  );
+  assert.equal(capped.state, 'complete');
+  assert.ok(capped.uncollected > 0);
   const docs = [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b' }];
   const unindexed = { ...provider(), load: async () => undefined };
   assert.equal((await buildContextPack(docs, docs, unindexed, 64 * 1024)).state, 'complete');
