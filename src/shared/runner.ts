@@ -1678,13 +1678,13 @@ async function runReviewPipeline(params: {
   // Served main-page packs by changed file, so tool-less verification sees what the finders saw.
   const verifierPacks = new Map<string, string[]>();
   // The tool-less verifier also gets the rule sections a finding cites; it cannot open them itself.
-  const toolLessContextFor = (finding: Finding) => [
-    ...(verifierPacks.get(finding.path) ?? []),
-    ...citedGuidelineSections(
+  const toolLessContextFor = (finding: Finding) => ({
+    packs: verifierPacks.get(finding.path) ?? [],
+    rules: citedGuidelineSections(
       [finding.title, finding.body, finding.evidence ?? ''].join('\n'),
       applicable.docs,
     ),
-  ];
+  });
   const findingSources =
     evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
       ? (targets: Finding[]) => evidence.sourceContext(targets)
@@ -4271,7 +4271,7 @@ async function verifyFindings(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  toolLessContextFor?: (finding: Finding) => string[];
+  toolLessContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4324,8 +4324,8 @@ export async function requestFindingVerdicts(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  /** Context the tool-less pass gets per target (page packs, cited rule sections); each goes in while it fits. */
-  toolLessContextFor?: (finding: Finding) => string[];
+  /** Context the tool-less pass gets per target; each item goes in while it fits. */
+  toolLessContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4409,10 +4409,12 @@ export async function requestFindingVerdicts(params: {
           params.promptBudget,
         ).fits;
       let omitted = 0;
-      if (params.toolLessFirst)
-        for (const item of new Set(
-          targets.flatMap((target) => params.toolLessContextFor?.(target) ?? []),
-        )) {
+      if (params.toolLessFirst) {
+        const extras = targets.map(
+          (target) => params.toolLessContextFor?.(target) ?? { packs: [], rules: [] },
+        );
+        const rules = new Set(extras.flatMap((extra) => extra.rules));
+        for (const item of new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules]))) {
           const enriched = joinContext(toolLessContext, item);
           if (!fits(enriched)) {
             params.log(
@@ -4422,9 +4424,11 @@ export async function requestFindingVerdicts(params: {
             continue;
           }
           toolLessContext = enriched;
-          sourceContext = joinContext(sourceContext, item);
+          // A quoted rule shows the rule exists, not that the code breaks it.
+          if (!rules.has(item)) sourceContext = joinContext(sourceContext, item);
           packed.add(item);
         }
+      }
       if (omitted) {
         const noted = joinContext(toolLessContext, verifierOmissionNote(omitted));
         if (fits(noted)) toolLessContext = noted;
@@ -4455,7 +4459,9 @@ export async function requestFindingVerdicts(params: {
               await (params.sourceContext?.([target]) ??
                 buildFindingSourceContext(params.workspace, [target])),
               preparedSources.get(target) ?? '',
-              ...(params.toolLessContextFor?.(target) ?? []).filter((item) => packed.has(item)),
+              ...(params.toolLessContextFor?.(target).packs ?? []).filter((item) =>
+                packed.has(item),
+              ),
             ),
           );
         }
