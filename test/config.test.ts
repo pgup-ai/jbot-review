@@ -386,10 +386,12 @@ describe('openai-compatible custom provider', () => {
     for (const providerID of ['openai', 'tokenrouter', 'opencode', 'commandcode']) {
       assert.deepEqual(defaultModelOptions(providerID, 'm'), { reasoningEffort: 'low' });
     }
-    for (const providerID of ['opencode', 'opencode-go'])
-      assert.deepEqual(defaultModelOptions(providerID, 'space-bunny-free'), {
-        reasoningEffort: 'high',
-      });
+    for (const [providerID, modelID] of [
+      ['opencode', 'space-bunny-free'],
+      ['opencode-go', 'space-bunny-free'],
+      ['commandcode', 'stealth/space-bunny-alpha'],
+    ])
+      assert.deepEqual(defaultModelOptions(providerID, modelID), { reasoningEffort: 'high' });
     assert.deepEqual(auxModelOptionsFor('opencode', 'm', 'opencode', 'space-bunny-free'), {
       reasoningEffort: 'high',
     });

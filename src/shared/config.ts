@@ -390,6 +390,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     models: {
       // CommandCode CLI is not driven through opencode, so prompt-cache options do not apply.
       default: { promptCache: false },
+      // The same model as opencode's space-bunny; see DEEP_DEFAULT_MODELS.
+      'stealth/space-bunny-alpha': { defaultReasoningEffort: 'high' },
     },
   },
   cursor: {
