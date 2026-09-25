@@ -98,7 +98,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    the ordered `permissions` ruleset (config-level and repeated on
    `session.create`: `edit`/`external_directory`/`question` deny, the shell
    globs from `BASH_PERMISSIONS`, plus a `subagent` deny so no child session
-   escapes the env allowlist), the jbot plugin's `context` hook (removes
+   escapes the env allowlist and a `skill` deny so no skill catalog, from the
+   operator's HOME or the reviewed repo, reaches a prompt), the jbot plugin's
+   `context` hook (removes
    write/edit/patch/apply_patch/multiedit/question/subagent/task from every
    request and every tool for the single-shot agent, and drops the
    "Instructions from:" messages opencode's read tool injects for nested

@@ -222,8 +222,10 @@ const EFFORT_RESTRICTED_MODELS = {
   'mimo-v2.5': { reasoningEfforts: ['medium', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
-// "only `"auto"` is supported for `tool_choice`" (opencode-go and Zen free, 2026-09-24).
+// "only `"auto"` is supported for `tool_choice`" (opencode-go and Zen free, 2026-09-24; 1.2 on opencode-go, 2026-09-25).
 const AUTO_TOOL_CHOICE_MODELS = {
+  'muse-spark-1.2': { forcedToolChoice: false },
+  'muse-spark-1.2-contributor': { forcedToolChoice: false },
   'muse-spark-1.3': { forcedToolChoice: false },
   'muse-spark-1.3-contributor': { forcedToolChoice: false },
 } satisfies Record<string, ModelConfig>;

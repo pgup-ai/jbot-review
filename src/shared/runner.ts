@@ -853,7 +853,7 @@ export interface ReviewRunOptions {
   scrubSessionEnv?: boolean;
   /** Environment scoped to the opencode child process. */
   opencodeProxyEnv?: NodeJS.ProcessEnv;
-  /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
+  /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then opencode. */
   sdkEngine?: string;
   dryRun?: boolean;
   /** Approve an exact reviewed head when no new or open jbot findings remain. */
@@ -1140,7 +1140,7 @@ async function runReviewPipeline(params: {
       repository: `${owner}/${repo}`,
       identity: runIdentity(process.env),
       policy: runConfiguration(
-        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'auto' },
+        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'opencode' },
         model,
       ),
       ...(baseSha ? { baseSha } : {}),

@@ -163,20 +163,25 @@ describe('runReview on V2', () => {
         undefined,
         mode,
       );
-    await runFindingVerification(
-      runtime(verify),
+    for (const model of [
       'opencode-go/muse-spark-1.3-contributor',
-      'ctx',
-      [finding],
-      log,
-      undefined,
-      undefined,
-      undefined,
-      'capped',
-    );
+      'opencode-go/muse-spark-1.2-contributor',
+      'opencode/muse-spark-1.2',
+    ])
+      await runFindingVerification(
+        runtime(verify),
+        model,
+        'ctx',
+        [finding],
+        log,
+        undefined,
+        undefined,
+        undefined,
+        'capped',
+      );
     assert.deepEqual(
       [...verify.sessions.values()].map((session) => session.agent),
-      ['jbot-closed-book', 'jbot-verify', 'plan'],
+      ['jbot-closed-book', 'jbot-verify', 'plan', 'plan', 'plan'],
     );
     assert.match(verify.prompts[0]!.body.text, /have no tools on this call/);
   });
