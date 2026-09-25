@@ -166,6 +166,7 @@ describe('runReview on V2', () => {
     for (const model of [
       'opencode-go/muse-spark-1.3-contributor',
       'opencode-go/muse-spark-1.2-contributor',
+      'opencode/muse-spark-1.2',
     ])
       await runFindingVerification(
         runtime(verify),
@@ -180,7 +181,7 @@ describe('runReview on V2', () => {
       );
     assert.deepEqual(
       [...verify.sessions.values()].map((session) => session.agent),
-      ['jbot-closed-book', 'jbot-verify', 'plan', 'plan'],
+      ['jbot-closed-book', 'jbot-verify', 'plan', 'plan', 'plan'],
     );
     assert.match(verify.prompts[0]!.body.text, /have no tools on this call/);
   });

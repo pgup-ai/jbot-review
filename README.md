@@ -496,8 +496,8 @@ authenticated locally. The generator uses the npm versions pinned in the
 Docker image; Cursor comes from its vendor-installed binary, while Devin has no
 enumerable catalog command and is documented as that explicit boundary.
 
-**SDK engines.** Non-CLI providers run on the opencode server by default. Set
-the Action input `sdk-engine: auto` or, for hosted/local runs,
+**SDK engines.** Non-CLI providers other than Poolside run on the opencode server
+by default. Set the Action input `sdk-engine: auto` or, for hosted/local runs,
 `JBOT_SDK_ENGINE=auto` to route a session to the in-process
 [pi SDK](https://pi.dev/docs/latest/sdk) instead when pi's catalog contains the
 selected model; catalog misses stay on the opencode server so newly released
@@ -838,7 +838,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `opencode`            | `opencode` runs every SDK session on opencode; `auto` uses pi for cataloged models                                                                                                                                                                           |
+| `sdk-engine`                 | No       | `opencode`            | `opencode` runs SDK sessions on opencode; `auto` uses pi for cataloged models                                                                                                                                                                                |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
