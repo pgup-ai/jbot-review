@@ -454,6 +454,9 @@ asserting unverified premises.`;
 
 export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
 
+const BATCHED_READS_RULE =
+  'Batch independent searches or file reads in one tool turn when supported; never batch a dependent lookup by guessing its input.';
+
 // Lens body for backends whose read-only mode denies every tool: the base's
 // read/grep steps would only be negated by the no-tools directive in front.
 const EMBEDDED_ONLY_LENS_EXPLORATION_POLICY = `## Repository exploration policy
@@ -493,10 +496,10 @@ resolution are handled separately.
 ${
   toolsAvailable
     ? `
-Batch independent searches or file reads in one tool turn when supported.
+${BATCHED_READS_RULE}
 Use search locations to read related caller/callee sections together. Reuse
 already inspected evidence; investigate further when it leaves a concrete
-contract question unresolved. Never batch a dependent lookup by guessing its input.
+contract question unresolved.
 `
     : ''
 }
@@ -1544,7 +1547,7 @@ export function buildContext7PromptBlock(reason: string): string {
 
 export const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
-Verify each prior thread against the embedded evidence. When tools are available, use the checked-out repo, git diff, and git log to resolve gaps.
+Verify each prior thread against the embedded evidence. When tools are available, use the checked-out repo, git diff, and git log to resolve gaps. ${BATCHED_READS_RULE}
 
 Rules:
 - Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
@@ -1611,6 +1614,7 @@ ${REVIEW_COMMAND_POLICY}
 - If a "Referenced Markdown documents" list is present, read every listed doc
   whose subject could plausibly apply to the changed files before you
   conclude.
+- ${BATCHED_READS_RULE}
 - Report one finding per violation, anchored to a line ADDED by this PR, or
   to line 0 of the changed file when no single added line carries the
   violation.
@@ -1716,6 +1720,7 @@ that each finding is WRONG. Your job is to try to refute it.
   code around each cited location, and the full repository is checked out on
   the PR branch for anything else a finding depends on. Never judge from the
   finding text alone.
+- ${BATCHED_READS_RULE}
 - Reproduce the claimed trigger path concretely: what input or state reaches
   this code, and does the claimed wrong result actually occur? Check guards,
   callers, types, and defaults that might prevent it.

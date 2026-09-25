@@ -443,7 +443,7 @@ describe('REVIEW_LENSES', () => {
         assert.doesNotMatch(prompt, /Read every changed hunk to identify affected contracts/);
         assert.match(prompt, /Return findings within this lens/);
         assert.match(prompt, /Batch independent searches or file reads/);
-        assert.match(prompt, /Never batch a dependent lookup/);
+        assert.match(prompt, /never batch a dependent lookup/i);
         assert.doesNotMatch(prompt, /Still report any other clear bug/);
         assert.match(prompt, /Do not modify files/);
         assert.match(prompt, /Do not run repository code/);
@@ -545,6 +545,15 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
   it('frames the verifier as adversarial with a refute-by-default stance', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /default position is\s+that each finding is WRONG/);
     assert.match(FINDING_VERIFICATION_PROMPT, /Do not propose new findings/);
+  });
+
+  it('asks every tool-using auxiliary pass to batch independent reads', () => {
+    for (const prompt of [
+      FINDING_VERIFICATION_PROMPT,
+      GUIDELINE_COMPLIANCE_PROMPT,
+      ADDRESSED_PRIOR_COMMENTS_PROMPT,
+    ])
+      assert.match(prompt, /Batch independent searches or file reads in one tool turn/);
   });
 
   it('uses concrete example verdicts instead of union syntax in the schema', () => {
