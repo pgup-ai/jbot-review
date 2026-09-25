@@ -82,7 +82,7 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
         ),
         false,
       );
-      const status = await runtime.client.server.status();
+      const status = await runtime.client.server.info();
       const anonymous = await fetch(`${status.urls[0]}/api/status`);
       assert.equal(anonymous.status, 401);
     } finally {

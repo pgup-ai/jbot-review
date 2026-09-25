@@ -793,7 +793,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.5`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.0.16`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
@@ -866,7 +866,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/minimax-m2.7`
 - `opencode/minimax-m3`
 - `opencode/muse-spark-1.2`
-- `opencode/muse-spark-1.2-contributor-free`
 - `opencode/muse-spark-1.3`
 - `opencode/muse-spark-1.3-contributor-free`
 - `opencode/nemotron-3-ultra-free`
@@ -874,11 +873,12 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/qwen3.5-plus`
 - `opencode/qwen3.6-plus`
 - `opencode/qwen3.8-flash`
+- `opencode/qwen3.8-max`
 - `opencode/space-bunny-free`
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.5`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.0.16`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
