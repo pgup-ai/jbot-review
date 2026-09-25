@@ -157,19 +157,18 @@ describe('piRuntimeSupported', () => {
 });
 
 describe('resolvePiEngine', () => {
-  it('enables pi by default on a supported runtime', () => {
-    assert.deepEqual(resolvePiEngine({}, 'v24.18.0'), { enabled: true, reason: '' });
-    assert.equal(resolvePiEngine({ JBOT_SDK_ENGINE: 'auto' }, 'v24.18.0').enabled, true);
+  it('keeps pi off unless JBOT_SDK_ENGINE=auto opts in', async () => {
+    const off = { enabled: false, reason: '' };
+    assert.deepEqual(resolvePiEngine({}, 'v24.18.0'), off);
+    assert.deepEqual(resolvePiEngine({ JBOT_SDK_ENGINE: 'opencode' }, 'v24.18.0'), off);
+    assert.equal(await catalogModelLimits('openai', 'gpt-5', off.enabled), undefined);
+    assert.deepEqual(resolvePiEngine({ JBOT_SDK_ENGINE: 'auto' }, 'v24.18.0'), {
+      enabled: true,
+      reason: '',
+    });
   });
 
-  it('disables pi when the kill switch forces opencode', async () => {
-    const resolved = resolvePiEngine({ JBOT_SDK_ENGINE: 'opencode' }, 'v24.18.0');
-    assert.equal(resolved.enabled, false);
-    assert.match(resolved.reason, /JBOT_SDK_ENGINE/);
-    assert.equal(await catalogModelLimits('openai', 'gpt-5', resolved.enabled), undefined);
-  });
-
-  it('fails safe to opencode on an unknown kill-switch value', () => {
+  it('fails safe to opencode on an unknown JBOT_SDK_ENGINE value', () => {
     const resolved = resolvePiEngine({ JBOT_SDK_ENGINE: 'pi-please' }, 'v24.18.0');
     assert.equal(resolved.enabled, false);
     assert.match(resolved.reason, /JBOT_SDK_ENGINE/);
@@ -177,7 +176,7 @@ describe('resolvePiEngine', () => {
   });
 
   it('disables pi on a Node runtime below the engines floor', () => {
-    const resolved = resolvePiEngine({}, 'v20.19.6');
+    const resolved = resolvePiEngine({ JBOT_SDK_ENGINE: 'auto' }, 'v20.19.6');
     assert.equal(resolved.enabled, false);
     assert.match(resolved.reason, /22\.19/);
   });

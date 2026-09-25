@@ -153,18 +153,19 @@ function parseSemver(value: string): [number, number, number] | undefined {
 }
 
 /**
- * Kill switch + runtime gate, resolved once per run and fed to
- * `selectReviewBackends` as `piEnabled`. JBOT_SDK_ENGINE accepts `auto`
- * (default) and `opencode`; anything else fails safe to opencode so a config
- * typo can never force a broken engine.
+ * Opt-in + runtime gate, resolved once per run and fed to
+ * `selectReviewBackends` as `piEnabled`. JBOT_SDK_ENGINE accepts `opencode`
+ * (default; same-model runs measured pi no faster or more accurate) and `auto`;
+ * anything else fails safe to opencode so a config typo can never force a
+ * broken engine.
  */
 export function resolvePiEngine(
   env: NodeJS.ProcessEnv,
   nodeVersion: string,
 ): { enabled: boolean; reason: string } {
-  const engine = env.JBOT_SDK_ENGINE?.trim() || 'auto';
+  const engine = env.JBOT_SDK_ENGINE?.trim() || 'opencode';
   if (engine === 'opencode') {
-    return { enabled: false, reason: 'JBOT_SDK_ENGINE=opencode pins the opencode engine' };
+    return { enabled: false, reason: '' };
   }
   if (engine !== 'auto') {
     return {

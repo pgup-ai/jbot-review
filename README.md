@@ -496,20 +496,17 @@ authenticated locally. The generator uses the npm versions pinned in the
 Docker image; Cursor comes from its vendor-installed binary, while Devin has no
 enumerable catalog command and is documented as that explicit boundary.
 
-**SDK engines.** Non-CLI providers run on one of two in-repo SDK engines,
-chosen automatically per session role. The rule: a provider pi can also serve
-routes to the in-process [pi SDK](https://pi.dev/docs/latest/sdk) first when pi's
-catalog contains the selected model; catalog misses automatically stay on the
-opencode server so newly released models do not fail while pi catches up. pi's
-allowlist covers `anthropic`, `openai`,
-`google`, `deepseek`, `xai`, `openrouter`,
-`fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
+**SDK engines.** Non-CLI providers run on the opencode server by default. Set
+the Action input `sdk-engine: auto` or, for hosted/local runs,
+`JBOT_SDK_ENGINE=auto` to route a session to the in-process
+[pi SDK](https://pi.dev/docs/latest/sdk) instead when pi's catalog contains the
+selected model; catalog misses stay on the opencode server so newly released
+models do not fail while pi catches up. pi's allowlist covers `anthropic`,
+`openai`, `google`, `deepseek`, `xai`, `openrouter`, `fireworks-ai`,
+`zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
 `opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
-endpoint directly, not through the opencode server). The Kimi providers, `tokenrouter`, and
-`openai-compatible` stay on opencode. Set the Action input `sdk-engine: opencode`
-or, for hosted/local runs, `JBOT_SDK_ENGINE=opencode` to pin every SDK session
-to opencode — the one-line rollback if pi misbehaves, and the path CLI backends'
-aux sessions still use.
+endpoint directly, not through the opencode server). The Kimi providers,
+`tokenrouter`, and `openai-compatible` always use opencode.
 The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
@@ -841,7 +838,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `auto`                | `auto` uses pi for cataloged models; `opencode` pins SDK sessions to opencode                                                                                                                                                                                |
+| `sdk-engine`                 | No       | `opencode`            | `opencode` runs every SDK session on opencode; `auto` uses pi for cataloged models                                                                                                                                                                           |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
