@@ -31,6 +31,8 @@ export function permissionRules(): PermissionRule[] {
     { action: 'question', resource: '*', effect: 'deny' },
     // A child session would not carry this session's env allowlist.
     { action: 'subagent', resource: '*', effect: 'deny' },
+    // opencode lists skills from the operator's HOME (~/.claude, ~/.agents) in every prompt; a deny drops the catalog too.
+    { action: 'skill', resource: '*', effect: 'deny' },
   ];
 }
 

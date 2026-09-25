@@ -18,7 +18,7 @@ import {
 } from '../src/shared/opencode-config.ts';
 
 describe('permissionRules', () => {
-  it('leads with the shell catch-all, denies edits, external directories and questions, never asks', () => {
+  it('leads with the shell catch-all, denies edits, external directories, questions and skills, never asks', () => {
     const rules = permissionRules();
     assert.deepEqual(rules[0], { action: 'shell', resource: '*', effect: 'allow' });
     assert.ok(
@@ -26,11 +26,12 @@ describe('permissionRules', () => {
         (r) => r.action === 'shell' && r.resource === 'git commit*' && r.effect === 'deny',
       ),
     );
-    assert.deepEqual(rules.slice(-4), [
+    assert.deepEqual(rules.slice(-5), [
       { action: 'edit', resource: '*', effect: 'deny' },
       { action: 'external_directory', resource: '*', effect: 'deny' },
       { action: 'question', resource: '*', effect: 'deny' },
       { action: 'subagent', resource: '*', effect: 'deny' },
+      { action: 'skill', resource: '*', effect: 'deny' },
     ]);
     assert.ok(
       rules.every((r) => r.effect !== 'ask'),
