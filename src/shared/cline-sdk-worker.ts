@@ -59,14 +59,17 @@ async function git(root: string, args: string[]): Promise<string> {
 
 export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): AgentTool[] {
   const root = resolveWithinWorkspace(workspace, '.') ?? workspace;
-  const tracked = (target: string) =>
-    git(root, ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', relative(root, target)])
-      .then(() => true)
-      .catch(() => false);
   // Files must also be tracked: untracked ones can be runner credentials (e.g. gha-creds-*.json).
   const allow = async (path: unknown, file = false) => {
     let target = readablePath(workspace, String(path ?? '') || '.');
-    if (target && file && !(await tracked(target))) target = undefined;
+    if (target && file)
+      await git(root, [
+        '--literal-pathspecs',
+        'ls-files',
+        '--error-unmatch',
+        '--',
+        relative(root, target),
+      ]).catch(() => (target = undefined));
     calls.push({ denied: !target });
     return target;
   };
