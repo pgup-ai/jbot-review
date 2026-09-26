@@ -50,6 +50,7 @@ import type { Finding } from '../src/shared/types.ts';
 import { IncompleteReviewError } from '../src/shared/types.ts';
 import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
 import { assembleFindingVerificationPrompt } from '../src/shared/prompt.ts';
+import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
 
 const PRIOR_JBOT_REVIEW = [
   '## J-Bot Code Review',
@@ -1976,6 +1977,85 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
     '1:confirmed',
     '2:refuted',
   ]);
+});
+
+it('gives a checkout-blind verifier the page packs and cited rules in its only pass', async () => {
+  const modes: string[] = [];
+  let seen = '';
+  const verdicts = await requestFindingVerdicts({
+    workspace: '/unused',
+    model: 'test/model',
+    prContext: 'diff',
+    sourceContext: async () => 'source of a.ts',
+    toolLessContextFor: () => ({
+      packs: ['page pack: caller(a)'],
+      rules: ['### RULES.md §1\nNever call caller(a).'],
+    }),
+    targets: [{ path: 'a.ts', line: 1, severity: 'P2', title: 'a', body: 'claim' }],
+    toolLessOnly: true,
+    log: () => {},
+    backend: {
+      async runFindingVerification(_model, context, findings, ...rest) {
+        modes.push(String(rest.at(-1)));
+        seen = context;
+        const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
+        return findings.map((_, index) => ({
+          index,
+          verdict: 'confirmed' as const,
+          reason: 'trigger',
+          finding: { ...finding, evidence: 'caller(a)' },
+        }));
+      },
+    },
+  });
+  assert.deepEqual(modes, ['single-shot']);
+  assert.match(seen, /page pack: caller\(a\)[^]*Never call caller\(a\)/);
+  // The quote comes from the shown pack, so the confirmation stands.
+  assert.deepEqual(
+    verdicts.map((v) => v.verdict),
+    ['confirmed'],
+  );
+});
+
+it('packs blind-verifier context only as far as the budget wrapper allows', async () => {
+  const target: Finding = { path: 'a.ts', line: 1, severity: 'P2', title: 'a', body: 'claim' };
+  const pack = `page pack: ${'p'.repeat(2000)}`;
+  // Fits the shorter single-shot prompt but not the tool-using one the wrapper measures.
+  const full = assembleFindingVerificationPrompt(`diff\n\nsource of a.ts\n\n${pack}`, [target]);
+  const budget = { ...reviewPromptBudget('test'), transportBytes: Buffer.byteLength(full) - 300 };
+  let seen = '';
+  const backend = budgetReviewBackend(
+    {
+      async runFindingVerification(_model, context, findings) {
+        seen = context;
+        const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
+        return findings.map((_, index) => ({
+          index,
+          verdict: 'confirmed' as const,
+          reason: 'trigger',
+          finding: { ...finding, evidence: 'source of a.ts' },
+        }));
+      },
+    } as unknown as Parameters<typeof budgetReviewBackend>[0],
+    budget,
+  );
+  const verdicts = await requestFindingVerdicts({
+    workspace: '/unused',
+    model: 'test/model',
+    prContext: 'diff',
+    sourceContext: async () => 'source of a.ts',
+    toolLessContextFor: () => ({ packs: [pack], rules: [] }),
+    promptBudget: budget,
+    targets: [target],
+    toolLessOnly: true,
+    log: () => {},
+    backend,
+  });
+  assert.doesNotMatch(seen, /page pack/);
+  assert.deepEqual(
+    verdicts.map((v) => v.verdict),
+    ['confirmed'],
+  );
 });
 
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
