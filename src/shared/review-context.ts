@@ -376,6 +376,8 @@ export interface DiscoveredGuidelines {
   referenced: string[];
   /** True when the bounded candidate pool was exhausted before all files. */
   budgetExhausted: boolean;
+  /** Labels of the docs the governance README requires for every PR review (REVIEW_READING). */
+  required?: string[];
 }
 
 export function applicableGuidelines(
@@ -837,6 +839,8 @@ const MAX_GUIDELINE_FRAGMENT_BYTES = 4 * 1024;
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 const MAX_PARENT_RULE_BYTES = 2 * 1024;
+// The governance README's base reading chain and the list its "PR review" entry adds to it.
+const REVIEW_READING = ['Architecture-sensitive implementation or refactor', 'PR review'];
 
 // Routes are PR-controlled and can cite hundreds of sections with arbitrarily
 // long dotted ids, so their omission metadata needs its own bound.
@@ -1341,7 +1345,14 @@ export async function discoverGuidelineDocs(
       await preloadOrListReferencedDoc(governanceDir, reference);
     }
     await flushDeferredReferences();
-    return buildDiscoveredGuidelines(docs, seen, referencedDocs, budgetExhausted);
+    const reading = REVIEW_READING.map(
+      (title) => selectGuidelineSections(readme.text, [title]) ?? '',
+    );
+    const required = extractMarkdownDocumentReferences(reading.join('\n')).flatMap((reference) => {
+      const path = resolveMarkdownReference(cwd, governanceDir, reference);
+      return path ? [relative(cwd, path)] : [];
+    });
+    return { ...buildDiscoveredGuidelines(docs, seen, referencedDocs, budgetExhausted), required };
   }
 
   try {
@@ -1522,6 +1533,7 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
 // Replaying 159 rules cited in real reviews: 50 kept 97% of routed ones while lifting unrouted 37% → 83%.
 const ROUTED_DOC_PRIOR = 50;
 const MAX_RANKED_SECTION_BYTES = 6 * 1024;
+const REQUIRED_SECTION_BYTES = 2 * 1024;
 
 /**
  * The guideline-compliance budget (JBOT_GUIDELINE_RANK=legacy restores
@@ -1551,18 +1563,30 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
       const rank = doc.label.includes(' (§')
         ? Number.MAX_SAFE_INTEGER
         : section.score + (doc.relevance === GUIDELINE_RELEVANCE.scoped ? ROUTED_DOC_PRIOR : 0);
-      return { index, doc, section, heading, lead, rank };
+      return { index, doc, section, heading, lead, rank, floor: false };
     });
   });
+  // The repo requires these docs for every review, so each keeps its best
+  // substantive section (clipped) even when no changed path names it.
+  for (const label of new Set([...(discovered.required ?? []), 'REVIEW.md'])) {
+    const best = units
+      .filter(
+        (unit) => unit.doc.label === label && unit.section.text.length > unit.heading.length + 40,
+      )
+      .sort((a, b) => b.section.score - a.section.score || a.section.order - b.section.order)[0];
+    if (best) Object.assign(best, { rank: Number.MAX_SAFE_INTEGER - 1, floor: true });
+  }
   units.sort((a, b) => b.rank - a.rank || a.index - b.index || a.section.order - b.section.order);
 
   // Notes are bounded lists plus under 512 bytes of fixed prose, so the cap holds by construction.
   const budget =
     MAX_GUIDELINE_TOTAL_BYTES - MAX_SKIPPED_SECTIONS_BYTES - MAX_OMITTED_LABEL_BYTES - 512;
-  const clip = (text: string) =>
-    Buffer.byteLength(text) <= MAX_RANKED_SECTION_BYTES
-      ? text
-      : truncateUtf8(text, MAX_RANKED_SECTION_BYTES - 32) + '\n[section truncated]';
+  const clip = ({ section, floor }: (typeof units)[number]) => {
+    const max = floor ? REQUIRED_SECTION_BYTES : MAX_RANKED_SECTION_BYTES;
+    return Buffer.byteLength(section.text) <= max
+      ? section.text
+      : truncateUtf8(section.text, max - 32) + '\n[section truncated]';
+  };
   const chosen = new Set<(typeof units)[number]>();
   const opened = new Set<number>();
   const skipped: typeof units = [];
@@ -1578,10 +1602,7 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
     }
     const header = opened.has(unit.index) ? 0 : Buffer.byteLength(`### ${unit.doc.label}\n`) + 2;
     const bytes =
-      header +
-      Buffer.byteLength(clip(unit.section.text)) +
-      Buffer.byteLength(unit.lead.join('\n')) +
-      2;
+      header + Buffer.byteLength(clip(unit)) + Buffer.byteLength(unit.lead.join('\n')) + 2;
     if (used + bytes > budget) {
       skipped.push(unit);
       continue;
@@ -1600,7 +1621,7 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
     const body = mine.map((unit) => {
       const lead = unit.lead.filter((line) => !emitted.has(line));
       for (const line of [...lead, unit.heading]) emitted.add(line);
-      return [...lead, clip(unit.section.text)].join('\n');
+      return [...lead, clip(unit)].join('\n');
     });
     return [`### ${doc.label}\n${body.join('\n')}`];
   });

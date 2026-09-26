@@ -8,6 +8,7 @@ import {
   discoverGuidelineDocs,
   formatFinderGuidelines,
   formatGuidelines,
+  formatRankedGuidelines,
 } from '../src/shared/review-context.ts';
 
 // Synthetic .pr-governance fixture (no repo content). TECHNICAL_STANDARDS is
@@ -376,6 +377,55 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!(await matches('a/b/c/deep.tsx')), 'the trailing literal still discriminates');
     assert.ok(await matches('x/axc.md'), '? matches one non-slash char');
     assert.ok(!(await matches('x/a/c.md')), '? does not match a slash');
+  });
+
+  it("keeps the best section of each doc the README's review reading lists, clipped", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-required-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      [
+        '## Required reading by task type',
+        '### Architecture-sensitive implementation or refactor',
+        '- `../AGENTS.md`',
+        '- `design/SEAMS.md`',
+        '### Financial logic changes',
+        '- `design/MONEY.md`',
+        '### PR review',
+        'Also read:',
+        '- `review/CHECKLIST.md`',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'AGENTS.md'),
+      '# Agents\nRepo-wide agent guidance that applies to every change.',
+    );
+    writeFileSync(
+      join(root, '.pr-governance/design/SEAMS.md'),
+      '# Seams\nModules talk to each other only through declared seams.',
+    );
+    writeFileSync(
+      join(root, '.pr-governance/design/MONEY.md'),
+      '# Money\nAmounts use decimal types everywhere in the ledger.',
+    );
+    writeFileSync(
+      join(root, '.pr-governance/review/CHECKLIST.md'),
+      `# Checklist\n${'Check every item. '.repeat(200)}`,
+    );
+    const discovered = await discoverGuidelineDocs(root, ['src/unrelated.ts']);
+    assert.deepEqual(discovered.required, [
+      'AGENTS.md',
+      '.pr-governance/design/SEAMS.md',
+      '.pr-governance/review/CHECKLIST.md',
+    ]);
+    const out = formatRankedGuidelines(discovered, [{ filename: 'src/unrelated.ts' }]);
+    assert.match(out, /Repo-wide agent guidance/);
+    assert.match(out, /declared seams/);
+    assert.match(out, /Check every item\.[^]*\[section truncated\]/);
+    // A conditional list's doc still has to name something in the diff.
+    assert.doesNotMatch(out, /decimal types/);
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {

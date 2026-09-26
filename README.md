@@ -1427,8 +1427,11 @@ Guideline files load whole, up to 128 KB each and 1 MB in total. Guideline
 compliance ranks every section of every applicable file on one scale: routed
 rule IDs first, then routed and nearby files, then sections that name a changed
 path, weighted by how critical the changed file is (code over configuration over
-tests over docs). It fills its 96 KB budget with whole sections in rank order and
-lists the ranked sections that did not fit, so it can open the ones that apply.
+tests over docs). Each doc in the governance README's base reading chain and
+its PR-review list, plus a root `REVIEW.md`, keeps its best section (up to 2 KB)
+right after the routed rules. It fills the rest of its 96 KB budget with whole
+sections in rank order and lists the ranked sections that did not fit, so it can
+open the ones that apply.
 Sections that name nothing in the diff are omitted and counted. Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each
 file's matching sections go first and files share the budget in turn.
