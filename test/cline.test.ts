@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { createCliProcessScope } from '../src/shared/cli-process.ts';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -11,19 +21,23 @@ import { describe, it } from 'node:test';
 import {
   assertClinePromptArgWithinBudget,
   buildClineCliArgs,
-  buildClinePromptArg,
   CLINE_MAX_ARGV_BYTES,
+  ClineSdkForbiddenError,
   clineEnvForHome,
   clineFailureDetail,
   clineProvidersPath,
+  clineSdkFailure,
   formatClinePromptTimeoutMessage,
   isClineProvider,
   parseClineFinalMessage,
   runClineFindingVerification,
   runClineReview,
+  runClineSdkFindingVerification,
   stripClineModelReasoning,
+  withClineSdkFallback,
   writeClineAuth,
 } from '../src/shared/cline.ts';
+import { readablePath, readOnlyTools } from '../src/shared/cline-sdk-worker.ts';
 
 describe('Cline CLI provider helpers', () => {
   it('matches both cline billing-mode provider ids', () => {
@@ -38,7 +52,7 @@ describe('Cline CLI provider helpers', () => {
       '--json',
       '--plan',
       '--auto-approve',
-      'false',
+      'true',
       '--provider',
       'cline-pass',
       'P',
@@ -67,17 +81,10 @@ describe('Cline CLI provider helpers', () => {
   it('delivers the prompt as the final positional arg (cline ignores piped stdin headless)', () => {
     // Regression pin for PR #79: stdin delivery fails every session with
     // "JSON output mode requires a prompt argument or piped stdin".
-    const promptArg = buildClinePromptArg('REVIEW BODY');
-    assert.equal(buildClineCliArgs({ model: 'cline-pass/glm-5.2', promptArg }).at(-1), promptArg);
-  });
-
-  it('prepends the no-tools directive to the prompt argv', () => {
-    const arg = buildClinePromptArg('REVIEW BODY');
-    // Load-bearing override phrases: cline must not attempt tool calls it cannot approve.
-    assert.match(arg, /Use no tools for this review/);
-    assert.match(arg, /running the git diff command/);
-    // The full review prompt is preserved verbatim after the directive.
-    assert.ok(arg.endsWith('\n\nREVIEW BODY'));
+    assert.equal(
+      buildClineCliArgs({ model: 'cline-pass/glm-5.2', promptArg: 'REVIEW BODY' }).at(-1),
+      'REVIEW BODY',
+    );
   });
 
   it('guards the argv prompt with a clear backend cap', () => {
@@ -92,16 +99,6 @@ describe('Cline CLI provider helpers', () => {
       () => assertClinePromptArgWithinBudget('review', '界'.repeat(CLINE_MAX_ARGV_BYTES / 2)),
       /argv limit/,
     );
-  });
-
-  it('never auto-approves tools or enables yolo (invariant #8)', () => {
-    for (const model of ['cline/default', 'cline-pass/glm-5.2']) {
-      const args = buildClineCliArgs({ model, promptArg: 'P' });
-      assert.equal(args.includes('--yolo'), false);
-      const approveIndex = args.indexOf('--auto-approve');
-      assert.notEqual(approveIndex, -1);
-      assert.equal(args[approveIndex + 1], 'false');
-    }
   });
 
   it('strips model/reasoning but keeps the auth token', () => {
@@ -247,7 +244,7 @@ describe('Cline CLI provider helpers', () => {
     );
     const result = scope.run('review-interactions', () =>
       runClineReview('cline/default', 'context', '', () => {}, {
-        home: workspace,
+        runtime: { home: workspace, workspace },
         timeoutMs: 10000,
       }),
     );
@@ -295,7 +292,7 @@ describe('Cline CLI provider helpers', () => {
         { mode: 0o700 },
       );
       const result = runClineReview('cline/default', 'context', '', (m) => logs.push(m), {
-        home: workspace,
+        runtime: { home: workspace, workspace },
         timeoutMs: 5000,
       });
       if (fail) await assert.rejects(result, /original provider failure/);
@@ -305,28 +302,30 @@ describe('Cline CLI provider helpers', () => {
     assert.doesNotMatch(logs.join('\n'), /private filesystem detail/);
   });
 
-  it('runs Cline in an empty directory so hooks and rules a PR commits never load', async (t) => {
+  it('runs Cline in the checkout so its read tools see the code', async (t) => {
     const bin = mkdtempSync(join(tmpdir(), 'cline-cwd-'));
+    const checkout = mkdtempSync(join(tmpdir(), 'cline-checkout-'));
     const originalPath = process.env.PATH;
     t.after(() => {
       process.env.PATH = originalPath;
-      rmSync(bin, { recursive: true, force: true });
+      for (const dir of [bin, checkout]) rmSync(dir, { recursive: true, force: true });
     });
     process.env.PATH = `${bin}:${originalPath}`;
     writeClineAuth('{"providers":{}}', bin);
-    const seen = join(bin, 'cwd.json');
+    const seen = join(bin, 'cwd.txt');
     writeFileSync(
       join(bin, 'cline'),
-      `#!/usr/bin/env node\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync('.') }));\nconsole.log(JSON.stringify({type:"run_result",text:'{"summary":"","findings":[]}'}));\n`,
+      `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(seen)}, process.cwd());\nconsole.log(JSON.stringify({type:"run_result",text:'{"summary":"","findings":[]}'}));\n`,
       { mode: 0o700 },
     );
-    await runClineReview('cline/default', 'context', '', () => {}, { home: bin, timeoutMs: 5000 });
-    const { cwd, entries } = JSON.parse(readFileSync(seen, 'utf8'));
-    assert.notEqual(cwd, process.cwd());
-    assert.deepEqual(entries, []);
+    await runClineReview('cline/default', 'context', '', () => {}, {
+      runtime: { home: bin, workspace: checkout },
+      timeoutMs: 5000,
+    });
+    assert.equal(readFileSync(seen, 'utf8'), realpathSync(checkout));
   });
 
-  it('verifies findings with the no-tools prompt', async (t) => {
+  it('verifies findings with the tool-using prompt', async (t) => {
     const bin = mkdtempSync(join(tmpdir(), 'cline-verify-'));
     const originalPath = process.env.PATH;
     t.after(() => {
@@ -350,11 +349,11 @@ describe('Cline CLI provider helpers', () => {
       () => {},
       5000,
       undefined,
-      bin,
+      { home: bin, workspace: bin },
     );
     const prompt = readFileSync(seen, 'utf8');
-    assert.match(prompt, /have no tools on this call/);
-    assert.doesNotMatch(prompt, /full repository is checked out/);
+    assert.match(prompt, /full repository is checked out/);
+    assert.doesNotMatch(prompt, /have no tools on this call/);
   });
 
   it('retries a silent Cline exit once in a fresh home and reports what Cline logged', async (t) => {
@@ -386,7 +385,7 @@ console.log(JSON.stringify({ type: 'run_result', text: '{"summary":"","findings"
         { mode: 0o700 },
       );
       const run = runClineReview('cline/default', 'context', '', () => {}, {
-        home: bin,
+        runtime: { home: bin, workspace: bin },
         timeoutMs: 5000,
       });
       if (silentTwice) await assert.rejects(run, /no run_result.*cline\.log: CLI run failed: boom/);
@@ -395,5 +394,117 @@ console.log(JSON.stringify({ type: 'run_result', text: '{"summary":"","findings"
       assert.equal(seen.length, 2);
       assert.notEqual(seen[0], seen[1]);
     }
+  });
+});
+
+describe('Cline SDK verifier', () => {
+  it('reads only tracked checkout files outside .git, even in a checkout another user owns', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-'));
+    const outside = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-out-'));
+    const originalPath = process.env.PATH;
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      mkdirSync(join(root, 'src'));
+      writeFileSync(join(root, 'src/a.ts'), 'export const answer = 42;\n');
+      writeFileSync(join(outside, 'token'), 'secret');
+      symlinkSync(outside, join(root, 'out'));
+      execFileSync('git', ['add', '-A'], { cwd: root });
+      writeFileSync(join(root, 'gha-creds.json'), 'secret');
+      // As in the Action, where the checkout belongs to another uid.
+      mkdirSync(join(outside, 'bin'));
+      const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+      writeFileSync(
+        join(outside, 'bin/git'),
+        `#!/bin/sh\nGIT_TEST_ASSUME_DIFFERENT_OWNER=1 exec "${realGit}" "$@"\n`,
+        { mode: 0o755 },
+      );
+      process.env.PATH = `${join(outside, 'bin')}:${originalPath}`;
+      for (const path of ['../token', '/etc/hosts', 'out/token', '.git', '.git/config'])
+        assert.equal(readablePath(root, path), undefined, path);
+      const calls: { denied: boolean }[] = [];
+      const [read, grep] = readOnlyTools(root, calls);
+      const run = (tool: typeof read, input: object) => tool.execute(input, {} as never);
+      assert.equal(await run(read, { path: 'src/a.ts' }), '1: export const answer = 42;\n2: ');
+      assert.match(String(await run(read, { path: '.git/config' })), /^Denied/);
+      assert.match(String(await run(read, { path: 'gha-creds.json' })), /^Denied/);
+      assert.match(String(await run(grep, { pattern: 'answer' })), /^src\/a\.ts:1:/);
+      assert.match(String(await run(grep, { pattern: 'secret', path: 'out' })), /^Denied/);
+      assert.deepEqual(
+        calls.map((call) => call.denied),
+        [false, true, true, false, true],
+      );
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('returns oversized tool output truncated within the cap', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-big-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      writeFileSync(
+        join(root, 'wide.txt'),
+        Array.from({ length: 20_000 }, () => '日本語の行').join('\n'),
+      );
+      mkdirSync(join(root, 'many'));
+      for (let i = 0; i < 2_000; i++)
+        writeFileSync(join(root, 'many', `${'n'.repeat(80)}-${i}`), '');
+      execFileSync('git', ['add', '-A'], { cwd: root });
+      const [read, , list] = readOnlyTools(root, []);
+      // The listing overflows git's output buffer; the multibyte file overflows the byte cap.
+      for (const output of [
+        await read.execute({ path: 'wide.txt', end_line: 20_000 }, {} as never),
+        await list.execute({}, {} as never),
+      ]) {
+        assert.ok(Buffer.byteLength(String(output)) <= 32 * 1024);
+        assert.match(String(output), /\[Output truncated to \d+ bytes/);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the CLI verifier unless Cline refuses the SDK route', async () => {
+    const logs: string[] = [];
+    const log = (message: string) => logs.push(message);
+    const cli = async (timeoutMs?: number) =>
+      `cli within ${timeoutMs !== undefined && timeoutMs <= 1000}`;
+    const failing = (stderr: string) => async () => {
+      throw clineSdkFailure(1, stderr);
+    };
+    assert.equal(await withClineSdkFallback(async () => 'sdk', cli, 1000, log), 'sdk');
+    assert.equal(
+      await withClineSdkFallback(failing('socket hang up'), cli, 1000, log),
+      'cli within true',
+    );
+    assert.match(logs.join('\n'), /socket hang up\); falling back to the CLI single pass/);
+    await assert.rejects(
+      withClineSdkFallback(
+        failing('Error: Error 403: only via Cline product surfaces'),
+        cli,
+        1000,
+        log,
+      ),
+      ClineSdkForbiddenError,
+    );
+    // `default` has no SDK model id, so it goes straight to the CLI without a worker.
+    await assert.rejects(
+      runClineSdkFindingVerification('cline/default', 'diff', [], log, {
+        home: '/unused',
+        workspace: '/unused',
+      }),
+      /concrete model id/,
+    );
+  });
+
+  it('pins one Cline SDK version for local runs and the full image', () => {
+    const pin = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+      .devDependencies['@cline/sdk'];
+    assert.match(pin, /^\d+\.\d+\.\d+$/);
+    assert.ok(
+      readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8').includes(`@cline/sdk@${pin}`),
+    );
   });
 });

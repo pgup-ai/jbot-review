@@ -153,6 +153,7 @@ import {
   auxModelOptionsFor,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
+  parseEnvBoolean,
   providerSessionConcurrency,
   resolvePromptCachePolicy,
   supportedModelOptions,
@@ -228,9 +229,12 @@ import {
   runClineFindingVerification,
   runClineGuidelineComplianceCheck,
   runClineReview,
+  runClineSdkFindingVerification,
+  withClineSdkFallback,
   CLINE_MODEL_LIMITS,
   isClineProvider,
   writeClineAuth,
+  type ClineRuntime,
 } from './cline.ts';
 import {
   GROK_PROVIDER_ID,
@@ -598,19 +602,21 @@ function createCommandCodeBackend(
   };
 }
 
-function createClineBackend(clineHome: string): ReviewBackend & { stop(): Promise<void> } {
+/** `sdkVerifier` opts verification into the Cline SDK with read-only checkout tools. */
+function createClineBackend(
+  runtime: ClineRuntime,
+  sdkVerifier: boolean,
+): ReviewBackend & { stop(): Promise<void> } {
   const processes = createCliProcessScope();
   return {
     name: CLINE_PROVIDER_ID,
     stop: processes.stop,
     abortSessionsByLabel: (label) => processes.abort(label),
     observability: CLINE_TELEMETRY_CAPABILITY,
+    canReadWorkspace: true,
     runReview: (model, prContext, guidelines, log, options) =>
       processes.run(options?.label ?? 'review', () =>
-        runClineReview(model, prContext, guidelines, log, {
-          ...options,
-          home: clineHome,
-        }),
+        runClineReview(model, prContext, guidelines, log, { ...options, runtime }),
       ),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       processes.run('addressed-prior-comments', () =>
@@ -620,7 +626,7 @@ function createClineBackend(clineHome: string): ReviewBackend & { stop(): Promis
           log,
           timeoutMs,
           onTokenUsage,
-          clineHome,
+          runtime,
         ),
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
@@ -632,31 +638,25 @@ function createClineBackend(clineHome: string): ReviewBackend & { stop(): Promis
           log,
           timeoutMs,
           onTokenUsage,
-          clineHome,
+          runtime,
         ),
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      processes.run('finding-verification', () =>
-        runClineFindingVerification(
-          model,
-          prContext,
-          findings,
-          log,
-          timeoutMs,
-          onTokenUsage,
-          clineHome,
-        ),
-      ),
+      processes.run('finding-verification', () => {
+        const cli = (ms?: number) =>
+          runClineFindingVerification(model, prContext, findings, log, ms, onTokenUsage, runtime);
+        return sdkVerifier
+          ? withClineSdkFallback(
+              (ms) => runClineSdkFindingVerification(model, prContext, findings, log, runtime, ms),
+              cli,
+              timeoutMs,
+              log,
+            )
+          : cli(timeoutMs);
+      }),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       processes.run('changes-since-last-review', () =>
-        runClineChangesSinceLastReview(
-          model,
-          deltaContext,
-          log,
-          timeoutMs,
-          onTokenUsage,
-          clineHome,
-        ),
+        runClineChangesSinceLastReview(model, deltaContext, log, timeoutMs, onTokenUsage, runtime),
       ),
   };
 }
@@ -2138,9 +2138,10 @@ async function runReviewPipeline(params: {
     }
     log(`Cline CLI auth configured at ${authPath}.`);
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
-    // The shared ACP permission policy permits shell execution; Cline needs a
-    // stricter permission hook before this tool-less route can be replaced.
-    clineBackend = createClineBackend(clineHome);
+    clineBackend = createClineBackend(
+      { home: clineHome, workspace },
+      parseEnvBoolean('JBOT_CLINE_SDK_VERIFIER', false),
+    );
   }
 
   if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {

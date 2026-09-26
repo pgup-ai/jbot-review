@@ -49,6 +49,7 @@
     "@symma/protocol": "0.7.0"
   },
   "devDependencies": {
+    "@cline/sdk": "0.0.86",
     "@opencode/cli": "2.0.16",
     "@types/node": "^22.20.1",
     "esbuild": "^0.28.1",

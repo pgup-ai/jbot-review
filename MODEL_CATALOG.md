@@ -929,11 +929,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.65.2`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.66.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-82 J-Bot model values:
+83 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
@@ -993,6 +993,7 @@ The CLI does not expose a complete list.
 - `commandcode/qwen/qwen3.8-max-0902`
 - `commandcode/qwen/qwen3.8-omni-flash`
 - `commandcode/sakana/fugu-ultra`
+- `commandcode/stealth/pixel-canary`
 - `commandcode/stealth/space-bunny-alpha`
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`

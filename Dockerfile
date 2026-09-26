@@ -11,7 +11,7 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-RUN npm install -g @opencode/cli@2.0.16 command-code@1.65.2 \
+RUN npm install -g @opencode/cli@2.0.16 command-code@1.66.0 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --no-auto-update --version
@@ -98,3 +98,8 @@ ENV JBOT_IMAGE_VARIANT=slim
 # Keep the default target full for existing docker build callers and dogfooding.
 FROM full-tools AS full
 COPY --from=app /app /app
+# The opt-in Cline SDK verifier (JBOT_CLINE_SDK_VERIFIER) runs where Cline does, so slim
+# skips it. Same pin as package.json; the linked scope resolves its deps from the prefix.
+RUN npm install --prefix /opt/cline-sdk --omit=dev --ignore-scripts @cline/sdk@0.0.86 \
+  && ln -s /opt/cline-sdk/node_modules/@cline /app/node_modules/@cline \
+  && npm cache clean --force
