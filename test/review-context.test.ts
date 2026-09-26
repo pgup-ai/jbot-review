@@ -208,6 +208,18 @@ it('places each section under its own parents and drops nothing for generic path
   );
 });
 
+it('charges a parent heading shared by selected sections once', () => {
+  const text = [
+    `# ${'Ledger '.repeat(300)}`,
+    ...Array.from({ length: 18 }, (_, i) => `## Rule ${i}\n${'x'.repeat(5 * 1024)}`),
+  ].join('\n');
+  const out = formatRankedGuidelines(
+    { docs: [{ label: 'a.md', text, relevance: 3 }], referenced: [], budgetExhausted: false },
+    [{ filename: 'src/ledger.ts' }],
+  );
+  assert.equal(out.match(/^## Rule \d+$/gm)?.length, 18);
+});
+
 it('delivers a guideline set small enough for the main prompt whole', () => {
   const discovered = {
     docs: [

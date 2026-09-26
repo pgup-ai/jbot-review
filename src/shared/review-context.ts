@@ -1610,7 +1610,8 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
       ? section.text
       : truncateUtf8(section.text, max - 32) + '\n[section truncated]';
   const chosen = new Set<(typeof units)[number]>();
-  const opened = new Set<number>();
+  // Doc headers and headings already charged, so shared parents are paid for once.
+  const paid = new Set<string>();
   const skipped: typeof units = [];
   const unrelated = new Set<string>();
   let dropped = 0;
@@ -1623,15 +1624,20 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
       dropped += 1;
       continue;
     }
-    const header = opened.has(unit.index) ? 0 : Buffer.byteLength(`### ${unit.doc.label}\n`) + 2;
-    const lead = unit.lead.map((parent) => parent.heading).join('\n');
-    const bytes = header + Buffer.byteLength(clip(unit)) + Buffer.byteLength(lead) + 2;
+    const header = paid.has(`${unit.index}`) ? 0 : Buffer.byteLength(`### ${unit.doc.label}\n`) + 2;
+    const lead = unit.lead.filter((parent) => !paid.has(`${unit.index}:${parent.order}`));
+    const bytes =
+      header +
+      Buffer.byteLength(clip(unit)) +
+      Buffer.byteLength(lead.map((parent) => parent.heading).join('\n')) +
+      2;
     if (used + bytes > budget) {
       skipped.push(unit);
       continue;
     }
     chosen.add(unit);
-    opened.add(unit.index);
+    paid.add(`${unit.index}`);
+    for (const { order } of [...lead, unit.section]) paid.add(`${unit.index}:${order}`);
     used += bytes;
   }
 
