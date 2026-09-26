@@ -881,6 +881,16 @@ process.stdin.on('end', async () => {
       lensAddendum: REVIEW_LENSES.interactions,
       timeoutMs: 5000,
     });
+    await runCommandCodeFindingVerification(
+      home,
+      'commandcode/verifier',
+      'BLIND_VERIFY_CTX',
+      [],
+      () => {},
+      5000,
+      undefined,
+      { home, tools: false },
+    );
     const evidence = new NativeEvidenceStore(home, 'head');
     let preparations = 0;
     evidence.prepare = async () => {
@@ -902,13 +912,15 @@ process.stdin.on('end', async () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 14);
+    assert.equal(calls.length, 15);
     const lensCall = calls.find((call) => call.input.includes('LENS_CTX'));
     assert.match(lensCall.input, /Tool use disabled/);
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
+    const blindCall = calls.find((call) => call.input.includes('BLIND_VERIFY_CTX'));
+    assert.doesNotMatch(blindCall.input, /full repository is checked out/);
     for (const call of calls) {
       assert.equal(existsSync(call.args[call.args.indexOf('--benchmark-output') + 1]), false);
-      if (call === lensCall) continue;
+      if (call === lensCall || call === blindCall) continue;
       if (!call.repair) assert.equal(call.cwd, realpathSync(join(home, 'launch')));
       else assert.ok(call.cwd.startsWith(realpathSync(home) + '/repair-'));
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');

@@ -4410,10 +4410,11 @@ export async function requestFindingVerdicts(params: {
       // Only the tool-less pass gets this context; the capped re-check reads what it needs.
       let toolLessContext = context;
       const packed = new Set<string>();
+      // Measured as budgetReviewBackend does: the tool-using prompt is the longer one.
       const fits = (candidate: string) =>
         !params.promptBudget ||
         measureReviewPrompt(
-          assembleFindingVerificationPrompt(candidate, targets, true),
+          assembleFindingVerificationPrompt(candidate, targets),
           params.promptBudget,
         ).fits;
       let omitted = 0;

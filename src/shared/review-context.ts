@@ -423,7 +423,7 @@ export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): stri
               (title) =>
                 title.length > 3 &&
                 named.startsWith(title.toLowerCase()) &&
-                !/[\w-]/.test(named[title.length] ?? ''),
+                !/^[\p{L}\p{M}\p{N}_-]/u.test(named.slice(title.length)),
             )
             .sort((a, b) => b.length - a.length);
       const found = section

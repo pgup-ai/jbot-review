@@ -133,7 +133,7 @@ it('finds a loaded rule cited by file and heading title', () => {
   const docs = [
     {
       label: 'AGENTS.md',
-      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny',
+      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny\n## 安全规则\n不要记录令牌。',
       relevance: 1 as const,
     },
   ];
@@ -147,14 +147,15 @@ it('finds a loaded rule cited by file and heading title', () => {
     cited("AGENTS.md ('code hygiene': reuse)"),
     /^### AGENTS\.md \(Code hygiene\)\n## Code hygiene\nReuse before adding\./,
   );
-  // A quoted heading line keeps its marker; a possessive names the title too.
   assert.match(
     cited('AGENTS.md ("## Code hygiene") and AGENTS.md’s conventions'),
     /Code hygiene\)[^]*### AGENTS\.md \(Conventions\)/,
   );
+  assert.match(cited('AGENTS.md (安全规则)'), /^### AGENTS\.md \(安全规则\)\n## 安全规则/);
   // A partial word, a title two headings share, a short title, or a bare space names nothing.
   for (const text of [
     'AGENTS.md (Conventions-based)',
+    'AGENTS.md (安全规则变更)',
     'AGENTS.md (Misc)',
     'AGENTS.md (API)',
     'AGENTS.md Conventions',
