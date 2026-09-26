@@ -133,7 +133,7 @@ it('finds a loaded rule cited by file and heading title', () => {
   const docs = [
     {
       label: 'AGENTS.md',
-      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny\n## 安全规则\n不要记录令牌。',
+      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny\n## 安全规则\n不要记录令牌。\n## İnfo\nz',
       relevance: 1 as const,
     },
   ];
@@ -152,6 +152,7 @@ it('finds a loaded rule cited by file and heading title', () => {
     /Code hygiene\)[^]*### AGENTS\.md \(Conventions\)/,
   );
   assert.match(cited('AGENTS.md (安全规则)'), /^### AGENTS\.md \(安全规则\)\n## 安全规则/);
+  assert.match(cited('AGENTS.md (İnfo)'), /^### AGENTS\.md \(İnfo\)/);
   // A partial word, a title two headings share, a short title, or a bare space names nothing.
   for (const text of [
     'AGENTS.md (Conventions-based)',

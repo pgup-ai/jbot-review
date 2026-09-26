@@ -419,12 +419,15 @@ export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): stri
         ? []
         : markdownHeadings(doc.text.split('\n'))
             .map((heading) => heading.title)
-            .filter(
-              (title) =>
+            .filter((title) => {
+              // Lowercasing can lengthen a title (İ → i̇), so the boundary sits after the folded form.
+              const folded = title.toLowerCase();
+              return (
                 title.length > 3 &&
-                named.startsWith(title.toLowerCase()) &&
-                !/^[\p{L}\p{M}\p{N}_-]/u.test(named.slice(title.length)),
-            )
+                named.startsWith(folded) &&
+                !/^[\p{L}\p{M}\p{N}_-]/u.test(named.slice(folded.length))
+              );
+            })
             .sort((a, b) => b.length - a.length);
       const found = section
         ? extractRuleSection(doc.text, section)
