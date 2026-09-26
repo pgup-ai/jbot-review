@@ -397,20 +397,40 @@ export function applicableGuidelines(
   };
 }
 
-/** Citations must name the file (`FILE.md §N`, `FILE.mdc §N`): a bare `§N` could be any doc's. */
+/**
+ * Citations must name the file, then `§N` or a heading title in brackets or quotes
+ * or after `'s` (`AGENTS.md` (Conventions)): a bare `§N` or title could be any doc's.
+ */
 export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): string[] {
   const sections = new Set<string>();
   const pathOf = (doc: GuidelineDoc) => doc.label.replace(/ \(.*\)$/, '');
-  for (const [, file, section] of text.matchAll(/([\w./-]+\.mdc?)`?\s*§\s*(\d+(?:\.\d+)*)/g)) {
+  const cites = /([\w./-]+\.mdc?)`?(?:\s*§\s*(\d+(?:\.\d+)*)|['’]s\s+|\s*[([`'"“‘]+\s*(?:#+\s+)?)/g;
+  for (const { 0: cite, 1: file, 2: section, index } of text.matchAll(cites)) {
     const paths = new Set(
       docs.map(pathOf).filter((path) => path === file || path.endsWith(`/${file}`)),
     );
     // An exact path wins; a name two files end in could mean either.
     const path = paths.has(file) ? file : paths.size === 1 ? [...paths][0] : undefined;
+    const named = text.slice(index + cite.length).toLowerCase();
     for (const doc of docs) {
-      const found = pathOf(doc) === path && extractRuleSection(doc.text, section);
+      if (pathOf(doc) !== path) continue;
+      // The longest title the citation starts with; three letters or fewer name too little.
+      const [title] = section
+        ? []
+        : markdownHeadings(doc.text.split('\n'))
+            .map((heading) => heading.title)
+            .filter(
+              (title) =>
+                title.length > 3 &&
+                named.startsWith(title.toLowerCase()) &&
+                !/[\w-]/.test(named[title.length] ?? ''),
+            )
+            .sort((a, b) => b.length - a.length);
+      const found = section
+        ? extractRuleSection(doc.text, section)
+        : title && selectGuidelineSections(doc.text, [title]);
       if (found) {
-        sections.add(`### ${path} §${section}\n${found}`);
+        sections.add(`### ${path} ${section ? `§${section}` : `(${title})`}\n${found}`);
         break;
       }
     }
