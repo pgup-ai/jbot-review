@@ -206,15 +206,18 @@ example, Cursor, Devin, Command Code) — no digging a field out of JSON.
 | **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it; comma-separate multiple keys for a balance-aware per-run pick | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`)              |
 | **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                                                                               | `KILO_AUTH_CONTENT` (`kilo-auth`)                                |
 
-Each CLI backend runs **read-only** and only when the main or aux model names
-it. Cline and Command Code write their credential into an
+Each CLI backend runs **read-only** (Cline by plan mode alone, below) and only
+when the main or aux model names it. Cline and Command Code write their credential into an
 isolated temporary `HOME`, Codex into a temporary `CODEX_HOME`, and Qoder carries
 its PAT through a one-time SDK auth payload while using a temporary `HOME`; each is
 removed after the run. Cursor reads its key straight from the env (no file); Devin writes
 `~/.local/share/devin/credentials.toml` under a separate temporary `HOME` per CLI
-invocation, removed after its process exits. Cline runs in an empty directory, so
-hooks and rules a PR commits never load, and uses only the auth token — the
-file's `model`/`reasoning` are stripped — and has two billing
+invocation, removed after its process exits. Cline runs in the checkout in plan
+mode with every tool auto-approved, so it can read the code. Cline approves tools
+all at once, so its shell and write tools are approved too, and hooks and rules
+the checkout commits (`.cline/hooks`, `.clinerules`) load: an accepted risk on
+CI runners. It uses only the auth token — the file's `model`/`reasoning` are
+stripped — and has two billing
 modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
 subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (no
 file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
@@ -540,8 +543,7 @@ Setting that URL routes gateway-supported providers (`devin`, `cursor`,
 [Agent Client Protocol](https://agentclientprotocol.com); the gateway token and
 endpoint are then required. Remote read-only enforcement combines the ACP
 permission policy with each agent's read-only configuration.
-`cline` stays on its tool-less argv driver: the shared ACP permission policy
-allows shell execution and is not a sufficient read-only boundary for Cline.
+`cline` stays on its argv driver.
 Every main task now receives all assigned diff hunks directly, on every backend.
 Related files stay grouped where they fit. Oversized groups split into pages;
 oversized files split at hunks, and a single large hunk splits at line boundaries

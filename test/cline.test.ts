@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -20,7 +21,6 @@ import { describe, it } from 'node:test';
 import {
   assertClinePromptArgWithinBudget,
   buildClineCliArgs,
-  buildClinePromptArg,
   CLINE_MAX_ARGV_BYTES,
   ClineSdkForbiddenError,
   clineEnvForHome,
@@ -52,7 +52,7 @@ describe('Cline CLI provider helpers', () => {
       '--json',
       '--plan',
       '--auto-approve',
-      'false',
+      'true',
       '--provider',
       'cline-pass',
       'P',
@@ -81,17 +81,10 @@ describe('Cline CLI provider helpers', () => {
   it('delivers the prompt as the final positional arg (cline ignores piped stdin headless)', () => {
     // Regression pin for PR #79: stdin delivery fails every session with
     // "JSON output mode requires a prompt argument or piped stdin".
-    const promptArg = buildClinePromptArg('REVIEW BODY');
-    assert.equal(buildClineCliArgs({ model: 'cline-pass/glm-5.2', promptArg }).at(-1), promptArg);
-  });
-
-  it('prepends the no-tools directive to the prompt argv', () => {
-    const arg = buildClinePromptArg('REVIEW BODY');
-    // Load-bearing override phrases: cline must not attempt tool calls it cannot approve.
-    assert.match(arg, /Use no tools for this review/);
-    assert.match(arg, /running the git diff command/);
-    // The full review prompt is preserved verbatim after the directive.
-    assert.ok(arg.endsWith('\n\nREVIEW BODY'));
+    assert.equal(
+      buildClineCliArgs({ model: 'cline-pass/glm-5.2', promptArg: 'REVIEW BODY' }).at(-1),
+      'REVIEW BODY',
+    );
   });
 
   it('guards the argv prompt with a clear backend cap', () => {
@@ -106,16 +99,6 @@ describe('Cline CLI provider helpers', () => {
       () => assertClinePromptArgWithinBudget('review', '界'.repeat(CLINE_MAX_ARGV_BYTES / 2)),
       /argv limit/,
     );
-  });
-
-  it('never auto-approves tools or enables yolo (invariant #8)', () => {
-    for (const model of ['cline/default', 'cline-pass/glm-5.2']) {
-      const args = buildClineCliArgs({ model, promptArg: 'P' });
-      assert.equal(args.includes('--yolo'), false);
-      const approveIndex = args.indexOf('--auto-approve');
-      assert.notEqual(approveIndex, -1);
-      assert.equal(args[approveIndex + 1], 'false');
-    }
   });
 
   it('strips model/reasoning but keeps the auth token', () => {
@@ -261,7 +244,7 @@ describe('Cline CLI provider helpers', () => {
     );
     const result = scope.run('review-interactions', () =>
       runClineReview('cline/default', 'context', '', () => {}, {
-        home: workspace,
+        runtime: { home: workspace, workspace },
         timeoutMs: 10000,
       }),
     );
@@ -309,7 +292,7 @@ describe('Cline CLI provider helpers', () => {
         { mode: 0o700 },
       );
       const result = runClineReview('cline/default', 'context', '', (m) => logs.push(m), {
-        home: workspace,
+        runtime: { home: workspace, workspace },
         timeoutMs: 5000,
       });
       if (fail) await assert.rejects(result, /original provider failure/);
@@ -319,28 +302,30 @@ describe('Cline CLI provider helpers', () => {
     assert.doesNotMatch(logs.join('\n'), /private filesystem detail/);
   });
 
-  it('runs Cline in an empty directory so hooks and rules a PR commits never load', async (t) => {
+  it('runs Cline in the checkout so its read tools see the code', async (t) => {
     const bin = mkdtempSync(join(tmpdir(), 'cline-cwd-'));
+    const checkout = mkdtempSync(join(tmpdir(), 'cline-checkout-'));
     const originalPath = process.env.PATH;
     t.after(() => {
       process.env.PATH = originalPath;
-      rmSync(bin, { recursive: true, force: true });
+      for (const dir of [bin, checkout]) rmSync(dir, { recursive: true, force: true });
     });
     process.env.PATH = `${bin}:${originalPath}`;
     writeClineAuth('{"providers":{}}', bin);
-    const seen = join(bin, 'cwd.json');
+    const seen = join(bin, 'cwd.txt');
     writeFileSync(
       join(bin, 'cline'),
-      `#!/usr/bin/env node\nconst fs = require('fs');\nfs.writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync('.') }));\nconsole.log(JSON.stringify({type:"run_result",text:'{"summary":"","findings":[]}'}));\n`,
+      `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(seen)}, process.cwd());\nconsole.log(JSON.stringify({type:"run_result",text:'{"summary":"","findings":[]}'}));\n`,
       { mode: 0o700 },
     );
-    await runClineReview('cline/default', 'context', '', () => {}, { home: bin, timeoutMs: 5000 });
-    const { cwd, entries } = JSON.parse(readFileSync(seen, 'utf8'));
-    assert.notEqual(cwd, process.cwd());
-    assert.deepEqual(entries, []);
+    await runClineReview('cline/default', 'context', '', () => {}, {
+      runtime: { home: bin, workspace: checkout },
+      timeoutMs: 5000,
+    });
+    assert.equal(readFileSync(seen, 'utf8'), realpathSync(checkout));
   });
 
-  it('verifies findings with the no-tools prompt', async (t) => {
+  it('verifies findings with the tool-using prompt', async (t) => {
     const bin = mkdtempSync(join(tmpdir(), 'cline-verify-'));
     const originalPath = process.env.PATH;
     t.after(() => {
@@ -364,11 +349,11 @@ describe('Cline CLI provider helpers', () => {
       () => {},
       5000,
       undefined,
-      bin,
+      { home: bin, workspace: bin },
     );
     const prompt = readFileSync(seen, 'utf8');
-    assert.match(prompt, /have no tools on this call/);
-    assert.doesNotMatch(prompt, /full repository is checked out/);
+    assert.match(prompt, /full repository is checked out/);
+    assert.doesNotMatch(prompt, /have no tools on this call/);
   });
 
   it('retries a silent Cline exit once in a fresh home and reports what Cline logged', async (t) => {
@@ -400,7 +385,7 @@ console.log(JSON.stringify({ type: 'run_result', text: '{"summary":"","findings"
         { mode: 0o700 },
       );
       const run = runClineReview('cline/default', 'context', '', () => {}, {
-        home: bin,
+        runtime: { home: bin, workspace: bin },
         timeoutMs: 5000,
       });
       if (silentTwice) await assert.rejects(run, /no run_result.*cline\.log: CLI run failed: boom/);
@@ -493,7 +478,10 @@ describe('Cline SDK verifier', () => {
     );
     // `default` has no SDK model id, so it goes straight to the CLI without a worker.
     await assert.rejects(
-      runClineSdkFindingVerification('cline/default', 'diff', [], log, undefined, '/unused'),
+      runClineSdkFindingVerification('cline/default', 'diff', [], log, {
+        home: '/unused',
+        workspace: '/unused',
+      }),
       /concrete model id/,
     );
   });

@@ -20,7 +20,6 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
-  NO_TOOLS_REVIEW_DIRECTIVE,
   truncateUtf8WithNotice,
   type VerifiableFinding,
 } from './prompt.ts';
@@ -62,6 +61,12 @@ export const CLINE_CLI_BIN = 'cline';
 
 export function isClineProvider(providerID: string): boolean {
   return providerID === CLINE_PROVIDER_ID || providerID === CLINE_PASS_PROVIDER_ID;
+}
+
+/** The per-run temp HOME holding the auth file, and the checkout Cline runs in. */
+export interface ClineRuntime {
+  home: string;
+  workspace: string;
 }
 
 export function clineProvidersPath(clineHome: string): string {
@@ -122,18 +127,18 @@ export interface ClineCliArgsInput {
 }
 
 /**
- * Complete `cline` argv. Read-only is enforced here (invariant #8): `--auto-approve
- * false` denies every tool call headless (POC-proven), `--plan` is the secondary
- * behavioral layer, and the bypass flags (`--auto-approve true`, `--yolo`) are never
- * emitted. `--provider` is the billing mode = the jbot provider id (`cline` /
- * `cline-pass`); cline's `-P` defaults to `cline` and ignores lastUsedProvider, so jbot
- * sets it explicitly. `--json` yields the NDJSON we parse; the prompt is the final
- * positional arg (cline ignores piped stdin headless) and carries only PR content —
- * credentials ride the per-session providers.json HOME file, never argv.
+ * Complete `cline` argv. Headless Cline refuses every tool it cannot auto-approve, and
+ * `--auto-approve` covers all tools at once, so reading the checkout means approving
+ * shell and write tools too; `--plan` is what keeps it from editing. That is an accepted
+ * risk on CI runners. `--yolo` is never emitted. `--provider` is the billing mode = the
+ * jbot provider id (`cline` / `cline-pass`); cline's `-P` defaults to `cline` and ignores
+ * lastUsedProvider, so jbot sets it explicitly. `--json` yields the NDJSON we parse; the
+ * prompt is the final positional arg (cline ignores piped stdin headless) and carries
+ * only PR content — credentials ride the per-session providers.json HOME file, never argv.
  */
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   const { providerID, modelID } = parseModelName(input.model);
-  const args = ['--json', '--plan', '--auto-approve', 'false', '--provider', providerID];
+  const args = ['--json', '--plan', '--auto-approve', 'true', '--provider', providerID];
   if (modelID !== 'default') args.push('--model', clineModelId(input.model));
   args.push(input.promptArg);
   return args;
@@ -146,12 +151,6 @@ export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
 function clineModelId(model: string): string {
   const { providerID, modelID } = parseModelName(model);
   return providerID === CLINE_PASS_PROVIDER_ID ? `${providerID}/${modelID}` : modelID;
-}
-
-/** Prompt argv: the no-tools directive (read-only cline can't run the base prompt's
- * git/grep steps) prepended so the model reviews the embedded context, not stalls. */
-export function buildClinePromptArg(prompt: string): string {
-  return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
 }
 
 export function assertClinePromptArgWithinBudget(label: string, prompt: string): void {
@@ -261,8 +260,8 @@ export async function runClineReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
-    home?: string;
-  } = {},
+    runtime: ClineRuntime;
+  },
 ): Promise<ReviewResult> {
   // Cline run_result carries usage, but mirror the other CLI backends and skip it.
   void options.onTokenUsage;
@@ -278,10 +277,10 @@ export async function runClineReview(
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
     options.embeddedFirstPrompt ?? false,
-    { toolsAvailable: false, contextFirst: options.contextFirst, contextPack: options.contextPack },
+    { toolsAvailable: true, contextFirst: options.contextFirst, contextPack: options.contextPack },
   );
   log(`Prompt assembled (${label}, cline): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const raw = await runClinePrompt(model, prompt, label, log, options.home, options.timeoutMs);
+  const raw = await runClinePrompt(model, prompt, label, log, options.runtime, options.timeoutMs);
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
@@ -298,7 +297,7 @@ export async function runClineReview(
       }),
       `${label}-repair`,
       log,
-      options.home,
+      options.runtime,
       options.timeoutMs,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
@@ -309,9 +308,9 @@ export async function runClineAddressedPriorCommentsCheck(
   model: string,
   prContext: string,
   log: (msg: string) => void,
-  timeoutMs?: number,
-  onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  timeoutMs: number | undefined,
+  onTokenUsage: TokenUsageRecorder | undefined,
+  runtime: ClineRuntime,
 ): Promise<AddressedPriorComment[]> {
   void onTokenUsage;
   const raw = await runClinePrompt(
@@ -319,7 +318,7 @@ export async function runClineAddressedPriorCommentsCheck(
     assembleAddressedPriorCommentsPrompt(prContext),
     'addressed-prior-comments',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
@@ -330,9 +329,9 @@ export async function runClineGuidelineComplianceCheck(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
-  timeoutMs?: number,
-  onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  timeoutMs: number | undefined,
+  onTokenUsage: TokenUsageRecorder | undefined,
+  runtime: ClineRuntime,
 ): Promise<Finding[]> {
   void onTokenUsage;
   const guidelinesForArgv = truncateUtf8WithNotice(
@@ -345,7 +344,7 @@ export async function runClineGuidelineComplianceCheck(
     assembleGuidelineCompliancePrompt(prContext, guidelinesForArgv),
     'guideline-compliance',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
@@ -355,9 +354,9 @@ export async function runClineChangesSinceLastReview(
   model: string,
   deltaContext: string,
   log: (msg: string) => void,
-  timeoutMs?: number,
-  onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  timeoutMs: number | undefined,
+  onTokenUsage: TokenUsageRecorder | undefined,
+  runtime: ClineRuntime,
 ): Promise<string> {
   void onTokenUsage;
   const raw = await runClinePrompt(
@@ -367,14 +366,13 @@ export async function runClineChangesSinceLastReview(
         deltaContext,
         CLINE_MAX_ARGV_BYTES -
           256 - // Reserve the omission notice in the argv limit.
-          Buffer.byteLength(buildClinePromptArg(assembleChangesSinceLastReviewPrompt('', true))),
+          Buffer.byteLength(assembleChangesSinceLastReviewPrompt('')),
         'Changes-since summary context',
       ),
-      true,
     ),
     'changes-since-last-review',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
@@ -385,17 +383,17 @@ export async function runClineFindingVerification(
   prContext: string,
   findings: VerifiableFinding[],
   log: (msg: string) => void,
-  timeoutMs?: number,
-  onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  timeoutMs: number | undefined,
+  onTokenUsage: TokenUsageRecorder | undefined,
+  runtime: ClineRuntime,
 ): Promise<FindingVerdict[] | undefined> {
   void onTokenUsage;
   const raw = await runClinePrompt(
     model,
-    assembleFindingVerificationPrompt(prContext, findings, true),
+    assembleFindingVerificationPrompt(prContext, findings),
     'finding-verification',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseFindingVerdicts(raw, findings.length, log);
@@ -406,16 +404,15 @@ async function runClinePrompt(
   prompt: string,
   label: string,
   log: (msg: string) => void,
-  home: string | undefined,
+  runtime: ClineRuntime,
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
-  const fullPrompt = buildClinePromptArg(prompt);
-  assertClinePromptArgWithinBudget(label, fullPrompt);
+  assertClinePromptArgWithinBudget(label, prompt);
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
   const deadline = Date.now() + timeoutMs;
   const timeoutMessage = formatClinePromptTimeoutMessage(label, model, timeoutMs);
   const run = () =>
-    runClineOnce(model, fullPrompt, home, Math.max(0, deadline - Date.now()), timeoutMessage, log);
+    runClineOnce(model, prompt, runtime, Math.max(0, deadline - Date.now()), timeoutMessage, log);
   let result = await run();
   // Cline can exit 0 without printing anything; one fresh run is cheap.
   if (result.exitCode === 0 && !result.stdout && !result.stderr) {
@@ -448,14 +445,15 @@ async function runClinePrompt(
 async function runClineOnce(
   model: string,
   promptArg: string,
-  home: string | undefined,
+  runtime: ClineRuntime,
   timeoutMs: number,
   timeoutMessage: string,
   log: (msg: string) => void,
 ) {
-  return inClineHome(home, log, async (dir, cwd) => {
+  return inClineHome(runtime.home, log, async (dir) => {
+    // In the checkout, so its read tools see the code; its hooks and rules load too.
     const result = await runCliProcess(CLINE_CLI_BIN, buildClineCliArgs({ model, promptArg }), {
-      cwd,
+      cwd: runtime.workspace,
       env: clineEnvForHome(dir),
       timeoutMs,
       timeoutMessage,
@@ -465,9 +463,9 @@ async function runClineOnce(
 }
 
 async function inClineHome<T>(
-  home: string | undefined,
+  home: string,
   log: (msg: string) => void,
-  run: (dir: string, cwd: string) => Promise<T>,
+  run: (dir: string) => Promise<T>,
 ): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
   try {
@@ -475,12 +473,8 @@ async function inClineHome<T>(
     // file cline rewrites when it refreshes the token.
     const providers = clineProvidersPath(dir);
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
-    copyFileSync(clineProvidersPath(home ?? ''), providers);
-    // Cline runs hooks and loads rules from its workspace, including ones a PR commits
-    // (.cline/hooks, .clinerules), so its working directory is always empty.
-    const cwd = join(dir, 'workspace');
-    mkdirSync(cwd);
-    return await run(dir, cwd);
+    copyFileSync(clineProvidersPath(home), providers);
+    return await run(dir);
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(
       (error: NodeJS.ErrnoException) => log(`Cline temporary-home cleanup failed: ${error.code}.`),
@@ -500,8 +494,7 @@ export async function runClineSdkFindingVerification(
   prContext: string,
   findings: VerifiableFinding[],
   log: (msg: string) => void,
-  home: string | undefined,
-  workspace: string,
+  runtime: ClineRuntime,
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<FindingVerdict[]> {
   // The CLI resolves `default` itself; the SDK needs a concrete model id.
@@ -516,9 +509,9 @@ export async function runClineSdkFindingVerification(
         import.meta.resolve('tsx'),
         fileURLToPath(new URL('./cline-sdk-worker.ts', import.meta.url)),
       ];
-  const result = await inClineHome(home, log, (dir, cwd) =>
+  const result = await inClineHome(runtime.home, log, (dir) =>
     runCliProcess(process.execPath, worker, {
-      cwd,
+      cwd: dir,
       env: clineEnvForHome(dir),
       timeoutMs,
       timeoutMessage: formatClinePromptTimeoutMessage('finding-verification', model, timeoutMs),
@@ -526,7 +519,7 @@ export async function runClineSdkFindingVerification(
         providerId: parseModelName(model).providerID,
         modelId: clineModelId(model),
         prompt: assembleFindingVerificationPrompt(prContext, findings),
-        workspace,
+        workspace: runtime.workspace,
         timeoutMs,
       }),
     }),

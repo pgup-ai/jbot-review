@@ -25,11 +25,7 @@ import {
   REVIEW_LENSES,
   UNTRUSTED_PR_CONTENT_NOTE,
 } from '../src/shared/prompt.ts';
-import {
-  buildClinePromptArg,
-  CLINE_MAX_ARGV_BYTES,
-  CLINE_MODEL_LIMITS,
-} from '../src/shared/cline.ts';
+import { CLINE_MAX_ARGV_BYTES, CLINE_MODEL_LIMITS } from '../src/shared/cline.ts';
 import { COMMANDCODE_MODEL_LIMITS } from '../src/shared/commandcode.ts';
 import { runShardedReview } from '../src/shared/runner.ts';
 import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
@@ -69,9 +65,7 @@ test('one requested shard pages a huge hunk without losing late changes or excee
     Array.from({ length: 14000 }, (_, i) => i + 1),
   );
   for (const plan of plans) {
-    assert.ok(
-      Buffer.byteLength(buildClinePromptArg(renderPrompt(plan.context))) <= CLINE_MAX_ARGV_BYTES,
-    );
+    assert.ok(Buffer.byteLength(renderPrompt(plan.context)) <= CLINE_MAX_ARGV_BYTES);
     assert.ok(plan.context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
     assert.equal(plan.diffCoverage.omittedFiles + plan.diffCoverage.truncatedFiles, 0);
   }
@@ -108,9 +102,7 @@ test('uses known free-model capacity for fewer complete pages and ranks auxiliar
     );
   assert.ok(plans.length < small.length);
   for (const plan of plans)
-    assert.ok(
-      Buffer.byteLength(buildClinePromptArg(renderPrompt(plan.context))) <= CLINE_MAX_ARGV_BYTES,
-    );
+    assert.ok(Buffer.byteLength(renderPrompt(plan.context)) <= CLINE_MAX_ARGV_BYTES);
   assert.equal(reviewDelivery(plans, new Set(plans.map((p) => p.label))).deliveredHunks, 2);
   const commandCodeFallback = buildShardPlans({
     ...base,
