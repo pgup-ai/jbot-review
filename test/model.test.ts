@@ -177,9 +177,10 @@ describe('pickReviewModels', () => {
     assert.equal(model, pickPooledModel(pool, seed));
     assert.ok(pool.includes(auxModel));
     assert.notEqual(auxModel, model);
-    // Retries advance the main pick past a failing candidate; aux fails open, so it holds.
+    // Retries advance both picks, so a rerun also moves the aux sessions to another model.
     assert.equal(pickReviewModels(pool, seed, 2).model, pickPooledModel(pool, seed, 2));
-    assert.equal(pickReviewModels(pool, seed, 2).auxModel, auxModel);
+    assert.equal(pickReviewModels(pool, seed, 2).auxModel, pickPooledModel(pool, `aux:${seed}`, 2));
+    assert.notEqual(pickReviewModels(pool, seed, 2).auxModel, auxModel);
     // One entry: both roles land on it, so aux shares the main options entry and its effort.
     assert.deepEqual(pickReviewModels(['opencode/a'], seed), {
       model: 'opencode/a',

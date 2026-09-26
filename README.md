@@ -814,7 +814,8 @@ differ. Both hash into the same pool, so roughly 1/n of runs land both roles on
 one candidate (half the runs on a two-model pool), and a one-entry pool
 always does. That is when the aux session shares the main model's options entry
 and its effort instead of the lower aux default. Neither draw prefers a
-position, so pool order carries no heavy/fast role assignment.
+position, so pool order carries no heavy/fast role assignment. A rerun advances
+both draws, so it also moves the auxiliary sessions to another candidate.
 
 **Legacy `provider`** still works unchanged. Setting it _pins_ the provider: an
 unprefixed id belongs to it, a matching `provider/` prefix is stripped, and any
