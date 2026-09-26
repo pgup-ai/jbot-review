@@ -182,6 +182,21 @@ it('ranks every section on one scale, fills the budget best-fit and lists the re
   assert.match(out, /1 sections in 1 docs name nothing in this diff and were omitted\./);
 });
 
+it('delivers a guideline set small enough for the main prompt whole', () => {
+  const discovered = {
+    docs: [
+      { label: 'AGENTS.md', text: '# Agents\n## Deploys\nship on green', relevance: 1 as const },
+    ],
+    referenced: [],
+    budgetExhausted: false,
+  };
+  // Nothing names src/unrelated.ts, yet no section is dropped: follow-up reuse relies on it.
+  assert.equal(
+    formatRankedGuidelines(discovered, [{ filename: 'src/unrelated.ts' }]),
+    formatGuidelines(discovered),
+  );
+});
+
 it('ranks rules for business logic ahead of rules for its tests', () => {
   const doc = (label: string, word: string) => ({
     label,

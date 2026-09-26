@@ -1542,6 +1542,9 @@ const REQUIRED_SECTION_BYTES = 2 * 1024;
  * weighted by how critical each file is — filled best-fit with whole sections.
  */
 export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: PrFile[]): string {
+  // A set small enough for the main prompt stays whole: an incremental follow-up
+  // reuses the guideline pass on the promise that main saw every rule (coveredByMain).
+  if (canCheckGlobalGuidelinesInMain(discovered)) return formatGuidelines(discovered);
   // Changed-line words were tried as terms and ranked worse: they name unrelated rules.
   const query = new Map<string, number>();
   for (const file of files) {
