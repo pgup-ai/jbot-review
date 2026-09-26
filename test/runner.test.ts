@@ -1978,6 +1978,44 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
   ]);
 });
 
+it('gives a checkout-blind verifier the page packs and cited rules in its only pass', async () => {
+  const modes: string[] = [];
+  let seen = '';
+  const verdicts = await requestFindingVerdicts({
+    workspace: '/unused',
+    model: 'test/model',
+    prContext: 'diff',
+    sourceContext: async () => 'source of a.ts',
+    toolLessContextFor: () => ({
+      packs: ['page pack: caller(a)'],
+      rules: ['### RULES.md §1\nNever call caller(a).'],
+    }),
+    targets: [{ path: 'a.ts', line: 1, severity: 'P2', title: 'a', body: 'claim' }],
+    toolLessOnly: true,
+    log: () => {},
+    backend: {
+      async runFindingVerification(_model, context, findings, ...rest) {
+        modes.push(String(rest.at(-1)));
+        seen = context;
+        const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
+        return findings.map((_, index) => ({
+          index,
+          verdict: 'confirmed' as const,
+          reason: 'trigger',
+          finding: { ...finding, evidence: 'caller(a)' },
+        }));
+      },
+    },
+  });
+  assert.deepEqual(modes, ['single-shot']);
+  assert.match(seen, /page pack: caller\(a\)[^]*Never call caller\(a\)/);
+  // The quote comes from the shown pack, so the confirmation stands.
+  assert.deepEqual(
+    verdicts.map((v) => v.verdict),
+    ['confirmed'],
+  );
+});
+
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
   const findings: Finding[] = Array.from({ length: 23 }, (_, i) => ({
     path: 'missing.ts',

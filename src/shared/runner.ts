@@ -2632,6 +2632,8 @@ async function runReviewPipeline(params: {
       auxBackend.name,
       modelSupportsAgenticTools(auxProviderID, auxModelID),
     );
+    // Cline and other checkout-blind verifiers cannot open the code a finding depends on.
+    const auxCheckoutBlind = !(auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff);
     const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
@@ -3250,6 +3252,7 @@ async function runReviewPipeline(params: {
         timeoutMs,
         modelOptions: verifierSessionOptions,
         toolLessFirst: toolLessAux,
+        toolLessOnly: auxCheckoutBlind,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
@@ -3444,6 +3447,7 @@ async function runReviewPipeline(params: {
         ),
         modelOptions: verifierSessionOptions,
         toolLessFirst: toolLessAux,
+        toolLessOnly: auxCheckoutBlind,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
@@ -3470,6 +3474,7 @@ async function runReviewPipeline(params: {
         enabled: verificationEnabled,
         modelOptions: verifierSessionOptions,
         toolLessFirst: toolLessAux,
+        toolLessOnly: auxCheckoutBlind,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
@@ -4282,6 +4287,7 @@ async function verifyFindings(params: {
   /** TASK-157: the verifier's floored options when the aux entry lacks them. */
   modelOptions?: Record<string, unknown>;
   toolLessFirst?: boolean;
+  toolLessOnly?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -4334,6 +4340,8 @@ export async function requestFindingVerdicts(params: {
   timeoutMs?: number;
   modelOptions?: Record<string, unknown>;
   toolLessFirst?: boolean;
+  /** A verifier that cannot open files: one tool-less pass, final like any other. */
+  toolLessOnly?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -4409,7 +4417,7 @@ export async function requestFindingVerdicts(params: {
           params.promptBudget,
         ).fits;
       let omitted = 0;
-      if (params.toolLessFirst) {
+      if (params.toolLessFirst || params.toolLessOnly) {
         const extras = targets.map(
           (target) => params.toolLessContextFor?.(target) ?? { packs: [], rules: [] },
         );
@@ -4501,7 +4509,7 @@ export async function requestFindingVerdicts(params: {
             index: targets.indexOf(rest[verdict.index]),
           })),
         ];
-      } else batch = await verify(targets);
+      } else batch = await verify(targets, params.toolLessOnly ? 'single-shot' : undefined);
       if (!batch) throw new Error('Finding verification output unusable.');
       const checked = await Promise.all(
         batch.map(async (verdict) => ({
