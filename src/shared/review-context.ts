@@ -415,7 +415,7 @@ export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): stri
     for (const doc of docs) {
       if (pathOf(doc) !== path) continue;
       // The longest title the citation starts with; three letters or fewer name too little.
-      const [title] = section
+      const [title, runnerUp] = section
         ? []
         : markdownHeadings(doc.text.split('\n'))
             .map((heading) => heading.title)
@@ -429,9 +429,11 @@ export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): stri
               );
             })
             .sort((a, b) => b.length - a.length);
+      // Titles that differ only in case are as ambiguous as duplicates.
+      const unique = runnerUp?.toLowerCase() !== title?.toLowerCase();
       const found = section
         ? extractRuleSection(doc.text, section)
-        : title && selectGuidelineSections(doc.text, [title]);
+        : title && unique && selectGuidelineSections(doc.text, [title]);
       if (found) {
         sections.add(`### ${path} ${section ? `§${section}` : `(${title})`}\n${found}`);
         break;

@@ -133,7 +133,7 @@ it('finds a loaded rule cited by file and heading title', () => {
   const docs = [
     {
       label: 'AGENTS.md',
-      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny\n## 安全规则\n不要记录令牌。\n## İnfo\nz',
+      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny\n## 安全规则\n不要记录令牌。\n## İnfo\nz\n## Case\nc\n## case\nd',
       relevance: 1 as const,
     },
   ];
@@ -158,6 +158,7 @@ it('finds a loaded rule cited by file and heading title', () => {
     'AGENTS.md (Conventions-based)',
     'AGENTS.md (安全规则变更)',
     'AGENTS.md (Misc)',
+    'AGENTS.md (Case)',
     'AGENTS.md (API)',
     'AGENTS.md Conventions',
   ])
