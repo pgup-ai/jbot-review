@@ -18,6 +18,7 @@ import {
   formatFinderGuidelines,
   formatGuidelines,
   formatLinkedIssues,
+  formatRankedGuidelines,
   rankGuidelineSections,
   selectFinderGuidelineText,
   selectGuidelineSections,
@@ -143,6 +144,122 @@ it('names the skipped sections of a cut doc in the full guidance notice', () => 
     budgetExhausted: false,
   });
   assert.match(full, /skipped sections by file: big\.md \(Skipped one, Skipped two\)\./);
+});
+
+it('ranks every section on one scale, fills the budget best-fit and lists the rest', () => {
+  const filler = (name: string) =>
+    Array.from({ length: 12 }, (_, i) => `## ${name} ${i}\n${'x'.repeat(5 * 1024)}`).join('\n');
+  const out = formatRankedGuidelines(
+    {
+      docs: [
+        { label: 'a.md', text: filler('Alpha'), relevance: 3 },
+        { label: 'b.md', text: filler('Beta'), relevance: 3 },
+        { label: 'root.md', text: '## Style\nuse tabs', relevance: 1 },
+        {
+          label: 'z.md',
+          text: '# Rules\n## Deploys\nship\n## Refunds\nrefunds stay append-only',
+          relevance: 3,
+        },
+        {
+          label: '.pr-governance/design/STANDARDS.md (§6.2)',
+          text: `## 6.2 Placement\nTests go in api-spec files.\n${'y'.repeat(7 * 1024)}\nSpecs sit beside the code.`,
+          relevance: 3,
+        },
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    },
+    [{ filename: 'apps/ledger/src/refunds/refund.service.ts' }],
+  );
+  assert.ok(Buffer.byteLength(out) <= 96 * 1024);
+  assert.match(out, /^### \.pr-governance\/design\/STANDARDS\.md \(§6\.2\)\n## 6\.2 Placement/m);
+  // A routed rule is never clipped at the per-section cap.
+  assert.match(out, /y\nSpecs sit beside the code\./);
+  // The matching section outranks equally routed filler that sorts earlier, and keeps its parent heading.
+  assert.match(out, /### z\.md\n# Rules\n[^]*## Refunds\nrefunds stay append-only/);
+  assert.match(out, /open any that apply: .*b\.md: Beta \d+/);
+  // A section naming no changed path is dropped even with room left; only a count remains.
+  assert.doesNotMatch(out, /use tabs/);
+  assert.doesNotMatch(out, /root\.md|Style/);
+  assert.match(out, /1 sections in 1 docs name nothing in this diff and were omitted\./);
+});
+
+it('places each section under its own parents and drops nothing for generic paths', () => {
+  const discovered = {
+    docs: [
+      {
+        label: 'nest.md',
+        text: '# Ledger\n## Rules\n### Refunds\nstay append-only\n# Payouts\n## Rules\n### Chargebacks\nsettle in a day',
+        relevance: 1 as const,
+      },
+    ],
+    referenced: [],
+    budgetExhausted: false,
+  };
+  const out = formatRankedGuidelines(discovered, [
+    { filename: 'src/refunds.ts' },
+    { filename: 'src/chargebacks.ts' },
+  ]);
+  assert.match(out, /### Refunds\nstay append-only\n# Payouts\n## Rules\n### Chargebacks/);
+  assert.match(out, /4 sections in 1 docs name nothing/);
+  assert.doesNotMatch(
+    formatRankedGuidelines(discovered, [{ filename: 'src/app.ts' }]),
+    /name nothing/,
+  );
+});
+
+it('charges a parent heading shared by selected sections once', () => {
+  const text = [
+    `# ${'Ledger '.repeat(300)}`,
+    ...Array.from({ length: 18 }, (_, i) => `## Rule ${i}\n${'x'.repeat(5 * 1024)}`),
+  ].join('\n');
+  const out = formatRankedGuidelines(
+    { docs: [{ label: 'a.md', text, relevance: 3 }], referenced: [], budgetExhausted: false },
+    [{ filename: 'src/ledger.ts' }],
+  );
+  assert.equal(out.match(/^## Rule \d+$/gm)?.length, 18);
+});
+
+it('delivers a guideline set small enough for the main prompt whole', () => {
+  const discovered = {
+    docs: [
+      { label: 'AGENTS.md', text: '# Agents\n## Deploys\nship on green', relevance: 1 as const },
+    ],
+    referenced: [],
+    budgetExhausted: false,
+  };
+  // Nothing names src/unrelated.ts, yet no section is dropped: follow-up reuse relies on it.
+  assert.equal(
+    formatRankedGuidelines(discovered, [{ filename: 'src/unrelated.ts' }]),
+    formatGuidelines(discovered),
+  );
+});
+
+it('ranks rules for business logic ahead of rules for its tests', () => {
+  const doc = (label: string, word: string) => ({
+    label,
+    text: Array.from(
+      { length: 10 },
+      (_, i) => `## ${word} rule ${i}\n${'x'.repeat(6 * 1024)}`,
+    ).join('\n'),
+    relevance: 2 as const,
+  });
+  const other = {
+    label: 'other.md',
+    text: Array.from({ length: 40 }, (_, i) => `## Topic ${i}\ny`).join('\n'),
+    relevance: 2 as const,
+  };
+  const out = formatRankedGuidelines(
+    {
+      docs: [doc('refunds.md', 'Refund'), doc('charges.md', 'Charge'), other],
+      referenced: [],
+      budgetExhausted: false,
+    },
+    [{ filename: 'src/pay/refund.spec.ts' }, { filename: 'src/pay/charge.ts' }],
+  );
+  // Every business-logic rule fits; the budget runs out inside the test rules.
+  assert.equal(out.match(/^## Charge rule \d$/gm)?.length, 10);
+  assert.ok((out.match(/^## Refund rule \d$/gm)?.length ?? 0) < 10);
 });
 
 describe('formatContextBudget', () => {
