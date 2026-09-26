@@ -1617,9 +1617,6 @@ ${REVIEW_COMMAND_POLICY}
 - If a "Referenced Markdown documents" list is present, read every listed doc
   whose subject could plausibly apply to the changed files before you
   conclude.
-- Beyond those, open a guidance file only for a skipped section the "Review
-  guidance budget" note lists or the rest of a truncated section, when it could
-  apply. Do not search the repository for other guidance.
 - ${BATCHED_READS_RULE}
 - Report one finding per violation, anchored to a line ADDED by this PR, or
   to line 0 of the changed file when no single added line carries the
@@ -1690,7 +1687,8 @@ export const COMPLIANCE_PACK_NOTE = `## Page audit notes
 
 ## Repository exploration policy
 
-Audit the embedded hunks, and read more code whenever a rule check needs it.`;
+Audit the embedded hunks, and read more code or guidance whenever a rule check
+needs it.`;
 
 export function assembleGuidelineSweepPrompt(guidelines: string): string {
   return assembleGuidelineCompliancePrompt(

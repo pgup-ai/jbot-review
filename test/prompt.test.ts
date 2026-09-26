@@ -795,7 +795,6 @@ describe('assembleGuidelineCompliancePrompt', () => {
     assert.ok(prompt.startsWith(GUIDELINE_COMPLIANCE_PROMPT));
     assert.ok(prompt.endsWith(GUIDELINE_COMPLIANCE_OUTPUT_REMINDER));
     assert.ok(prompt.indexOf('GUIDELINES_SENTINEL') < prompt.indexOf('PR_CONTEXT_SENTINEL'));
-    assert.match(prompt, /Do not search the repository for other guidance/);
   });
 
   it('omits the guidelines section when they are embedded in the context', () => {

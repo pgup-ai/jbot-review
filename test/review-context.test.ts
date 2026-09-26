@@ -217,10 +217,7 @@ it('ranks every section on one scale, fills the budget best-fit and lists the re
   // A section naming no changed path is dropped even with room left; only a count remains.
   assert.doesNotMatch(out, /use tabs/);
   assert.doesNotMatch(out, /root\.md|Style/);
-  assert.match(
-    out,
-    /1 sections in 1 docs name nothing in this diff and were omitted as not applicable\./,
-  );
+  assert.match(out, /1 sections in 1 docs name nothing in this diff and were omitted\./);
 });
 
 it('places each section under its own parents and drops nothing for generic paths', () => {

@@ -1693,7 +1693,7 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
       : []),
     ...(dropped > 0
       ? [
-          `${dropped} sections in ${unrelated.size} docs name nothing in this diff and were omitted as not applicable.`,
+          `${dropped} sections in ${unrelated.size} docs name nothing in this diff and were omitted.`,
         ]
       : []),
   ]);
