@@ -1423,11 +1423,15 @@ as `TS-13.1` also brings its parent's own text (§13 up to its first sub-rule)
 when that text is at most 2 KB, since a parent usually states the defaults its
 sub-rules refine.
 
-Guideline files load whole, up to 128 KB each and 1 MB in total. Within each
-file, the sections that name a changed directory or file go first, so a session
-whose byte budget cannot hold the whole file keeps those sections instead of its
-opening. When guideline compliance cannot fit every section, its budget note
-names each file's skipped sections so it can open the ones that apply.
+Guideline files load whole, up to 128 KB each and 1 MB in total. Guideline
+compliance ranks every section of every applicable file on one scale: routed
+rule IDs first, then routed and nearby files, then sections that name a changed
+path, weighted by how critical the changed file is (code over configuration over
+tests over docs). It fills its 96 KB budget with whole sections in rank order and
+lists the ranked sections that did not fit, so it can open the ones that apply.
+Sections that name nothing in the diff are omitted and counted. Set
+`JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each
+file's matching sections go first and files share the budget in turn.
 
 No additional routing file or flag is needed. Logs report
 scope exclusions, guideline parts, prompt bytes, and page completion. The existing

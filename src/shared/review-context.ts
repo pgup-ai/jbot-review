@@ -1,7 +1,9 @@
 import { access, open, readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
+import { diffRiskScore } from './diff-context.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
+import type { PrFile } from './github.ts';
 import {
   buildFairGuidelineFragments,
   type GuidelineFragment,
@@ -428,60 +430,82 @@ function termText(text: string): string {
   return ` ${words} `;
 }
 
+/** A changed path's phrases and words, e.g. `refund-policy.ts` → `refund policy`, `refund`, `policy`. */
+function pathTerms(file: string): string[] {
+  const phrases = file
+    .replace(/\.[^./]+$/, '')
+    .split(/[/.]/)
+    .map((part) => termText(part).trim().split(' '))
+    .filter((words) => words.some((word) => !GENERIC_PATH_WORD.test(word)));
+  return [...phrases.map((words) => words.join(' ')), ...phrases.flat()].filter(
+    (term) => term.length >= 3 && !GENERIC_PATH_WORD.test(term),
+  );
+}
+
 /**
- * Moves each doc's sections that name a changed directory or file ahead of the
- * rest, so a byte budget that cuts the doc keeps them instead of its opening.
- * Terms are weighted by rarity; one in over a quarter of all sections is ignored.
+ * Each doc's heading-delimited sections, scored by the query terms they name: a
+ * term's rarity across all sections times its query weight, doubled in a
+ * heading. A term in over a quarter of all sections tells none apart and is ignored.
  */
-export function rankGuidelineSections(
-  discovered: DiscoveredGuidelines,
-  changedFiles: string[],
-): DiscoveredGuidelines {
-  const split = discovered.docs.map((doc) => {
+function scoreSections(docs: GuidelineDoc[], query: Map<string, number>) {
+  const split = docs.map((doc) => {
     const lines = doc.text.split('\n');
     const levels = new Map(markdownHeadings(lines).map(({ line, level }) => [line, level]));
     const starts = [0, ...[...levels.keys()].filter((line) => line > 0), lines.length];
     return starts.slice(0, -1).map((start, index) => {
       const text = lines.slice(start, starts[index + 1]).join('\n');
+      const words = termText(text);
       return {
         text,
         level: levels.get(start) ?? 0,
-        words: termText(text),
+        words,
+        vocabulary: new Set(words.trim().split(' ')),
         heading: levels.has(start) ? termText(lines[start]) : '',
       };
     });
   });
   const sections = split.flat();
-  const phrases = changedFiles
-    .flatMap((file) => file.replace(/\.[^./]+$/, '').split(/[/.]/))
-    .map((part) => termText(part).trim().split(' '))
-    .filter((words) => words.some((word) => !GENERIC_PATH_WORD.test(word)));
-  const terms = new Set(
-    [...phrases.map((words) => words.join(' ')), ...phrases.flat()].filter(
-      (term) => term.length >= 3 && !GENERIC_PATH_WORD.test(term),
-    ),
-  );
-  const weights = [...terms].flatMap((term) => {
-    const found = sections.filter(({ words }) => words.includes(` ${term} `)).length;
+  // Single words are set lookups; only multi-word path phrases need a scan.
+  const names = (section: (typeof sections)[number], term: string) =>
+    term.includes(' ') ? section.words.includes(` ${term} `) : section.vocabulary.has(term);
+  const weights = [...query].flatMap(([term, weight]) => {
+    const found = sections.filter((section) => names(section, term)).length;
     return found && found <= Math.max(1, sections.length / 4)
-      ? [{ term: ` ${term} `, weight: Math.log(1 + sections.length / found) }]
+      ? [{ term, weight: weight * Math.log(1 + sections.length / found) }]
       : [];
   });
+  return split.map((doc) =>
+    doc.map((section, order) => ({
+      text: section.text,
+      level: section.level,
+      order,
+      score: weights.reduce(
+        (sum, { term, weight }) =>
+          names(section, term)
+            ? sum + weight * (section.heading.includes(` ${term} `) ? 2 : 1)
+            : sum,
+        0,
+      ),
+    })),
+  );
+}
+
+/**
+ * Moves each doc's sections that name a changed directory or file ahead of the
+ * rest, so a byte budget that cuts the doc keeps them instead of its opening.
+ */
+export function rankGuidelineSections(
+  discovered: DiscoveredGuidelines,
+  changedFiles: string[],
+): DiscoveredGuidelines {
+  const scoredDocs = scoreSections(
+    discovered.docs,
+    new Map(changedFiles.flatMap(pathTerms).map((term) => [term, 1])),
+  );
   return {
     ...discovered,
     docs: discovered.docs.map((doc, index) => {
-      const scored = split[index].map((section, order) => ({
-        text: section.text,
-        level: section.level,
-        order,
-        score: weights.reduce(
-          (sum, { term, weight }) =>
-            section.words.includes(term)
-              ? sum + weight * (section.heading.includes(term) ? 2 : 1)
-              : sum,
-          0,
-        ),
-      }));
+      const scored = scoredDocs[index];
       if (!scored.some(({ score }) => score > 0)) return doc;
       const emitted = new Set<number>();
       const parts: string[] = [];
@@ -1493,6 +1517,124 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
       return notes.length > 0 ? `### Review guidance budget\n${notes.join(' ')}` : '';
     },
   );
+}
+
+// Replaying 159 rules cited in real reviews: 50 kept 97% of routed ones while lifting unrouted 37% → 83%.
+const ROUTED_DOC_PRIOR = 50;
+const MAX_RANKED_SECTION_BYTES = 6 * 1024;
+
+/**
+ * The guideline-compliance budget (JBOT_GUIDELINE_RANK=legacy restores
+ * formatGuidelines): every section of every applicable doc on one scale — rule-ID
+ * routes, then routed and nearby docs with a head start, then changed-path terms
+ * weighted by how critical each file is — filled best-fit with whole sections.
+ */
+export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: PrFile[]): string {
+  // Changed-line words were tried as terms and ranked worse: they name unrelated rules.
+  const query = new Map<string, number>();
+  for (const file of files) {
+    const weight = Math.min(2, Math.max(0.2, diffRiskScore(file) / 30));
+    for (const term of pathTerms(file.filename))
+      query.set(term, Math.max(query.get(term) ?? 0, weight));
+  }
+  const scored = scoreSections(discovered.docs, query);
+  const units = discovered.docs.flatMap((doc, index) => {
+    const chain: string[] = [];
+    return scored[index].map((section) => {
+      const heading = section.level ? section.text.split('\n', 1)[0] : '';
+      // The parent headings a subsection needs to read in place.
+      const lead = chain.slice(0, Math.max(0, section.level - 1)).filter(Boolean);
+      if (section.level) {
+        chain.length = section.level - 1;
+        chain[section.level - 1] = heading;
+      }
+      const rank = doc.label.includes(' (§')
+        ? Number.MAX_SAFE_INTEGER
+        : section.score + (doc.relevance === GUIDELINE_RELEVANCE.scoped ? ROUTED_DOC_PRIOR : 0);
+      return { index, doc, section, heading, lead, rank };
+    });
+  });
+  units.sort((a, b) => b.rank - a.rank || a.index - b.index || a.section.order - b.section.order);
+
+  // Notes are bounded lists plus under 512 bytes of fixed prose, so the cap holds by construction.
+  const budget =
+    MAX_GUIDELINE_TOTAL_BYTES - MAX_SKIPPED_SECTIONS_BYTES - MAX_OMITTED_LABEL_BYTES - 512;
+  const clip = (text: string) =>
+    Buffer.byteLength(text) <= MAX_RANKED_SECTION_BYTES
+      ? text
+      : truncateUtf8(text, MAX_RANKED_SECTION_BYTES - 32) + '\n[section truncated]';
+  const chosen = new Set<(typeof units)[number]>();
+  const opened = new Set<number>();
+  const skipped: typeof units = [];
+  const unrelated = new Set<string>();
+  let dropped = 0;
+  let used = 0;
+  for (const unit of units) {
+    // Dropped, not listed: no cited rule in the replay came from an unrouted section naming nothing in the diff.
+    if (unit.rank <= 0) {
+      unrelated.add(unit.doc.label);
+      dropped += 1;
+      continue;
+    }
+    const header = opened.has(unit.index) ? 0 : Buffer.byteLength(`### ${unit.doc.label}\n`) + 2;
+    const bytes =
+      header +
+      Buffer.byteLength(clip(unit.section.text)) +
+      Buffer.byteLength(unit.lead.join('\n')) +
+      2;
+    if (used + bytes > budget) {
+      skipped.push(unit);
+      continue;
+    }
+    chosen.add(unit);
+    opened.add(unit.index);
+    used += bytes;
+  }
+
+  const blocks = discovered.docs.flatMap((doc, index) => {
+    const mine = [...chosen]
+      .filter((unit) => unit.index === index)
+      .sort((a, b) => a.section.order - b.section.order);
+    if (!mine.length) return [];
+    const emitted = new Set<string>();
+    const body = mine.map((unit) => {
+      const lead = unit.lead.filter((line) => !emitted.has(line));
+      for (const line of [...lead, unit.heading]) emitted.add(line);
+      return [...lead, clip(unit.section.text)].join('\n');
+    });
+    return [`### ${doc.label}\n${body.join('\n')}`];
+  });
+  const notes: string[] = [];
+  if (skipped.length > 0) {
+    const listed = skipped
+      .filter((unit) => unit.heading)
+      .map(
+        (unit) =>
+          `${unit.doc.label.replace(/ \(.*\)$/, '')}: ${unit.heading.replace(/^#+\s*/, '')}`,
+      );
+    notes.push(
+      `Sections not loaded to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget, highest-ranked first; open any that apply: ${boundedJoin(listed, MAX_SKIPPED_SECTIONS_BYTES)}.`,
+    );
+  }
+  if (dropped > 0) {
+    notes.push(
+      `${dropped} sections in ${unrelated.size} docs name nothing in this diff and were omitted.`,
+    );
+  }
+  if (discovered.budgetExhausted) {
+    notes.push(
+      `Additional files were skipped after the ${MAX_GUIDELINE_CANDIDATE_BYTES} byte guideline candidate budget was reached.`,
+    );
+  }
+  if (discovered.referenced.length > 0) {
+    notes.push(
+      `Referenced Markdown documents not preloaded: ${boundedJoin(discovered.referenced, MAX_OMITTED_LABEL_BYTES)}. Read any that apply to the changed files or review question.`,
+    );
+  }
+  return [
+    ...blocks,
+    ...(notes.length ? [`### Review guidance budget\n${notes.join(' ')}`] : []),
+  ].join('\n\n');
 }
 
 /**
