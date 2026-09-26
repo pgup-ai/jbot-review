@@ -151,6 +151,7 @@ import {
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
+  defaultModelOptions,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
@@ -1479,13 +1480,31 @@ async function runReviewPipeline(params: {
       `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
     );
   }
+  // The entry points chose default options before the diff size was known.
+  const patchBytes = files.reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0);
+  const sizedOptions = defaultModelOptions(providerID, modelID, patchBytes);
+  if (
+    !options.modelOptionsExplicit &&
+    sizedOptions.reasoningEffort !== options.modelOptions?.reasoningEffort
+  ) {
+    log(
+      `Model options for a ${Math.round(patchBytes / 1024)} KB diff: ${JSON.stringify(sizedOptions)}`,
+    );
+    options.modelOptions = sizedOptions;
+  }
   const mainPoolsideBackend = mainOnPoolside
     ? createPoolsideBackend(apiKey, options.modelOptions)
     : undefined;
   const auxPoolsideKey = auxApiKey || (auxProviderID === providerID ? apiKey : '');
   const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
-  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
+  const auxModelOptions = auxModelOptionsFor(
+    providerID,
+    modelID,
+    auxProviderID,
+    auxModelID,
+    patchBytes,
+  );
   const resolvedMainOptions = supportedModelOptions(providerID, modelID, options.modelOptions);
   // The verifier runs one effort tier below the finder. An identity return
   // means the aux entry already delivers it, so no per-session override (and
