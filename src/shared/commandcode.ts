@@ -518,7 +518,7 @@ export async function runCommandCodeFindingVerification(
   const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
-    assembleFindingVerificationPrompt(prContext, findings),
+    assembleFindingVerificationPrompt(prContext, findings, !runtime?.tools),
     'finding-verification',
     log,
     timeoutMs,

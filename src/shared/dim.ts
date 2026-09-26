@@ -439,7 +439,7 @@ export async function runDimFindingVerification(
   const raw = await runDimPrompt(
     workspace,
     model,
-    assembleFindingVerificationPrompt(prContext, findings, true),
+    assembleFindingVerificationPrompt(prContext, findings),
     'finding-verification',
     log,
     { timeoutMs, onTokenUsage, runtime },

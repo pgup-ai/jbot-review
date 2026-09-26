@@ -129,6 +129,42 @@ it('finds the loaded rule sections a finding cites', () => {
   );
 });
 
+it('finds a loaded rule cited by file and heading title', () => {
+  const docs = [
+    {
+      label: 'AGENTS.md',
+      text: '# Agents\n## Code\nx\n## Code hygiene\nReuse before adding.\n## Conventions\nPin invariants, not prose.\n## Misc\n## Misc\n## API\ny\n## 安全规则\n不要记录令牌。\n## İnfo\nz\n## Case\nc\n## case\nd',
+      relevance: 1 as const,
+    },
+  ];
+  const cited = (text: string) => citedGuidelineSections(text, docs).join('\n');
+  assert.match(
+    cited('`AGENTS.md` (Conventions) says so'),
+    /^### AGENTS\.md \(Conventions\)\n## Conventions\nPin invariants, not prose\.\n/,
+  );
+  // Case-insensitive, quoted inside brackets, and the longest title wins over a shorter prefix.
+  assert.match(
+    cited("AGENTS.md ('code hygiene': reuse)"),
+    /^### AGENTS\.md \(Code hygiene\)\n## Code hygiene\nReuse before adding\./,
+  );
+  assert.match(
+    cited('AGENTS.md ("## Code hygiene") and AGENTS.md’s conventions'),
+    /Code hygiene\)[^]*### AGENTS\.md \(Conventions\)/,
+  );
+  assert.match(cited('AGENTS.md (安全规则)'), /^### AGENTS\.md \(安全规则\)\n## 安全规则/);
+  assert.match(cited('AGENTS.md (İnfo)'), /^### AGENTS\.md \(İnfo\)/);
+  // A partial word, a title two headings share, a short title, or a bare space names nothing.
+  for (const text of [
+    'AGENTS.md (Conventions-based)',
+    'AGENTS.md (安全规则变更)',
+    'AGENTS.md (Misc)',
+    'AGENTS.md (Case)',
+    'AGENTS.md (API)',
+    'AGENTS.md Conventions',
+  ])
+    assert.equal(cited(text), '', text);
+});
+
 it('names the skipped sections of a cut doc in the full guidance notice', () => {
   const text = [
     '# Big',
