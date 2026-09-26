@@ -27,13 +27,22 @@ export function readablePath(workspace: string, path: string): string | undefine
 const cap = (text: string) => truncateUtf8WithNotice(text, MAX_TOOL_OUTPUT_BYTES - 128, 'Output');
 
 // Repo config can name programs (fsmonitor, hooks); none may run while the tools read.
-async function git(workspace: string, args: string[]): Promise<string> {
+// The Action trusts its checkout (another uid's) only in the global config HOME hides.
+async function git(root: string, args: string[]): Promise<string> {
   try {
     const { stdout } = await promisify(execFile)(
       'git',
-      ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
+      [
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        `safe.directory=${root}`,
+        ...args,
+      ],
       {
-        cwd: workspace,
+        cwd: root,
         env: { PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent' },
         maxBuffer: 4 * MAX_TOOL_OUTPUT_BYTES,
         timeout: 20_000,
@@ -50,12 +59,18 @@ async function git(workspace: string, args: string[]): Promise<string> {
 
 export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): AgentTool[] {
   const root = resolveWithinWorkspace(workspace, '.') ?? workspace;
-  const allow = (path: unknown) => {
-    const target = readablePath(workspace, String(path ?? '') || '.');
+  const tracked = (target: string) =>
+    git(root, ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', relative(root, target)])
+      .then(() => true)
+      .catch(() => false);
+  // Files must also be tracked: untracked ones can be runner credentials (e.g. gha-creds-*.json).
+  const allow = async (path: unknown, file = false) => {
+    let target = readablePath(workspace, String(path ?? '') || '.');
+    if (target && file && !(await tracked(target))) target = undefined;
     calls.push({ denied: !target });
     return target;
   };
-  const denied = 'Denied: the path is missing, outside the repository, or inside .git.';
+  const denied = 'Denied: the path is missing, untracked, outside the repository, or inside .git.';
   return [
     {
       name: 'read_file',
@@ -72,7 +87,7 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
       },
       async execute(input: unknown) {
         const { path, start_line, end_line } = input as Record<string, unknown>;
-        const target = allow(path);
+        const target = await allow(path, true);
         if (!target) return denied;
         try {
           if (!statSync(target).isFile()) return denied;
@@ -101,13 +116,12 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
       },
       async execute(input: unknown) {
         const { pattern, path } = input as Record<string, unknown>;
-        const target = allow(path);
+        const target = await allow(path);
         if (!target) return denied;
         const args = ['grep', '-n', '-I', '-E', '--max-count=50', '-e', String(pattern)];
         try {
           return cap(
-            (await git(workspace, [...args, '--', relative(root, target) || '.'])) ||
-              '(no matches)',
+            (await git(root, [...args, '--', relative(root, target) || '.'])) || '(no matches)',
           );
         } catch (error) {
           return (error as { code?: number }).code === 1
@@ -122,10 +136,10 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
         'List tracked files under an optional directory relative to the repository root.',
       inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
       async execute(input: unknown) {
-        const target = allow((input as Record<string, unknown>).path);
+        const target = await allow((input as Record<string, unknown>).path);
         if (!target) return denied;
         try {
-          return cap(await git(workspace, ['ls-files', '--', relative(root, target) || '.']));
+          return cap(await git(root, ['ls-files', '--', relative(root, target) || '.']));
         } catch (error) {
           return `list_files failed: ${(error as Error).message.slice(0, 200)}`;
         }

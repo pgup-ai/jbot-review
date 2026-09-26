@@ -398,9 +398,10 @@ console.log(JSON.stringify({ type: 'run_result', text: '{"summary":"","findings"
 });
 
 describe('Cline SDK verifier', () => {
-  it('reads only tracked checkout files outside .git', async () => {
+  it('reads only tracked checkout files outside .git, even in a checkout another user owns', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-'));
     const outside = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-out-'));
+    const originalPath = process.env.PATH;
     try {
       execFileSync('git', ['init', '-q'], { cwd: root });
       mkdirSync(join(root, 'src'));
@@ -408,6 +409,16 @@ describe('Cline SDK verifier', () => {
       writeFileSync(join(outside, 'token'), 'secret');
       symlinkSync(outside, join(root, 'out'));
       execFileSync('git', ['add', '-A'], { cwd: root });
+      writeFileSync(join(root, 'gha-creds.json'), 'secret');
+      // As in the Action, where the checkout belongs to another uid.
+      mkdirSync(join(outside, 'bin'));
+      const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+      writeFileSync(
+        join(outside, 'bin/git'),
+        `#!/bin/sh\nGIT_TEST_ASSUME_DIFFERENT_OWNER=1 exec "${realGit}" "$@"\n`,
+        { mode: 0o755 },
+      );
+      process.env.PATH = `${join(outside, 'bin')}:${originalPath}`;
       for (const path of ['../token', '/etc/hosts', 'out/token', '.git', '.git/config'])
         assert.equal(readablePath(root, path), undefined, path);
       const calls: { denied: boolean }[] = [];
@@ -415,13 +426,15 @@ describe('Cline SDK verifier', () => {
       const run = (tool: typeof read, input: object) => tool.execute(input, {} as never);
       assert.equal(await run(read, { path: 'src/a.ts' }), '1: export const answer = 42;\n2: ');
       assert.match(String(await run(read, { path: '.git/config' })), /^Denied/);
+      assert.match(String(await run(read, { path: 'gha-creds.json' })), /^Denied/);
       assert.match(String(await run(grep, { pattern: 'answer' })), /^src\/a\.ts:1:/);
       assert.match(String(await run(grep, { pattern: 'secret', path: 'out' })), /^Denied/);
       assert.deepEqual(
         calls.map((call) => call.denied),
-        [false, true, false, true],
+        [false, true, true, false, true],
       );
     } finally {
+      process.env.PATH = originalPath;
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
     }
