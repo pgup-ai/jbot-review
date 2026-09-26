@@ -37,16 +37,16 @@ export function parseEnvJsonObject(
 ): Record<string, unknown> {
   const raw = process.env[name]?.trim();
   if (!raw) return defaultValue;
+  // A set value counts as explicit, so a malformed one must fail rather than fall back.
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    /* fall through to default */
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${name}: ${error instanceof Error ? error.message : error}`);
   }
-  console.warn(`[jbot-review] Ignoring invalid JSON in ${name}; using default.`);
-  return defaultValue;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+    throw new Error(`Invalid JSON in ${name}: expected a JSON object.`);
+  return parsed as Record<string, unknown>;
 }
 
 export function parseEnvInt(name: string, defaultValue: number): number {
