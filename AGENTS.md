@@ -101,8 +101,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    escapes the env allowlist and a `skill` deny so no skill catalog, from the
    operator's HOME or the reviewed repo, reaches a prompt), the jbot plugin's
    `context` hook (removes
-   write/edit/patch/apply_patch/multiedit/question/subagent/task from every
-   request and every tool for the single-shot agent, and drops the
+   write/edit/patch/apply_patch/multiedit/question/subagent/task and the
+   webfetch/websearch/execute tools from every request and every tool for the
+   single-shot agent, and drops the
    "Instructions from:" messages opencode's read tool injects for nested
    `AGENTS.md` files so repo text never reaches a session as instructions;
    wrap-up and `jbot-closed-book` retain native tool schemas for model and

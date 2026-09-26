@@ -839,6 +839,10 @@ Set `enable-context7: auto` and pass `context7-api-key` from
 `secrets.CONTEXT7_API_KEY` to let the review agent verify current docs when the
 PR changes external API, SDK, framework, CLI, cloud-service, or GitHub Actions
 usage. In `auto` mode, Context7 is skipped for ordinary business-logic changes.
+Reviews are told not to search the web or download packages to check library
+behavior, and OpenCode sessions have no web or code-execution tools, so without
+Context7 an unconfirmed library claim stays advisory. Use `enable-context7: true` when the
+code reaches a library through in-house wrappers that `auto` does not detect.
 
 Context7 failures are non-blocking: if the MCP server cannot connect, rejects
 auth, or rate-limits, the action logs a warning and continues the review without

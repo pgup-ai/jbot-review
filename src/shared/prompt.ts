@@ -176,8 +176,9 @@ alone cannot confirm such a claim, and priors about "native", "raw", or "bulk"
 methods are often wrong for a specific version.
 
 Before reporting a finding that rests on framework-internal behavior, confirm
-that behavior against an authoritative source: the library's documentation, or
-its vendored types/source in the repo. If you cannot confirm it, set "kind" to
+that behavior against an authoritative source: Context7 documentation when it
+is available, or the library's types/source in the repo. Do not search the web
+or download packages to confirm it. If you cannot confirm it, set "kind" to
 "investigate", keep severity advisory, and phrase the unresolved behavior as a
 question with the concrete potential failure to verify. Never state an
 unverified library behavior as fact; a failed lookup alone is not a finding.`;
@@ -1616,6 +1617,9 @@ ${REVIEW_COMMAND_POLICY}
 - If a "Referenced Markdown documents" list is present, read every listed doc
   whose subject could plausibly apply to the changed files before you
   conclude.
+- Beyond those, open a guidance file only for a skipped section the "Review
+  guidance budget" note lists or the rest of a truncated section, when it could
+  apply. Do not search the repository for other guidance.
 - ${BATCHED_READS_RULE}
 - Report one finding per violation, anchored to a line ADDED by this PR, or
   to line 0 of the changed file when no single added line carries the
@@ -1686,8 +1690,7 @@ export const COMPLIANCE_PACK_NOTE = `## Page audit notes
 
 ## Repository exploration policy
 
-Audit the embedded hunks, and read more code or guidance whenever a rule check
-needs it.`;
+Audit the embedded hunks, and read more code whenever a rule check needs it.`;
 
 export function assembleGuidelineSweepPrompt(guidelines: string): string {
   return assembleGuidelineCompliancePrompt(

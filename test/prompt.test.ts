@@ -240,6 +240,7 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /Never state an\s+unverified library behavior as fact/);
     assert.match(REVIEW_PROMPT, /concrete potential failure to verify/);
     assert.match(REVIEW_PROMPT, /keep severity advisory/);
+    assert.match(REVIEW_PROMPT, /Do not search the web\s+or download packages/);
     assert.match(REVIEW_PROMPT, /repository's declared\s+versions/);
     assert.match(REVIEW_PROMPT, /Do not infer authorship or generation/);
   });
@@ -794,6 +795,7 @@ describe('assembleGuidelineCompliancePrompt', () => {
     assert.ok(prompt.startsWith(GUIDELINE_COMPLIANCE_PROMPT));
     assert.ok(prompt.endsWith(GUIDELINE_COMPLIANCE_OUTPUT_REMINDER));
     assert.ok(prompt.indexOf('GUIDELINES_SENTINEL') < prompt.indexOf('PR_CONTEXT_SENTINEL'));
+    assert.match(prompt, /Do not search the repository for other guidance/);
   });
 
   it('omits the guidelines section when they are embedded in the context', () => {

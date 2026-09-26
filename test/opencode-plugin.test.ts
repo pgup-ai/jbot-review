@@ -51,6 +51,9 @@ const tools = () => ({
   apply_patch: { description: 'patch', input: { type: 'object', properties: {} } },
   subagent: { description: 'spawn', input: { type: 'object', properties: {} } },
   task: { description: 'spawn', input: { type: 'object', properties: {} } },
+  webfetch: { description: 'fetch', input: { type: 'object', properties: {} } },
+  websearch: { description: 'search', input: { type: 'object', properties: {} } },
+  execute: { description: 'run code', input: { type: 'object', properties: {} } },
 });
 
 const temps: string[] = [];
@@ -90,7 +93,7 @@ describe('jbot opencode plugin', () => {
     );
   });
 
-  it('strips mutating and interactive tools for review and wrap-up and rewrites the Gemini-hostile schema', async () => {
+  it('strips mutating, interactive, web and code tools for review and wrap-up and rewrites the Gemini-hostile schema', async () => {
     const { context } = await loadPlugin();
     for (const agent of ['plan', 'jbot-wrapup', 'jbot-closed-book']) {
       const event = { agent, tools: tools() };
