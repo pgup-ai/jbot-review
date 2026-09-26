@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { AgentTool } from '@cline/sdk';
 import { resolveWithinWorkspace } from './pi.ts';
+import { CLINE_SDK_VERIFIER_SYSTEM_PROMPT, truncateUtf8WithNotice } from './prompt.ts';
 
 const MAX_TOOL_OUTPUT_BYTES = 32 * 1024;
 const MAX_ITERATIONS = 20;
@@ -22,23 +23,30 @@ export function readablePath(workspace: string, path: string): string | undefine
   return inside === '.git' || inside.startsWith(`.git${sep}`) ? undefined : target;
 }
 
-const cap = (text: string) =>
-  Buffer.byteLength(text) <= MAX_TOOL_OUTPUT_BYTES
-    ? text
-    : `${text.slice(0, MAX_TOOL_OUTPUT_BYTES)}\n[output truncated]`;
+// The notice fits inside the cap.
+const cap = (text: string) => truncateUtf8WithNotice(text, MAX_TOOL_OUTPUT_BYTES - 128, 'Output');
 
 // Repo config can name programs (fsmonitor, hooks); none may run while the tools read.
-const git = (workspace: string, args: string[]) =>
-  promisify(execFile)(
-    'git',
-    ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
-    {
-      cwd: workspace,
-      env: { PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent' },
-      maxBuffer: 4 * MAX_TOOL_OUTPUT_BYTES,
-      timeout: 20_000,
-    },
-  );
+async function git(workspace: string, args: string[]): Promise<string> {
+  try {
+    const { stdout } = await promisify(execFile)(
+      'git',
+      ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
+      {
+        cwd: workspace,
+        env: { PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent' },
+        maxBuffer: 4 * MAX_TOOL_OUTPUT_BYTES,
+        timeout: 20_000,
+      },
+    );
+    return stdout;
+  } catch (error) {
+    // Output past the buffer is capped anyway: keep what arrived.
+    if ((error as { code?: string }).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+      return String((error as { stdout?: string }).stdout ?? '');
+    throw error;
+  }
+}
 
 export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): AgentTool[] {
   const root = resolveWithinWorkspace(workspace, '.') ?? workspace;
@@ -65,16 +73,21 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
       async execute(input: unknown) {
         const { path, start_line, end_line } = input as Record<string, unknown>;
         const target = allow(path);
-        if (!target || !statSync(target).isFile()) return denied;
-        const lines = readFileSync(target, 'utf8').split('\n');
-        const start = Math.max(1, Number(start_line) || 1);
-        const end = Math.min(lines.length, Number(end_line) || start + 399);
-        return cap(
-          lines
-            .slice(start - 1, end)
-            .map((line, i) => `${start + i}: ${line}`)
-            .join('\n'),
-        );
+        if (!target) return denied;
+        try {
+          if (!statSync(target).isFile()) return denied;
+          const lines = readFileSync(target, 'utf8').split('\n');
+          const start = Math.max(1, Number(start_line) || 1);
+          const end = Math.min(lines.length, Number(end_line) || start + 399);
+          return cap(
+            lines
+              .slice(start - 1, end)
+              .map((line, i) => `${start + i}: ${line}`)
+              .join('\n'),
+          );
+        } catch (error) {
+          return `read_file failed: ${(error as Error).message.slice(0, 200)}`;
+        }
       },
     },
     {
@@ -92,8 +105,10 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
         if (!target) return denied;
         const args = ['grep', '-n', '-I', '-E', '--max-count=50', '-e', String(pattern)];
         try {
-          const { stdout } = await git(workspace, [...args, '--', relative(root, target) || '.']);
-          return cap(stdout || '(no matches)');
+          return cap(
+            (await git(workspace, [...args, '--', relative(root, target) || '.'])) ||
+              '(no matches)',
+          );
         } catch (error) {
           return (error as { code?: number }).code === 1
             ? '(no matches)'
@@ -109,8 +124,11 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
       async execute(input: unknown) {
         const target = allow((input as Record<string, unknown>).path);
         if (!target) return denied;
-        const { stdout } = await git(workspace, ['ls-files', '--', relative(root, target) || '.']);
-        return cap(stdout);
+        try {
+          return cap(await git(workspace, ['ls-files', '--', relative(root, target) || '.']));
+        } catch (error) {
+          return `list_files failed: ${(error as Error).message.slice(0, 200)}`;
+        }
       },
     },
   ];
@@ -151,8 +169,7 @@ async function main(): Promise<string> {
     apiKey: `workos:${credentials.access}`,
     // The SDK's own identity; free models answer only to Cline clients.
     headers: buildClineClientHeaders(),
-    systemPrompt:
-      'You verify code review findings in a checked-out repository. Your only tools are read_file, grep and list_files; nothing can be changed or run.',
+    systemPrompt: CLINE_SDK_VERIFIER_SYSTEM_PROMPT,
     tools: readOnlyTools(job.workspace, calls).map((tool) => createTool(tool)),
     maxIterations: MAX_ITERATIONS,
   });

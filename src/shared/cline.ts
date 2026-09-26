@@ -503,7 +503,10 @@ export async function runClineSdkFindingVerification(
   home: string | undefined,
   workspace: string,
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
-): Promise<FindingVerdict[] | undefined> {
+): Promise<FindingVerdict[]> {
+  // The CLI resolves `default` itself; the SDK needs a concrete model id.
+  if (parseModelName(model).modelID === 'default')
+    throw new Error('the Cline SDK needs a concrete model id');
   log(`Calling finding-verification prompt (agent=cline-sdk, model=${model})`);
   const bundled = fileURLToPath(new URL('../cline-sdk-worker.js', import.meta.url));
   const worker = existsSync(bundled)
@@ -537,7 +540,10 @@ export async function runClineSdkFindingVerification(
   log(
     `finding-verification complete via cline-sdk: ${output.toolCalls} tool calls, ${output.denied} denied`,
   );
-  return parseFindingVerdicts(output.text, findings.length, log);
+  const verdicts = parseFindingVerdicts(output.text, findings.length, log);
+  if (!verdicts?.length)
+    throw new Error('cline-sdk finding-verification returned no usable verdicts');
+  return verdicts;
 }
 
 /** A 403 in the worker's error text means Cline refused the SDK route. */

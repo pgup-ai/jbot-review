@@ -32,6 +32,7 @@ import {
   parseClineFinalMessage,
   runClineFindingVerification,
   runClineReview,
+  runClineSdkFindingVerification,
   stripClineModelReasoning,
   withClineSdkFallback,
   writeClineAuth,
@@ -441,6 +442,32 @@ describe('Cline SDK verifier', () => {
     }
   });
 
+  it('returns oversized tool output truncated within the cap', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-big-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      writeFileSync(
+        join(root, 'wide.txt'),
+        Array.from({ length: 20_000 }, () => '日本語の行').join('\n'),
+      );
+      mkdirSync(join(root, 'many'));
+      for (let i = 0; i < 2_000; i++)
+        writeFileSync(join(root, 'many', `${'n'.repeat(80)}-${i}`), '');
+      execFileSync('git', ['add', '-A'], { cwd: root });
+      const [read, , list] = readOnlyTools(root, []);
+      // The listing overflows git's output buffer; the multibyte file overflows the byte cap.
+      for (const output of [
+        await read.execute({ path: 'wide.txt', end_line: 20_000 }, {} as never),
+        await list.execute({}, {} as never),
+      ]) {
+        assert.ok(Buffer.byteLength(String(output)) <= 32 * 1024);
+        assert.match(String(output), /\[Output truncated to \d+ bytes/);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('falls back to the CLI verifier unless Cline refuses the SDK route', async () => {
     const logs: string[] = [];
     const log = (message: string) => logs.push(message);
@@ -463,6 +490,11 @@ describe('Cline SDK verifier', () => {
         log,
       ),
       ClineSdkForbiddenError,
+    );
+    // `default` has no SDK model id, so it goes straight to the CLI without a worker.
+    await assert.rejects(
+      runClineSdkFindingVerification('cline/default', 'diff', [], log, undefined, '/unused'),
+      /concrete model id/,
     );
   });
 
