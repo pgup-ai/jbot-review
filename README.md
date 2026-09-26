@@ -120,6 +120,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # Review sessions can run git, and `git config` would print a persisted token.
+          persist-credentials: false
       - uses: pgup-ai/jbot-review-action@v0 # moving v0 tag; pin a release tag for stability
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || '' }}
@@ -310,6 +312,7 @@ input so `JBOT_REVIEW_MODEL` can switch providers without editing the workflow.
 - uses: actions/checkout@v7
   with:
     fetch-depth: 0
+    persist-credentials: false
     ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
 - uses: actions/setup-node@v6
   with:
