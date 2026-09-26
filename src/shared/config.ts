@@ -133,6 +133,19 @@ export function defaultModelOptions(
   );
 }
 
+/** The main options once the diff size is known; an explicit model-options input stands. */
+export function sizedModelOptions(
+  providerID: string,
+  modelID: string,
+  patchBytes: number,
+  modelOptions: Record<string, unknown>,
+  explicit: boolean | undefined,
+): Record<string, unknown> {
+  if (explicit) return modelOptions;
+  const sized = defaultModelOptions(providerID, modelID, patchBytes);
+  return sized.reasoningEffort === modelOptions.reasoningEffort ? modelOptions : sized;
+}
+
 /**
  * Options are scoped per model id: auxiliary sessions using the main model
  * share its effort, including explicit overrides.

@@ -151,12 +151,12 @@ import {
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
-  defaultModelOptions,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
   providerSessionConcurrency,
   resolvePromptCachePolicy,
+  sizedModelOptions,
   supportedModelOptions,
   verificationModelOptions,
 } from './config.ts';
@@ -1482,11 +1482,14 @@ async function runReviewPipeline(params: {
   }
   // The entry points chose default options before the diff size was known.
   const patchBytes = files.reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0);
-  const sizedOptions = defaultModelOptions(providerID, modelID, patchBytes);
-  if (
-    !options.modelOptionsExplicit &&
-    sizedOptions.reasoningEffort !== options.modelOptions?.reasoningEffort
-  ) {
+  const sizedOptions = sizedModelOptions(
+    providerID,
+    modelID,
+    patchBytes,
+    options.modelOptions,
+    options.modelOptionsExplicit,
+  );
+  if (sizedOptions !== options.modelOptions) {
     log(
       `Model options for a ${Math.round(patchBytes / 1024)} KB diff: ${JSON.stringify(sizedOptions)}`,
     );

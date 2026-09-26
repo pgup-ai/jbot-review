@@ -177,7 +177,7 @@ describe('pickReviewModels', () => {
     assert.equal(model, pickPooledModel(pool, seed));
     assert.ok(pool.includes(auxModel));
     assert.notEqual(auxModel, model);
-    // Retries advance both picks, so a rerun also moves the aux sessions to another model.
+    // Aux fails open, so a weak one would stick to a head unless reruns move it too.
     assert.equal(pickReviewModels(pool, seed, 2).model, pickPooledModel(pool, seed, 2));
     assert.equal(pickReviewModels(pool, seed, 2).auxModel, pickPooledModel(pool, `aux:${seed}`, 2));
     assert.notEqual(pickReviewModels(pool, seed, 2).auxModel, auxModel);
