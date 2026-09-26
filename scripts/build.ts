@@ -18,6 +18,7 @@ const shared: esbuild.BuildOptions = {
   external: [
     '@actions/core',
     '@actions/github',
+    '@cline/sdk',
     '@earendil-works/pi-ai',
     '@earendil-works/pi-coding-agent',
     '@opencode/client',
@@ -33,6 +34,12 @@ await esbuild.build({
   ...shared,
   entryPoints: ['src/shared/review-retrieval.ts'],
   outfile: 'dist/review-retrieval.js',
+});
+
+await esbuild.build({
+  ...shared,
+  entryPoints: ['src/shared/cline-sdk-worker.ts'],
+  outfile: 'dist/cline-sdk-worker.js',
 });
 
 await esbuild.build({

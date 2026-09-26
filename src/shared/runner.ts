@@ -153,6 +153,7 @@ import {
   auxModelOptionsFor,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
+  parseEnvBoolean,
   providerSessionConcurrency,
   resolvePromptCachePolicy,
   supportedModelOptions,
@@ -228,6 +229,8 @@ import {
   runClineFindingVerification,
   runClineGuidelineComplianceCheck,
   runClineReview,
+  runClineSdkFindingVerification,
+  withClineSdkFallback,
   CLINE_MODEL_LIMITS,
   isClineProvider,
   writeClineAuth,
@@ -598,7 +601,11 @@ function createCommandCodeBackend(
   };
 }
 
-function createClineBackend(clineHome: string): ReviewBackend & { stop(): Promise<void> } {
+/** `sdkWorkspace` opts verification into the Cline SDK with read-only checkout tools. */
+function createClineBackend(
+  clineHome: string,
+  sdkWorkspace?: string,
+): ReviewBackend & { stop(): Promise<void> } {
   const processes = createCliProcessScope();
   return {
     name: CLINE_PROVIDER_ID,
@@ -636,17 +643,27 @@ function createClineBackend(clineHome: string): ReviewBackend & { stop(): Promis
         ),
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      processes.run('finding-verification', () =>
-        runClineFindingVerification(
-          model,
-          prContext,
-          findings,
-          log,
-          timeoutMs,
-          onTokenUsage,
-          clineHome,
-        ),
-      ),
+      processes.run('finding-verification', () => {
+        const cli = (ms?: number) =>
+          runClineFindingVerification(model, prContext, findings, log, ms, onTokenUsage, clineHome);
+        return sdkWorkspace
+          ? withClineSdkFallback(
+              (ms) =>
+                runClineSdkFindingVerification(
+                  model,
+                  prContext,
+                  findings,
+                  log,
+                  clineHome,
+                  sdkWorkspace,
+                  ms,
+                ),
+              cli,
+              timeoutMs,
+              log,
+            )
+          : cli(timeoutMs);
+      }),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       processes.run('changes-since-last-review', () =>
         runClineChangesSinceLastReview(
@@ -2140,7 +2157,10 @@ async function runReviewPipeline(params: {
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
     // The shared ACP permission policy permits shell execution; Cline needs a
     // stricter permission hook before this tool-less route can be replaced.
-    clineBackend = createClineBackend(clineHome);
+    clineBackend = createClineBackend(
+      clineHome,
+      parseEnvBoolean('JBOT_CLINE_SDK_VERIFIER', false) ? workspace : undefined,
+    );
   }
 
   if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {

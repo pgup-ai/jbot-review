@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { createCliProcessScope } from '../src/shared/cli-process.ts';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -13,17 +22,21 @@ import {
   buildClineCliArgs,
   buildClinePromptArg,
   CLINE_MAX_ARGV_BYTES,
+  ClineSdkForbiddenError,
   clineEnvForHome,
   clineFailureDetail,
   clineProvidersPath,
+  clineSdkFailure,
   formatClinePromptTimeoutMessage,
   isClineProvider,
   parseClineFinalMessage,
   runClineFindingVerification,
   runClineReview,
   stripClineModelReasoning,
+  withClineSdkFallback,
   writeClineAuth,
 } from '../src/shared/cline.ts';
+import { readablePath, readOnlyTools } from '../src/shared/cline-sdk-worker.ts';
 
 describe('Cline CLI provider helpers', () => {
   it('matches both cline billing-mode provider ids', () => {
@@ -395,5 +408,70 @@ console.log(JSON.stringify({ type: 'run_result', text: '{"summary":"","findings"
       assert.equal(seen.length, 2);
       assert.notEqual(seen[0], seen[1]);
     }
+  });
+});
+
+describe('Cline SDK verifier', () => {
+  it('reads only tracked checkout files outside .git', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-'));
+    const outside = mkdtempSync(join(tmpdir(), 'jbot-cline-sdk-out-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      mkdirSync(join(root, 'src'));
+      writeFileSync(join(root, 'src/a.ts'), 'export const answer = 42;\n');
+      writeFileSync(join(outside, 'token'), 'secret');
+      symlinkSync(outside, join(root, 'out'));
+      execFileSync('git', ['add', '-A'], { cwd: root });
+      for (const path of ['../token', '/etc/hosts', 'out/token', '.git', '.git/config'])
+        assert.equal(readablePath(root, path), undefined, path);
+      const calls: { denied: boolean }[] = [];
+      const [read, grep] = readOnlyTools(root, calls);
+      const run = (tool: typeof read, input: object) => tool.execute(input, {} as never);
+      assert.equal(await run(read, { path: 'src/a.ts' }), '1: export const answer = 42;\n2: ');
+      assert.match(String(await run(read, { path: '.git/config' })), /^Denied/);
+      assert.match(String(await run(grep, { pattern: 'answer' })), /^src\/a\.ts:1:/);
+      assert.match(String(await run(grep, { pattern: 'secret', path: 'out' })), /^Denied/);
+      assert.deepEqual(
+        calls.map((call) => call.denied),
+        [false, true, false, true],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the CLI verifier unless Cline refuses the SDK route', async () => {
+    const logs: string[] = [];
+    const log = (message: string) => logs.push(message);
+    const cli = async (timeoutMs?: number) =>
+      `cli within ${timeoutMs !== undefined && timeoutMs <= 1000}`;
+    const failing = (stderr: string) => async () => {
+      throw clineSdkFailure(1, stderr);
+    };
+    assert.equal(await withClineSdkFallback(async () => 'sdk', cli, 1000, log), 'sdk');
+    assert.equal(
+      await withClineSdkFallback(failing('socket hang up'), cli, 1000, log),
+      'cli within true',
+    );
+    assert.match(logs.join('\n'), /socket hang up\); falling back to the CLI single pass/);
+    await assert.rejects(
+      withClineSdkFallback(
+        failing('Error: Error 403: only via Cline product surfaces'),
+        cli,
+        1000,
+        log,
+      ),
+      ClineSdkForbiddenError,
+    );
+  });
+
+  it('pins one Cline SDK version for local runs and the full image', () => {
+    const pin = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+      .devDependencies['@cline/sdk'];
+    assert.match(pin, /^\d+\.\d+\.\d+$/);
+    assert.ok(
+      readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8').includes(`@cline/sdk@${pin}`),
+    );
   });
 });

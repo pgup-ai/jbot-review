@@ -1,6 +1,7 @@
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { parseModelName } from '@symma/protocol';
 import {
@@ -132,15 +134,18 @@ export interface ClineCliArgsInput {
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   const { providerID, modelID } = parseModelName(input.model);
   const args = ['--json', '--plan', '--auto-approve', 'false', '--provider', providerID];
-  if (modelID !== 'default') {
-    // cline requires --model as `modelType/model`. cline-pass models are namespaced under
-    // the provider (e.g. `cline-pass/glm-5.2`); pay-as-you-go `cline` models already carry
-    // their type (e.g. `deepseek/deepseek-v4-flash`).
-    const model = providerID === CLINE_PASS_PROVIDER_ID ? `${providerID}/${modelID}` : modelID;
-    args.push('--model', model);
-  }
+  if (modelID !== 'default') args.push('--model', clineModelId(input.model));
   args.push(input.promptArg);
   return args;
+}
+
+/**
+ * Cline's model id is `modelType/model`: cline-pass models are namespaced under the
+ * provider (`cline-pass/glm-5.2`); pay-as-you-go `cline` ids already carry their type.
+ */
+function clineModelId(model: string): string {
+  const { providerID, modelID } = parseModelName(model);
+  return providerID === CLINE_PASS_PROVIDER_ID ? `${providerID}/${modelID}` : modelID;
 }
 
 /** Prompt argv: the no-tools directive (read-only cline can't run the base prompt's
@@ -448,6 +453,22 @@ async function runClineOnce(
   timeoutMessage: string,
   log: (msg: string) => void,
 ) {
+  return inClineHome(home, log, async (dir, cwd) => {
+    const result = await runCliProcess(CLINE_CLI_BIN, buildClineCliArgs({ model, promptArg }), {
+      cwd,
+      env: clineEnvForHome(dir),
+      timeoutMs,
+      timeoutMessage,
+    });
+    return { ...result, logged: clineLoggedErrors(dir) };
+  });
+}
+
+async function inClineHome<T>(
+  home: string | undefined,
+  log: (msg: string) => void,
+  run: (dir: string, cwd: string) => Promise<T>,
+): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
   try {
     // Per-process HOME: copy providers.json so concurrent sessions don't race on the
@@ -456,19 +477,93 @@ async function runClineOnce(
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
     // Cline runs hooks and loads rules from its workspace, including ones a PR commits
-    // (.cline/hooks, .clinerules); a tool-less review needs none of the checkout.
+    // (.cline/hooks, .clinerules), so its working directory is always empty.
     const cwd = join(dir, 'workspace');
     mkdirSync(cwd);
-    const result = await runCliProcess(CLINE_CLI_BIN, buildClineCliArgs({ model, promptArg }), {
-      cwd,
-      env: clineEnvForHome(dir),
-      timeoutMs,
-      timeoutMessage,
-    });
-    return { ...result, logged: clineLoggedErrors(dir) };
+    return await run(dir, cwd);
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(
       (error: NodeJS.ErrnoException) => log(`Cline temporary-home cleanup failed: ${error.code}.`),
     );
+  }
+}
+
+/** Cline refused the SDK route (HTTP 403): the findings stay unverified. */
+export class ClineSdkForbiddenError extends Error {}
+
+/**
+ * Opt-in verifier (JBOT_CLINE_SDK_VERIFIER): @cline/sdk with read-only checkout tools,
+ * in a child process with the CLI's environment and temp HOME (see cline-sdk-worker.ts).
+ */
+export async function runClineSdkFindingVerification(
+  model: string,
+  prContext: string,
+  findings: VerifiableFinding[],
+  log: (msg: string) => void,
+  home: string | undefined,
+  workspace: string,
+  timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
+): Promise<FindingVerdict[] | undefined> {
+  log(`Calling finding-verification prompt (agent=cline-sdk, model=${model})`);
+  const bundled = fileURLToPath(new URL('../cline-sdk-worker.js', import.meta.url));
+  const worker = existsSync(bundled)
+    ? [bundled]
+    : [
+        '--import',
+        import.meta.resolve('tsx'),
+        fileURLToPath(new URL('./cline-sdk-worker.ts', import.meta.url)),
+      ];
+  const result = await inClineHome(home, log, (dir, cwd) =>
+    runCliProcess(process.execPath, worker, {
+      cwd,
+      env: clineEnvForHome(dir),
+      timeoutMs,
+      timeoutMessage: formatClinePromptTimeoutMessage('finding-verification', model, timeoutMs),
+      input: JSON.stringify({
+        providerId: parseModelName(model).providerID,
+        modelId: clineModelId(model),
+        prompt: assembleFindingVerificationPrompt(prContext, findings),
+        workspace,
+        timeoutMs,
+      }),
+    }),
+  );
+  if (result.exitCode !== 0) throw clineSdkFailure(result.exitCode, result.stderr);
+  const output = JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '') as {
+    text: string;
+    toolCalls: number;
+    denied: number;
+  };
+  log(
+    `finding-verification complete via cline-sdk: ${output.toolCalls} tool calls, ${output.denied} denied`,
+  );
+  return parseFindingVerdicts(output.text, findings.length, log);
+}
+
+/** A 403 in the worker's error text means Cline refused the SDK route. */
+export function clineSdkFailure(exitCode: number | null, stderr: string): Error {
+  const detail = `cline-sdk finding-verification exited ${exitCode}: ${truncateForLog(stderr, 600)}`;
+  return /\bError 403\b/.test(stderr) ? new ClineSdkForbiddenError(detail) : new Error(detail);
+}
+
+/**
+ * A 403 leaves the findings unverified; any other SDK failure falls back to the CLI
+ * single pass in the time left.
+ */
+export async function withClineSdkFallback<T>(
+  sdk: (timeoutMs?: number) => Promise<T>,
+  cli: (timeoutMs?: number) => Promise<T>,
+  timeoutMs: number | undefined,
+  log: (msg: string) => void,
+): Promise<T> {
+  const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+  try {
+    return await sdk(timeoutMs);
+  } catch (error) {
+    if (error instanceof ClineSdkForbiddenError) throw error;
+    log(
+      `Cline SDK verification failed (${error instanceof Error ? error.message : String(error)}); falling back to the CLI single pass.`,
+    );
+    return cli(deadline === undefined ? undefined : Math.max(0, deadline - Date.now()));
   }
 }

@@ -221,6 +221,15 @@ file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
 removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
 model.
 
+Set `JBOT_CLINE_SDK_VERIFIER=true` to verify findings on a Cline aux route
+through the [Cline SDK](https://docs.cline.bot/sdk/clinecore) (full image only).
+A child process with the CLI's environment and temporary `HOME` runs the SDK's
+bare agent, never its harness, which runs a checkout's `.cline` hooks and loads
+its `.clinerules`. Its only tools are J-Bot's: read, grep, and list tracked
+files inside the checkout, never `.git`. It identifies as the SDK
+(`X-CLIENT-TYPE: cline-sdk`); a 403 leaves the findings unverified, and any
+other failure falls back to the CLI's single pass.
+
 Poolside uses its OpenAI-compatible chat-completions endpoint directly. Laguna
 S 2.1 is absent from Poolside's advertised model list, but the endpoint accepts
 `poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests stream

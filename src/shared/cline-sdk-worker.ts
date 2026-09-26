@@ -1,0 +1,173 @@
+// Child process for the opt-in Cline SDK verifier (JBOT_CLINE_SDK_VERIFIER). It runs the
+// SDK's bare Agent, never ClineCore, which runs a checkout's .cline hooks and loads its
+// .clinerules; its only tools are the three below, which read tracked files in the checkout.
+import { execFile } from 'node:child_process';
+import { readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, relative, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import type { AgentTool } from '@cline/sdk';
+import { resolveWithinWorkspace } from './pi.ts';
+
+const MAX_TOOL_OUTPUT_BYTES = 32 * 1024;
+const MAX_ITERATIONS = 20;
+
+/** Inside the checkout and outside `.git`, whose config can include a persisted job token. */
+export function readablePath(workspace: string, path: string): string | undefined {
+  const root = resolveWithinWorkspace(workspace, '.');
+  const target = root && resolveWithinWorkspace(root, path);
+  if (!root || !target) return undefined;
+  const inside = relative(root, target);
+  return inside === '.git' || inside.startsWith(`.git${sep}`) ? undefined : target;
+}
+
+const cap = (text: string) =>
+  Buffer.byteLength(text) <= MAX_TOOL_OUTPUT_BYTES
+    ? text
+    : `${text.slice(0, MAX_TOOL_OUTPUT_BYTES)}\n[output truncated]`;
+
+// Repo config can name programs (fsmonitor, hooks); none may run while the tools read.
+const git = (workspace: string, args: string[]) =>
+  promisify(execFile)(
+    'git',
+    ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
+    {
+      cwd: workspace,
+      env: { PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent' },
+      maxBuffer: 4 * MAX_TOOL_OUTPUT_BYTES,
+      timeout: 20_000,
+    },
+  );
+
+export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): AgentTool[] {
+  const root = resolveWithinWorkspace(workspace, '.') ?? workspace;
+  const allow = (path: unknown) => {
+    const target = readablePath(workspace, String(path ?? '') || '.');
+    calls.push({ denied: !target });
+    return target;
+  };
+  const denied = 'Denied: the path is missing, outside the repository, or inside .git.';
+  return [
+    {
+      name: 'read_file',
+      description:
+        'Read a text file in the repository under review. `path` is relative to the repository root; start_line/end_line select a range. Returns numbered lines.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          start_line: { type: 'integer' },
+          end_line: { type: 'integer' },
+        },
+        required: ['path'],
+      },
+      async execute(input: unknown) {
+        const { path, start_line, end_line } = input as Record<string, unknown>;
+        const target = allow(path);
+        if (!target || !statSync(target).isFile()) return denied;
+        const lines = readFileSync(target, 'utf8').split('\n');
+        const start = Math.max(1, Number(start_line) || 1);
+        const end = Math.min(lines.length, Number(end_line) || start + 399);
+        return cap(
+          lines
+            .slice(start - 1, end)
+            .map((line, i) => `${start + i}: ${line}`)
+            .join('\n'),
+        );
+      },
+    },
+    {
+      name: 'grep',
+      description:
+        'Search tracked files with `git grep -n -I -E`. `pattern` is an extended regex; optional `path` limits it to a file or directory relative to the repository root.',
+      inputSchema: {
+        type: 'object',
+        properties: { pattern: { type: 'string' }, path: { type: 'string' } },
+        required: ['pattern'],
+      },
+      async execute(input: unknown) {
+        const { pattern, path } = input as Record<string, unknown>;
+        const target = allow(path);
+        if (!target) return denied;
+        const args = ['grep', '-n', '-I', '-E', '--max-count=50', '-e', String(pattern)];
+        try {
+          const { stdout } = await git(workspace, [...args, '--', relative(root, target) || '.']);
+          return cap(stdout || '(no matches)');
+        } catch (error) {
+          return (error as { code?: number }).code === 1
+            ? '(no matches)'
+            : `grep failed: ${(error as Error).message.slice(0, 200)}`;
+        }
+      },
+    },
+    {
+      name: 'list_files',
+      description:
+        'List tracked files under an optional directory relative to the repository root.',
+      inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+      async execute(input: unknown) {
+        const target = allow((input as Record<string, unknown>).path);
+        if (!target) return denied;
+        const { stdout } = await git(workspace, ['ls-files', '--', relative(root, target) || '.']);
+        return cap(stdout);
+      },
+    },
+  ];
+}
+
+/** stdin: { providerId, modelId, prompt, workspace, timeoutMs }; stdout: { text, toolCalls, denied }. */
+async function main(): Promise<string> {
+  const job = JSON.parse(readFileSync(0, 'utf8')) as {
+    providerId: string;
+    modelId: string;
+    prompt: string;
+    workspace: string;
+    timeoutMs: number;
+  };
+  // Loaded only in the worker, under its temp HOME: importing the tools never loads the SDK.
+  const { Agent, buildClineClientHeaders, createTool, getValidClineCredentials } =
+    await import('@cline/sdk');
+  // The parent's temp HOME holds a copy of CLINE_AUTH_JSON, as for the CLI.
+  const providers = JSON.parse(
+    readFileSync(join(homedir(), '.cline', 'data', 'settings', 'providers.json'), 'utf8'),
+  );
+  const auth = providers.providers?.[job.providerId]?.settings?.auth;
+  if (!auth?.refreshToken) throw new Error(`No ${job.providerId} OAuth login in CLINE_AUTH_JSON.`);
+  const credentials = await getValidClineCredentials(
+    {
+      access: String(auth.accessToken ?? '').replace(/^workos:/i, ''),
+      refresh: auth.refreshToken,
+      expires: auth.expiresAt,
+      accountId: auth.accountId,
+    },
+    { apiBaseUrl: 'https://api.cline.bot' },
+  );
+  if (!credentials) throw new Error('Cline rejected the refresh token; run `cline auth` again.');
+  const calls: { denied: boolean }[] = [];
+  const agent = new Agent({
+    providerId: job.providerId,
+    modelId: job.modelId,
+    apiKey: `workos:${credentials.access}`,
+    // The SDK's own identity; free models answer only to Cline clients.
+    headers: buildClineClientHeaders(),
+    systemPrompt:
+      'You verify code review findings in a checked-out repository. Your only tools are read_file, grep and list_files; nothing can be changed or run.',
+    tools: readOnlyTools(job.workspace, calls).map((tool) => createTool(tool)),
+    maxIterations: MAX_ITERATIONS,
+  });
+  const timer = setTimeout(() => agent.abort(new Error('timed out')), job.timeoutMs);
+  const result = await agent.run(job.prompt).finally(() => clearTimeout(timer));
+  if (result.status !== 'completed') throw result.error ?? new Error(`run ${result.status}`);
+  const denied = calls.filter((call) => call.denied).length;
+  return JSON.stringify({ text: result.outputText, toolCalls: calls.length, denied });
+}
+
+// Exit once the output is flushed: the SDK's keep-alive sockets would hold the process open.
+// The parent reads a 403 in the error text as Cline refusing the SDK route.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().then(
+    (output) => process.stdout.write(output, () => process.exit(0)),
+    (error: unknown) => process.stderr.write(String(error).slice(0, 1000), () => process.exit(1)),
+  );
+}
