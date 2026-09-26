@@ -1508,26 +1508,31 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
   return renderGuidelineBlock(
     guidelineSources(discovered.docs),
     MAX_GUIDELINE_TOTAL_BYTES,
-    (omitted, skipped) => {
-      const notes: string[] = [];
-      if (omitted.length > 0) {
-        notes.push(
-          `Guidance fragments were omitted to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget; skipped sections by file: ${boundedJoin(skipped(), MAX_SKIPPED_SECTIONS_BYTES)}.`,
-        );
-      }
-      if (discovered.budgetExhausted) {
-        notes.push(
-          `Additional files were skipped after the ${MAX_GUIDELINE_CANDIDATE_BYTES} byte guideline candidate budget was reached.`,
-        );
-      }
-      if (discovered.referenced.length > 0) {
-        notes.push(
-          `Referenced Markdown documents not preloaded: ${boundedJoin(discovered.referenced, MAX_OMITTED_LABEL_BYTES)}. Read any that apply to the changed files or review question.`,
-        );
-      }
-      return notes.length > 0 ? `### Review guidance budget\n${notes.join(' ')}` : '';
-    },
+    (omitted, skipped) =>
+      guidelineBudgetNote(
+        discovered,
+        omitted.length > 0
+          ? [
+              `Guidance fragments were omitted to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget; skipped sections by file: ${boundedJoin(skipped(), MAX_SKIPPED_SECTIONS_BYTES)}.`,
+            ]
+          : [],
+      ),
   );
+}
+
+function guidelineBudgetNote(discovered: DiscoveredGuidelines, omissions: string[]): string {
+  const notes = [...omissions];
+  if (discovered.budgetExhausted) {
+    notes.push(
+      `Additional files were skipped after the ${MAX_GUIDELINE_CANDIDATE_BYTES} byte guideline candidate budget was reached.`,
+    );
+  }
+  if (discovered.referenced.length > 0) {
+    notes.push(
+      `Referenced Markdown documents not preloaded: ${boundedJoin(discovered.referenced, MAX_OMITTED_LABEL_BYTES)}. Read any that apply to the changed files or review question.`,
+    );
+  }
+  return notes.length > 0 ? `### Review guidance budget\n${notes.join(' ')}` : '';
 }
 
 // Replaying 159 rules cited in real reviews: 50 kept 97% of routed ones while lifting unrouted 37% → 83%.
@@ -1539,7 +1544,8 @@ const REQUIRED_SECTION_BYTES = 2 * 1024;
  * The guideline-compliance budget (JBOT_GUIDELINE_RANK=legacy restores
  * formatGuidelines): every section of every applicable doc on one scale — rule-ID
  * routes, then routed and nearby docs with a head start, then changed-path terms
- * weighted by how critical each file is — filled best-fit with whole sections.
+ * weighted by how critical each file is — filled best-fit, clipping unrouted
+ * sections at 6 KB.
  */
 export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: PrFile[]): string {
   // A set small enough for the main prompt stays whole: an incremental follow-up
@@ -1554,42 +1560,55 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
   }
   const scored = scoreSections(discovered.docs, query);
   const units = discovered.docs.flatMap((doc, index) => {
-    const chain: string[] = [];
+    const chain: { order: number; heading: string }[] = [];
     return scored[index].map((section) => {
       const heading = section.level ? section.text.split('\n', 1)[0] : '';
-      // The parent headings a subsection needs to read in place.
+      // The parent headings a subsection needs to read in place, by position: titles repeat.
       const lead = chain.slice(0, Math.max(0, section.level - 1)).filter(Boolean);
       if (section.level) {
         chain.length = section.level - 1;
-        chain[section.level - 1] = heading;
+        chain[section.level - 1] = { order: section.order, heading };
       }
-      const rank = doc.label.includes(' (§')
+      const routed = doc.label.includes(' (§');
+      const rank = routed
         ? Number.MAX_SAFE_INTEGER
         : section.score + (doc.relevance === GUIDELINE_RELEVANCE.scoped ? ROUTED_DOC_PRIOR : 0);
-      return { index, doc, section, heading, lead, rank, floor: false };
+      return {
+        index,
+        doc,
+        section,
+        heading,
+        lead,
+        rank,
+        max: routed ? Infinity : MAX_RANKED_SECTION_BYTES,
+      };
     });
   });
-  // The repo requires these docs for every review, so each keeps its best
-  // substantive section (clipped) even when no changed path names it.
+  // The repo requires these docs for every review, so each keeps its best section
+  // (clipped, preferring one with a body) even when no changed path names it.
+  const substantive = (unit: (typeof units)[number]) =>
+    Number(unit.section.text.length > unit.heading.length + 40);
   for (const label of new Set([...(discovered.required ?? []), 'REVIEW.md'])) {
-    const best = units
-      .filter(
-        (unit) => unit.doc.label === label && unit.section.text.length > unit.heading.length + 40,
-      )
-      .sort((a, b) => b.section.score - a.section.score || a.section.order - b.section.order)[0];
-    if (best) Object.assign(best, { rank: Number.MAX_SAFE_INTEGER - 1, floor: true });
+    const [best] = units
+      .filter((unit) => unit.doc.label === label)
+      .sort(
+        (a, b) =>
+          substantive(b) - substantive(a) ||
+          b.section.score - a.section.score ||
+          a.section.order - b.section.order,
+      );
+    if (best)
+      Object.assign(best, { rank: Number.MAX_SAFE_INTEGER - 1, max: REQUIRED_SECTION_BYTES });
   }
   units.sort((a, b) => b.rank - a.rank || a.index - b.index || a.section.order - b.section.order);
 
   // Notes are bounded lists plus under 512 bytes of fixed prose, so the cap holds by construction.
   const budget =
     MAX_GUIDELINE_TOTAL_BYTES - MAX_SKIPPED_SECTIONS_BYTES - MAX_OMITTED_LABEL_BYTES - 512;
-  const clip = ({ section, floor }: (typeof units)[number]) => {
-    const max = floor ? REQUIRED_SECTION_BYTES : MAX_RANKED_SECTION_BYTES;
-    return Buffer.byteLength(section.text) <= max
+  const clip = ({ section, max }: (typeof units)[number]) =>
+    Buffer.byteLength(section.text) <= max
       ? section.text
       : truncateUtf8(section.text, max - 32) + '\n[section truncated]';
-  };
   const chosen = new Set<(typeof units)[number]>();
   const opened = new Set<number>();
   const skipped: typeof units = [];
@@ -1597,15 +1616,16 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
   let dropped = 0;
   let used = 0;
   for (const unit of units) {
-    // Dropped, not listed: no cited rule in the replay came from an unrouted section naming nothing in the diff.
-    if (unit.rank <= 0) {
+    // Dropped, not listed: no cited rule in the replay came from an unrouted section naming
+    // nothing in the diff. Generic paths alone (src/app/index.ts) give nothing to rank by.
+    if (query.size > 0 && unit.rank <= 0) {
       unrelated.add(unit.doc.label);
       dropped += 1;
       continue;
     }
     const header = opened.has(unit.index) ? 0 : Buffer.byteLength(`### ${unit.doc.label}\n`) + 2;
-    const bytes =
-      header + Buffer.byteLength(clip(unit)) + Buffer.byteLength(unit.lead.join('\n')) + 2;
+    const lead = unit.lead.map((parent) => parent.heading).join('\n');
+    const bytes = header + Buffer.byteLength(clip(unit)) + Buffer.byteLength(lead) + 2;
     if (used + bytes > budget) {
       skipped.push(unit);
       continue;
@@ -1620,45 +1640,33 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
       .filter((unit) => unit.index === index)
       .sort((a, b) => a.section.order - b.section.order);
     if (!mine.length) return [];
-    const emitted = new Set<string>();
+    const emitted = new Set<number>();
     const body = mine.map((unit) => {
-      const lead = unit.lead.filter((line) => !emitted.has(line));
-      for (const line of [...lead, unit.heading]) emitted.add(line);
-      return [...lead, clip(unit)].join('\n');
+      const lead = unit.lead.filter((parent) => !emitted.has(parent.order));
+      for (const parent of lead) emitted.add(parent.order);
+      emitted.add(unit.section.order);
+      return [...lead.map((parent) => parent.heading), clip(unit)].join('\n');
     });
     return [`### ${doc.label}\n${body.join('\n')}`];
   });
-  const notes: string[] = [];
-  if (skipped.length > 0) {
-    const listed = skipped
-      .filter((unit) => unit.heading)
-      .map(
-        (unit) =>
-          `${unit.doc.label.replace(/ \(.*\)$/, '')}: ${unit.heading.replace(/^#+\s*/, '')}`,
-      );
-    notes.push(
-      `Sections not loaded to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget, highest-ranked first; open any that apply: ${boundedJoin(listed, MAX_SKIPPED_SECTIONS_BYTES)}.`,
+  const listed = skipped
+    .filter((unit) => unit.heading)
+    .map(
+      (unit) => `${unit.doc.label.replace(/ \(.*\)$/, '')}: ${unit.heading.replace(/^#+\s*/, '')}`,
     );
-  }
-  if (dropped > 0) {
-    notes.push(
-      `${dropped} sections in ${unrelated.size} docs name nothing in this diff and were omitted.`,
-    );
-  }
-  if (discovered.budgetExhausted) {
-    notes.push(
-      `Additional files were skipped after the ${MAX_GUIDELINE_CANDIDATE_BYTES} byte guideline candidate budget was reached.`,
-    );
-  }
-  if (discovered.referenced.length > 0) {
-    notes.push(
-      `Referenced Markdown documents not preloaded: ${boundedJoin(discovered.referenced, MAX_OMITTED_LABEL_BYTES)}. Read any that apply to the changed files or review question.`,
-    );
-  }
-  return [
-    ...blocks,
-    ...(notes.length ? [`### Review guidance budget\n${notes.join(' ')}`] : []),
-  ].join('\n\n');
+  const note = guidelineBudgetNote(discovered, [
+    ...(skipped.length > 0
+      ? [
+          `Sections not loaded to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget, highest-ranked first; open any that apply: ${boundedJoin(listed, MAX_SKIPPED_SECTIONS_BYTES)}.`,
+        ]
+      : []),
+    ...(dropped > 0
+      ? [
+          `${dropped} sections in ${unrelated.size} docs name nothing in this diff and were omitted.`,
+        ]
+      : []),
+  ]);
+  return [...blocks, note].filter(Boolean).join('\n\n');
 }
 
 /**

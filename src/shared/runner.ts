@@ -1580,7 +1580,7 @@ async function runReviewPipeline(params: {
   // JBOT_GUIDELINE_RANK=legacy restores the per-file round-robin guideline budget.
   const rankedGuidelines = process.env.JBOT_GUIDELINE_RANK !== 'legacy';
   const guidelines = rankedGuidelines
-    ? formatRankedGuidelines(applicable, files)
+    ? formatRankedGuidelines(applicableGuidelines(applicable, reviewedFiles), files)
     : formatGuidelines(discoveredGuidelines);
   if (guidelines) {
     const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
@@ -2519,11 +2519,8 @@ async function runReviewPipeline(params: {
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     let guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
-    const complianceGuidelines = !followupGuidelines
-      ? guidelines
-      : rankedGuidelines
-        ? formatRankedGuidelines(applicableGuidelines(applicable, reviewedFiles), files)
-        : formatGuidelines(followupGuidelines);
+    const complianceGuidelines =
+      rankedGuidelines || !followupGuidelines ? guidelines : formatGuidelines(followupGuidelines);
     let candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,

@@ -162,7 +162,7 @@ it('ranks every section on one scale, fills the budget best-fit and lists the re
         },
         {
           label: '.pr-governance/design/STANDARDS.md (§6.2)',
-          text: '## 6.2 Placement\nTests go in api-spec files.',
+          text: `## 6.2 Placement\nTests go in api-spec files.\n${'y'.repeat(7 * 1024)}\nSpecs sit beside the code.`,
           relevance: 3,
         },
       ],
@@ -173,6 +173,8 @@ it('ranks every section on one scale, fills the budget best-fit and lists the re
   );
   assert.ok(Buffer.byteLength(out) <= 96 * 1024);
   assert.match(out, /^### \.pr-governance\/design\/STANDARDS\.md \(§6\.2\)\n## 6\.2 Placement/m);
+  // A routed rule is never clipped at the per-section cap.
+  assert.match(out, /y\nSpecs sit beside the code\./);
   // The matching section outranks equally routed filler that sorts earlier, and keeps its parent heading.
   assert.match(out, /### z\.md\n# Rules\n[^]*## Refunds\nrefunds stay append-only/);
   assert.match(out, /open any that apply: .*b\.md: Beta \d+/);
@@ -180,6 +182,30 @@ it('ranks every section on one scale, fills the budget best-fit and lists the re
   assert.doesNotMatch(out, /use tabs/);
   assert.doesNotMatch(out, /root\.md|Style/);
   assert.match(out, /1 sections in 1 docs name nothing in this diff and were omitted\./);
+});
+
+it('places each section under its own parents and drops nothing for generic paths', () => {
+  const discovered = {
+    docs: [
+      {
+        label: 'nest.md',
+        text: '# Ledger\n## Rules\n### Refunds\nstay append-only\n# Payouts\n## Rules\n### Chargebacks\nsettle in a day',
+        relevance: 1 as const,
+      },
+    ],
+    referenced: [],
+    budgetExhausted: false,
+  };
+  const out = formatRankedGuidelines(discovered, [
+    { filename: 'src/refunds.ts' },
+    { filename: 'src/chargebacks.ts' },
+  ]);
+  assert.match(out, /### Refunds\nstay append-only\n# Payouts\n## Rules\n### Chargebacks/);
+  assert.match(out, /4 sections in 1 docs name nothing/);
+  assert.doesNotMatch(
+    formatRankedGuidelines(discovered, [{ filename: 'src/app.ts' }]),
+    /name nothing/,
+  );
 });
 
 it('delivers a guideline set small enough for the main prompt whole', () => {

@@ -398,10 +398,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
         '- `review/CHECKLIST.md`',
       ].join('\n'),
     );
-    writeFileSync(
-      join(root, 'AGENTS.md'),
-      '# Agents\nRepo-wide agent guidance that applies to every change.',
-    );
+    writeFileSync(join(root, 'AGENTS.md'), '# Agents\nKeep changes small.');
     writeFileSync(
       join(root, '.pr-governance/design/SEAMS.md'),
       '# Seams\nModules talk to each other only through declared seams.',
@@ -414,14 +411,15 @@ describe('discoverGuidelineDocs with diff routing', () => {
       join(root, '.pr-governance/review/CHECKLIST.md'),
       `# Checklist\n${'Check every item. '.repeat(200)}`,
     );
-    const discovered = await discoverGuidelineDocs(root, ['src/unrelated.ts']);
+    const discovered = await discoverGuidelineDocs(root, ['src/check.ts']);
     assert.deepEqual(discovered.required, [
       'AGENTS.md',
       '.pr-governance/design/SEAMS.md',
       '.pr-governance/review/CHECKLIST.md',
     ]);
-    const out = formatRankedGuidelines(discovered, [{ filename: 'src/unrelated.ts' }]);
-    assert.match(out, /Repo-wide agent guidance/);
+    const out = formatRankedGuidelines(discovered, [{ filename: 'src/check.ts' }]);
+    // A required doc whose only section is short still keeps it.
+    assert.match(out, /Keep changes small/);
     assert.match(out, /declared seams/);
     assert.match(out, /Check every item\.[^]*\[section truncated\]/);
     // A conditional list's doc still has to name something in the diff.
