@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { parseEnvInt } from '../src/app/app.ts';
+import { parseEnvInt, parseEnvJsonObject } from '../src/app/app.ts';
 import { parseEnvBoolean } from '../src/shared/config.ts';
 
 const OLD_ENV = { ...process.env };
@@ -23,6 +23,18 @@ describe('parseEnvInt', () => {
 
     assert.equal(parseEnvInt('JBOT_REVIEW_SHARDS', 3), 3);
     assert.equal(parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 2), 2);
+  });
+});
+
+describe('parseEnvJsonObject', () => {
+  it('rejects malformed JSON instead of passing the defaults off as explicit options', () => {
+    process.env.JBOT_MODEL_OPTIONS = '{effort: high}';
+    assert.throws(
+      () => parseEnvJsonObject('JBOT_MODEL_OPTIONS', {}),
+      /Invalid JSON in JBOT_MODEL_OPTIONS/,
+    );
+    process.env.JBOT_MODEL_OPTIONS = '["low"]';
+    assert.throws(() => parseEnvJsonObject('JBOT_MODEL_OPTIONS', {}), /expected a JSON object/);
   });
 });
 

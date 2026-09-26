@@ -446,6 +446,9 @@ paired full/incremental reviews with OpenCode's free MiMo Flash model, without
 posting to GitHub.
 See the [comparison results and limitations](docs/audits/incremental-followup-review.md).
 
+CommandCode's space-bunny defaults to `medium` instead of `high` on diffs over
+20 KB, where `high` ran past the finder cap. An explicit `model-options` still wins.
+
 CommandCode MiMo v2.6 Flash, Pro and Pro UltraSpeed have no adjustable reasoning
 effort in CLI 1.62.0 through 1.66.0. J-Bot omits `--effort` and logs `effort=not-configurable`;
 the global low default does not control these models. Other models without a
@@ -814,7 +817,8 @@ differ. Both hash into the same pool, so roughly 1/n of runs land both roles on
 one candidate (half the runs on a two-model pool), and a one-entry pool
 always does. That is when the aux session shares the main model's options entry
 and its effort instead of the lower aux default. Neither draw prefers a
-position, so pool order carries no heavy/fast role assignment.
+position, so pool order carries no heavy/fast role assignment. A rerun advances
+both draws, so it also moves the auxiliary sessions to another candidate.
 
 **Legacy `provider`** still works unchanged. Setting it _pins_ the provider: an
 unprefixed id belongs to it, a matching `provider/` prefix is stripped, and any
@@ -838,6 +842,10 @@ Set `enable-context7: auto` and pass `context7-api-key` from
 `secrets.CONTEXT7_API_KEY` to let the review agent verify current docs when the
 PR changes external API, SDK, framework, CLI, cloud-service, or GitHub Actions
 usage. In `auto` mode, Context7 is skipped for ordinary business-logic changes.
+Reviews are told not to search the web or download packages to check library
+behavior, and OpenCode sessions have no web or code-execution tools, so without
+Context7 an unconfirmed library claim stays advisory. Use `enable-context7: true` when the
+code reaches a library through in-house wrappers that `auto` does not detect.
 
 Context7 failures are non-blocking: if the MCP server cannot connect, rejects
 auth, or rate-limits, the action logs a warning and continues the review without

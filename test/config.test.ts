@@ -17,6 +17,7 @@ import {
   resolvePoolCredentials,
   resolveProviderBaseURL,
   resolveProviderCredential,
+  sizedModelOptions,
   verificationModelOptions,
   resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
@@ -395,6 +396,26 @@ describe('openai-compatible custom provider', () => {
     assert.deepEqual(auxModelOptionsFor('opencode', 'm', 'opencode', 'space-bunny-free'), {
       reasoningEffort: 'high',
     });
+    // Only CommandCode's route steps down on big diffs: at high it ran past the finder cap.
+    assert.deepEqual(defaultModelOptions('commandcode', 'stealth/space-bunny-alpha', 31_000), {
+      reasoningEffort: 'medium',
+    });
+    assert.deepEqual(defaultModelOptions('opencode', 'space-bunny-free', 31_000), {
+      reasoningEffort: 'high',
+    });
+    assert.deepEqual(
+      auxModelOptionsFor('opencode', 'm', 'commandcode', 'stealth/space-bunny-alpha', 31_000),
+      { reasoningEffort: 'medium' },
+    );
+    const high = { reasoningEffort: 'high' };
+    assert.equal(
+      sizedModelOptions('commandcode', 'stealth/space-bunny-alpha', 31_000, high, true),
+      high,
+    );
+    assert.equal(
+      sizedModelOptions('commandcode', 'stealth/space-bunny-alpha', 10_000, high, false),
+      high,
+    );
   });
 
   it('requires and validates an HTTP(S) base URL', () => {

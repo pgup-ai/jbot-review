@@ -55,6 +55,8 @@ describe('BASH_PERMISSIONS', () => {
       'npx vitest run',
       'pnpm exec tsc',
       'python3 -c "print(1)"',
+      'curl -sL https://cdn.jsdelivr.net/npm/pkg/dist/index.js',
+      'wget https://example.com/pkg.tgz',
     ]) {
       assert.ok(isDenied(command), `expected deny for: ${command}`);
     }

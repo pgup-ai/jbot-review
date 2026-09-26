@@ -176,8 +176,9 @@ alone cannot confirm such a claim, and priors about "native", "raw", or "bulk"
 methods are often wrong for a specific version.
 
 Before reporting a finding that rests on framework-internal behavior, confirm
-that behavior against an authoritative source: the library's documentation, or
-its vendored types/source in the repo. If you cannot confirm it, set "kind" to
+that behavior against an authoritative source: Context7 documentation when it
+is available, or the library's types/source in the repo. Do not search the web
+or download packages to confirm it. If you cannot confirm it, set "kind" to
 "investigate", keep severity advisory, and phrase the unresolved behavior as a
 question with the concrete potential failure to verify. Never state an
 unverified library behavior as fact; a failed lookup alone is not a finding.`;

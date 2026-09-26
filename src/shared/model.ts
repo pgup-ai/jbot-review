@@ -112,6 +112,8 @@ export function removedAuxInputWarnings(read: (input: string, env: string) => st
  * together; both still hash into the same pool, so they land on one model about
  * 1/n of the time, and always on a one-entry pool. That is when the aux session
  * shares the main options entry and its effort rather than the low aux default.
+ * Reruns advance both picks: a weak aux fails open rather than failing the run, so
+ * it would otherwise stay on every rerun of that head.
  */
 export function pickReviewModels(
   pool: string[],
@@ -120,7 +122,7 @@ export function pickReviewModels(
 ): { model: string; auxModel: string } {
   return {
     model: pickPooledModel(pool, seed, attempt),
-    auxModel: pickPooledModel(pool, `aux:${seed}`),
+    auxModel: pickPooledModel(pool, `aux:${seed}`, attempt),
   };
 }
 

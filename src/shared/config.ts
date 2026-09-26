@@ -118,11 +118,32 @@ function reasoningOptions(providerID: string, effort: string): Record<string, un
   return provider?.custom && !provider.defaultModel ? {} : { reasoningEffort: effort };
 }
 
-export function defaultModelOptions(providerID: string, modelID: string): Record<string, unknown> {
+const LARGE_DIFF_PATCH_BYTES = 20 * 1024;
+
+export function defaultModelOptions(
+  providerID: string,
+  modelID: string,
+  patchBytes = 0,
+): Record<string, unknown> {
+  const config = modelConfigFor(providerID, modelID);
   return reasoningOptions(
     providerID,
-    modelConfigFor(providerID, modelID)?.defaultReasoningEffort ?? 'low',
+    (patchBytes > LARGE_DIFF_PATCH_BYTES && config?.largeDiffReasoningEffort) ||
+      (config?.defaultReasoningEffort ?? 'low'),
   );
+}
+
+/** The main options once the diff size is known; an explicit model-options input stands. */
+export function sizedModelOptions(
+  providerID: string,
+  modelID: string,
+  patchBytes: number,
+  modelOptions: Record<string, unknown>,
+  explicit: boolean | undefined,
+): Record<string, unknown> {
+  if (explicit) return modelOptions;
+  const sized = defaultModelOptions(providerID, modelID, patchBytes);
+  return sized.reasoningEffort === modelOptions.reasoningEffort ? modelOptions : sized;
 }
 
 /**
@@ -139,9 +160,10 @@ export function auxModelOptionsFor(
   modelID: string,
   auxProviderID: string,
   auxModelID: string,
+  patchBytes = 0,
 ): Record<string, unknown> | undefined {
   if (auxProviderID === providerID && auxModelID === modelID) return undefined;
-  return defaultModelOptions(auxProviderID, auxModelID);
+  return defaultModelOptions(auxProviderID, auxModelID, patchBytes);
 }
 
 export function needsAuxOpencodeConfig(
@@ -200,6 +222,8 @@ export interface ModelConfig {
   forcedToolChoice?: boolean;
   /** Effort when no model-options input is given, for a model that barely reasons at `low`. */
   defaultReasoningEffort?: string;
+  /** The default for diffs over LARGE_DIFF_PATCH_BYTES, when the usual one runs past the finder cap. */
+  largeDiffReasoningEffort?: string;
 }
 
 const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
@@ -392,8 +416,12 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     models: {
       // CommandCode CLI is not driven through opencode, so prompt-cache options do not apply.
       default: { promptCache: false },
-      // The same model as opencode's space-bunny; see DEEP_DEFAULT_MODELS.
-      'stealth/space-bunny-alpha': { defaultReasoningEffort: 'high' },
+      // The same model as opencode's space-bunny; see DEEP_DEFAULT_MODELS. At high, a
+      // 10 KB diff took 8 min and a 31 KB one ran past the 24.5-min finder cap.
+      'stealth/space-bunny-alpha': {
+        defaultReasoningEffort: 'high',
+        largeDiffReasoningEffort: 'medium',
+      },
     },
   },
   cursor: {

@@ -18,7 +18,8 @@
  *
  * Interpreters and package runners are denied too: running code is not reading it,
  * and a package it loads comes from jbot's image, not the reviewed repo (a verifier
- * once reported jbot's zod as the project's).
+ * once reported jbot's zod as the project's). So are web fetches: library behavior
+ * comes from Context7 or the repo, and one review spent minutes on a CDN bundle.
  *
  * The `*: allow` catch-all is load-bearing: opencode defaults UNMATCHED commands
  * to "ask" once a rule map exists, which would hang a headless run.
@@ -62,6 +63,8 @@ export const BASH_PERMISSIONS = {
   'tsx*': 'deny',
   'ts-node*': 'deny',
   'python*': 'deny',
+  'curl*': 'deny',
+  'wget*': 'deny',
 } as const;
 
 /**

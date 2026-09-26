@@ -7,8 +7,9 @@ import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
  * XDG_CONFIG_HOME's `plugins/` dir (a configured `plugins:` entry would need a
- * package directory). Strips mutating tools per request and every tool for the
- * tool-less agents; rewrites `exclusiveMinimum: 0` → `minimum: 1` because
+ * package directory). Strips mutating tools per request, plus the web and
+ * code-execution tools reviews spent minutes fetching library bundles with, and
+ * every tool for the tool-less agents; rewrites `exclusiveMinimum: 0` → `minimum: 1` because
  * Gemini-backed proxies 400 on it; drops the nested AGENTS.md instructions
  * opencode's read tool injects; applies the per-session options file
  * because V2 ignores config model overrides on catalog providers. Plain object
@@ -16,7 +17,7 @@ import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
  */
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
 import { readFileSync } from 'node:fs';
-const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task']);
+const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute']);
 const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
 
 function stripTools(tools, agent) {
