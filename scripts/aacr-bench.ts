@@ -95,6 +95,9 @@ function ensureCommits(repos: string, instance: AacrInstance): string {
       `https://github.com/${instance.repo}.git`,
       dir,
     );
+  // Reviews need source, not LFS payloads, and git-lfs may be absent: keep pointer files.
+  for (const key of ['process', 'smudge', 'clean']) git(dir, 'config', `filter.lfs.${key}`, '');
+  git(dir, 'config', 'filter.lfs.required', 'false');
   try {
     git(dir, 'fetch', '--filter=tree:0', 'origin', instance.base, instance.head);
   } catch {
