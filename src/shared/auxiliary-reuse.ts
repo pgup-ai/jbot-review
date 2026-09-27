@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { PrFile } from './github.ts';
+import { COMPARE_FILES_CAP, type PrFile } from './github.ts';
 
 const execFileAsync = promisify(execFile);
 const MARKER = /<!-- jbot-review:auxiliary:(\[[^\n]*\]) -->/;
@@ -65,6 +65,8 @@ export async function planComplianceRecheck(input: {
   if (!baseline) return { reason: 'no-completed-baseline' };
   if (baseline.policy !== input.policy) return { reason: 'policy-changed', baseline };
   if (baseline.head === input.head) return { reason: 'same-head-rerun', baseline };
+  // The compare API lists at most 300 files; PRs that large always check every file.
+  if (input.files.length >= COMPARE_FILES_CAP) return { reason: 'large-pr', baseline };
   // The audited diff, not today's base: a retargeted PR must not carry over files it never had.
   const audited = await input.audited(baseline.base, baseline.head).catch(() => undefined);
   if (!audited) return { reason: 'history-unavailable', baseline };

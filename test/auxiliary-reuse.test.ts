@@ -164,6 +164,7 @@ test('a follow-up re-checks compliance only on files whose edits differ from the
     [{ priorBody: '<sup>driver</sup>' }, 'no-completed-baseline'],
     [{ policy: auxiliaryPolicy('changed rules') }, 'policy-changed'],
     [{ head: reviewed }, 'same-head-rerun'],
+    [{ files: Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.ts` })) }, 'large-pr'],
     [{ audited: () => Promise.reject(new Error('compare capped')) }, 'history-unavailable'],
     [{ files: [{ filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+r' }] }, 'every-file-changed'],
   ] as const) {

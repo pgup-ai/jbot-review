@@ -123,7 +123,7 @@ export async function listPrFiles(
 }
 
 // GitHub's compare endpoint returns at most 300 files with no pagination.
-const COMPARE_FILES_CAP = 300;
+export const COMPARE_FILES_CAP = 300;
 
 /**
  * Changed files (with patches) between two commits — the incremental delta for a

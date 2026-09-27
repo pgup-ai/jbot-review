@@ -1372,7 +1372,7 @@ completed pass, when the rules, prompt, models and settings still match.
 Merging the base branch, editing the PR description, a new jbot release and
 the pool member a push draws don't count as changes. Findings on the other PR
 files are dropped; that review's results stand for them. The review states the
-narrowed scope. Explicit reruns, auto-approval, PRs over 300 files and
+narrowed scope. Explicit reruns, auto-approval, PRs of 300 or more files and
 unavailable history check every file.
 
 CommandCode logs progress every minute: elapsed time, observed tool outcomes,
