@@ -61,45 +61,57 @@ export function buildTargetedDiffBlock(files: PrFile[], adjacent: string[]): str
     .join('\n\n');
 }
 
+/** Changed paths a batched diff read can carry, once each in order, with their output bytes. */
+export function batchablePaths(files: PrFile[]): { path: string; bytes: number }[] {
+  return [...new Map(files.map((file) => [file.filename, file]))].flatMap(([path, file]) => {
+    if (!file.patch || /\p{Cc}/u.test(path)) return [];
+    const bytes = Buffer.byteLength(file.patch) + Buffer.byteLength(path) * 4 + 512;
+    return bytes > 8192 ? [] : [{ path, bytes }];
+  });
+}
+
+/** Batched reads for `count` missing paths, from the batchable ones in order; stops reading once full. */
 export function buildDiffRecoveryBlock(
-  files: PrFile[],
-  missing: string[],
+  batchable: Iterable<{ path: string; bytes: number }>,
+  count: number,
   scope: DiffScope,
 ): string {
   if (!/^[a-f0-9]{40}$/.test(scope.baseSha ?? '')) return '';
   if (!scope.worktree && !/^[a-f0-9]{40}$/.test(scope.headSha ?? '')) return '';
   const revision = scope.worktree ? scope.baseSha : `${scope.baseSha}...${scope.headSha}`;
   const command = `git --literal-pathspecs ${GIT_DIFF_ARGS.join(' ')} ${revision} --`;
-  const byPath = new Map(files.map((file) => [file.filename, file]));
-  const paths = [...new Set(missing)];
-  const groups: { paths: string[]; bytes: number }[] = [];
-  for (const path of paths) {
-    const file = byPath.get(path);
-    if (!file?.patch || /\p{Cc}/u.test(path)) continue;
-    const bytes = Buffer.byteLength(file.patch) + Buffer.byteLength(path) * 4 + 512;
-    if (bytes > 8192) continue;
-    let group = groups.at(-1);
-    if (!group || group.paths.length === 8 || group.bytes + bytes > 8192) {
-      group = { paths: [], bytes: 0 };
-      groups.push(group);
-    }
-    group.paths.push(path);
-    group.bytes += bytes;
-  }
   const lines = [
     '## Batched missing-diff reads',
     'When a caller or contract check needs another changed file not embedded here, read its diff in these batches instead of one command per file. Your assigned diff pages are delivered directly; do not re-review all other pages. If output truncates, recover the needed remaining hunks separately.',
   ];
+  let used = Buffer.byteLength(lines.join('\n'));
   let delivered = 0;
-  for (const group of groups) {
-    const line = `    ${command} ${group.paths.map((path) => `'${path.replace(/'/g, "'\\''")}'`).join(' ')}`;
-    if (Buffer.byteLength([...lines, line].join('\n')) > 3900) break;
+  const deliver = (paths: string[]) => {
+    const line = `    ${command} ${paths.map((path) => `'${path.replace(/'/g, "'\\''")}'`).join(' ')}`;
+    const next = used + 1 + Buffer.byteLength(line);
+    if (next > 3900) return false;
     lines.push(line);
-    delivered += group.paths.length;
+    used = next;
+    delivered += paths.length;
+    return true;
+  };
+  // A group is final once the next one starts; the first line over budget ends the block.
+  let group: { paths: string[]; bytes: number } | undefined;
+  for (const { path, bytes } of batchable) {
+    if (!group || group.paths.length === 8 || group.bytes + bytes > 8192) {
+      if (group && !deliver(group.paths)) {
+        group = undefined;
+        break;
+      }
+      group = { paths: [], bytes: 0 };
+    }
+    group.paths.push(path);
+    group.bytes += bytes;
   }
+  if (group) deliver(group.paths);
   if (!delivered) return '';
   lines.push(
-    `${delivered} missing paths batched; ${paths.length - delivered} omitted from this plan (large, unknown, or budget-limited). Read those remaining diffs separately.`,
+    `${delivered} missing paths batched; ${count - delivered} omitted from this plan (large, unknown, or budget-limited). Read those remaining diffs separately.`,
   );
   return lines.join('\n');
 }

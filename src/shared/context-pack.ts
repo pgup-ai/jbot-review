@@ -114,7 +114,6 @@ class PackReader {
 
 const within = (span: { start: number; end: number }, line: number) =>
   span.start <= line && line <= span.end;
-/** Index of the first ascending line at or after `line`. */
 const firstAtLeast = (sorted: number[], line: number) => {
   let low = 0;
   let high = sorted.length;
@@ -224,13 +223,12 @@ function surroundingEntries(
     if (!source || !file.patch) continue;
     const changed = changedEvidenceLines(file.patch);
     const sorted = [...changed].sort((a, b) => a - b);
+    const touched = (d: Declaration) =>
+      firstAtLeast(sorted, d.start) < firstAtLeast(sorted, d.end + 1);
     const { declarations, callbacks } = source.index;
     const enclosing = declarations.filter((d) => ENCLOSING.has(d.kind));
     const containers = declarations.filter(
-      (d) =>
-        (d.kind === 'variable' || d.kind === 'class') &&
-        firstAtLeast(sorted, d.start) < firstAtLeast(sorted, d.end + 1) &&
-        !local(source.index, d),
+      (d) => (d.kind === 'variable' || d.kind === 'class') && touched(d) && !local(source.index, d),
     );
     const enclosingAt = innermost(enclosing);
     const containerAt = innermost(containers);
@@ -256,15 +254,10 @@ function surroundingEntries(
       }
     }
     const changedClasses = new Set(
-      declarations
-        .filter(
-          (d) =>
-            d.kind === 'class' && firstAtLeast(sorted, d.start) < firstAtLeast(sorted, d.end + 1),
-        )
-        .map((d) => d.symbol),
+      declarations.filter((d) => d.kind === 'class' && touched(d)).map((d) => d.symbol),
     );
     for (const member of declarations) {
-      if (!member.owner || !changedClasses.has(member.owner)) continue;
+      if (member.owner === undefined || !changedClasses.has(member.owner)) continue;
       if (member.kind === 'constructor')
         ranges.push({
           start: member.start,
@@ -320,17 +313,15 @@ function callerAt(source: PackSource) {
 const locals = new WeakMap<RichSourceIndex, (d: Declaration) => boolean>();
 
 /**
- * Whether a declaration sits inside another, or inside a callback. A function contains a
- * declaration with its own span; anything else must strictly contain it, since an equal
- * span is the declaration's own value, such as `const x = wrap(() => {})`.
+ * Whether a declaration sits inside another or a callback. Only a function may share its span:
+ * otherwise an equal span is the declaration's own value, as in `const x = wrap(() => {})`.
  */
 function local(index: RichSourceIndex, d: Declaration): boolean {
   let query = locals.get(index);
   if (!query) {
     const spans = [...index.declarations, ...index.callbacks].sort((a, b) => a.start - b.start);
     const starts = spans.map((span) => span.start);
-    // reach[i]: the furthest end among spans[0..i]; a span starting earlier contains
-    // d exactly when it reaches d's end.
+    // reach[i]: the furthest end in spans[0..i]; an earlier span contains d iff it reaches d.end.
     const reach: number[] = [];
     for (const [i, span] of spans.entries())
       reach.push(Math.max(span.end, reach[i - 1] ?? -Infinity));
@@ -533,7 +524,7 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
     const { declarations } = source.index;
     const members = new Map<string, Declaration[]>();
     for (const m of declarations) {
-      if (!m.owner) continue;
+      if (m.owner === undefined) continue;
       const same = members.get(m.owner);
       if (same) same.push(m);
       else members.set(m.owner, [m]);
@@ -566,9 +557,12 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
       });
     }
   }
+  const unowned = new Set([...found.values()].filter((s) => !s.owner).map((s) => s.symbol));
   for (const symbol of extractChangedExportedSymbols(files))
-    if (![...found.values()].some((s) => !s.owner && s.symbol === symbol))
+    if (!unowned.has(symbol)) {
+      unowned.add(symbol);
       found.set(`\0${symbol}`, { path: '', symbol, weight: 0 });
+    }
   return [...found.values()].sort((a, b) => b.weight - a.weight);
 }
 

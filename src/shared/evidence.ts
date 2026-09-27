@@ -867,8 +867,7 @@ export class EvidenceStore {
           }
         }
       }
-      // An identifier's pattern matches exactly a whole [\w$] run equal to it, so one pass
-      // over each file's runs finds their first lines; other symbols keep their pattern.
+      // symbolPattern matches an identifier exactly where a whole [\w$] run equals it.
       const identifiers = new Set(symbols.filter((symbol) => /^[\w$]+$/.test(symbol)));
       const patterns = new Map(
         symbols

@@ -72,7 +72,7 @@ export function selectGuidelineSections(text: string, titles: string[]): string 
     if (same) same.push(heading);
     else byTitle.set(heading.title, [heading]);
   }
-  // A section ends at the next heading of its level or higher, found for all in one pass.
+  // A section ends at the next heading of its level or higher.
   const ends = new Map<(typeof headings)[number], number>();
   const open: typeof headings = [];
   for (const heading of headings) {

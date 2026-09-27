@@ -130,9 +130,10 @@ export function selectPrefetchCandidates(
     const c = candidates[index];
     if (locations.has(c.path)) continue;
     const next = [...selected, index];
-    const chosen = new Set(next.map((i) => candidates[i]));
+    const picked = next.map((i) => candidates[i]);
+    const chosen = new Set(picked);
     const block = formatJevPrefetch(
-      next.map((i) => candidates[i]),
+      picked,
       allCandidates.filter((c) => !chosen.has(c)),
     );
     if (Buffer.byteLength(block) > MAX_CONTEXT_BYTES) continue;
@@ -221,7 +222,7 @@ export async function buildJevPrefetch(
         }
       }
 
-      // Each path's symbols in entry order, instead of scanning every entry per path.
+      // Each path's symbols in entry order, once per entry.
       const symbolsAt = new Map<string, string[]>();
       for (const e of eligible)
         for (const site of new Set(e.callSites)) {

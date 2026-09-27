@@ -532,10 +532,7 @@ function whitespaceNote(lines: number[]): string {
   return lines.length ? `Whitespace only: ${formatLineRanges(lines)}` : '';
 }
 
-/**
- * Byte size of an unlimited-budget diff block, from each file's section size: what
- * buildDiffHunksBlockWithMetadata renders with Infinity budgets, without rendering it.
- */
+/** Bytes of the unlimited-budget diff block with these sections, without rendering it. */
 export function unboundedDiffBlockBytes(
   sectionBytes: number,
   sections: number,

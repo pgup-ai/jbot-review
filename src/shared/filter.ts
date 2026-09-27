@@ -97,21 +97,16 @@ function findingStrength(finding: Finding): [number, number] {
  */
 export function dedupeFindings(...findingLists: Finding[][]): Finding[] {
   const kept: Finding[] = [];
-  // A line-anchored finding only matches its exact path and line; a file-level one only
-  // file-level findings on its path, so each looks in its own bucket.
-  const byLine = new Map<string, number>();
-  const fileLevel = new Map<string, number[]>();
+  // Only findings on one path and line, or file-level ones on one path, can share an anchor.
+  const byAnchor = new Map<string, number[]>();
   for (const findings of findingLists) {
     for (const finding of findings) {
-      const lineKey = finding.line > 0 ? `${finding.path}\0${finding.line}` : undefined;
-      let sameFile = lineKey ? undefined : fileLevel.get(finding.path);
-      if (!lineKey && !sameFile) fileLevel.set(finding.path, (sameFile = []));
-      const existingIndex = lineKey
-        ? (byLine.get(lineKey) ?? -1)
-        : (sameFile!.find((index) => isSameAnchor(kept[index], finding)) ?? -1);
+      const key = `${finding.path}\0${finding.line > 0 ? finding.line : 0}`;
+      const same = byAnchor.get(key) ?? [];
+      const existingIndex = same.find((index) => isSameAnchor(kept[index], finding)) ?? -1;
       if (existingIndex === -1) {
-        if (lineKey) byLine.set(lineKey, kept.length);
-        else sameFile!.push(kept.length);
+        same.push(kept.length);
+        byAnchor.set(key, same);
         kept.push(finding);
         continue;
       }
@@ -196,7 +191,6 @@ export function suppressPreviouslyReported(
 ): { findings: Finding[]; suppressedCount: number } {
   if (priorThreads.length === 0) return { findings, suppressedCount: 0 };
 
-  // Only open threads on the same path can match; bodies are lowercased once.
   const open = new Map<string, { thread: PriorFindingRef; text: string }[]>();
   for (const thread of priorThreads) {
     if (thread.isResolved) continue;

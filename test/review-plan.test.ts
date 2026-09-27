@@ -54,10 +54,12 @@ const base = {
 test('pages from byte arithmetic exactly as rendering every candidate would', () => {
   const hunk = (at: number, text: string) =>
     `@@ -${at},2 +${at},3 @@\n ctx\n-  ${text};\n+${text};\n+added ${text} 東京;`;
-  const files = Array.from({ length: 40 }, (_, i) => ({
+  const files: { filename: string; patch?: string }[] = Array.from({ length: 40 }, (_, i) => ({
     filename: `src/m${i}/f${i}.ts`,
     patch: Array.from({ length: 8 }, (_, h) => hunk(h * 20 + 1, `call${i}_${h}()`)).join('\n'),
   }));
+  // A binary file has no patch, yet stays on the modeled path.
+  files.push({ filename: 'assets/logo.png' });
   files.push({
     filename: 'src/huge.ts',
     patch: `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, n) => `+const v${n} = ${n};`).join('\n')}`,
