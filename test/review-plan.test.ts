@@ -65,9 +65,14 @@ test('pages from byte arithmetic exactly as rendering every candidate would', ()
     patch: `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, n) => `+const v${n} = ${n};`).join('\n')}`,
   });
   let calls = 0;
-  const counted = (context: string) => (calls++, renderPrompt(context));
-  // Answering the planner's NUL-bearing frame probe differently forces a render per candidate.
-  const opaque = (context: string) => (context.includes('\u0000') ? '' : counted(context));
+  // Counts candidate renders, not the frame checks' NUL probe and empty context.
+  const counted = (render: (context: string) => string) => (context: string) => {
+    if (context && !context.includes('\u0000')) calls++;
+    return render(context);
+  };
+  // Answering the NUL-bearing frame probe differently forces a render per candidate.
+  const exact = (render: (context: string) => string) => (context: string) =>
+    context.includes('\u0000') ? '' : counted(render)(context);
   const options = {
     ...base,
     budget: { ...budget, transportBytes: 40_000 },
@@ -75,12 +80,26 @@ test('pages from byte arithmetic exactly as rendering every candidate would', ()
     numberedDiff: true,
     batchDiffScope: { baseRef: 'main', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) },
   };
-  const modeled = buildShardPlans({ ...options, renderPrompt: counted });
-  const modeledCalls = calls;
-  calls = 0;
-  assert.deepEqual(modeled, buildShardPlans({ ...options, renderPrompt: opaque }));
-  assert.ok(modeled.length > 2);
-  assert.ok(modeledCalls * 4 < calls, `${modeledCalls} renders modeled, ${calls} exact`);
+  const plan = (render: (context: string) => string) => {
+    calls = 0;
+    return { plans: buildShardPlans({ ...options, renderPrompt: render }), calls };
+  };
+  const modeled = plan(counted(renderPrompt));
+  const reference = plan(exact(renderPrompt));
+  assert.deepEqual(modeled.plans, reference.plans);
+  assert.ok(modeled.plans.length > 2);
+  assert.ok(
+    modeled.calls * 4 < reference.calls,
+    `${modeled.calls} modeled, ${reference.calls} exact`,
+  );
+  // Renders the byte model can't use: the context twice, lone surrogates at its seams and a
+  // different empty render. Each pages with the same renders as the exact planner.
+  for (const render of [
+    (context: string) => renderPrompt(context) + context,
+    (context: string) => renderPrompt(`\uD800${context}\uDC00`),
+    (context: string) => (context ? renderPrompt(context) : ''),
+  ])
+    assert.deepEqual(plan(counted(render)), plan(exact(render)));
 });
 
 test('one requested shard pages a huge hunk without losing late changes or exceeding Cline argv', () => {

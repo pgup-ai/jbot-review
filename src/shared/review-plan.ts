@@ -188,7 +188,7 @@ const CONTEXT_PROBE = '\u0000jbot-context\u0000';
 function promptFrameBytes(renderPrompt: (context: string) => string): number | undefined {
   const probe = renderPrompt(CONTEXT_PROBE);
   const at = probe.indexOf(CONTEXT_PROBE);
-  if (at < 0 || probe.includes(CONTEXT_PROBE, at + 1)) return undefined;
+  if (at < 0) return undefined;
   const frame = probe.slice(0, at) + probe.slice(at + CONTEXT_PROBE.length);
   // A surrogate at the seam would pair with the context's edge and change the byte count.
   if (/[\uD800-\uDFFF]/.test(probe[at - 1] ?? '') || /[\uD800-\uDFFF]/.test(frame[at] ?? ''))
