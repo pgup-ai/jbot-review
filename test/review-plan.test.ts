@@ -51,6 +51,36 @@ const base = {
   budget,
 };
 
+test('pages from byte arithmetic exactly as rendering every candidate would', () => {
+  const hunk = (at: number, text: string) =>
+    `@@ -${at},2 +${at},3 @@\n ctx\n-  ${text};\n+${text};\n+added ${text} 東京;`;
+  const files = Array.from({ length: 40 }, (_, i) => ({
+    filename: `src/m${i}/f${i}.ts`,
+    patch: Array.from({ length: 8 }, (_, h) => hunk(h * 20 + 1, `call${i}_${h}()`)).join('\n'),
+  }));
+  files.push({
+    filename: 'src/huge.ts',
+    patch: `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, n) => `+const v${n} = ${n};`).join('\n')}`,
+  });
+  let calls = 0;
+  const counted = (context: string) => (calls++, renderPrompt(context));
+  // Answering the planner's NUL-bearing frame probe differently forces a render per candidate.
+  const opaque = (context: string) => (context.includes('\u0000') ? '' : counted(context));
+  const options = {
+    ...base,
+    budget: { ...budget, transportBytes: 40_000 },
+    shards: [files],
+    numberedDiff: true,
+    batchDiffScope: { baseRef: 'main', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) },
+  };
+  const modeled = buildShardPlans({ ...options, renderPrompt: counted });
+  const modeledCalls = calls;
+  calls = 0;
+  assert.deepEqual(modeled, buildShardPlans({ ...options, renderPrompt: opaque }));
+  assert.ok(modeled.length > 2);
+  assert.ok(modeledCalls * 4 < calls, `${modeledCalls} renders modeled, ${calls} exact`);
+});
+
 test('one requested shard pages a huge hunk without losing late changes or exceeding Cline argv', () => {
   const lines = Array.from({ length: 14000 }, (_, n) => `+const value${n} = '東京-${n}';`);
   const files = [{ filename: 'src/huge.ts', patch: `@@ -0,0 +1,14000 @@\n${lines.join('\n')}` }];

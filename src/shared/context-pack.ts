@@ -114,8 +114,48 @@ class PackReader {
 
 const within = (span: { start: number; end: number }, line: number) =>
   span.start <= line && line <= span.end;
-const innermost = <T extends { start: number; end: number }>(spans: T[], line: number) =>
-  spans.filter((span) => within(span, line)).sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+/** Index of the first ascending line at or after `line`. */
+const firstAtLeast = (sorted: number[], line: number) => {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (sorted[mid] < line) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+};
+/**
+ * The smallest span holding a line, ties to the earlier span, answered for every line at
+ * once: spans in that order claim the lines they hold that no earlier span claimed.
+ */
+const innermost = <T extends { start: number; end: number }>(spans: T[]) => {
+  const low = spans.reduce((min, span) => Math.min(min, span.start), Infinity);
+  const high = spans.reduce((max, span) => Math.max(max, span.end), -Infinity);
+  if (low > high) return (): T | undefined => undefined;
+  const claimed = Array.from<T | undefined>({ length: high - low + 1 });
+  // next[i]: the first unclaimed line at or after i (path-compressed).
+  const next = Array.from({ length: high - low + 2 }, (_, i) => i);
+  const unclaimed = (i: number) => {
+    let root = i;
+    while (next[root] !== root) root = next[root];
+    while (next[i] !== root) {
+      const up = next[i];
+      next[i] = root;
+      i = up;
+    }
+    return root;
+  };
+  const order = spans
+    .map((span, index) => ({ span, index }))
+    .sort((a, b) => a.span.end - a.span.start - (b.span.end - b.span.start) || a.index - b.index);
+  for (const { span } of order)
+    for (let i = unclaimed(span.start - low); i <= span.end - low; i = unclaimed(i + 1)) {
+      claimed[i] = span;
+      next[i] = i + 1;
+    }
+  return (line: number) => (line < low || line > high ? undefined : claimed[line - low]);
+};
 const range = (start: number, end: number) =>
   Array.from({ length: Math.max(0, end - start + 1) }, (_, i) => start + i);
 const qualified = (d: { symbol: string; owner?: string }) =>
@@ -183,20 +223,22 @@ function surroundingEntries(
     const source = reader.sources.get(file.filename);
     if (!source || !file.patch) continue;
     const changed = changedEvidenceLines(file.patch);
+    const sorted = [...changed].sort((a, b) => a - b);
     const { declarations, callbacks } = source.index;
     const enclosing = declarations.filter((d) => ENCLOSING.has(d.kind));
     const containers = declarations.filter(
       (d) =>
         (d.kind === 'variable' || d.kind === 'class') &&
-        changed.some((line) => within(d, line)) &&
+        firstAtLeast(sorted, d.start) < firstAtLeast(sorted, d.end + 1) &&
         !local(source.index, d),
     );
+    const enclosingAt = innermost(enclosing);
+    const containerAt = innermost(containers);
+    const callbackAt = innermost(callbacks);
     const ranges: { start: number; end: number; label: string }[] = [];
     for (const line of changed) {
-      const named =
-        innermost(enclosing, line) ??
-        (trivia(source, line) ? undefined : innermost(containers, line));
-      const outer = named ?? innermost(callbacks, line);
+      const named = enclosingAt(line) ?? (trivia(source, line) ? undefined : containerAt(line));
+      const outer = named ?? callbackAt(line);
       if (!outer) continue;
       const label = named ? qualified(named) : '';
       if (outer.end - outer.start < WHOLE_DEFINITION_LINES)
@@ -213,11 +255,16 @@ function surroundingEntries(
         );
       }
     }
-    const classes = declarations.filter(
-      (d) => d.kind === 'class' && changed.some((line) => within(d, line)),
+    const changedClasses = new Set(
+      declarations
+        .filter(
+          (d) =>
+            d.kind === 'class' && firstAtLeast(sorted, d.start) < firstAtLeast(sorted, d.end + 1),
+        )
+        .map((d) => d.symbol),
     );
     for (const member of declarations) {
-      if (!classes.some((c) => c.symbol === member.owner)) continue;
+      if (!member.owner || !changedClasses.has(member.owner)) continue;
       if (member.kind === 'constructor')
         ranges.push({
           start: member.start,
@@ -258,16 +305,60 @@ function signatureLine(source: PackSource, d: { start: number; end: number }): n
   return d.start;
 }
 
+const callers = new WeakMap<PackSource, (line: number) => Declaration | undefined>();
+/** The function around a line of a caller's file, indexed once per file. */
+function callerAt(source: PackSource) {
+  let at = callers.get(source);
+  if (!at)
+    callers.set(
+      source,
+      (at = innermost(source.index.declarations.filter((d) => FUNCTION_LIKE.has(d.kind)))),
+    );
+  return at;
+}
+
+const locals = new WeakMap<RichSourceIndex, (d: Declaration) => boolean>();
+
+/**
+ * Whether a declaration sits inside another, or inside a callback. A function contains a
+ * declaration with its own span; anything else must strictly contain it, since an equal
+ * span is the declaration's own value, such as `const x = wrap(() => {})`.
+ */
 function local(index: RichSourceIndex, d: Declaration): boolean {
-  const contains = (o: { start: number; end: number }) => o.start <= d.start && d.end <= o.end;
-  // An equal span is the declaration's own value, such as `const x = wrap(() => {})`.
-  const strictly = (o: { start: number; end: number }) =>
-    contains(o) && (o.start < d.start || d.end < o.end);
-  return (
-    index.declarations.some(
-      (o) => o !== d && (FUNCTION_LIKE.has(o.kind) ? contains(o) : strictly(o)),
-    ) || index.callbacks.some(strictly)
-  );
+  let query = locals.get(index);
+  if (!query) {
+    const spans = [...index.declarations, ...index.callbacks].sort((a, b) => a.start - b.start);
+    const starts = spans.map((span) => span.start);
+    // reach[i]: the furthest end among spans[0..i]; a span starting earlier contains
+    // d exactly when it reaches d's end.
+    const reach: number[] = [];
+    for (const [i, span] of spans.entries())
+      reach.push(Math.max(span.end, reach[i - 1] ?? -Infinity));
+    // Spans starting where d starts: the furthest end, and functions ending where d ends.
+    const sameStart = new Map<number, { end: number; functions: Map<number, Declaration[]> }>();
+    const group = (span: { start: number; end: number }) => {
+      let found = sameStart.get(span.start);
+      if (!found) sameStart.set(span.start, (found = { end: -Infinity, functions: new Map() }));
+      found.end = Math.max(found.end, span.end);
+      return found;
+    };
+    for (const o of index.declarations) {
+      const { functions } = group(o);
+      if (!FUNCTION_LIKE.has(o.kind)) continue;
+      const same = functions.get(o.end);
+      if (same) same.push(o);
+      else functions.set(o.end, [o]);
+    }
+    for (const callback of index.callbacks) group(callback);
+    query = (d) => {
+      const before = firstAtLeast(starts, d.start);
+      if (before > 0 && reach[before - 1] >= d.end) return true;
+      const peers = sameStart.get(d.start);
+      return !!peers && (peers.end > d.end || !!peers.functions.get(d.end)?.some((o) => o !== d));
+    };
+    locals.set(index, query);
+  }
+  return query(d);
 }
 
 function topLevel(index: RichSourceIndex, symbol: string): Declaration | undefined {
@@ -360,8 +451,8 @@ async function definitionEntries(
     if (!source || !file.patch) continue;
     const changed = new Set(changedEvidenceLines(file.patch));
     const { declarations, uses, memberCalls, injected } = source.index;
-    const functions = declarations.filter((d) => FUNCTION_LIKE.has(d.kind));
-    const classes = declarations.filter((d) => d.kind === 'class');
+    const functionAt = innermost(declarations.filter((d) => FUNCTION_LIKE.has(d.kind)));
+    const classAt = innermost(declarations.filter((d) => d.kind === 'class'));
     const bySymbol = new Map<string, Declaration[]>();
     for (const d of declarations) {
       const same = bySymbol.get(d.symbol);
@@ -370,7 +461,7 @@ async function definitionEntries(
     }
     for (const use of uses) {
       if (!changed.has(use.line)) continue;
-      const scope = innermost(functions, use.line);
+      const scope = functionAt(use.line);
       // Locals of the enclosing function are already in the surrounding code.
       if (
         scope &&
@@ -382,7 +473,7 @@ async function definitionEntries(
     for (const call of memberCalls) {
       if (!changed.has(call.line)) continue;
       if (!call.target) {
-        const owner = innermost(classes, call.line)?.symbol;
+        const owner = classAt(call.line)?.symbol;
         if (owner && bySymbol.get(call.member)?.some((d) => d.owner === owner))
           want({ path: file.filename, symbol: call.member, owner }, file.filename);
         continue;
@@ -437,20 +528,33 @@ function changedSymbols(files: PrFile[], reader: PackReader): (Located & { span?
   for (const file of files) {
     const source = reader.sources.get(file.filename);
     if (!source || !file.patch) continue;
-    const changed = changedEvidenceLines(file.patch);
+    // Sorted so each declaration's lines are a binary-searched slice.
+    const changed = changedEvidenceLines(file.patch).sort((a, b) => a - b);
     const { declarations } = source.index;
+    const members = new Map<string, Declaration[]>();
+    for (const m of declarations) {
+      if (!m.owner) continue;
+      const same = members.get(m.owner);
+      if (same) same.push(m);
+      else members.set(m.owner, [m]);
+    }
+    const memberAt = new Map<string, (line: number) => Declaration | undefined>();
+    const inMember = (owner: string, line: number) => {
+      let at = memberAt.get(owner);
+      if (!at) memberAt.set(owner, (at = innermost(members.get(owner) ?? [])));
+      return at(line) !== undefined;
+    };
     for (const d of declarations) {
-      const inside = changed.filter((line) => within(d, line));
+      const inside = changed.slice(
+        firstAtLeast(changed, d.start),
+        firstAtLeast(changed, d.end + 1),
+      );
       if (!inside.length || d.kind === 'constructor' || (!d.owner && local(source.index, d)))
         continue;
       // A class counts only when code outside its members changes, such as its header.
       if (
         d.kind === 'class' &&
-        inside.every(
-          (line) =>
-            trivia(source, line) ||
-            declarations.some((m) => m.owner === d.symbol && within(m, line)),
-        )
+        inside.every((line) => trivia(source, line) || inMember(d.symbol, line))
       )
         continue;
       found.set(`${file.filename}\0${qualified(d)}`, {
@@ -549,10 +653,7 @@ async function callerEntries(
         continue;
       }
       const source = reader.sources.get(hit.path)!;
-      const caller = innermost(
-        source.index.declarations.filter((d) => FUNCTION_LIKE.has(d.kind)),
-        hit.line,
-      );
+      const caller = callerAt(source)(hit.line);
       const lines = [
         ...(caller ? [signatureLine(source, caller)] : []),
         ...range(hit.line - CALLER_CONTEXT_LINES, hit.line + CALLER_CONTEXT_LINES),

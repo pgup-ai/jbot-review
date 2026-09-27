@@ -867,11 +867,25 @@ export class EvidenceStore {
           }
         }
       }
+      // An identifier's pattern matches exactly a whole [\w$] run equal to it, so one pass
+      // over each file's runs finds their first lines; other symbols keep their pattern.
+      const identifiers = new Set(symbols.filter((symbol) => /^[\w$]+$/.test(symbol)));
+      const patterns = new Map(
+        symbols
+          .filter((symbol) => !identifiers.has(symbol))
+          .map((symbol) => [symbol, symbolPattern(symbol)]),
+      );
       for (const [path, source] of loaded) {
         const lines = source.text.split(/\r?\n/);
+        const first = new Map<string, number>();
+        for (let i = 0; i < lines.length && first.size < identifiers.size; i++)
+          for (const run of lines[i].match(/[\w$]+/g) ?? [])
+            if (identifiers.has(run) && !first.has(run)) first.set(run, i);
         for (const symbol of symbols) {
-          const pattern = symbolPattern(symbol);
-          const line = lines.findIndex((l) => pattern.test(l));
+          const pattern = patterns.get(symbol);
+          const line = pattern
+            ? lines.findIndex((l) => pattern.test(l))
+            : (first.get(symbol) ?? -1);
           if (line >= 0) add(path, symbol, line + 1, 'text reference; binding unresolved');
         }
       }

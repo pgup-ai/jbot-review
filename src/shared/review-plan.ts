@@ -9,7 +9,13 @@ import type { Finding } from './types.ts';
 import {
   buildDiffHunksBlockWithMetadata,
   diffHunksCoverage,
+  diffLineCounts,
   diffRiskScore,
+  numberNewSideLines,
+  unboundedDiffBlockBytes,
+  unboundedDiffSectionBytes,
+  whitespaceOnlyLines,
+  type DerivedDiffFile,
 } from './diff-context.ts';
 import {
   buildDiffRecoveryBlock,
@@ -94,18 +100,25 @@ export interface ShardPlan {
 }
 
 export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
-  const score = (plan: ShardPlan) =>
-    Math.max(0, ...(plan.units ?? []).map((unit) => diffRiskScore(unit.file)));
-  return [...plans].sort((a, b) => score(b) - score(a));
+  const scores = new Map(
+    plans.map((plan) => [
+      plan,
+      Math.max(0, ...(plan.units ?? []).map((unit) => diffRiskScore(unit.file))),
+    ]),
+  );
+  return [...plans].sort((a, b) => scores.get(b)! - scores.get(a)!);
 }
 
 export function planPageFiles(units: DiffUnit[]): PrFile[] {
-  return [...new Set(units.map((unit) => unit.file.filename))].map((filename) => ({
-    ...units.find((unit) => unit.file.filename === filename)!.file,
-    patch: units
-      .filter((unit) => unit.file.filename === filename)
-      .map((unit) => unit.file.patch)
-      .join('\n'),
+  const byName = new Map<string, DiffUnit[]>();
+  for (const unit of units) {
+    const same = byName.get(unit.file.filename);
+    if (same) same.push(unit);
+    else byName.set(unit.file.filename, [unit]);
+  }
+  return [...byName.values()].map((same) => ({
+    ...same[0].file,
+    patch: same.map((unit) => unit.file.patch).join('\n'),
   }));
 }
 
@@ -153,6 +166,34 @@ function splitUnit(unit: DiffUnit): [DiffUnit, DiffUnit] {
 
 class PromptCapacityError extends Error {}
 
+/** Hunks start with a header, so each numbers its lines and pairs re-indented lines on its own. */
+const HUNK_START = /^@@ -\d+(?:,\d+)? \+\d+/;
+/** Probe for the render's fixed frame; a real context never holds NUL. */
+const CONTEXT_PROBE = '\u0000jbot-context\u0000';
+
+/** Bytes a render adds around the context, when it places the context verbatim once. */
+function promptFrameBytes(renderPrompt: (context: string) => string): number | undefined {
+  const probe = renderPrompt(CONTEXT_PROBE);
+  const at = probe.indexOf(CONTEXT_PROBE);
+  if (at < 0 || probe.includes(CONTEXT_PROBE, at + 1)) return undefined;
+  const frame = probe.slice(0, at) + probe.slice(at + CONTEXT_PROBE.length);
+  // A surrogate at the seam would pair with the context's edge and change the byte count.
+  if (/[\uD800-\uDFFF]/.test(probe[at - 1] ?? '') || /[\uD800-\uDFFF]/.test(frame[at] ?? ''))
+    return undefined;
+  return renderPrompt('') === frame ? Buffer.byteLength(frame) : undefined;
+}
+
+/** A page's modeled prompt bytes did not match its real render; plan with real renders. */
+class ModelMismatch extends Error {}
+
+interface Page {
+  units: DiffUnit[];
+  fits(unit: DiffUnit): boolean;
+  add(unit: DiffUnit): void;
+  /** Modeled prompt bytes, checked against a real render of the finished page. */
+  bytes?: number;
+}
+
 export function buildShardPlans(params: {
   coreContext: string;
   context7Block: string;
@@ -173,10 +214,58 @@ export function buildShardPlans(params: {
   let core = params.coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
     ? params.coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()
     : params.coreContext;
-  const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
+  // Each unit's numbered patch, re-indented lines and added count are derived once; a
+  // page's file joins them in unit order, which equals deriving them from its joined patch.
+  const wellFormed = originals.every((shard) =>
+    shard.every((unit) => HUNK_START.test(unit.file.patch ?? '')),
+  );
+  const derivations = new Map<
+    DiffUnit,
+    { text: string; textBytes: number; whitespaceOnly: number[]; addedLines: number }
+  >();
+  const derive = (unit: DiffUnit) => {
+    let derived = derivations.get(unit);
+    if (!derived) {
+      const patch = unit.file.patch ?? '';
+      const text = params.numberedDiff ? numberNewSideLines(patch) : patch;
+      derived = {
+        text,
+        textBytes: Buffer.byteLength(text),
+        whitespaceOnly: params.numberedDiff ? whitespaceOnlyLines(patch) : [],
+        addedLines: diffLineCounts([unit.file]).added,
+      };
+      derivations.set(unit, derived);
+    }
+    return derived;
+  };
+  const pageFiles = (units: DiffUnit[]): DerivedDiffFile[] => {
+    if (!wellFormed) return planPageFiles(units);
+    const byName = new Map<string, DiffUnit[]>();
+    for (const unit of units) {
+      const same = byName.get(unit.file.filename);
+      if (same) same.push(unit);
+      else byName.set(unit.file.filename, [unit]);
+    }
+    return [...byName.values()].map((same) => ({
+      ...same[0].file,
+      patch: same.map((unit) => unit.file.patch).join('\n'),
+      numberedPatch: same.map((unit) => derive(unit).text).join('\n'),
+      whitespaceOnly: same.flatMap((unit) => derive(unit).whitespaceOnly),
+      addedLines: same.reduce((sum, unit) => sum + derive(unit).addedLines, 0),
+    }));
+  };
+  const recoveryBlock = (assigned: ReadonlySet<string>) =>
+    params.batchDiffScope
+      ? buildDiffRecoveryBlock(
+          files,
+          files.filter((f) => !assigned.has(f.filename)).map((f) => f.filename),
+          params.batchDiffScope,
+        )
+      : '';
+  const assemble = (units: DiffUnit[], index: number, count: number) => {
     const assignedFiles = [...new Set(units.map((u) => u.file.filename))];
-    const pageFiles = planPageFiles(units);
-    const diff = buildDiffHunksBlockWithMetadata(pageFiles, {
+    const page = pageFiles(units);
+    const diff = buildDiffHunksBlockWithMetadata(page, {
       ...COMPLETE_DIFF_OPTIONS,
       numbered: params.numberedDiff,
     });
@@ -186,13 +275,7 @@ export function buildShardPlans(params: {
       count,
       params.embeddedFirstPrompt,
     );
-    const recovery = params.batchDiffScope
-      ? buildDiffRecoveryBlock(
-          files,
-          files.filter((f) => !assignedFiles.includes(f.filename)).map((f) => f.filename),
-          params.batchDiffScope,
-        )
-      : '';
+    const recovery = recoveryBlock(new Set(assignedFiles));
     const parts =
       params.diffFirst && count === 1
         ? [UNTRUSTED_PR_CONTENT_NOTE, diff.text, core, map, assignment, recovery]
@@ -202,6 +285,18 @@ export function buildShardPlans(params: {
     const contextParts = [...parts];
     contextParts.splice(contextParts.indexOf(assignment), 0, params.context7Block);
     const context = contextParts.filter(Boolean).join('\n\n');
+    return { assignedFiles, page, diff, baseContext, context };
+  };
+  const unitsByFile = new Map<string, DiffUnit[]>();
+  for (const unit of originals.flat()) {
+    const same = unitsByFile.get(unit.file.filename);
+    if (same) same.push(unit);
+    else unitsByFile.set(unit.file.filename, [unit]);
+  }
+  const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
+    const { assignedFiles, page, diff, baseContext, context } = assemble(units, index, count);
+    const ids = new Set(units.map((part) => part.id));
+    const whole = (path: string) => unitsByFile.get(path)!.every((u) => ids.has(u.id));
     return {
       label: count === 1 ? 'review' : `review-shard-${index + 1}`,
       context,
@@ -209,33 +304,20 @@ export function buildShardPlans(params: {
       assignedFiles,
       diffText: diff.text,
       diffCoverage: {
-        ...diffHunksCoverage(pageFiles, diff),
-        completeFiles: assignedFiles.filter((path) =>
-          originals
-            .flat()
-            .filter((u) => u.file.filename === path)
-            .every((u) => units.some((part) => part.id === u.id)),
-        ).length,
-        pagedFiles: assignedFiles.filter((path) =>
-          originals
-            .flat()
-            .filter((u) => u.file.filename === path)
-            .some((u) => !units.some((part) => part.id === u.id)),
-        ).length,
+        ...diffHunksCoverage(page, diff),
+        completeFiles: assignedFiles.filter(whole).length,
+        pagedFiles: assignedFiles.filter((path) => !whole(path)).length,
       },
       units,
       promptBytes: Buffer.byteLength(params.renderPrompt(context)),
     };
   };
+  // A fit check measures the page at placeholder task numbers, the widest it can render.
+  const promptBytes = (units: DiffUnit[]) =>
+    Buffer.byteLength(params.renderPrompt(assemble(units, 999999, 1000000).context));
   const fits = (units: DiffUnit[], extraReserve = 0) =>
-    measureReviewPrompt(
-      params.renderPrompt(render(units, 999999, 1000000).context),
-      params.budget,
-      reserve + extraReserve,
-    ).fits;
-  const fixedBytes =
-    Buffer.byteLength(params.renderPrompt(render([], 999999, 1000000).context)) -
-    Buffer.byteLength(core);
+    promptBytes(units) + reserve + extraReserve <= inputCapacity(params.budget);
+  const fixedBytes = promptBytes([]) - Buffer.byteLength(core);
   core = boundedPromptContext(
     core,
     Math.max(256, inputCapacity(params.budget) - reserve - fixedBytes - 24 * 1024),
@@ -245,28 +327,133 @@ export function buildShardPlans(params: {
     throw new PromptCapacityError(
       'Incomplete diff delivery: instructions, guidelines and shared context exhaust the assembled prompt budget before any diff can be delivered.',
     );
-  const pages: DiffUnit[][] = [];
-  for (const shard of originals) {
-    let page: DiffUnit[] = [];
-    const pending = [...shard];
-    while (pending.length) {
-      const unit = pending.shift()!;
-      if (fits([...page, unit])) {
-        page.push(unit);
-        continue;
+
+  const exactPage = (): Page => {
+    const units: DiffUnit[] = [];
+    return { units, fits: (unit) => fits([...units, unit]), add: (unit) => units.push(unit) };
+  };
+  // The same decisions without rendering each candidate page: the prompt is the context in
+  // a fixed frame, the context its parts joined, and a part is rebuilt only when the
+  // candidate changes it. Every rejection is confirmed by a real render.
+  const frame = promptFrameBytes(params.renderPrompt);
+  const fixedParts = [UNTRUSTED_PR_CONTENT_NOTE, core, map, params.context7Block].filter(Boolean);
+  const fixedPartBytes = fixedParts.reduce((sum, part) => sum + Buffer.byteLength(part), 0);
+  const modeledPage = (): Page => {
+    const units: DiffUnit[] = [];
+    const onPage = new Map<
+      string,
+      { textBytes: number; whitespaceOnly: number[]; sectionBytes: number }
+    >();
+    let sectionBytes = 0;
+    // The first unit always brings a new file, which rebuilds both.
+    let assignment = '';
+    let recovery = '';
+    let excerpts: string[] = [];
+    let adjacent = '';
+    let next: (() => void) | undefined;
+    const page: Page = {
+      units,
+      fits(unit) {
+        const name = unit.file.filename;
+        const derived = derive(unit);
+        const known = onPage.get(name);
+        const textBytes = known ? known.textBytes + 1 + derived.textBytes : derived.textBytes;
+        const whitespaceOnly =
+          known && derived.whitespaceOnly.length
+            ? [...known.whitespaceOnly, ...derived.whitespaceOnly]
+            : (known?.whitespaceOnly ?? derived.whitespaceOnly);
+        const fileBytes =
+          known && !derived.whitespaceOnly.length
+            ? known.sectionBytes + derived.textBytes + 1
+            : unboundedDiffSectionBytes(name, textBytes, whitespaceOnly);
+        const nextSectionBytes = sectionBytes - (known?.sectionBytes ?? 0) + fileBytes;
+        const names = known ? undefined : [...onPage.keys(), name];
+        const nextAssignment = names
+          ? buildShardAssignmentBlock(names, 999999, 1000000, params.embeddedFirstPrompt)
+          : assignment;
+        const nextRecovery = names ? recoveryBlock(new Set(names)) : recovery;
+        const nextExcerpts = unit.adjacent?.length ? [...excerpts, ...unit.adjacent] : excerpts;
+        const nextAdjacent = unit.adjacent?.length
+          ? buildAdjacentDiffContext(nextExcerpts)
+          : adjacent;
+        const parts = [nextAssignment, nextRecovery, nextAdjacent].filter(Boolean);
+        // Plus a blank-line join between each part and the diff block.
+        const context =
+          fixedPartBytes +
+          parts.reduce((sum, part) => sum + Buffer.byteLength(part), 0) +
+          unboundedDiffBlockBytes(
+            nextSectionBytes,
+            onPage.size + (known ? 0 : 1),
+            params.numberedDiff,
+          ) +
+          2 * (fixedParts.length + parts.length);
+        const bytes = frame! + context;
+        if (bytes + reserve > inputCapacity(params.budget)) {
+          if (fits([...units, unit])) throw new ModelMismatch();
+          return false;
+        }
+        next = () => {
+          units.push(unit);
+          onPage.set(name, { textBytes, whitespaceOnly, sectionBytes: fileBytes });
+          sectionBytes = nextSectionBytes;
+          assignment = nextAssignment;
+          recovery = nextRecovery;
+          excerpts = nextExcerpts;
+          adjacent = nextAdjacent;
+          page.bytes = bytes;
+        };
+        return true;
+      },
+      add() {
+        next!();
+      },
+    };
+    return page;
+  };
+  const paginate = (newPage: () => Page): Page[] => {
+    const pages: Page[] = [];
+    for (const shard of originals) {
+      let page = newPage();
+      // Next unit last: a failed or split unit goes back on top.
+      const pending = [...shard].reverse();
+      while (pending.length) {
+        const unit = pending.pop()!;
+        if (page.fits(unit)) {
+          page.add(unit);
+          continue;
+        }
+        if (page.units.length) {
+          pages.push(page);
+          page = newPage();
+          pending.push(unit);
+          continue;
+        }
+        const [first, second] = splitUnit(unit);
+        pending.push(second, first);
       }
-      if (page.length) {
-        pages.push(page);
-        page = [];
-        pending.unshift(unit);
-        continue;
-      }
-      pending.unshift(...splitUnit(unit));
+      if (page.units.length) pages.push(page);
     }
-    if (page.length) pages.push(page);
+    return pages;
+  };
+  let pages: DiffUnit[][];
+  try {
+    if (frame === undefined || !wellFormed) throw new ModelMismatch();
+    const modeled = paginate(modeledPage);
+    for (const page of modeled)
+      if (promptBytes(page.units) !== page.bytes) throw new ModelMismatch();
+    pages = modeled.map((page) => page.units);
+  } catch (error) {
+    if (!(error instanceof ModelMismatch)) throw error;
+    pages = paginate(exactPage).map((page) => page.units);
+  }
+  const partsByHunk = new Map<string, DiffUnit[]>();
+  for (const part of pages.flat()) {
+    const same = partsByHunk.get(part.hunk);
+    if (same) same.push(part);
+    else partsByHunk.set(part.hunk, [part]);
   }
   for (const original of originals.flat()) {
-    const parts = pages.flat().filter((part) => part.hunk === original.id);
+    const parts = partsByHunk.get(original.id) ?? [];
     const body = (patch: string) => patch.split('\n').slice(1).join('\n');
     if (
       !parts.length ||

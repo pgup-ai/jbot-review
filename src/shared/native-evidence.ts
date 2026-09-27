@@ -120,6 +120,7 @@ export function investigationOverlap(review: Trace, verification: Trace) {
   const current = new Set(
     verification.reads.flatMap((r) => r.lines.map((line) => `${r.path}:${line}`)),
   );
+  const searched = new Set(review.searches);
   return {
     readCalls: verification.reads.length,
     overlappingReadCalls: verification.reads.filter((r) =>
@@ -130,8 +131,7 @@ export function investigationOverlap(review: Trace, verification: Trace) {
     ).length,
     uniqueReadLines: current.size,
     overlappingLines: [...current].filter((key) => previous.has(key)).length,
-    exactRepeatedSearches: verification.searches.filter((key) => review.searches.includes(key))
-      .length,
+    exactRepeatedSearches: verification.searches.filter((key) => searched.has(key)).length,
     unsupportedReads: verification.unsupportedReads,
   };
 }
@@ -207,10 +207,11 @@ export function nativeEvidenceCandidates(
   const eligible = candidates.filter(
     (c) => relevant.has(c.path) && Buffer.byteLength(c.text) <= 2048,
   );
+  const kept = new Set(eligible);
   return {
     candidates: eligible,
     duplicateLines,
-    omitted: candidates.filter((c) => !eligible.includes(c)).map((c) => c.path),
+    omitted: candidates.filter((c) => !kept.has(c)).map((c) => c.path),
   };
 }
 
@@ -294,9 +295,10 @@ export class NativeEvidenceStore {
       candidates,
       candidates.length,
     );
+    const chosen = new Set(selected);
     const packet = formatJevPrefetch(
       selected.map((i) => candidates[i]),
-      candidates.filter((_, i) => !selected.includes(i)),
+      candidates.filter((_, i) => !chosen.has(i)),
     );
     return {
       packet,

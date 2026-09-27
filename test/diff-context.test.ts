@@ -143,6 +143,11 @@ describe('buildDiffHunksBlock', () => {
     const wrapped =
       '@@ -1,4 +1,6 @@\n-  x();\n-  y();\n+run(() => {\n+    x();\n+    y();\n+});\n z();\n+x();';
     assert.deepEqual(whitespaceOnlyLines(wrapped), [2, 3]);
+    // Each removed line pairs with one added copy.
+    assert.deepEqual(
+      whitespaceOnlyLines('@@ -1,2 +1,3 @@\n-  a();\n-a();\n+a();\n+ a();\n+a();'),
+      [1, 2],
+    );
     assert.match(
       buildDiffHunksBlock([{ filename: 'src/w.ts', patch: wrapped }], { numbered: true }),
       /### src\/w\.ts\nWhitespace only: 2-3\n```diff/,

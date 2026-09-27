@@ -130,9 +130,10 @@ export function selectPrefetchCandidates(
     const c = candidates[index];
     if (locations.has(c.path)) continue;
     const next = [...selected, index];
+    const chosen = new Set(next.map((i) => candidates[i]));
     const block = formatJevPrefetch(
       next.map((i) => candidates[i]),
-      allCandidates.filter((c) => !next.some((i) => candidates[i] === c)),
+      allCandidates.filter((c) => !chosen.has(c)),
     );
     if (Buffer.byteLength(block) > MAX_CONTEXT_BYTES) continue;
     selected.push(index);
@@ -220,6 +221,14 @@ export async function buildJevPrefetch(
         }
       }
 
+      // Each path's symbols in entry order, instead of scanning every entry per path.
+      const symbolsAt = new Map<string, string[]>();
+      for (const e of eligible)
+        for (const site of new Set(e.callSites)) {
+          const same = symbolsAt.get(site);
+          if (same) same.push(e.symbol);
+          else symbolsAt.set(site, [e.symbol]);
+        }
       for (const path of paths) {
         signal.throwIfAborted();
         const source = await readTrackedSource(workspace, path, signal);
@@ -228,10 +237,10 @@ export async function buildJevPrefetch(
         const lines = source.text.split(/\r?\n/);
         const numbered = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
         const completeFile = !source.truncated && Buffer.byteLength(numbered) <= 2048;
-        const symbols = eligible.filter((e) => e.callSites.includes(path)).map((e) => e.symbol);
+        const patterns = (symbolsAt.get(path) ?? []).map((s) => [s, symbolPattern(s)] as const);
         let hits = 0;
         for (let i = 0; i < lines.length && hits < 3; i++) {
-          const symbol = symbols.find((s) => symbolPattern(s).test(lines[i]));
+          const symbol = patterns.find(([, pattern]) => pattern.test(lines[i]))?.[0];
           if (!symbol) continue;
           const start = Math.max(0, i - 12);
           candidates.push({
