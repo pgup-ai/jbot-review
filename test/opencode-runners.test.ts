@@ -458,6 +458,31 @@ describe('runFindingVerification on V2', () => {
     assert.deepEqual(tiers, ['low', 'medium']);
   });
 
+  it('runs guideline compliance on its own session options', async () => {
+    const fake = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
+    const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+    const rt = runtime(fake, {
+      sessionOptionsFile,
+      modelOptions: { 'openai/gpt-5': { main: { reasoningEffort: 'high' } } },
+    });
+    const low = { reasoningEffort: 'low' };
+    await runGuidelineComplianceCheck(
+      rt,
+      'openai/gpt-5',
+      'ctx',
+      'guides',
+      log,
+      undefined,
+      undefined,
+      low,
+    );
+    await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log);
+    assert.deepEqual(Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))), [
+      low,
+      { reasoningEffort: 'high' },
+    ]);
+  });
+
   it('forks the main review session, not a lens pass, when JBOT_VERIFY_FORK is on', async () => {
     const fake = fakeOpencodeServer((session) =>
       session.forkedFrom ? { text: verdicts } : { text: '{"findings":[]}' },

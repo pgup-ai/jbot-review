@@ -654,6 +654,23 @@ export function verificationModelOptions(
   return baseEffort === target ? auxOptions : { ...base, reasoningEffort: target };
 }
 
+/**
+ * Compliance runs at `low` on every model: space-bunny's `high` made it 8–57× slower in
+ * production without more findings. Undefined when the options need no change.
+ */
+export function complianceModelOptions(
+  mainOptions: Record<string, unknown> | undefined,
+  auxOptions: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const base = auxOptions ?? mainOptions;
+  const effort = base?.reasoningEffort;
+  return typeof effort === 'string' &&
+    effort !== 'low' &&
+    (effort === 'none' || effortRank(effort) >= 0)
+    ? { ...base, reasoningEffort: 'low' }
+    : undefined;
+}
+
 export interface PromptCachePolicyInput {
   promptCache?: boolean;
   mainModel: string;

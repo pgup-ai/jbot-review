@@ -425,7 +425,8 @@ already enabled by default. An explicit review request or the existing
 `skip-unchanged: false` setting forces full review.
 
 A follow-up can reuse the latest posted review that completed a baseline when
-its base, model, guidelines and review settings still match. A model pool counts
+its base, model, guidelines and review settings still match. PR title and
+description edits don't count. A model pool counts
 as one setting, so the member a push draws does not force full review, and a
 later review that left a finding unverified keeps the earlier baseline. The
 first version handles small modifications to existing JavaScript/TypeScript
@@ -1363,6 +1364,16 @@ listed as available paths, read on demand. When any guidelines are discovered,
 guideline compliance audits the diff rule-by-rule alongside the main review. It
 shares the first auxiliary lens when one is selected, otherwise it runs separately
 (disable with `enable-guideline-pass: false`).
+
+A separate compliance pass runs at `low` reasoning effort, or the nearest tier
+the model supports, whatever `model-options` sets. On a full follow-up review
+it checks only the files whose own edits changed since the latest review's
+completed pass, when the rules, prompt, models and settings still match.
+Merging the base branch, editing the PR description, a new jbot release and
+the pool member a push draws don't count as changes. Findings on the other PR
+files are dropped; that review's results stand for them. The review states the
+narrowed scope. Explicit reruns, auto-approval, PRs over 300 files and
+unavailable history check every file.
 
 CommandCode logs progress every minute: elapsed time, observed tool outcomes,
 last completed tool, and time since the last event. A final `commandcode-progress`

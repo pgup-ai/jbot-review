@@ -9,6 +9,7 @@ import {
   auxiliaryPolicy,
   isRoutineDocumentation,
   planAuxiliaryReuse,
+  planComplianceRecheck,
   withAuxiliaryBaselines,
 } from '../src/shared/auxiliary-reuse.ts';
 
@@ -68,7 +69,7 @@ test('documentation reuse requires a successful ancestor with matching base and 
       workspace,
       base,
       head,
-      policy,
+      policyFor: () => policy,
       sessions: ['review-interactions', 'guideline-compliance'],
       priorBodies: [withAuxiliaryBaselines('<sup>driver</sup>', [baseline])],
     };
@@ -79,7 +80,7 @@ test('documentation reuse requires a successful ancestor with matching base and 
       [{ head: reviewed }, 'explicit-rerun'],
       [{ head: base }, 'history-unavailable'],
       [{ base: reviewed }, 'base-changed'],
-      [{ policy: auxiliaryPolicy('new model') }, 'policy-changed'],
+      [{ policyFor: () => auxiliaryPolicy('new model') }, 'policy-changed'],
       [{ priorBodies: ['reviewed head, but incomplete auxiliaries'] }, 'no-completed-baseline'],
       [
         { priorBodies: [...input.priorBodies, '<sup>Newer incomplete run</sup>'] },
@@ -106,7 +107,7 @@ test('documentation reuse requires a successful ancestor with matching base and 
         { guidelineFollowup: { baseline: head, coveredByMain: true } },
         'guideline-baseline-mismatch',
       ],
-      [{ policy: auxiliaryPolicy('changed rules') }, 'policy-changed'],
+      [{ policyFor: () => auxiliaryPolicy('changed rules') }, 'policy-changed'],
       [{ priorBodies: ['incomplete prior guideline review'] }, 'no-completed-baseline'],
     ] as const) {
       const [decision] = await planAuxiliaryReuse({ ...followup, ...override });
@@ -122,5 +123,51 @@ test('documentation reuse requires a successful ancestor with matching base and 
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a follow-up re-checks compliance only on files whose own edits changed', () => {
+  const [reviewed, base] = ['a'.repeat(40), 'b'.repeat(40)];
+  const policy = auxiliaryPolicy('compliance prompt and rules');
+  const row = { session: 'guideline-compliance', head: reviewed, base, policy };
+  const prior = {
+    head: reviewed,
+    files: [
+      { filename: 'a.ts', patch: '@@ -1,3 +1,3 @@\n ctx\n-x\n+y' },
+      { filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+q' },
+      { filename: 'img.png' },
+    ],
+  };
+  const input = {
+    priorBody: withAuxiliaryBaselines('<sup>driver</sup>', [row]),
+    policy,
+    prior,
+    files: [
+      // Merging the base moved the hunk and changed its context; the edit is the same.
+      { filename: 'a.ts', patch: '@@ -9,3 +9,3 @@\n other\n-x\n+y' },
+      { filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+r' },
+      { filename: 'c.ts', patch: '@@ -0,0 +1 @@\n+new' },
+      { filename: 'img.png' },
+    ],
+  };
+  assert.deepEqual(planComplianceRecheck(input), {
+    reason: 'edits-since-review',
+    reviewedHead: reviewed,
+    files: ['b.ts', 'c.ts', 'img.png'],
+  });
+  assert.deepEqual(planComplianceRecheck({ ...input, files: prior.files.slice(0, 2) }), {
+    reason: 'no-edits-since-review',
+    reviewedHead: reviewed,
+    files: [],
+  });
+  for (const [override, reason] of [
+    [{ priorBody: '<sup>driver</sup>' }, 'no-completed-baseline'],
+    [{ policy: auxiliaryPolicy('changed rules') }, 'policy-changed'],
+    [{ prior: { ...prior, head: 'c'.repeat(40) } }, 'baseline-mismatch'],
+    [{ files: [{ filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+r' }] }, 'every-file-changed'],
+  ] as const) {
+    const plan = planComplianceRecheck({ ...input, ...override });
+    assert.equal(plan.reason, reason);
+    assert.equal(plan.files, undefined);
   }
 });

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
+import type { PrFile } from './github.ts';
 
 const execFileAsync = promisify(execFile);
 const MARKER = /<!-- jbot-review:auxiliary:(\[[^\n]*\]) -->/;
@@ -49,6 +50,39 @@ export function withAuxiliaryBaselines(body: string, rows: AuxiliaryBaseline[]):
   return rows.length ? `${body}\n<!-- jbot-review:auxiliary:${JSON.stringify(rows)} -->` : body;
 }
 
+/** `files` undefined means check every file; empty means none changed. */
+export function planComplianceRecheck(input: {
+  priorBody: string;
+  policy: string;
+  /** The PR's patches at the latest reviewed head. */
+  prior: { head: string; files: PrFile[] };
+  files: PrFile[];
+}): { reason: string; reviewedHead: string; files?: string[] } {
+  const reviewedHead = input.prior.head;
+  const baseline = auxiliaryBaselines(input.priorBody).find(
+    (row) => row.session === 'guideline-compliance',
+  );
+  if (!baseline) return { reason: 'no-completed-baseline', reviewedHead };
+  if (baseline.policy !== input.policy) return { reason: 'policy-changed', reviewedHead };
+  if (baseline.head !== reviewedHead) return { reason: 'baseline-mismatch', reviewedHead };
+  // Only +/- lines count: merging the base branch shifts hunks and context, not the PR's edits.
+  const edits = (patch?: string) =>
+    patch
+      ?.split('\n')
+      .filter((line) => /^[+-]/.test(line))
+      .join('\n');
+  const prior = new Map(input.prior.files.map((file) => [file.filename, edits(file.patch)]));
+  const files = input.files
+    .filter((file) => !file.patch || prior.get(file.filename) !== edits(file.patch))
+    .map((file) => file.filename);
+  if (files.length === input.files.length) return { reason: 'every-file-changed', reviewedHead };
+  return {
+    reason: files.length ? 'edits-since-review' : 'no-edits-since-review',
+    reviewedHead,
+    files,
+  };
+}
+
 export function isRoutineDocumentation(paths: string[]): boolean {
   return (
     paths.length > 0 &&
@@ -63,7 +97,7 @@ export async function planAuxiliaryReuse(input: {
   base?: string;
   head?: string;
   reviewedHead?: string;
-  policy: string;
+  policyFor: (session: string) => string;
   sessions: string[];
   priorBodies: string[];
   guidelineFollowup?: { baseline: string; coveredByMain: boolean };
@@ -77,7 +111,7 @@ export async function planAuxiliaryReuse(input: {
       let reason: string;
       if (!baseline) reason = 'no-completed-baseline';
       else if (baseline.base !== input.base) reason = 'base-changed';
-      else if (baseline.policy !== input.policy) reason = 'policy-changed';
+      else if (baseline.policy !== input.policyFor(session)) reason = 'policy-changed';
       else if (!input.head || baseline.head === input.head || input.reviewedHead === input.head)
         reason = 'explicit-rerun';
       else if (session === 'guideline-compliance' && input.guidelineFollowup) {

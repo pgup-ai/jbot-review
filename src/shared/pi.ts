@@ -1141,9 +1141,17 @@ export async function runPiGuidelineComplianceCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  modelOptions?: Record<string, unknown>,
 ): Promise<Finding[]> {
   const label = 'guideline-compliance';
-  const session = await createPiSession(runtime, model, false, false, undefined, label);
+  const session = await createPiSession(
+    runtime,
+    model,
+    false,
+    false,
+    piThinkingLevel(modelOptions),
+    label,
+  );
   try {
     const raw = await promptPiSession(
       session,

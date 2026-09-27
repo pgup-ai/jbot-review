@@ -240,6 +240,7 @@ export interface CreateSessionSpec {
   label: string;
   model: string;
   tier?: OptionTier;
+  modelOptions?: Record<string, unknown>;
   agent?: string;
   forkFrom?: string;
   deadline?: number;
@@ -310,7 +311,8 @@ function registerSessionOptions(
   sessionID: string,
   spec: CreateSessionSpec,
 ): void {
-  const options = sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
+  const options =
+    spec.modelOptions ?? sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
   const experiment = runtime.explorationExperiment;
   const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
   if (!options && !label) return;

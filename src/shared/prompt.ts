@@ -1690,6 +1690,12 @@ export const COMPLIANCE_PACK_NOTE = `## Page audit notes
 Audit the embedded hunks, and read more code or guidance whenever a rule check
 needs it.`;
 
+export const COMPLIANCE_RECHECK_NOTE = `## Follow-up scope
+
+Audit only the files in this page's diff hunks, not the whole PR diff. An
+earlier review audited the PR's other files against these rules, and their
+edits have not changed since; findings on them are discarded.`;
+
 export function assembleGuidelineSweepPrompt(guidelines: string): string {
   return assembleGuidelineCompliancePrompt(
     'Continue the review in this session, using the PR diff and inspected evidence already in its history. Check the written guidelines below against the same assigned diff scope. Return only additional guideline violations not already reported in your main review.',
