@@ -12,6 +12,7 @@ import {
   createReviewSession,
   promptInSession,
 } from './opencode-session.ts';
+import { resolveOpencodeApiKeys } from './opencode-usage.ts';
 
 const JUDGE_TIMEOUT_MS = 120_000;
 const quiet = () => {};
@@ -20,15 +21,15 @@ const quiet = () => {};
 export async function startOpencodeJudge(model: string, concurrency: number) {
   const { providerID, modelID } = parseModelName(model);
   const keyEnv = PROVIDERS[providerID]?.keyEnv;
-  // Judge sessions read nothing, so they run in an empty scratch dir.
-  const workspace = mkdtempSync(join(tmpdir(), 'jbot-judge-'));
-  const runtime = await startOpencode(
-    workspace,
-    providerID,
-    modelID,
-    (keyEnv && process.env[keyEnv]) || '',
+  const raw = (keyEnv && process.env[keyEnv]) || '';
+  // Key lists (e.g. two opencode accounts) resolve exactly as a review run's do.
+  const { apiKey } = await resolveOpencodeApiKeys(
+    { providerID, apiKey: raw, auxProviderID: providerID, auxApiKey: raw },
     quiet,
   );
+  // Judge sessions read nothing, so they run in an empty scratch dir.
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-judge-'));
+  const runtime = await startOpencode(workspace, providerID, modelID, apiKey, quiet);
   configureSessionConcurrency(concurrency);
   const judge = createJudge(async (text) => {
     const spec = { label: 'semantic-judge', model, log: quiet };
