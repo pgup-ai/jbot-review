@@ -86,6 +86,17 @@ export function modelPolicy(
   };
 }
 
+/** An auxiliary pass's model policy: explicit options count, defaults sized to a diff don't. */
+export function auxiliaryModelPolicy(
+  options: ReviewRunOptions,
+  draw: { model: string; auxModel: string; baseURL?: string },
+) {
+  return modelPolicy(
+    options.modelOptionsExplicit ? options : { ...options, modelOptions: undefined },
+    draw,
+  );
+}
+
 export function runIdentity(env: NodeJS.ProcessEnv) {
   return {
     reviewerRevision:

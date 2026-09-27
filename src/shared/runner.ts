@@ -82,6 +82,7 @@ import {
   type TelemetryRecorder,
 } from './telemetry.ts';
 import {
+  auxiliaryModelPolicy,
   modelPolicy,
   runConfiguration,
   runIdentity,
@@ -2596,7 +2597,7 @@ async function runReviewPipeline(params: {
     // PR text, the jbot build and the pool's per-head draw stay out: bots edit PR
     // descriptions after pushes, releases ship daily, and each head draws its own member.
     const auxPolicy = {
-      ...modelPolicy({ ...options, modelOptions: undefined }, { model, auxModel, baseURL }),
+      ...auxiliaryModelPolicy(options, { model, auxModel, baseURL }),
       context: options.enhancedContext,
       experiment: options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
@@ -2679,6 +2680,8 @@ async function runReviewPipeline(params: {
       log(
         'Guideline checking will continue in each main review session; verification remains separate.',
       );
+    // Compliance rides the first lens when one runs with tools.
+    const complianceInLens = candidateLensKeys.length > 0 && !toolLessAux;
     const complianceDecided = auxiliaryDecisions.some(
       (decision) => decision.session === 'guideline-compliance',
     );
@@ -2691,7 +2694,7 @@ async function runReviewPipeline(params: {
       baseSha &&
       reviewScope.mode === 'full' &&
       !sweepGuidelines &&
-      (candidateLensKeys.length === 0 || toolLessAux)
+      !complianceInLens
         ? planComplianceRecheck({
             priorBody: priorJbotReviewGroups.at(-1)?.body ?? '',
             policy: policyFor('guideline-compliance'),
@@ -3051,9 +3054,7 @@ async function runReviewPipeline(params: {
     const lensSharesMainPrefix =
       auxModel === model && shardPlans.length <= 1 && !shardPlans[0]?.contextPack;
     const jointGuidelines =
-      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0 && !toolLessAux
-        ? complianceGuidelines
-        : '';
+      guidelineCandidate && !sweepGuidelines && complianceInLens ? complianceGuidelines : '';
     const preparingFinders = new Set([
       ...candidateLensKeys.map((key) => `review-${key}`),
       ...(guidelineCandidate && complianceGuidelines && !sweepGuidelines && !jointGuidelines
