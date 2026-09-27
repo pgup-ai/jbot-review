@@ -182,11 +182,20 @@ async function run() {
           { cwd: caseDir, env, stdio: ['ignore', log, log] },
         );
         const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-        child.on('close', (code, signal) => {
+        // A spawn failure emits 'error', and 'close' may still follow it: settle once.
+        let settled = false;
+        const settle = (code: number | null, timedOut: boolean) => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
           closeSync(log);
-          done({ code, timedOut: signal === 'SIGTERM' });
+          done({ code, timedOut });
+        };
+        child.on('error', (error) => {
+          console.log(`SPAWN FAILED ${instance.instanceId}: ${error.message}`);
+          settle(null, false);
         });
+        child.on('close', (code, signal) => settle(code, signal === 'SIGTERM'));
       });
       const wallMs = Date.now() - started;
       const output = join(caseDir, 'jbot.json');
