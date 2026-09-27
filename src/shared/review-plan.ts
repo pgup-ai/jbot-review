@@ -121,10 +121,18 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   return groups;
 }
 
-export function planPageFiles(units: DiffUnit[]): PrFile[] {
+export function planPageFiles(
+  units: DiffUnit[],
+  derive?: (unit: DiffUnit) => { text: string; whitespaceOnly: number[]; addedLines: number },
+): DerivedDiffFile[] {
   return [...groupBy(units, (unit) => unit.file.filename).values()].map((same) => ({
     ...same[0].file,
     patch: same.map((unit) => unit.file.patch).join('\n'),
+    ...(derive && {
+      numberedPatch: same.map((unit) => derive(unit).text).join('\n'),
+      whitespaceOnly: same.flatMap((unit) => derive(unit).whitespaceOnly),
+      addedLines: same.reduce((sum, unit) => sum + derive(unit).addedLines, 0),
+    }),
   }));
 }
 
@@ -242,16 +250,7 @@ export function buildShardPlans(params: {
     }
     return derived;
   };
-  const pageFiles = (units: DiffUnit[]): DerivedDiffFile[] =>
-    wellFormed
-      ? [...groupBy(units, (unit) => unit.file.filename).values()].map((same) => ({
-          ...same[0].file,
-          patch: same.map((unit) => unit.file.patch).join('\n'),
-          numberedPatch: same.map((unit) => derive(unit).text).join('\n'),
-          whitespaceOnly: same.flatMap((unit) => derive(unit).whitespaceOnly),
-          addedLines: same.reduce((sum, unit) => sum + derive(unit).addedLines, 0),
-        }))
-      : planPageFiles(units);
+  const pageFiles = (units: DiffUnit[]) => planPageFiles(units, wellFormed ? derive : undefined);
   const pathCount = new Set(files.map((file) => file.filename)).size;
   const batchable = params.batchDiffScope ? batchablePaths(files) : [];
   const recoveryBlock = (assigned: ReadonlySet<string>) =>

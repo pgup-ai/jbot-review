@@ -464,12 +464,12 @@ export function buildDiffHunksBlockWithMetadata(
     const note = whitespaceNote(
       options.numbered ? (file.whitespaceOnly ?? whitespaceOnlyLines(file.patch as string)) : [],
     );
-    const truncationNotice = `_Hunks truncated for ${file.filename}; run the git diff command for the rest._`;
     // Unlimited budgets never truncate or omit a file, so the byte accounting below is moot.
     if (unbounded) {
-      sections.push(renderDiffSection(file.filename, patch, false, truncationNotice, note));
+      sections.push(renderDiffSection(file.filename, patch, false, '', note));
       continue;
     }
+    const truncationNotice = `_Hunks truncated for ${file.filename}; run the git diff command for the rest._`;
     const sectionSeparatorBytes = sections.length > 0 ? 2 : 0; // blank line between file sections
     const truncatedSectionOverhead =
       sectionSeparatorBytes +
@@ -549,7 +549,7 @@ export function unboundedDiffSectionBytes(
   patchBytes: number,
   whitespaceOnly: number[],
 ): number {
-  const shell = renderDiffSection(filename, '', false, undefined, whitespaceNote(whitespaceOnly));
+  const shell = renderDiffSection(filename, '', false, '', whitespaceNote(whitespaceOnly));
   return Buffer.byteLength(shell, 'utf8') + patchBytes;
 }
 
