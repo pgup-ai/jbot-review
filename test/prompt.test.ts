@@ -1080,5 +1080,7 @@ describe('AACR-Bench semantic judge', () => {
     assert.equal(parseJudgeVerdict(' no '), false);
     assert.equal(parseJudgeVerdict('**Yes** — same root cause'), true);
     assert.equal(parseJudgeVerdict('No. Yes would overstate it'), false);
+    // judge.py's quirk, kept for comparable scores: a "no" that mentions "same" still matches.
+    assert.equal(parseJudgeVerdict('No, they are not the same concern'), true);
   });
 });

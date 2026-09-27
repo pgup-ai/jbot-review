@@ -22,9 +22,16 @@ it('parses integer arguments and throws on typos or values below the minimum', (
   const argv = (...flags: string[]) => ['node', 'script', ...flags];
   assert.equal(integerArgument('concurrency', 4, 1, argv()), 4);
   assert.equal(integerArgument('concurrency', 4, 1, argv('--concurrency', '8')), 8);
-  for (const typo of ['4x', '0', '1.5'])
+  for (const flags of [
+    ['--concurrency=4x'],
+    ['--concurrency=0'],
+    ['--concurrency=1.5'],
+    ['--concurrency'],
+    ['--concurrency='],
+    ['--concurrency', '--timeout-min', '5'],
+  ])
     assert.throws(
-      () => integerArgument('concurrency', 4, 1, argv(`--concurrency=${typo}`)),
+      () => integerArgument('concurrency', 4, 1, argv(...flags)),
       /--concurrency must be an integer ≥ 1, got/,
     );
 });
