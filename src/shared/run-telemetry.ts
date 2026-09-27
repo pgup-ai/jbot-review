@@ -74,7 +74,7 @@ export function runConfiguration(
 /** A pool's draw and the provider defaults it brings are not policy; the pool itself is. */
 export function modelPolicy(
   options: ReviewRunOptions,
-  draw: { model: string; auxModel: string; baseURL?: string },
+  draw: { model: string; auxModel: string; baseURL?: string; auxBackend?: string },
 ) {
   const pooled = (options.modelPool?.length ?? 0) > 1;
   const policy =
@@ -89,7 +89,7 @@ export function modelPolicy(
 /** An auxiliary pass's model policy: explicit options count, defaults sized to a diff don't. */
 export function auxiliaryModelPolicy(
   options: ReviewRunOptions,
-  draw: { model: string; auxModel: string; baseURL?: string },
+  draw: { model: string; auxModel: string; baseURL?: string; auxBackend: string },
 ) {
   return modelPolicy(
     options.modelOptionsExplicit ? options : { ...options, modelOptions: undefined },

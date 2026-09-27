@@ -51,34 +51,37 @@ export function withAuxiliaryBaselines(body: string, rows: AuxiliaryBaseline[]):
 }
 
 /** `files` undefined means check every file; empty means none changed. */
-export function planComplianceRecheck(input: {
+export async function planComplianceRecheck(input: {
   priorBody: string;
   policy: string;
-  /** The PR's patches at the latest reviewed head. */
-  prior: { head: string; files: PrFile[] };
+  head: string;
   files: PrFile[];
-}): { reason: string; reviewedHead: string; files?: string[] } {
-  const reviewedHead = input.prior.head;
+  /** The base...head patches a completed pass audited. */
+  audited: (base: string, head: string) => Promise<PrFile[]>;
+}): Promise<{ reason: string; baseline?: AuxiliaryBaseline; files?: string[] }> {
   const baseline = auxiliaryBaselines(input.priorBody).find(
     (row) => row.session === 'guideline-compliance',
   );
-  if (!baseline) return { reason: 'no-completed-baseline', reviewedHead };
-  if (baseline.policy !== input.policy) return { reason: 'policy-changed', reviewedHead };
-  if (baseline.head !== reviewedHead) return { reason: 'baseline-mismatch', reviewedHead };
+  if (!baseline) return { reason: 'no-completed-baseline' };
+  if (baseline.policy !== input.policy) return { reason: 'policy-changed', baseline };
+  if (baseline.head === input.head) return { reason: 'same-head-rerun', baseline };
+  // The audited diff, not today's base: a retargeted PR must not carry over files it never had.
+  const audited = await input.audited(baseline.base, baseline.head).catch(() => undefined);
+  if (!audited) return { reason: 'history-unavailable', baseline };
   // Only +/- lines count: merging the base branch shifts hunks and context, not the PR's edits.
   const edits = (patch?: string) =>
     patch
       ?.split('\n')
       .filter((line) => /^[+-]/.test(line))
       .join('\n');
-  const prior = new Map(input.prior.files.map((file) => [file.filename, edits(file.patch)]));
+  const prior = new Map(audited.map((file) => [file.filename, edits(file.patch)]));
   const files = input.files
     .filter((file) => !file.patch || prior.get(file.filename) !== edits(file.patch))
     .map((file) => file.filename);
-  if (files.length === input.files.length) return { reason: 'every-file-changed', reviewedHead };
+  if (files.length === input.files.length) return { reason: 'every-file-changed', baseline };
   return {
     reason: files.length ? 'edits-since-review' : 'no-edits-since-review',
-    reviewedHead,
+    baseline,
     files,
   };
 }

@@ -1391,8 +1391,6 @@ async function runReviewPipeline(params: {
   // Auto-approve runs never skip: approval must re-attest the latest pushed
   // head, and a skipped run would leave the prior approval stranded on the old
   // head — blocking PRs behind stale-approval-dismissing branch protection.
-  // The same comparison later scopes guideline compliance to the files edited since.
-  let priorPatches: { head: string; files: PrFile[] } | undefined;
   if (!localDiff && options.skipUnchanged && !options.autoApprove && headSha && baseRef) {
     const reviewedHead = completedReviewHead(priorJbotReviewGroups.at(-1)?.body ?? '');
     // Same-head reruns are never assumed unchanged: the base may have advanced
@@ -1421,7 +1419,6 @@ async function runReviewPipeline(params: {
         finishTelemetry('skipped');
         return;
       }
-      if (priorFiles) priorPatches = { head: reviewedHead, files: priorFiles };
     }
   }
 
@@ -2597,7 +2594,7 @@ async function runReviewPipeline(params: {
     // PR text, the jbot build and the pool's per-head draw stay out: bots edit PR
     // descriptions after pushes, releases ship daily, and each head draws its own member.
     const auxPolicy = {
-      ...auxiliaryModelPolicy(options, { model, auxModel, baseURL }),
+      ...auxiliaryModelPolicy(options, { model, auxModel, baseURL, auxBackend: auxBackend.name }),
       context: options.enhancedContext,
       experiment: options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
@@ -2686,28 +2683,34 @@ async function runReviewPipeline(params: {
       (decision) => decision.session === 'guideline-compliance',
     );
     // Compliance folded into main review (sweep) or a lens (joint) keeps its full scope.
+    // Explicit reruns and auto-approval re-attest every file.
     const complianceRecheck =
       !complianceDecided &&
       guidelineCandidate &&
       complianceGuidelines &&
-      priorPatches &&
+      !localDiff &&
+      options.skipUnchanged &&
+      !options.autoApprove &&
+      headSha &&
       baseSha &&
       reviewScope.mode === 'full' &&
       !sweepGuidelines &&
       !complianceInLens
-        ? planComplianceRecheck({
+        ? await planComplianceRecheck({
             priorBody: priorJbotReviewGroups.at(-1)?.body ?? '',
             policy: policyFor('guideline-compliance'),
-            prior: priorPatches,
+            head: headSha,
             files,
+            audited: (base, head) => compareCommitFiles(octokit, owner, repo, base, head),
           })
         : undefined;
     const recheckFiles = complianceRecheck?.files;
+    const auditedHead = complianceRecheck?.baseline?.head;
     const complianceScope = complianceRecheck && {
       reason: complianceRecheck.reason,
       files: recheckFiles?.length ?? files.length,
       totalFiles: files.length,
-      reviewedHead: complianceRecheck.reviewedHead,
+      ...(auditedHead ? { reviewedHead: auditedHead } : {}),
     };
     if (!complianceDecided)
       log(
@@ -2727,7 +2730,7 @@ async function runReviewPipeline(params: {
           ...complianceScope,
         })}`,
       );
-    if (complianceRecheck?.files?.length === 0 && headSha && baseSha) {
+    if (recheckFiles?.length === 0 && auditedHead && headSha && baseSha) {
       reusedAux.set('guideline-compliance', {
         session: 'guideline-compliance',
         head: headSha,
@@ -2737,7 +2740,7 @@ async function runReviewPipeline(params: {
       recordCoverage({
         session: 'guideline-compliance',
         state: 'reused',
-        reusedFrom: complianceRecheck.reviewedHead,
+        reusedFrom: auditedHead,
       });
       guidelineCandidate = false;
     }
@@ -3706,7 +3709,15 @@ async function runReviewPipeline(params: {
       auxiliaryBaselines,
       diagnosticsUrl,
       reviewScope: scopeStats,
-      ...(recheckFiles ? { complianceScope } : {}),
+      ...(recheckFiles && auditedHead
+        ? {
+            complianceScope: {
+              files: recheckFiles.length,
+              totalFiles: files.length,
+              reviewedHead: auditedHead,
+            },
+          }
+        : {}),
       baseline:
         verificationEnabled &&
         headSha &&

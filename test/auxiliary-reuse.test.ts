@@ -126,22 +126,19 @@ test('documentation reuse requires a successful ancestor with matching base and 
   }
 });
 
-test('a follow-up re-checks compliance only on files whose own edits changed', () => {
+test('a follow-up re-checks compliance only on files whose edits differ from the audited diff', async () => {
   const [reviewed, base] = ['a'.repeat(40), 'b'.repeat(40)];
   const policy = auxiliaryPolicy('compliance prompt and rules');
   const row = { session: 'guideline-compliance', head: reviewed, base, policy };
-  const prior = {
-    head: reviewed,
-    files: [
-      { filename: 'a.ts', patch: '@@ -1,3 +1,3 @@\n ctx\n-x\n+y' },
-      { filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+q' },
-      { filename: 'img.png' },
-    ],
-  };
+  const auditedFiles = [
+    { filename: 'a.ts', patch: '@@ -1,3 +1,3 @@\n ctx\n-x\n+y' },
+    { filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+q' },
+    { filename: 'img.png' },
+  ];
   const input = {
     priorBody: withAuxiliaryBaselines('<sup>driver</sup>', [row]),
     policy,
-    prior,
+    head: 'c'.repeat(40),
     files: [
       // Merging the base moved the hunk and changed its context; the edit is the same.
       { filename: 'a.ts', patch: '@@ -9,3 +9,3 @@\n other\n-x\n+y' },
@@ -149,24 +146,28 @@ test('a follow-up re-checks compliance only on files whose own edits changed', (
       { filename: 'c.ts', patch: '@@ -0,0 +1 @@\n+new' },
       { filename: 'img.png' },
     ],
+    // The pass's own base...head, whatever the PR's base is today.
+    audited: async (...range: string[]) =>
+      range.join() === `${base},${reviewed}` ? auditedFiles : [],
   };
-  assert.deepEqual(planComplianceRecheck(input), {
+  assert.deepEqual(await planComplianceRecheck(input), {
     reason: 'edits-since-review',
-    reviewedHead: reviewed,
+    baseline: row,
     files: ['b.ts', 'c.ts', 'img.png'],
   });
-  assert.deepEqual(planComplianceRecheck({ ...input, files: prior.files.slice(0, 2) }), {
+  assert.deepEqual(await planComplianceRecheck({ ...input, files: auditedFiles.slice(0, 2) }), {
     reason: 'no-edits-since-review',
-    reviewedHead: reviewed,
+    baseline: row,
     files: [],
   });
   for (const [override, reason] of [
     [{ priorBody: '<sup>driver</sup>' }, 'no-completed-baseline'],
     [{ policy: auxiliaryPolicy('changed rules') }, 'policy-changed'],
-    [{ prior: { ...prior, head: 'c'.repeat(40) } }, 'baseline-mismatch'],
+    [{ head: reviewed }, 'same-head-rerun'],
+    [{ audited: () => Promise.reject(new Error('compare capped')) }, 'history-unavailable'],
     [{ files: [{ filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+r' }] }, 'every-file-changed'],
   ] as const) {
-    const plan = planComplianceRecheck({ ...input, ...override });
+    const plan = await planComplianceRecheck({ ...input, ...override });
     assert.equal(plan.reason, reason);
     assert.equal(plan.files, undefined);
   }
