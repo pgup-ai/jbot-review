@@ -1,7 +1,8 @@
 // Quick-screen scorer: jbot benchmark outputs (JBOT_BENCHMARK_OUTPUT JSON) against reference
 // comments, matched by the AACR-Bench judge instead of keywords.
 //   npm run judge:findings -- --references refs.json --results results.json --judge-model M [--line-window 1|none] [--concurrency 4]
-// refs.json: [{caseId, references: JudgeComment[]}]; results.json: {caseId: pathToJbotOutput}.
+// refs.json:    [{"caseId": "pr-1", "references": [{"path": "src/a.ts", "fromLine": 10, "toLine": 12, "note": "Null check missing"}]}]
+// results.json: {"pr-1": "runs/pr-1/jbot.json"}
 import { readFileSync } from 'node:fs';
 
 import { toJudgeComments } from '../src/shared/aacr-bench.ts';

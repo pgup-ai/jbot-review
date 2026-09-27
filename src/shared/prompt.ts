@@ -2243,8 +2243,14 @@ export function buildIncrementalReviewContext(
 const semanticJudgeTask = (subject: string) =>
   `-Task-\nDetermine whether ${subject} express the same concern or suggestion. Ignore differences in wording, tone, or formatting—focus solely on semantic equivalence of the underlying issue. If the core intent and technical substance are identical, answer "yes"; otherwise, answer "no".\n\n`;
 
+// Real notes stay far below this (AACR max 2.2 KB), so the official text is untouched in practice.
+const SEMANTIC_JUDGE_COMMENT_BYTES = 8192;
+
 export function buildSemanticJudgePrompt(reference: string, generated: string): string {
-  return `-Role-\nYou are an expert code reviewer assistant specialized in analyzing and comparing code review comments.\n\n${semanticJudgeTask('two given review comments')}Review Comment 1:\n${reference}\n\nReview Comment 2:\n${generated}\n\n${semanticJudgeTask('the two review comments given above')}Your answer:`;
+  const [first, second] = [reference, generated].map((comment) =>
+    boundedPromptContext(comment, SEMANTIC_JUDGE_COMMENT_BYTES, 'Review comment'),
+  );
+  return `-Role-\nYou are an expert code reviewer assistant specialized in analyzing and comparing code review comments.\n\n${semanticJudgeTask('two given review comments')}Review Comment 1:\n${first}\n\nReview Comment 2:\n${second}\n\n${semanticJudgeTask('the two review comments given above')}Your answer:`;
 }
 
 /** The official verdict heuristic, quirks included, for comparable holdout scores. */

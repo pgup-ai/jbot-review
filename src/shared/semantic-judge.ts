@@ -7,11 +7,7 @@ import { createJudge } from './benchmark-judge.ts';
 import { PROVIDERS } from './config.ts';
 import { CLOSED_BOOK_AGENT } from './opencode-config.ts';
 import { startOpencode } from './opencode-server.ts';
-import {
-  configureSessionConcurrency,
-  createReviewSession,
-  promptInSession,
-} from './opencode-session.ts';
+import { Semaphore, createReviewSession, promptInSession } from './opencode-session.ts';
 import { resolveOpencodeApiKeys } from './opencode-usage.ts';
 
 const JUDGE_TIMEOUT_MS = 120_000;
@@ -29,11 +25,21 @@ export async function startOpencodeJudge(model: string, concurrency: number) {
   );
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-judge-'));
   const runtime = await startOpencode(workspace, providerID, modelID, apiKey, quiet);
-  configureSessionConcurrency(concurrency);
+  // Held from session creation through the prompt, so --concurrency bounds both.
+  const slots = new Semaphore(concurrency);
   const judge = createJudge(async (text) => {
-    const spec = { label: 'semantic-judge', model, log: quiet };
-    const sessionID = await createReviewSession(runtime, { ...spec, agent: CLOSED_BOOK_AGENT });
-    return promptInSession(runtime, sessionID, { ...spec, text, timeoutMs: JUDGE_TIMEOUT_MS });
+    const release = await slots.acquire();
+    try {
+      const spec = { label: 'semantic-judge', model, log: quiet };
+      const sessionID = await createReviewSession(runtime, { ...spec, agent: CLOSED_BOOK_AGENT });
+      return await promptInSession(runtime, sessionID, {
+        ...spec,
+        text,
+        timeoutMs: JUDGE_TIMEOUT_MS,
+      });
+    } finally {
+      release();
+    }
   });
   return {
     ...judge,

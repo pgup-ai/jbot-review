@@ -26,7 +26,7 @@ import {
 } from '../src/shared/aacr-bench.ts';
 import { judgeMetrics, scoreCases, type JudgeCounts } from '../src/shared/benchmark-judge.ts';
 import { parseBenchmarkTelemetry } from '../src/shared/benchmark-runner.ts';
-import { PROVIDERS } from '../src/shared/config.ts';
+import { PROVIDERS, providerCredentialSources } from '../src/shared/config.ts';
 import { startOpencodeJudge } from '../src/shared/semantic-judge.ts';
 import type { Finding } from '../src/shared/types.ts';
 import { benchmarkArgument } from './benchmark-args.ts';
@@ -39,6 +39,9 @@ function required(name: string): string {
   return value;
 }
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T;
+// meta.json is written last, so it marks a case whose outputs are all on disk.
+const finished = (caseDir: string) =>
+  existsSync(join(caseDir, 'jbot.json')) && existsSync(join(caseDir, 'meta.json'));
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
 
@@ -120,14 +123,18 @@ async function run() {
   const out = resolve(required('out'));
   const repos = resolve(option('repos', join(PROJECT_ROOT, '.jbot-review', 'aacr', 'repos'))!);
   const timeoutMs = Number(option('timeout-min', '30')) * 60_000;
-  const keyEnv = PROVIDERS[parseModelName(model).providerID]?.keyEnv;
+  const provider = PROVIDERS[parseModelName(model).providerID];
+  const credentialEnv = Object.fromEntries(
+    [
+      ...(provider ? providerCredentialSources(provider).map((source) => source.env) : []),
+      provider?.custom?.baseURL.env,
+    ].flatMap((name) => (name && process.env[name] ? [[name, process.env[name]]] : [])),
+  );
   mkdirSync(repos, { recursive: true });
   mkdirSync(join(out, 'official'), { recursive: true });
   const prepared = new Map<string, string>();
   // Resumable: finished instances are skipped; a fresh --out re-reviews them.
-  for (const instance of instances.filter(
-    (i) => !existsSync(join(out, i.instanceId, 'jbot.json')),
-  )) {
+  for (const instance of instances.filter((i) => !finished(join(out, i.instanceId)))) {
     const started = Date.now();
     try {
       prepared.set(instance.instanceId, ensureCommits(repos, instance));
@@ -147,16 +154,17 @@ async function run() {
     try {
       const caseDir = join(out, instance.instanceId);
       mkdirSync(caseDir, { recursive: true });
+      for (const stale of ['jbot.json', 'meta.json']) rmSync(join(caseDir, stale), { force: true });
       rmSync(worktree, { recursive: true });
       git(repo, 'worktree', 'add', '--detach', worktree, instance.head);
       const log = openSync(join(caseDir, 'review.log'), 'w');
       const started = Date.now();
-      // A neutral launch dir keeps jbot's own .env out; only the model's key is passed through.
+      // A neutral launch dir keeps jbot's own .env out; only the provider's credentials pass through.
       const env = {
         PATH: process.env.PATH!,
         HOME: process.env.HOME!,
         TMPDIR: process.env.TMPDIR ?? tmpdir(),
-        ...(keyEnv && process.env[keyEnv] ? { [keyEnv]: process.env[keyEnv] } : {}),
+        ...credentialEnv,
         MODEL: model,
         JBOT_BENCHMARK_DRY_RUN: 'true',
         JBOT_BENCHMARK_OUTPUT: join(caseDir, 'jbot.json'),
@@ -186,10 +194,6 @@ async function run() {
         ? readJson<{ findings: Finding[]; telemetry?: string }>(output)
         : undefined;
       const usage = parseBenchmarkTelemetry(result?.telemetry);
-      writeFileSync(
-        join(caseDir, 'meta.json'),
-        JSON.stringify({ ...exit, wallMs, findings: result?.findings.length }),
-      );
       if (result)
         // Token totals follow OCR's accounting: input includes cache reads, output includes reasoning.
         writeFileSync(
@@ -206,6 +210,10 @@ async function run() {
             2,
           ),
         );
+      writeFileSync(
+        join(caseDir, 'meta.json'),
+        JSON.stringify({ ...exit, wallMs, findings: result?.findings.length }),
+      );
       console.log(
         `${result ? 'done' : 'FAILED'} ${instance.instanceId} exit=${exit.code} ${Math.round(wallMs / 1000)}s`,
       );
@@ -223,9 +231,7 @@ async function score() {
   const results = resolve(required('results'));
   const judgeModel = required('judge-model');
   const lineWindow = option('line-window', '1')!;
-  const evaluated = instances.filter((instance) =>
-    existsSync(join(results, instance.instanceId, 'jbot.json')),
-  );
+  const evaluated = instances.filter((instance) => finished(join(results, instance.instanceId)));
   const judge = await startOpencodeJudge(judgeModel, Number(option('concurrency', '4')));
   try {
     const cases = evaluated.map((instance) => ({

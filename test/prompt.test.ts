@@ -1068,6 +1068,13 @@ describe('AACR-Bench semantic judge', () => {
     assert.match(prompt, /answer "yes"; otherwise, answer "no"\.\n\nYour answer:$/);
   });
 
+  it('bounds each comment and names what it omitted', () => {
+    const prompt = buildSemanticJudgePrompt('x'.repeat(20_000), 'short');
+    assert.ok(Buffer.byteLength(prompt) < 9000);
+    assert.match(prompt, /\[Review comment truncated to \d+ bytes; omitted \d+ bytes\.\]/);
+    assert.match(prompt, /Review Comment 2:\nshort\n/);
+  });
+
   it('reads verdicts with the official heuristic', () => {
     assert.equal(parseJudgeVerdict('Yes.'), true);
     assert.equal(parseJudgeVerdict(' no '), false);
