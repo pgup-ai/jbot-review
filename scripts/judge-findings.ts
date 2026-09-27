@@ -9,7 +9,7 @@ import { toJudgeComments } from '../src/shared/aacr-bench.ts';
 import { scoreCases, type JudgeComment } from '../src/shared/benchmark-judge.ts';
 import { startOpencodeJudge } from '../src/shared/semantic-judge.ts';
 import type { Finding } from '../src/shared/types.ts';
-import { benchmarkArgument } from './benchmark-args.ts';
+import { benchmarkArgument, integerArgument } from './benchmark-args.ts';
 
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T;
 const references = readJson<{ caseId: string; references: JudgeComment[] }[]>(
@@ -19,8 +19,9 @@ const results = readJson<Record<string, string>>(benchmarkArgument('results') ??
 const judgeModel = benchmarkArgument('judge-model');
 if (!judgeModel) throw new Error('--judge-model is required.');
 const lineWindow = benchmarkArgument('line-window') ?? '1';
+const maxDistance = lineWindow === 'none' ? Infinity : integerArgument('line-window', 1, 0);
 
-const judge = await startOpencodeJudge(judgeModel, Number(benchmarkArgument('concurrency') ?? '4'));
+const judge = await startOpencodeJudge(judgeModel, integerArgument('concurrency', 4, 1));
 try {
   const cases = references.map(({ caseId, references: refs }) => {
     // A missing run is an error, not a review that found nothing.
@@ -28,11 +29,7 @@ try {
     const { findings } = readJson<{ findings: Finding[] }>(results[caseId]);
     return { caseId, references: refs, generated: toJudgeComments(findings) };
   });
-  const scored = await scoreCases(
-    cases,
-    judge.sameConcern,
-    lineWindow === 'none' ? Infinity : Number(lineWindow),
-  );
+  const scored = await scoreCases(cases, judge.sameConcern, maxDistance);
   for (const item of scored.cases) {
     const input = cases.find((c) => c.caseId === item.caseId)!;
     console.log(

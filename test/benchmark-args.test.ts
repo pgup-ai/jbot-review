@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
 
-import { benchmarkArgument, readJsonLines } from '../scripts/benchmark-args.ts';
+import { benchmarkArgument, integerArgument, readJsonLines } from '../scripts/benchmark-args.ts';
 
 it('parses split and equals-style benchmark arguments without consuming another flag', () => {
   assert.equal(benchmarkArgument('output', ['node', 'script', '--output', 'result']), 'result');
@@ -16,6 +16,17 @@ it('parses split and equals-style benchmark arguments without consuming another 
     benchmarkArgument('output', ['node', 'script', '--output', '--subset', 'smoke']),
     undefined,
   );
+});
+
+it('parses integer arguments and throws on typos or values below the minimum', () => {
+  const argv = (...flags: string[]) => ['node', 'script', ...flags];
+  assert.equal(integerArgument('concurrency', 4, 1, argv()), 4);
+  assert.equal(integerArgument('concurrency', 4, 1, argv('--concurrency', '8')), 8);
+  for (const typo of ['4x', '0', '1.5'])
+    assert.throws(
+      () => integerArgument('concurrency', 4, 1, argv(`--concurrency=${typo}`)),
+      /--concurrency must be an integer ≥ 1, got/,
+    );
 });
 
 it('reads nonblank JSONL records and reports malformed line locations', () => {

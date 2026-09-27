@@ -33,7 +33,7 @@ import { parseBenchmarkTelemetry } from '../src/shared/benchmark-runner.ts';
 import { PROVIDERS, providerCredentialSources } from '../src/shared/config.ts';
 import { startOpencodeJudge } from '../src/shared/semantic-judge.ts';
 import type { Finding } from '../src/shared/types.ts';
-import { benchmarkArgument } from './benchmark-args.ts';
+import { benchmarkArgument, integerArgument } from './benchmark-args.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..');
 const option = (name: string, fallback?: string) => benchmarkArgument(name) ?? fallback;
@@ -71,8 +71,8 @@ async function pool<T>(items: T[], limit: number, work: (item: T) => Promise<voi
 function sample() {
   const instances = parseAacrDataset(readJson(required('dataset')));
   const picked = sampleAacrInstances(instances, {
-    perLanguage: Number(option('per-language', '1')),
-    seed: Number(option('seed', '20260927')),
+    perLanguage: integerArgument('per-language', 1, 1),
+    seed: integerArgument('seed', 20260927, 0),
   });
   const out = required('out');
   const manifest = picked.map(
@@ -126,7 +126,8 @@ async function run() {
   const model = required('model');
   const out = resolve(required('out'));
   const repos = resolve(option('repos', join(PROJECT_ROOT, '.jbot-review', 'aacr', 'repos'))!);
-  const timeoutMs = Number(option('timeout-min', '30')) * 60_000;
+  const timeoutMs = integerArgument('timeout-min', 30, 1) * 60_000;
+  const concurrency = integerArgument('concurrency', 4, 1);
   const provider = PROVIDERS[parseModelName(model).providerID];
   const credentialEnv = Object.fromEntries(
     [
@@ -154,7 +155,7 @@ async function run() {
   // Ctrl-C tears down every review's process group, not just its tsx wrapper.
   const processes = createCliProcessScope();
   const unregister = onCliFatalSignal(() => processes.stop());
-  await pool(instances, Number(option('concurrency', '4')), async (instance) => {
+  await pool(instances, concurrency, async (instance) => {
     const repo = prepared.get(instance.instanceId);
     if (!repo) return;
     const worktree = mkdtempSync(join(tmpdir(), 'jbot-aacr-'));
@@ -246,8 +247,9 @@ async function score() {
   const results = resolve(required('results'));
   const judgeModel = required('judge-model');
   const lineWindow = option('line-window', '1')!;
+  const maxDistance = lineWindow === 'none' ? Infinity : integerArgument('line-window', 1, 0);
   const evaluated = instances.filter((instance) => finished(join(results, instance.instanceId)));
-  const judge = await startOpencodeJudge(judgeModel, Number(option('concurrency', '4')));
+  const judge = await startOpencodeJudge(judgeModel, integerArgument('concurrency', 4, 1));
   try {
     const cases = evaluated.map((instance) => ({
       caseId: instance.instanceId,
@@ -256,11 +258,7 @@ async function score() {
         readJson<{ findings: Finding[] }>(join(results, instance.instanceId, 'jbot.json')).findings,
       ),
     }));
-    const scored = await scoreCases(
-      cases,
-      judge.sameConcern,
-      lineWindow === 'none' ? Infinity : Number(lineWindow),
-    );
+    const scored = await scoreCases(cases, judge.sameConcern, maxDistance);
     const language = new Map(instances.map((instance) => [instance.instanceId, instance.language]));
     const byLanguage: Record<string, JudgeCounts> = {};
     for (const item of scored.cases) {

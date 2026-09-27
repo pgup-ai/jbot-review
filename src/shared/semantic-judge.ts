@@ -24,7 +24,12 @@ export async function startOpencodeJudge(model: string, concurrency: number) {
     quiet,
   );
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-judge-'));
-  const runtime = await startOpencode(workspace, providerID, modelID, apiKey, quiet);
+  const runtime = await startOpencode(workspace, providerID, modelID, apiKey, quiet).catch(
+    (error: unknown) => {
+      rmSync(workspace, { recursive: true, force: true });
+      throw error;
+    },
+  );
   // Held from session creation through the prompt, so --concurrency bounds both.
   const slots = new Semaphore(concurrency);
   const judge = createJudge(async (text) => {
