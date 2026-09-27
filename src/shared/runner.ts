@@ -2819,9 +2819,10 @@ async function runReviewPipeline(params: {
       );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
-    const complianceShards = recheckFiles?.length
+    const recheck = new Set(recheckFiles);
+    const complianceShards = recheck.size
       ? shardFilesForReview(
-          files.filter((file) => recheckFiles.includes(file.filename)),
+          files.filter((file) => recheck.has(file.filename)),
           { requestedShards: options.reviewShards },
         )
       : shards;
