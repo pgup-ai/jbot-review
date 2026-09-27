@@ -48,8 +48,12 @@ describe('parseAacrDataset', () => {
     });
   });
 
-  it('rejects rows without usable commits', () => {
+  it('rejects rows without usable commits or with non-GitHub repo names', () => {
     assert.throws(() => parseAacrDataset([row({ pr_source_commit: 'main' })]), /pr_source_commit/);
+    assert.throws(
+      () => parseAacrDataset([row({ pr_url: 'https://github.com/acme/..\\evil/pull/1' })]),
+      /pr_url/,
+    );
   });
 });
 

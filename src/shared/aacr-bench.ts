@@ -15,7 +15,8 @@ export interface AacrInstance {
 }
 
 const SHA = /^[0-9a-f]{40}$/;
-const PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)$/;
+// GitHub's own name charsets: owner and repo can never carry a path separator into the cache path.
+const PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)\/pull\/(\d+)$/;
 const byId = (a: AacrInstance, b: AacrInstance) => (a.instanceId < b.instanceId ? -1 : 1);
 const lineOf = (value: unknown) => (Number.isInteger(value) ? (value as number) : null);
 
