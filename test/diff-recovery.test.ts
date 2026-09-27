@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { buildDiffRecoveryBlock } from '../src/shared/prompt.ts';
+import { batchablePaths, buildDiffRecoveryBlock } from '../src/shared/prompt.ts';
 import { classifyReadonlyTool } from '../src/shared/tool-telemetry.ts';
 
 test('recovery batches bound estimated output and prompt bytes without hiding unplanned paths', () => {
@@ -18,7 +18,7 @@ test('recovery batches bound estimated output and prompt bytes without hiding un
     { filename: 'unknown.ts', patch: '' },
   );
   const paths = files.map((f) => f.filename);
-  const block = buildDiffRecoveryBlock(files, paths, scope);
+  const block = buildDiffRecoveryBlock(batchablePaths(files), paths.length, scope);
   assert.ok(Buffer.byteLength(block) <= 4096);
   assert.match(block, /omitted from this plan/);
   assert.match(block, /Read those remaining diffs separately/);
@@ -33,8 +33,11 @@ test('recovery batches bound estimated output and prompt bytes without hiding un
   }
   assert.ok(delivered > 0 && delivered < files.length);
   assert.ok(block.includes(`${files.length - delivered} omitted`));
-  assert.equal(buildDiffRecoveryBlock(files, [], scope), '');
-  assert.equal(buildDiffRecoveryBlock(files, paths, { baseRef: 'main' }), '');
+  assert.equal(buildDiffRecoveryBlock([], 0, scope), '');
+  assert.equal(
+    buildDiffRecoveryBlock(batchablePaths(files), paths.length, { baseRef: 'main' }),
+    '',
+  );
 });
 
 test('recovery commands preserve literal hostile filenames, PR scope and uncommitted local scope', (t) => {
@@ -71,7 +74,11 @@ test('recovery commands preserve literal hostile filenames, PR scope and uncommi
   for (const name of names) writeFileSync(join(root, name), 'uncommitted\n');
   const files = names.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-old\n+committed' }));
   for (const worktree of [false, true]) {
-    const block = buildDiffRecoveryBlock(files, names.slice(0, 3), { baseSha, headSha, worktree });
+    const block = buildDiffRecoveryBlock(batchablePaths(files.slice(0, 3)), 3, {
+      baseSha,
+      headSha,
+      worktree,
+    });
     const commands = block.split('\n').filter((l) => l.startsWith('    git'));
     assert.equal(commands.length, 1);
     assert.equal(classifyReadonlyTool('bash', { command: commands[0] }), 'diff-recovery');

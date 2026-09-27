@@ -51,6 +51,57 @@ const base = {
   budget,
 };
 
+test('pages from byte arithmetic exactly as rendering every candidate would', () => {
+  const hunk = (at: number, text: string) =>
+    `@@ -${at},2 +${at},3 @@\n ctx\n-  ${text};\n+${text};\n+added ${text} 東京;`;
+  const files: { filename: string; patch?: string }[] = Array.from({ length: 40 }, (_, i) => ({
+    filename: `src/m${i}/f${i}.ts`,
+    patch: Array.from({ length: 8 }, (_, h) => hunk(h * 20 + 1, `call${i}_${h}()`)).join('\n'),
+  }));
+  // A binary file has no patch, yet stays on the modeled path.
+  files.push({ filename: 'assets/logo.png' });
+  files.push({
+    filename: 'src/huge.ts',
+    patch: `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, n) => `+const v${n} = ${n};`).join('\n')}`,
+  });
+  let calls = 0;
+  // Counts candidate renders, not the frame checks' NUL probe and empty context.
+  const counted = (render: (context: string) => string) => (context: string) => {
+    if (context && !context.includes('\u0000')) calls++;
+    return render(context);
+  };
+  // Answering the NUL-bearing frame probe differently forces a render per candidate.
+  const exact = (render: (context: string) => string) => (context: string) =>
+    context.includes('\u0000') ? '' : counted(render)(context);
+  const options = {
+    ...base,
+    budget: { ...budget, transportBytes: 40_000 },
+    shards: [files],
+    numberedDiff: true,
+    batchDiffScope: { baseRef: 'main', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) },
+  };
+  const plan = (render: (context: string) => string) => {
+    calls = 0;
+    return { plans: buildShardPlans({ ...options, renderPrompt: render }), calls };
+  };
+  const modeled = plan(counted(renderPrompt));
+  const reference = plan(exact(renderPrompt));
+  assert.deepEqual(modeled.plans, reference.plans);
+  assert.ok(modeled.plans.length > 2);
+  assert.ok(
+    modeled.calls * 4 < reference.calls,
+    `${modeled.calls} modeled, ${reference.calls} exact`,
+  );
+  // Renders the byte model can't use: the context twice, lone surrogates at its seams and a
+  // different empty render. Each pages with the same renders as the exact planner.
+  for (const render of [
+    (context: string) => renderPrompt(context) + context,
+    (context: string) => renderPrompt(`\uD800${context}\uDC00`),
+    (context: string) => (context ? renderPrompt(context) : ''),
+  ])
+    assert.deepEqual(plan(counted(render)), plan(exact(render)));
+});
+
 test('one requested shard pages a huge hunk without losing late changes or exceeding Cline argv', () => {
   const lines = Array.from({ length: 14000 }, (_, n) => `+const value${n} = '東京-${n}';`);
   const files = [{ filename: 'src/huge.ts', patch: `@@ -0,0 +1,14000 @@\n${lines.join('\n')}` }];

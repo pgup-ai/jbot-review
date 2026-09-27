@@ -129,13 +129,16 @@ export function diffLineCounts(files: PrFile[]): { added: number; removed: numbe
 }
 
 export function diffRiskScore(file: PrFile): number {
+  return riskScore(file.filename, countPatchLines(file.patch).added);
+}
+
+function riskScore(filename: string, addedLines: number): number {
   let score = 0;
   for (const rule of RISK_RULES) {
-    if (rule.pattern.test(file.filename)) score += rule.weight;
+    if (rule.pattern.test(filename)) score += rule.weight;
   }
   // Churn tiebreaker: more added lines, more surface for bugs. Capped so a
   // giant generated-looking patch cannot outrank a small auth change.
-  const addedLines = countPatchLines(file.patch).added;
   return score + Math.min(addedLines, 400) / 100;
 }
 
@@ -398,6 +401,13 @@ export interface DiffHunksBlockResult {
   omittedFiles: string[];
 }
 
+/** A file whose numbered patch, whitespace-only lines and added-line count are already known. */
+export interface DerivedDiffFile extends PrFile {
+  numberedPatch?: string;
+  whitespaceOnly?: number[];
+  addedLines?: number;
+}
+
 export function diffHunksCoverage(files: PrFile[], result: DiffHunksBlockResult) {
   const assignedFiles = files.filter((file) => file.patch).length;
   return {
@@ -420,19 +430,26 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
 }
 
 export function buildDiffHunksBlockWithMetadata(
-  files: PrFile[],
+  files: DerivedDiffFile[],
   options: DiffHunksOptions = {},
 ): DiffHunksBlockResult {
   const totalBudget = options.totalBudgetBytes ?? MAX_TOTAL_DIFF_BYTES;
   const perFileBudget = options.perFileBudgetBytes ?? MAX_FILE_DIFF_BYTES;
+  const unbounded = totalBudget === Infinity && perFileBudget === Infinity;
 
   const withPatch = files.filter((file) => file.patch);
   if (withPatch.length === 0) {
     return { text: '', truncatedFiles: [], omittedFiles: [] };
   }
 
+  const scores = new Map(
+    withPatch.map((file) => [
+      file,
+      riskScore(file.filename, file.addedLines ?? countPatchLines(file.patch).added),
+    ]),
+  );
   const ranked = [...withPatch].sort(
-    (a, b) => diffRiskScore(b) - diffRiskScore(a) || a.filename.localeCompare(b.filename),
+    (a, b) => scores.get(b)! - scores.get(a)! || a.filename.localeCompare(b.filename),
   );
 
   const sections: string[] = [];
@@ -442,10 +459,16 @@ export function buildDiffHunksBlockWithMetadata(
 
   for (const file of ranked) {
     const patch = options.numbered
-      ? numberNewSideLines(file.patch as string)
+      ? (file.numberedPatch ?? numberNewSideLines(file.patch as string))
       : (file.patch as string);
-    const reindented = options.numbered ? whitespaceOnlyLines(file.patch as string) : [];
-    const note = reindented.length ? `Whitespace only: ${formatLineRanges(reindented)}` : '';
+    const note = whitespaceNote(
+      options.numbered ? (file.whitespaceOnly ?? whitespaceOnlyLines(file.patch as string)) : [],
+    );
+    // Unlimited budgets never truncate or omit a file, so the byte accounting below is moot.
+    if (unbounded) {
+      sections.push(renderDiffSection(file.filename, patch, false, '', note));
+      continue;
+    }
     const truncationNotice = `_Hunks truncated for ${file.filename}; run the git diff command for the rest._`;
     const sectionSeparatorBytes = sections.length > 0 ? 2 : 0; // blank line between file sections
     const truncatedSectionOverhead =
@@ -471,20 +494,7 @@ export function buildDiffHunksBlockWithMetadata(
     if (truncated) truncatedFiles.push(file.filename);
   }
 
-  const lines = [
-    '## Diff hunks',
-    'Merge-base-relative patches for the changed files, highest review risk first.',
-    ...(options.numbered
-      ? [
-          "Each new-side line starts with its line number; cite it for a finding's line " +
-            'instead of re-reading the file to count lines. A "Whitespace only" line under a ' +
-            'file lists added lines whose text matches a removed line apart from whitespace: the PR moved or re-indented that code, it did not write it.',
-        ]
-      : []),
-    'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
-    '',
-    sections.join('\n\n'),
-  ];
+  const lines = [...diffBlockHeader(options.numbered), sections.join('\n\n')];
 
   if (omittedFiles.length > 0) {
     const listed = omittedFiles.slice(0, MAX_NOT_EMBEDDED_LISTED);
@@ -500,6 +510,47 @@ export function buildDiffHunksBlockWithMetadata(
   }
 
   return { text: lines.join('\n'), truncatedFiles, omittedFiles };
+}
+
+function diffBlockHeader(numbered?: boolean): string[] {
+  return [
+    '## Diff hunks',
+    'Merge-base-relative patches for the changed files, highest review risk first.',
+    ...(numbered
+      ? [
+          "Each new-side line starts with its line number; cite it for a finding's line " +
+            'instead of re-reading the file to count lines. A "Whitespace only" line under a ' +
+            'file lists added lines whose text matches a removed line apart from whitespace: the PR moved or re-indented that code, it did not write it.',
+        ]
+      : []),
+    'These are a starting point — cross-reference callers, definitions, and tests in the checkout.',
+    '',
+  ];
+}
+
+function whitespaceNote(lines: number[]): string {
+  return lines.length ? `Whitespace only: ${formatLineRanges(lines)}` : '';
+}
+
+/** Bytes of the unlimited-budget diff block with these sections, without rendering it. */
+export function unboundedDiffBlockBytes(
+  sectionBytes: number,
+  sections: number,
+  numbered?: boolean,
+): number {
+  if (!sections) return 0;
+  const header = Buffer.byteLength(diffBlockHeader(numbered).join('\n'), 'utf8') + 1;
+  return header + sectionBytes + 2 * (sections - 1);
+}
+
+/** Byte size of one file's section in that block, given its (numbered) patch's bytes. */
+export function unboundedDiffSectionBytes(
+  filename: string,
+  patchBytes: number,
+  whitespaceOnly: number[],
+): number {
+  const shell = renderDiffSection(filename, '', false, '', whitespaceNote(whitespaceOnly));
+  return Buffer.byteLength(shell, 'utf8') + patchBytes;
 }
 
 function renderDiffSection(
@@ -538,24 +589,27 @@ export function formatLineRanges(lines: number[]): string {
 export function whitespaceOnlyLines(patch: string): number[] {
   const found: number[] = [];
   const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
-  let removed: string[] = [];
+  // Removed texts of the current change block, counted: equal texts are interchangeable.
+  const removed = new Map<string, number>();
   let line = 0;
   for (const row of patch.split('\n')) {
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row);
     if (hunk) {
       line = Number(hunk[1]);
-      removed = [];
-    } else if (row.startsWith('-')) removed.push(normalize(row.slice(1)));
-    else if (row.startsWith('+')) {
+      removed.clear();
+    } else if (row.startsWith('-')) {
       const text = normalize(row.slice(1));
-      const at = text ? removed.indexOf(text) : -1;
-      if (at >= 0) {
-        removed.splice(at, 1);
+      removed.set(text, (removed.get(text) ?? 0) + 1);
+    } else if (row.startsWith('+')) {
+      const text = normalize(row.slice(1));
+      const count = text ? (removed.get(text) ?? 0) : 0;
+      if (count) {
+        removed.set(text, count - 1);
         found.push(line);
       }
       line++;
     } else if (row.startsWith(' ')) {
-      removed = [];
+      removed.clear();
       line++;
     }
   }

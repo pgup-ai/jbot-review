@@ -97,10 +97,16 @@ function findingStrength(finding: Finding): [number, number] {
  */
 export function dedupeFindings(...findingLists: Finding[][]): Finding[] {
   const kept: Finding[] = [];
+  // Only findings on one path and line, or file-level ones on one path, can share an anchor.
+  const byAnchor = new Map<string, number[]>();
   for (const findings of findingLists) {
     for (const finding of findings) {
-      const existingIndex = kept.findIndex((existing) => isSameAnchor(existing, finding));
+      const key = `${finding.path}\0${finding.line > 0 ? finding.line : 0}`;
+      const same = byAnchor.get(key) ?? [];
+      const existingIndex = same.find((index) => isSameAnchor(kept[index], finding)) ?? -1;
       if (existingIndex === -1) {
+        same.push(kept.length);
+        byAnchor.set(key, same);
         kept.push(finding);
         continue;
       }
@@ -185,20 +191,31 @@ export function suppressPreviouslyReported(
 ): { findings: Finding[]; suppressedCount: number } {
   if (priorThreads.length === 0) return { findings, suppressedCount: 0 };
 
-  const kept = findings.filter(
-    (finding) => !priorThreads.some((thread) => isSameIssue(finding, thread, addable)),
-  );
+  const open = new Map<string, { thread: PriorFindingRef; text: string }[]>();
+  for (const thread of priorThreads) {
+    if (thread.isResolved) continue;
+    const same = open.get(thread.path) ?? [];
+    same.push({ thread, text: thread.body.toLowerCase() });
+    open.set(thread.path, same);
+  }
+  const kept = findings.filter((finding) => {
+    const candidates = open.get(finding.path);
+    if (!candidates) return true;
+    const titleTokens = significantTokens(finding.title);
+    return !candidates.some(({ thread, text }) =>
+      isSameIssue(finding, titleTokens, thread, text, addable),
+    );
+  });
   return { findings: kept, suppressedCount: findings.length - kept.length };
 }
 
 function isSameIssue(
   finding: Finding,
+  titleTokens: string[],
   thread: PriorFindingRef,
+  threadText: string,
   addable?: ReadonlyMap<string, ReadonlySet<number>>,
 ): boolean {
-  if (thread.isResolved) return false;
-  if (finding.path !== thread.path) return false;
-
   const addableLines = addable?.get(finding.path);
   const locationMatches =
     thread.line === undefined
@@ -206,11 +223,9 @@ function isSameIssue(
       : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
   if (!locationMatches) return false;
 
-  const titleTokens = significantTokens(finding.title);
   // No comparable content: keep the finding rather than silently dropping it.
   if (titleTokens.length === 0) return false;
 
-  const threadText = thread.body.toLowerCase();
   const matched = titleTokens.filter((token) => threadText.includes(token)).length;
   return matched / titleTokens.length >= SUPPRESS_TITLE_OVERLAP;
 }

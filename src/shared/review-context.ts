@@ -66,19 +66,32 @@ export interface GuidelineDoc {
 export function selectGuidelineSections(text: string, titles: string[]): string | undefined {
   const lines = text.split('\n');
   const headings = markdownHeadings(lines);
-  const included = new Set<number>();
-  for (const title of titles) {
-    const matches = headings.filter((heading) => heading.title === title);
-    if (matches.length !== 1) return undefined;
-    const heading = matches[0];
-    const end =
-      headings.find((next) => next.line > heading.line && next.level <= heading.level)?.line ??
-      lines.length;
-    for (let line = heading.line; line < end; line++) included.add(line);
+  const byTitle = new Map<string, typeof headings>();
+  for (const heading of headings) {
+    const same = byTitle.get(heading.title);
+    if (same) same.push(heading);
+    else byTitle.set(heading.title, [heading]);
   }
-  const omitted = headings.filter((heading) => !included.has(heading.line)).map((h) => h.title);
+  // A section ends at the next heading of its level or higher.
+  const ends = new Map<(typeof headings)[number], number>();
+  const open: typeof headings = [];
+  for (const heading of headings) {
+    while (open.length && open.at(-1)!.level >= heading.level) ends.set(open.pop()!, heading.line);
+    open.push(heading);
+  }
+  // +1 where a selected section starts and -1 where it ends; a positive running sum is inside.
+  const depth = Array.from({ length: lines.length + 1 }, () => 0);
+  for (const title of titles) {
+    const matches = byTitle.get(title) ?? [];
+    if (matches.length !== 1) return undefined;
+    depth[matches[0].line]++;
+    depth[ends.get(matches[0]) ?? lines.length]--;
+  }
+  let inside = 0;
+  const included = lines.map((_, line) => (inside += depth[line]) > 0);
+  const omitted = headings.filter((heading) => !included[heading.line]).map((h) => h.title);
   return [
-    lines.filter((_, line) => included.has(line)).join('\n'),
+    lines.filter((_, line) => included[line]).join('\n'),
     `[Only routed sections loaded; other text omitted: ${boundedJoin(omitted, MAX_OMISSION_NOTE_BYTES)}.]`,
   ].join('\n\n');
 }
@@ -1761,8 +1774,9 @@ export function formatFinderGuidelines(
     options.contextPack && !options.lens
       ? discovered.docs.filter(pointer).map((doc) => doc.label)
       : [];
+  const pointerLabels = new Set(pointers);
   const finderDocs = pointers.length
-    ? discovered.docs.filter((doc) => !pointers.includes(doc.label))
+    ? discovered.docs.filter((doc) => !pointerLabels.has(doc.label))
     : discovered.docs;
   const docs = options.lens
     ? discovered.docs.map((doc) => {
