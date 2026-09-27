@@ -167,6 +167,9 @@ async function run() {
       rmSync(worktree, { recursive: true });
       git(repo, 'worktree', 'add', '--detach', worktree, instance.head);
       const log = createWriteStream(join(caseDir, 'review.log'));
+      // runCliProcess drops its listener once settled; a later log error must mark this case, not crash the run.
+      let logError: Error | undefined;
+      log.on('error', (error) => (logError ??= error));
       const started = Date.now();
       // A neutral launch dir keeps jbot's own .env out; only the provider's credentials pass through.
       const env = {
@@ -199,6 +202,7 @@ async function run() {
       } finally {
         await new Promise((done) => log.end(done));
       }
+      if (logError) exit.error ??= `review.log: ${logError.message}`;
       const wallMs = Date.now() - started;
       const output = join(caseDir, 'jbot.json');
       const result = existsSync(output)
