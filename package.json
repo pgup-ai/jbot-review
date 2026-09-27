@@ -17,6 +17,8 @@
     "benchmark:review": "tsx scripts/review-benchmark.ts",
     "benchmark:normalize": "tsx scripts/review-competitor-adapter.ts",
     "benchmark:ledger": "tsx scripts/benchmark-ledger.ts",
+    "holdout:aacr": "tsx scripts/aacr-bench.ts",
+    "judge:findings": "tsx scripts/judge-findings.ts",
     "corpus:import-history": "tsx scripts/review-history-import.ts",
     "corpus:adjudicate": "tsx scripts/review-adjudication.ts",
     "performance:review": "tsx scripts/review-performance.ts",

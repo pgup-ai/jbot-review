@@ -2238,3 +2238,26 @@ export function buildIncrementalReviewContext(
       : []),
   ].join('\n');
 }
+
+// Verbatim from aacr-bench evaluation/judge.py (HEAD 2026-09-27): edits break comparability.
+const semanticJudgeTask = (subject: string) =>
+  `-Task-\nDetermine whether ${subject} express the same concern or suggestion. Ignore differences in wording, tone, or formatting—focus solely on semantic equivalence of the underlying issue. If the core intent and technical substance are identical, answer "yes"; otherwise, answer "no".\n\n`;
+
+// Real notes stay far below this (AACR max 2.2 KB), so the official text is untouched in practice.
+const SEMANTIC_JUDGE_COMMENT_BYTES = 8192;
+
+export function buildSemanticJudgePrompt(reference: string, generated: string): string {
+  const [first, second] = [reference, generated].map((comment) =>
+    boundedPromptContext(comment, SEMANTIC_JUDGE_COMMENT_BYTES, 'Review comment'),
+  );
+  return `-Role-\nYou are an expert code reviewer assistant specialized in analyzing and comparing code review comments.\n\n${semanticJudgeTask('two given review comments')}Review Comment 1:\n${first}\n\nReview Comment 2:\n${second}\n\n${semanticJudgeTask('the two review comments given above')}Your answer:`;
+}
+
+/** The official verdict heuristic, quirks included, for comparable holdout scores. */
+export function parseJudgeVerdict(answer: string): boolean {
+  const text = answer.trim().toLowerCase();
+  const affirmative = ['yes', 'similar', 'same', 'identical', 'equivalent'].some((word) =>
+    text.includes(word),
+  );
+  return affirmative && (!text.includes('yes') || !text.split('yes')[0]!.includes('no'));
+}

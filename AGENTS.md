@@ -14,6 +14,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 - `npm run typecheck` / `npm run lint` / `npm run format` — tsc, oxlint (deny-warnings), prettier (owns formatting)
 - `npm run build` — esbuild bundles to `dist/` (gitignored build artifact, not committed; `build.yml` rebuilds it in CI before the Docker image `COPY`s it — run locally to verify the bundle compiles)
 - `npm run review:local` — dogfood the real review pipeline on the current branch's committed + uncommitted changes with no GitHub/PR/token (needs only a provider key; see README “Local review”)
+- `npm run holdout:aacr -- <sample|run|score>` — AACR-Bench external holdout (usage in `scripts/aacr-bench.ts`); results go to `docs/audits/` reports, never the ledger, and never drive tuning
+- `npm run judge:findings` — quick-screen scoring: local review outputs vs reference comments, matched by the AACR judge instead of keywords
 
 ## Architecture
 
@@ -35,6 +37,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 | `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                   |
 | `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                         |
 | `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                        |
+| `src/shared/benchmark-judge.ts`     | Pure port of AACR-Bench's comment matcher (path → side → line window → LLM same-concern) and official metrics; judge sessions run via `semantic-judge.ts`                                                                                              |
+| `src/shared/aacr-bench.ts`          | Pure AACR-Bench dataset model: official commit mapping, seeded per-language sample, finding → comment conversion                                                                                                                                       |
 | `src/shared/report.ts`              | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                                                                                                                                                |
 | `src/shared/github.ts`              | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                                                                                                                                      |
 

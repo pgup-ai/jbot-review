@@ -1,0 +1,92 @@
+[
+  {
+    "instanceId": "mpv-player__mpv@0b0330f",
+    "repo": "mpv-player/mpv",
+    "prNumber": 16061,
+    "language": "C",
+    "base": "5ba7ee513751dd005379a06fb627303e6fe1b3dd",
+    "head": "0b0330fa9d5d70c78f36e1010a3b826fa7046387",
+    "changeLines": 159
+  },
+  {
+    "instanceId": "dotnet__aspnetcore@2f372e8",
+    "repo": "dotnet/aspnetcore",
+    "prNumber": 62936,
+    "language": "C#",
+    "base": "e7d49f52363753a4faa2a22538eace7a923382ce",
+    "head": "2f372e8ff137aa24114269576fc1912f12ff5402",
+    "changeLines": 5
+  },
+  {
+    "instanceId": "FreeCAD__FreeCAD@eb761fd",
+    "repo": "FreeCAD/FreeCAD",
+    "prNumber": 21257,
+    "language": "C++",
+    "base": "17e56f6570a97aa9803b502b23cf27dc8be1da70",
+    "head": "eb761fd69cf1fb9c674e385bb1d419814526ba5a",
+    "changeLines": 672
+  },
+  {
+    "instanceId": "microsoft__typescript-go@ae447d3",
+    "repo": "microsoft/typescript-go",
+    "prNumber": 1354,
+    "language": "Go",
+    "base": "15def0236938e25ec7822755444f4d58c68045be",
+    "head": "ae447d3b2a6db00072941e1992a09981b6096061",
+    "changeLines": 176
+  },
+  {
+    "instanceId": "elastic__elasticsearch@a6a4623",
+    "repo": "elastic/elasticsearch",
+    "prNumber": 118895,
+    "language": "Java",
+    "base": "cc0e53e883ee7e0b136e58a0105103c1a7ffddf9",
+    "head": "a6a4623f4a0216b515a8cb323110305504431459",
+    "changeLines": 211
+  },
+  {
+    "instanceId": "facebook__react@b045f18",
+    "repo": "facebook/react",
+    "prNumber": 32499,
+    "language": "JavaScript",
+    "base": "99563e91736e9de473c4865d5cb6fd9eb1a26bcb",
+    "head": "b045f18e378341876ee69e729fc855cab501c3cd",
+    "changeLines": 599
+  },
+  {
+    "instanceId": "nextcloud__server@51b5ea9",
+    "repo": "nextcloud/server",
+    "prNumber": 52846,
+    "language": "PHP",
+    "base": "4aa4972550bec08faf477113f223475f7fb3e5d2",
+    "head": "51b5ea92ccb5f4683b0f52840a01031e1ed0baa3",
+    "changeLines": 165
+  },
+  {
+    "instanceId": "infiniflow__ragflow@2d06022",
+    "repo": "infiniflow/ragflow",
+    "prNumber": 5065,
+    "language": "Python",
+    "base": "469460483665000f522b6c9a6583bb34f17a954b",
+    "head": "2d06022b78536bd22a0fd83f38804f39aa34cce8",
+    "changeLines": 65
+  },
+  {
+    "instanceId": "linera-io__linera-protocol@8fb32bb",
+    "repo": "linera-io/linera-protocol",
+    "prNumber": 3151,
+    "language": "Rust",
+    "base": "ad508025a9d05552a1c8ac1ba4e71a0062ebb556",
+    "head": "8fb32bb8a463a3b19e291426f83833027739f868",
+    "changeLines": 8
+  },
+  {
+    "instanceId": "cline__cline@ca7f02b",
+    "repo": "cline/cline",
+    "prNumber": 5524,
+    "language": "TypeScript",
+    "base": "8f4c6038dd70ce02caaf7ae924dc28d5be63968e",
+    "head": "ca7f02b8cf8cd36d832a63e1c9ad892356c7df66",
+    "changeLines": 333
+  }
+]

@@ -34,11 +34,13 @@ import {
   buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
+  buildSemanticJudgePrompt,
   buildShardAssignmentBlock,
   compactReviewPageContexts,
   formatContextPack,
   formatContextPackItem,
   formatFindingsForVerification,
+  parseJudgeVerdict,
   selectLensKeys,
   withNoToolsReviewDirective,
 } from '../src/shared/prompt.ts';
@@ -1056,5 +1058,29 @@ describe('compactReviewPageContexts', () => {
       assert.equal(pages.full.includes('## Metadata'), !pages.compacted);
       assert.equal(pages.main.includes('## Metadata'), !pages.compacted);
     }
+  });
+});
+
+describe('AACR-Bench semantic judge', () => {
+  it('asks the official yes/no question with the reference first', () => {
+    const prompt = buildSemanticJudgePrompt('REF', 'GEN');
+    assert.ok(prompt.indexOf('Review Comment 1:\nREF') < prompt.indexOf('Review Comment 2:\nGEN'));
+    assert.match(prompt, /answer "yes"; otherwise, answer "no"\.\n\nYour answer:$/);
+  });
+
+  it('bounds each comment and names what it omitted', () => {
+    const prompt = buildSemanticJudgePrompt('x'.repeat(20_000), 'short');
+    assert.ok(Buffer.byteLength(prompt) < 9000);
+    assert.match(prompt, /\[Review comment truncated to \d+ bytes; omitted \d+ bytes\.\]/);
+    assert.match(prompt, /Review Comment 2:\nshort\n/);
+  });
+
+  it('reads verdicts with the official heuristic', () => {
+    assert.equal(parseJudgeVerdict('Yes.'), true);
+    assert.equal(parseJudgeVerdict(' no '), false);
+    assert.equal(parseJudgeVerdict('**Yes** — same root cause'), true);
+    assert.equal(parseJudgeVerdict('No. Yes would overstate it'), false);
+    // judge.py's quirk, kept for comparable scores: a "no" that mentions "same" still matches.
+    assert.equal(parseJudgeVerdict('No, they are not the same concern'), true);
   });
 });

@@ -13,6 +13,17 @@ export function benchmarkArgument(name: string, argv = process.argv): string | u
   return value && !value.startsWith('--') ? value : undefined;
 }
 
+/** A typo must throw: NaN or 0 downstream silently empties a worker pool or never grants a semaphore. */
+export function integerArgument(name: string, fallback: number, min: number, argv = process.argv) {
+  const raw = benchmarkArgument(name, argv);
+  // A flag given without a value is a mistake, not a request for the default.
+  const given = argv.some((arg) => arg === `--${name}` || arg.startsWith(`--${name}=`));
+  const value = given ? Number(raw) : fallback;
+  if (!Number.isInteger(value) || value < min)
+    throw new Error(`--${name} must be an integer ≥ ${min}, got ${raw ?? 'no value'}.`);
+  return value;
+}
+
 export function readJsonLines<T>(path: string): T[] {
   const resolved = resolve(path);
   const values: T[] = [];
