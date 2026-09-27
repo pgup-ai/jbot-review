@@ -124,7 +124,7 @@ async function run() {
   mkdirSync(repos, { recursive: true });
   mkdirSync(join(out, 'official'), { recursive: true });
   const prepared = new Map<string, string>();
-  // Finished instances are kept, so an interrupted run resumes instead of re-reviewing.
+  // Resumable: finished instances are skipped; a fresh --out re-reviews them.
   for (const instance of instances.filter(
     (i) => !existsSync(join(out, i.instanceId, 'jbot.json')),
   )) {
@@ -222,7 +222,7 @@ async function score() {
   const instances = sampledInstances();
   const results = resolve(required('results'));
   const judgeModel = required('judge-model');
-  const window = option('line-window', '1')!;
+  const lineWindow = option('line-window', '1')!;
   const evaluated = instances.filter((instance) =>
     existsSync(join(results, instance.instanceId, 'jbot.json')),
   );
@@ -238,7 +238,7 @@ async function score() {
     const scored = await scoreCases(
       cases,
       judge.sameConcern,
-      window === 'none' ? Infinity : Number(window),
+      lineWindow === 'none' ? Infinity : Number(lineWindow),
     );
     const language = new Map(instances.map((instance) => [instance.instanceId, instance.language]));
     const byLanguage: Record<string, JudgeCounts> = {};
@@ -262,7 +262,7 @@ async function score() {
     const summary = {
       generatedAt: new Date().toISOString(),
       judgeModel,
-      lineWindow: window,
+      lineWindow,
       sampled: instances.length,
       evaluated: evaluated.length,
       failed: instances.filter((i) => !evaluated.includes(i)).map((i) => i.instanceId),

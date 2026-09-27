@@ -27,7 +27,6 @@ export async function startOpencodeJudge(model: string, concurrency: number) {
     { providerID, apiKey: raw, auxProviderID: providerID, auxApiKey: raw },
     quiet,
   );
-  // Judge sessions read nothing, so they run in an empty scratch dir.
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-judge-'));
   const runtime = await startOpencode(workspace, providerID, modelID, apiKey, quiet);
   configureSessionConcurrency(concurrency);

@@ -17,21 +17,20 @@ const references = readJson<{ caseId: string; references: JudgeComment[] }[]>(
 const results = readJson<Record<string, string>>(benchmarkArgument('results') ?? '');
 const judgeModel = benchmarkArgument('judge-model');
 if (!judgeModel) throw new Error('--judge-model is required.');
-const window = benchmarkArgument('line-window') ?? '1';
+const lineWindow = benchmarkArgument('line-window') ?? '1';
 
 const judge = await startOpencodeJudge(judgeModel, Number(benchmarkArgument('concurrency') ?? '4'));
 try {
-  const cases = references.map(({ caseId, references: refs }) => ({
-    caseId,
-    references: refs,
-    generated: results[caseId]
-      ? toJudgeComments(readJson<{ findings: Finding[] }>(results[caseId]).findings)
-      : [],
-  }));
+  const cases = references.map(({ caseId, references: refs }) => {
+    // A missing run is an error, not a review that found nothing.
+    if (!results[caseId]) throw new Error(`No result for case ${caseId}.`);
+    const { findings } = readJson<{ findings: Finding[] }>(results[caseId]);
+    return { caseId, references: refs, generated: toJudgeComments(findings) };
+  });
   const scored = await scoreCases(
     cases,
     judge.sameConcern,
-    window === 'none' ? Infinity : Number(window),
+    lineWindow === 'none' ? Infinity : Number(lineWindow),
   );
   for (const item of scored.cases) {
     const input = cases.find((c) => c.caseId === item.caseId)!;
@@ -47,7 +46,7 @@ try {
     JSON.stringify(
       {
         judgeModel,
-        lineWindow: window,
+        lineWindow,
         counts: scored.counts,
         metrics: scored.metrics,
         judge: judge.stats,

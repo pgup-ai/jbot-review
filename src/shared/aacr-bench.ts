@@ -69,8 +69,11 @@ export function sampleAacrInstances(
 ): AacrInstance[] {
   const random = benchmarkRandom(options.seed);
   const byLanguage = new Map<string, AacrInstance[]>();
-  for (const instance of [...instances].sort(byId))
-    byLanguage.set(instance.language, [...(byLanguage.get(instance.language) ?? []), instance]);
+  for (const instance of [...instances].sort(byId)) {
+    const pool = byLanguage.get(instance.language) ?? [];
+    pool.push(instance);
+    byLanguage.set(instance.language, pool);
+  }
   return [...byLanguage.keys()].sort().flatMap((language) => {
     const pool = byLanguage.get(language)!;
     for (let i = pool.length - 1; i > 0; i -= 1) {

@@ -45,31 +45,33 @@ const near = ([aFrom, aTo]: [number, number], [bFrom, bTo]: [number, number], wi
   (aFrom <= bTo && aTo >= bFrom) ||
   Math.min(Math.abs(aFrom - bTo), Math.abs(aTo - bFrom)) <= window;
 
-/** References in order; each generated comment earns at most one line and one semantic match. */
 export async function matchComments(
   references: JudgeComment[],
   generated: JudgeComment[],
   sameConcern: SameConcern,
   lineWindow = 1,
 ): Promise<{ lineMatched: boolean[]; matchedGenerated: (number | null)[] }> {
+  const candidates = generated.map((comment) => ({
+    note: stripThinkingTags(comment.note),
+    path: normalizePath(comment.path),
+    side: comment.side,
+    range: lineRange(comment),
+  }));
   const lineUsed = new Set<number>();
   const semanticUsed = new Set<number>();
   const lineMatched: boolean[] = [];
   const matchedGenerated: (number | null)[] = [];
   for (const reference of references) {
     const referenceNote = stripThinkingTags(reference.note);
+    const referencePath = normalizePath(reference.path);
     const referenceRange = lineRange(reference);
     let line = false;
     let matched: number | null = null;
-    for (const [index, candidate] of referenceNote ? generated.entries() : []) {
-      const candidateNote = stripThinkingTags(candidate.note);
-      const referencePath = normalizePath(reference.path);
-      const candidatePath = normalizePath(candidate.path);
-      const candidateRange = lineRange(candidate);
-      if (!candidateNote) continue;
-      if (referencePath && candidatePath && referencePath !== candidatePath) continue;
+    for (const [index, candidate] of referenceNote ? candidates.entries() : []) {
+      if (!candidate.note) continue;
+      if (referencePath && candidate.path && referencePath !== candidate.path) continue;
       if (reference.side && candidate.side && reference.side !== candidate.side) continue;
-      if (referenceRange && candidateRange && !near(referenceRange, candidateRange, lineWindow))
+      if (referenceRange && candidate.range && !near(referenceRange, candidate.range, lineWindow))
         continue;
       if (!line && !lineUsed.has(index)) {
         line = true;
@@ -77,7 +79,7 @@ export async function matchComments(
       }
       if (semanticUsed.has(index)) continue;
       // Sequential by design: which candidate a reference claims depends on earlier verdicts.
-      if (await sameConcern(referenceNote, candidateNote)) {
+      if (await sameConcern(referenceNote, candidate.note)) {
         matched = index;
         semanticUsed.add(index);
         break;
