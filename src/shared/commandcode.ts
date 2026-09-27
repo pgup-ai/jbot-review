@@ -197,7 +197,7 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
  * Unknown models keep the CLI default. Unsupported built-in efforts use the
  * catalog fallback; explicit efforts clamp to the nearest declared tier.
  */
-function commandCodeReasoningEffort(
+export function commandCodeReasoningEffort(
   model: string,
   modelOptions: Record<string, unknown> | undefined,
   explicit: boolean,

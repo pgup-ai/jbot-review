@@ -387,6 +387,7 @@ export async function runGuidelineComplianceCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  modelOptions?: Record<string, unknown>,
 ): Promise<Finding[]> {
   const prompt = promptForModel(model, assembleGuidelineCompliancePrompt(prContext, guidelines));
   const { raw, sessionID } = await promptPlanAgent(
@@ -397,6 +398,8 @@ export async function runGuidelineComplianceCheck(
     log,
     timeoutMs,
     onTokenUsage,
+    undefined,
+    { modelOptions },
   );
   return parseAuxSessionWithRepair(
     { runtime, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
@@ -582,13 +585,19 @@ async function promptPlanAgent(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   outcome?: PromptOutcome,
-  session: { tier?: OptionTier; forkFrom?: string; toolLess?: boolean } = {},
+  session: {
+    tier?: OptionTier;
+    modelOptions?: Record<string, unknown>;
+    forkFrom?: string;
+    toolLess?: boolean;
+  } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   const sessionID = await createReviewSession(runtime, {
     label,
     model,
     tier: session.tier,
+    modelOptions: session.modelOptions,
     forkFrom: session.forkFrom,
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent, session.toolLess),
   });

@@ -52,6 +52,8 @@ export interface ReviewBackend {
     log: (msg: string) => void,
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
+    /** Compliance's own options (effort pinned to low); backends without per-session options ignore them. */
+    modelOptions?: Record<string, unknown>,
   ): Promise<Finding[]>;
   runFindingVerification(
     model: string,

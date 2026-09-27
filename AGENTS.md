@@ -56,7 +56,11 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    documentation-only follow-ups with unchanged base and policy. Incremental
    follow-ups may also reuse a matching completed guideline pass when no scoped
    rule applies and complete global guidance is delivered in the main prompt;
-   unknown scope or incomplete guidance keeps the pass enabled. Main review
+   unknown scope or incomplete guidance keeps the pass enabled. A full
+   follow-up may run the guideline pass only on files whose own edits changed
+   since the latest review's completed pass under the same pass policy; the
+   report and telemetry show that scope, and explicit reruns, auto-approval and
+   unavailable history check every file. Main review
    still covers its selected scope and verification remains enabled. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
    Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement

@@ -46,6 +46,7 @@ import { buildFindingSourceContext } from './finding-context.ts';
 import {
   auxiliaryPolicy,
   planAuxiliaryReuse,
+  planComplianceRecheck,
   withAuxiliaryBaselines,
   type AuxiliaryBaseline,
 } from './auxiliary-reuse.ts';
@@ -81,6 +82,7 @@ import {
   type TelemetryRecorder,
 } from './telemetry.ts';
 import {
+  auxiliaryModelPolicy,
   modelPolicy,
   runConfiguration,
   runIdentity,
@@ -151,6 +153,7 @@ import {
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
+  complianceModelOptions,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
@@ -180,6 +183,7 @@ import {
   assembleFindingVerificationPrompt,
   verifierOmissionNote,
   COMPLIANCE_PACK_NOTE,
+  COMPLIANCE_RECHECK_NOTE,
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
@@ -209,6 +213,7 @@ import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_MODEL_LIMITS,
   COMMANDCODE_TELEMETRY_CAPABILITY,
+  commandCodeReasoningEffort,
   commandCodeSessionEffort,
   fetchCommandCodePlanUsageLine,
   selectCommandCodeAccessKey,
@@ -379,7 +384,15 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+    runGuidelineComplianceCheck: (
+      model,
+      prContext,
+      guidelines,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runOpencodeGuidelineComplianceCheck(
         runtime,
         model,
@@ -388,6 +401,7 @@ function createOpencodeBackend(
         log,
         timeoutMs,
         onTokenUsage,
+        modelOptions,
       ),
     runFindingVerification: (
       model,
@@ -427,7 +441,15 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
       runPiReview(runtime, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runPiAddressedPriorCommentsCheck(runtime, model, prContext, log, timeoutMs, onTokenUsage),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+    runGuidelineComplianceCheck: (
+      model,
+      prContext,
+      guidelines,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runPiGuidelineComplianceCheck(
         runtime,
         model,
@@ -436,6 +458,7 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
+        modelOptions,
       ),
     runFindingVerification: (
       model,
@@ -551,7 +574,15 @@ function createCommandCodeBackend(
           effortFor(model),
         ),
       ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+    runGuidelineComplianceCheck: (
+      model,
+      prContext,
+      guidelines,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       processes.run('guideline-compliance', () =>
         runCommandCodeGuidelineComplianceCheck(
           workspace,
@@ -562,7 +593,7 @@ function createCommandCodeBackend(
           timeoutMs,
           onTokenUsage,
           runtime,
-          effortFor(model),
+          modelOptions ? commandCodeReasoningEffort(model, modelOptions, true) : effortFor(model),
         ),
       ),
     runFindingVerification: (
@@ -1522,6 +1553,13 @@ async function runReviewPipeline(params: {
   // Undefined aux options mean the aux role shares the main entry, so a
   // verifier alias there hangs off the main (root) entry.
   const verifierOnMainEntry = verifierNeedsOwnOptions && auxModelOptions === undefined;
+  const complianceSessionOptions = supportedModelOptions(
+    auxProviderID,
+    auxModelID,
+    complianceModelOptions(resolvedMainOptions, auxModelOptions),
+  );
+  if (complianceSessionOptions)
+    log(`Guideline-compliance options: ${JSON.stringify(complianceSessionOptions)}`);
   // Stamped into the posted review's metadata: the arm identity for effort
   // A/Bs. Undefined wherever the main engine does not consume the option.
   const commandCodeEffortContext = {
@@ -1550,8 +1588,6 @@ async function runReviewPipeline(params: {
     version: 1,
     ...modelPolicy(options, { model, auxModel, baseURL }),
     guidelines: policyGuidelines,
-    title: pullTitle,
-    body: pullBody,
     reviewer: runIdentity(process.env).reviewerRevision,
   });
   const scopeStartedAt = Date.now();
@@ -2555,39 +2591,32 @@ async function runReviewPipeline(params: {
         ? ['guideline-compliance']
         : []),
     ];
-    const policy = auxiliaryPolicy({
-      scopePolicy,
-      model: auxModel,
-      backend: auxBackend.name,
-      modelOptions: options.modelOptions,
-      auxModelOptions,
-      baseURL: options.auxBaseURL || baseURL,
-      title: params.pullTitle,
-      body: params.pullBody,
+    // PR text, the jbot build and the pool's per-head draw stay out: bots edit PR
+    // descriptions after pushes, releases ship daily, and each head draws its own member.
+    const auxPolicy = {
+      ...auxiliaryModelPolicy(options, { model, auxModel, baseURL, auxBackend: auxBackend.name }),
       context: options.enhancedContext,
-      configuration: runConfiguration(options, model).configurationHash,
-      linkedIssueContext,
       experiment: options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
-      prompts: [
-        'guideline-compliance',
-        ...Object.keys(REVIEW_LENSES).map((key) => `review-${key}`),
-      ].map((session) =>
-        session === 'guideline-compliance'
-          ? assembleGuidelineCompliancePrompt('', policyGuidelines)
-          : assembleReviewPrompt(
-              '',
-              policyGuidelines,
-              REVIEW_LENSES[session.slice(7)],
-              options.evidenceQuotes,
-              options.embeddedFirstPrompt,
-              {
-                toolsAvailable: auxBackend.canReadWorkspace,
-                contextFirst: options.sharedPrefixPrompt,
-              },
-            ),
-      ),
-    });
+    };
+    const policyFor = (session: string) =>
+      auxiliaryPolicy({
+        ...auxPolicy,
+        prompt:
+          session === 'guideline-compliance'
+            ? assembleGuidelineCompliancePrompt('', policyGuidelines)
+            : assembleReviewPrompt(
+                '',
+                policyGuidelines,
+                REVIEW_LENSES[session.slice(7)],
+                options.evidenceQuotes,
+                options.embeddedFirstPrompt,
+                {
+                  toolsAvailable: auxBackend.canReadWorkspace,
+                  contextFirst: options.sharedPrefixPrompt,
+                },
+              ),
+      });
     const adaptiveReuse =
       options.experiment.preset === 'adaptive' && options.dynamicFanout && !localDiff;
     const auxiliaryDecisions =
@@ -2597,7 +2626,7 @@ async function runReviewPipeline(params: {
             base: baseSha,
             head: headSha,
             reviewedHead,
-            policy,
+            policyFor,
             sessions: adaptiveReuse
               ? auxiliarySessions
               : auxiliarySessions.filter((session) => session === 'guideline-compliance'),
@@ -2614,19 +2643,6 @@ async function runReviewPipeline(params: {
               : {}),
           })
         : [];
-    if (!auxiliaryDecisions.some((decision) => decision.session === 'guideline-compliance')) {
-      log(
-        `Auxiliary scheduling: ${JSON.stringify({
-          session: 'guideline-compliance',
-          action: guidelineCandidate && complianceGuidelines ? 'run' : 'skip',
-          reason: !guidelineCandidate
-            ? 'disabled-or-fanout'
-            : !complianceGuidelines
-              ? 'no-guidelines'
-              : 'full-review',
-        })}`,
-      );
-    }
     const reusedAux = new Map(
       auxiliaryDecisions.flatMap((decision) =>
         decision.baseline ? [[decision.session, decision.baseline] as const] : [],
@@ -2655,6 +2671,79 @@ async function runReviewPipeline(params: {
       auxBackend.name,
       modelSupportsAgenticTools(auxProviderID, auxModelID),
     );
+    const sweepGuidelines =
+      options.guidelineSweep && mainBackend.supportsGuidelineSweep ? guidelines : undefined;
+    if (sweepGuidelines)
+      log(
+        'Guideline checking will continue in each main review session; verification remains separate.',
+      );
+    // Compliance rides the first lens when one runs with tools.
+    const complianceInLens = candidateLensKeys.length > 0 && !toolLessAux;
+    const complianceDecided = auxiliaryDecisions.some(
+      (decision) => decision.session === 'guideline-compliance',
+    );
+    // Compliance folded into main review (sweep) or a lens (joint) keeps its full scope.
+    // Explicit reruns and auto-approval re-attest every file.
+    const complianceRecheck =
+      !complianceDecided &&
+      guidelineCandidate &&
+      complianceGuidelines &&
+      !localDiff &&
+      options.skipUnchanged &&
+      !options.autoApprove &&
+      headSha &&
+      baseSha &&
+      reviewScope.mode === 'full' &&
+      !sweepGuidelines &&
+      !complianceInLens
+        ? await planComplianceRecheck({
+            priorBody: priorJbotReviewGroups.at(-1)?.body ?? '',
+            policy: policyFor('guideline-compliance'),
+            head: headSha,
+            files,
+            audited: (base, head) => compareCommitFiles(octokit, owner, repo, base, head),
+          })
+        : undefined;
+    const recheckFiles = complianceRecheck?.files;
+    const auditedHead = complianceRecheck?.baseline?.head;
+    const complianceScope = complianceRecheck && {
+      reason: complianceRecheck.reason,
+      files: recheckFiles?.length ?? files.length,
+      totalFiles: files.length,
+      ...(auditedHead ? { reviewedHead: auditedHead } : {}),
+    };
+    if (!complianceDecided)
+      log(
+        `Auxiliary scheduling: ${JSON.stringify({
+          session: 'guideline-compliance',
+          action:
+            recheckFiles?.length === 0
+              ? 'reuse'
+              : guidelineCandidate && complianceGuidelines
+                ? 'run'
+                : 'skip',
+          reason: !guidelineCandidate
+            ? 'disabled-or-fanout'
+            : !complianceGuidelines
+              ? 'no-guidelines'
+              : 'full-review',
+          ...complianceScope,
+        })}`,
+      );
+    if (recheckFiles?.length === 0 && auditedHead && headSha && baseSha) {
+      reusedAux.set('guideline-compliance', {
+        session: 'guideline-compliance',
+        head: headSha,
+        base: baseSha,
+        policy: policyFor('guideline-compliance'),
+      });
+      recordCoverage({
+        session: 'guideline-compliance',
+        state: 'reused',
+        reusedFrom: auditedHead,
+      });
+      guidelineCandidate = false;
+    }
     // Cline and other checkout-blind verifiers cannot open the code a finding depends on.
     const auxCheckoutBlind = !(auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff);
     const guidelineSelection = {
@@ -2730,6 +2819,13 @@ async function runReviewPipeline(params: {
       );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    const recheck = new Set(recheckFiles);
+    const complianceShards = recheck.size
+      ? shardFilesForReview(
+          files.filter((file) => recheck.has(file.filename)),
+          { requestedShards: options.reviewShards },
+        )
+      : shards;
     const buildPagePack = async (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) =>
       buildContextPack(
         planPageFiles(plan.units ?? []),
@@ -2833,6 +2929,7 @@ async function runReviewPipeline(params: {
       );
       telemetry.recordExecution({
         reviewScope: scopeStats,
+        ...(complianceScope ? { complianceScope } : {}),
         reviewPasses: effectiveReviewPasses,
         reviewShards: shardPlans.length,
         lensKeys: candidateLensKeys,
@@ -2884,12 +2981,6 @@ async function runReviewPipeline(params: {
         'Shard cache disabled: the configured directory resolves inside the reviewed checkout (forgeable).',
       );
     }
-    const sweepGuidelines =
-      options.guidelineSweep && mainBackend.supportsGuidelineSweep ? guidelines : undefined;
-    if (sweepGuidelines)
-      log(
-        'Guideline checking will continue in each main review session; verification remains separate.',
-      );
     const shardCache =
       shardCacheDir && headSha
         ? {
@@ -2967,9 +3058,7 @@ async function runReviewPipeline(params: {
     const lensSharesMainPrefix =
       auxModel === model && shardPlans.length <= 1 && !shardPlans[0]?.contextPack;
     const jointGuidelines =
-      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0 && !toolLessAux
-        ? complianceGuidelines
-        : '';
+      guidelineCandidate && !sweepGuidelines && complianceInLens ? complianceGuidelines : '';
     const preparingFinders = new Set([
       ...candidateLensKeys.map((key) => `review-${key}`),
       ...(guidelineCandidate && complianceGuidelines && !sweepGuidelines && !jointGuidelines
@@ -3062,11 +3151,13 @@ async function runReviewPipeline(params: {
               UNTRUSTED_PR_CONTENT_NOTE,
               ...lensContextBlocks.filter((block) => block !== usageTrailer),
             )
-          : packPages
-            ? joinContext(fullCoreContext, COMPLIANCE_PACK_NOTE)
-            : fullCoreContext,
+          : joinContext(
+              fullCoreContext,
+              packPages ? COMPLIANCE_PACK_NOTE : '',
+              recheckFiles?.length ? COMPLIANCE_RECHECK_NOTE : '',
+            ),
         context7Block: '',
-        shards,
+        shards: lens ? shards : complianceShards,
         budget: auxPromptBudget,
         renderPrompt: render,
         guidelines: lens ? lensRules : complianceGuidelines,
@@ -3175,10 +3266,12 @@ async function runReviewPipeline(params: {
                 model: auxModel,
                 prContext: coreContext,
                 plans: () => prepareAuxPlans(),
+                diffFiles: changedFiles,
                 onQueued: finderQueued,
                 guidelinesForPrompt: complianceGuidelines,
                 hasGuidelines: Boolean(complianceGuidelines),
                 enabled: guidelineCandidate && !sweepGuidelines,
+                modelOptions: complianceSessionOptions,
                 timeoutMs: finderTimeoutMs,
                 log,
                 onTokenUsage: recordTokenUsage,
@@ -3541,7 +3634,7 @@ async function runReviewPipeline(params: {
                   },
                 ];
               return auxCoverage.get(session)?.complete && !partialSessions.has(session)
-                ? [{ session, head: headSha, base: baseSha, policy }]
+                ? [{ session, head: headSha, base: baseSha, policy: policyFor(session) }]
                 : [];
             })
         : [];
@@ -3617,6 +3710,15 @@ async function runReviewPipeline(params: {
       auxiliaryBaselines,
       diagnosticsUrl,
       reviewScope: scopeStats,
+      ...(recheckFiles && auditedHead
+        ? {
+            complianceScope: {
+              files: recheckFiles.length,
+              totalFiles: files.length,
+              reviewedHead: auditedHead,
+            },
+          }
+        : {}),
       baseline:
         verificationEnabled &&
         headSha &&
@@ -5256,8 +5358,11 @@ export function startGuidelineComplianceCheck(params: {
   prContext: string;
   guidelinesForPrompt: string;
   plans?: () => ShardPlan[] | Promise<ShardPlan[]>;
+  /** Every PR file; findings on one outside the pages are left to an earlier pass. */
+  diffFiles?: string[];
   hasGuidelines: boolean;
   enabled: boolean;
+  modelOptions?: Record<string, unknown>;
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
@@ -5285,7 +5390,9 @@ export function startGuidelineComplianceCheck(params: {
     .then(async () => {
       const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
         await (params.plans?.() ?? [{ context: params.prContext }]);
-      const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
+      const changed = new Set(
+        params.diffFiles ?? plans.flatMap((plan) => plan.assignedFiles ?? []),
+      );
       const pending = Promise.all(
         plans.map(async (plan, page) => {
           try {
@@ -5296,6 +5403,7 @@ export function startGuidelineComplianceCheck(params: {
               params.log,
               params.timeoutMs,
               params.onTokenUsage,
+              params.modelOptions,
             );
             const kept = clampFindingsToFiles(findings, plan.assignedFiles, changed);
             params.onFindings?.(kept);
@@ -5516,6 +5624,7 @@ export function buildBody(
     auxiliaryBaselines: AuxiliaryBaseline[];
     diagnosticsUrl?: string;
     reviewScope?: { mode: 'full' | 'incremental'; files: number; totalFiles: number };
+    complianceScope?: { files: number; totalFiles: number; reviewedHead: string };
     baseline?: ReviewBaseline;
   },
 ): string {
@@ -5526,6 +5635,16 @@ export function buildBody(
       `**Scope:** Incremental follow-up; ${experiment.reviewScope.files} of ${experiment.reviewScope.totalFiles} PR files re-reviewed, including related earlier changes.`,
       '',
     );
+  const recheck = experiment?.complianceScope;
+  if (recheck) {
+    const since = `[\`${recheck.reviewedHead.slice(0, 12)}\`](https://github.com/${owner}/${repo}/commit/${recheck.reviewedHead})`;
+    lines.push(
+      recheck.files
+        ? `**Guideline compliance:** re-checked ${recheck.files} of ${recheck.totalFiles} files; the others have the same edits as at ${since} and keep that review's results.`
+        : `**Guideline compliance:** every file has the same edits as at ${since}, so that review's results stand.`,
+      '',
+    );
+  }
   const coverageNotice = formatIncompleteCoverage(incompleteSessions);
   if (coverageNotice) lines.push(coverageNotice, '');
   if (changesSinceLastReview.trim()) {

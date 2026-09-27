@@ -1678,6 +1678,53 @@ it('retains and clamps denied guideline candidates without claiming completed co
   assert.ok(coverage.includes('guideline-compliance:partial'));
 });
 
+it('runs compliance on its own options and drops findings on PR files left to an earlier pass', async () => {
+  const options: unknown[] = [];
+  const findings = ['a.ts', 'b.ts', 'outside.ts'].map((path): Finding => ({
+    path,
+    line: 1,
+    severity: 'P3',
+    title: 'Rule',
+    body: 'Cited rule',
+  }));
+  const result = await startGuidelineComplianceCheck({
+    backend: {
+      runGuidelineComplianceCheck: async (...args: unknown[]) => {
+        options.push(args[6]);
+        return findings;
+      },
+    } as unknown as ReviewBackend,
+    model: 'fake/model',
+    prContext: '',
+    guidelinesForPrompt: 'rules',
+    hasGuidelines: true,
+    enabled: true,
+    plans: () => [
+      {
+        label: 'a.ts',
+        context: 'a.ts',
+        baseContext: 'a.ts',
+        assignedFiles: ['a.ts'],
+        diffCoverage: {
+          assignedFiles: 1,
+          completeFiles: 1,
+          truncatedFiles: 0,
+          omittedFiles: 0,
+          bytes: 1,
+        },
+      },
+    ],
+    diffFiles: ['a.ts', 'b.ts'],
+    modelOptions: { reasoningEffort: 'low' },
+    log: () => {},
+  });
+  assert.deepEqual(options, [{ reasoningEffort: 'low' }]);
+  assert.deepEqual(
+    result.map((finding) => finding.path),
+    ['a.ts', 'outside.ts'],
+  );
+});
+
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
   assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
   assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);
@@ -1722,6 +1769,16 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     { auxiliaryBaselines: [], reviewScope: { mode: 'incremental', files: 2, totalFiles: 8 } },
   );
   assert.match(incremental, /2 of 8 PR files re-reviewed/);
+  const recheck = (files: number) =>
+    buildBody('', '', [], [], 'model', 'owner', 'repo', head, undefined, undefined, undefined, [], {
+      auxiliaryBaselines: [],
+      complianceScope: { files, totalFiles: 40, reviewedHead: 'b'.repeat(40) },
+    });
+  assert.match(
+    recheck(1),
+    /re-checked 1 of 40 files; the others have the same edits as at \[`b{12}`\]/,
+  );
+  assert.match(recheck(0), /every file has the same edits as at \[`b{12}`\]/);
   assert.equal(completedReviewHead(incremental), undefined);
   assert.equal(completedReviewHead(incremental, 'incremental'), head);
   assert.equal(

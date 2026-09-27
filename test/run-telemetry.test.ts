@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { normalizeOptions } from '../src/shared/runner.ts';
 import {
+  auxiliaryModelPolicy,
   effectiveReasoningEffort,
   modelPolicy,
   runConfiguration,
@@ -129,6 +130,22 @@ test('a pool draw is not a policy change; explicit options and a single model ar
   );
   const single = normalizeOptions({});
   assert.notEqual(policy(single, 'opencode/a'), policy(single, 'opencode/b'));
+  // Auxiliary baselines also ignore defaults sized to the diff, but not explicit options,
+  // and key the aux backend unless it follows a pool's draw.
+  const aux = (
+    modelOptions: Record<string, unknown>,
+    { explicit = false, auxBackend = 'opencode', options = single } = {},
+  ) =>
+    JSON.stringify(
+      auxiliaryModelPolicy(
+        { ...options, modelOptions, modelOptionsExplicit: explicit },
+        { model: 'opencode/a', auxModel: 'opencode/a', auxBackend },
+      ),
+    );
+  assert.equal(aux({ reasoningEffort: 'high' }), aux({ reasoningEffort: 'medium' }));
+  assert.notEqual(aux({ topP: 1 }, { explicit: true }), aux({ topP: 0.5 }, { explicit: true }));
+  assert.notEqual(aux({}), aux({}, { auxBackend: 'pi' }));
+  assert.equal(aux({}, { options: pool }), aux({}, { options: pool, auxBackend: 'commandcode' }));
 });
 
 test('attempt identity distinguishes reruns without confusing the reviewed SHA with the reviewer revision', () => {

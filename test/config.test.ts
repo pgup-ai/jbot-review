@@ -6,6 +6,7 @@ import {
   PROVIDERS,
   auxModelOptionsFor,
   clampReasoningEffort,
+  complianceModelOptions,
   credentialSecretValues,
   defaultModelOptions,
   modelSupportsPromptCache,
@@ -150,6 +151,26 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
       { reasoningEffort: 'high' },
     );
     assert.equal(clampReasoningEffort('xhigh', ['low', 'high', 'max']), 'max');
+  });
+});
+
+describe('compliance effort', () => {
+  it('pins the compliance session to low whatever the model default', () => {
+    assert.deepEqual(
+      complianceModelOptions({ reasoningEffort: 'low' }, { reasoningEffort: 'high', topP: 1 }),
+      { reasoningEffort: 'low', topP: 1 },
+    );
+    // Sharing the main entry lowers the main options, including an explicit `none`.
+    assert.deepEqual(complianceModelOptions({ reasoningEffort: 'max' }, undefined), {
+      reasoningEffort: 'low',
+    });
+    assert.deepEqual(complianceModelOptions({ reasoningEffort: 'none' }, undefined), {
+      reasoningEffort: 'low',
+    });
+    // Already low, provider-managed, or effort-less: no override.
+    assert.equal(complianceModelOptions(undefined, { reasoningEffort: 'low' }), undefined);
+    assert.equal(complianceModelOptions({ reasoningEffort: 'default' }, undefined), undefined);
+    assert.equal(complianceModelOptions({}, undefined), undefined);
   });
 });
 
