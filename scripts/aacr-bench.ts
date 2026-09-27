@@ -2,13 +2,12 @@
 //   npm run holdout:aacr -- sample --dataset D --out F [--per-language 1] [--seed 20260927]
 //   npm run holdout:aacr -- run --dataset D --sample F --model M --out DIR [--concurrency 4] [--timeout-min 30]
 //   npm run holdout:aacr -- score --dataset D --sample F --results DIR --judge-model M [--line-window 1] [--concurrency 4]
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
-  closeSync,
+  createWriteStream,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -25,6 +24,11 @@ import {
   type AacrInstance,
 } from '../src/shared/aacr-bench.ts';
 import { judgeMetrics, scoreCases, type JudgeCounts } from '../src/shared/benchmark-judge.ts';
+import {
+  createCliProcessScope,
+  onCliFatalSignal,
+  runCliProcess,
+} from '../src/shared/cli-process.ts';
 import { parseBenchmarkTelemetry } from '../src/shared/benchmark-runner.ts';
 import { PROVIDERS, providerCredentialSources } from '../src/shared/config.ts';
 import { startOpencodeJudge } from '../src/shared/semantic-judge.ts';
@@ -147,6 +151,9 @@ async function run() {
       );
     }
   }
+  // Ctrl-C tears down every review's process group, not just its tsx wrapper.
+  const processes = createCliProcessScope();
+  const unregister = onCliFatalSignal(() => processes.stop());
   await pool(instances, Number(option('concurrency', '4')), async (instance) => {
     const repo = prepared.get(instance.instanceId);
     if (!repo) return;
@@ -154,10 +161,12 @@ async function run() {
     try {
       const caseDir = join(out, instance.instanceId);
       mkdirSync(caseDir, { recursive: true });
-      for (const stale of ['jbot.json', 'meta.json']) rmSync(join(caseDir, stale), { force: true });
+      const official = join(out, 'official', `${instance.instanceId}.json`);
+      for (const stale of [join(caseDir, 'jbot.json'), join(caseDir, 'meta.json'), official])
+        rmSync(stale, { force: true });
       rmSync(worktree, { recursive: true });
       git(repo, 'worktree', 'add', '--detach', worktree, instance.head);
-      const log = openSync(join(caseDir, 'review.log'), 'w');
+      const log = createWriteStream(join(caseDir, 'review.log'));
       const started = Date.now();
       // A neutral launch dir keeps jbot's own .env out; only the provider's credentials pass through.
       const env = {
@@ -169,34 +178,27 @@ async function run() {
         JBOT_BENCHMARK_DRY_RUN: 'true',
         JBOT_BENCHMARK_OUTPUT: join(caseDir, 'jbot.json'),
       };
-      const exit = await new Promise<{ code: number | null; timedOut: boolean }>((done) => {
-        const child = spawn(
-          join(PROJECT_ROOT, 'node_modules', '.bin', 'tsx'),
-          [
-            join(PROJECT_ROOT, 'src', 'local', 'index.ts'),
-            '--workspace',
-            worktree,
-            '--base',
-            instance.base,
-          ],
-          { cwd: caseDir, env, stdio: ['ignore', log, log] },
+      let exit: { code: number | null; error?: string };
+      try {
+        const { exitCode } = await processes.run(instance.instanceId, () =>
+          runCliProcess(
+            join(PROJECT_ROOT, 'node_modules', '.bin', 'tsx'),
+            [
+              join(PROJECT_ROOT, 'src', 'local', 'index.ts'),
+              '--workspace',
+              worktree,
+              '--base',
+              instance.base,
+            ],
+            { cwd: caseDir, env, timeoutMs, timeoutMessage: 'review timed out', output: log },
+          ),
         );
-        const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-        // A spawn failure emits 'error', and 'close' may still follow it: settle once.
-        let settled = false;
-        const settle = (code: number | null, timedOut: boolean) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          closeSync(log);
-          done({ code, timedOut });
-        };
-        child.on('error', (error) => {
-          console.log(`SPAWN FAILED ${instance.instanceId}: ${error.message}`);
-          settle(null, false);
-        });
-        child.on('close', (code, signal) => settle(code, signal === 'SIGTERM'));
-      });
+        exit = { code: exitCode };
+      } catch (error) {
+        exit = { code: null, error: (error as Error).message };
+      } finally {
+        await new Promise((done) => log.end(done));
+      }
       const wallMs = Date.now() - started;
       const output = join(caseDir, 'jbot.json');
       const result = existsSync(output)
@@ -206,7 +208,7 @@ async function run() {
       if (result)
         // Token totals follow OCR's accounting: input includes cache reads, output includes reasoning.
         writeFileSync(
-          join(out, 'official', `${instance.instanceId}.json`),
+          official,
           JSON.stringify(
             toOfficialResult({
               instance,
@@ -224,7 +226,7 @@ async function run() {
         JSON.stringify({ ...exit, wallMs, findings: result?.findings.length }),
       );
       console.log(
-        `${result ? 'done' : 'FAILED'} ${instance.instanceId} exit=${exit.code} ${Math.round(wallMs / 1000)}s`,
+        `${result ? 'done' : 'FAILED'} ${instance.instanceId} exit=${exit.code}${exit.error ? ` (${exit.error})` : ''} ${Math.round(wallMs / 1000)}s`,
       );
     } catch (error) {
       console.log(`FAILED ${instance.instanceId}: ${(error as Error).message.split('\n')[0]}`);
@@ -232,7 +234,7 @@ async function run() {
       rmSync(worktree, { recursive: true, force: true });
       git(repo, 'worktree', 'prune');
     }
-  });
+  }).finally(unregister);
 }
 
 async function score() {
