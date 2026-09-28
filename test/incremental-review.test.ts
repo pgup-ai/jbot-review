@@ -394,10 +394,21 @@ test('a merge from the base branch re-reviews only the PR files it or the author
     ]);
     // A PR file the merge itself edited is re-reviewed, even with no new author edit.
     const nextTip = mergeMain('c/charlie.ts', charlie('C', 3));
-    assert.deepEqual(await scope(git('rev-parse', 'HEAD'), nextTip, head, mainTip), [
+    const merge = git('rev-parse', 'HEAD');
+    assert.deepEqual(await scope(merge, nextTip, head, mainTip), [
       'incremental',
       'bounded-base-merge',
       ['c/charlie.ts'],
+    ]);
+    // A base tip the PR has not merged forces a full review, whatever the author edited.
+    git('checkout', '-q', 'main');
+    write('docs/notes.ts', 'export const notes = 2;\n');
+    const unmergedTip = commit();
+    git('checkout', '-q', 'pr');
+    write('a/alpha.ts', 'export function alpha() {\n  return 12;\n}\n');
+    assert.deepEqual((await scope(commit(), unmergedTip, merge, nextTip)).slice(0, 2), [
+      'full',
+      'base-changed',
     ]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });

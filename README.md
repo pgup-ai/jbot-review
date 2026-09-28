@@ -426,8 +426,8 @@ already enabled by default. An explicit review request or the existing
 
 A follow-up can reuse the latest posted review that completed a baseline when
 its model, guidelines and review settings still match. PR title and
-description edits don't count. Merging the base branch into the PR doesn't
-either: the follow-up selects the PR files the author or the merged commits
+description edits don't count. A moved base counts only until the PR merges
+it: the follow-up then selects the PR files the author or the merged commits
 edited, plus PR files importing a module the merge changed. A rebase rewrites
 history and falls back to full review. A model pool counts
 as one setting, so the member a push draws does not force full review, and a

@@ -178,6 +178,8 @@ export async function planIncrementalReview(input: {
         [input.base, input.head],
       ].map(async ([base, head]) => (await git('merge-base', base, head)).trim()),
     );
+    // A base tip the PR has not merged can change code its unchanged files depend on.
+    if (input.base !== baseline.base && forks[1] !== input.base) return full('base-changed');
     const merged =
       forks[0] === forks[1]
         ? undefined
