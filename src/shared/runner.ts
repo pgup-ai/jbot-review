@@ -932,7 +932,7 @@ export interface ReviewRunOptions {
    * share its prefix cache. Off by default pending benchmark evidence.
    */
   sharedPrefixPrompt?: boolean;
-  /** JBOT_RULES_ONLY_TESTS arm: additive test files get only the guideline pass. Off by default. */
+  /** JBOT_RULES_ONLY_TESTS arm: new test files get only the guideline pass. Off by default. */
   rulesOnlyTests?: boolean;
   /**
    * TASK-065 arm: verification judges from a slim claim-checking context
@@ -5686,7 +5686,7 @@ export function buildBody(
       ({ label }) => label.replace(/-page-\d+$/, '') === 'guideline-compliance',
     );
     lines.push(
-      `**Rules-only tests:** ${rulesOnlyTests.length} test file(s) that only add tests skipped the deep review; ${
+      `**Rules-only tests:** ${rulesOnlyTests.length} new test file(s) skipped the deep review; ${
         checked
           ? 'the guideline pass checked them'
           : 'the guideline pass did not finish, so they got no review this run'

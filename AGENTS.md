@@ -67,12 +67,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    unavailable history check every file. Main review
    still covers its selected scope and verification remains enabled. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
-   With the opt-in `JBOT_RULES_ONLY_TESTS`, test-case files (matched by name)
-   whose diff only adds tests (no removed line, and no focus marker, hook or
-   module mock added to an existing file) leave the main and lens pages and are delivered by the
-   guideline pass alone, only when that standalone pass runs, auto-approval is
-   off and another file remains in the main review; the report and telemetry
-   list them.
+   With the opt-in `JBOT_RULES_ONLY_TESTS`, new test-case files (matched by
+   name) leave the main and lens pages and are delivered by the guideline pass
+   alone, only when that standalone pass runs, auto-approval is off and another
+   file remains in the main review; the report and telemetry list them.
    Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement
    sessions (lens passes, guideline pass) by diff shape — it never narrows the
    diff or gates the main review or verification.

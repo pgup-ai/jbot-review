@@ -5,24 +5,18 @@
 This is the first live run of `JBOT_RULES_ONLY_TESTS`, which is opt-in and off by
 default.
 
-**What the flag does.** Test files whose diff only adds tests leave the main and
-lens review pages, and only the guideline pass checks them. A file does not count
-as additive when an existing file gains:
-
-- a focus marker,
-- a setup/teardown hook, or
-- a module mock.
+**What the flag does.** New test files leave the main and lens review pages,
+and only the guideline pass checks them. Any change to an existing test file
+stays in the main review.
 
 **Corpus.** An internal recall set of 12 PR heads from a private backend
 repository, with 54 known issues.
 
-Across all 12 heads, the final classifier marks 9 test files as rules-only. It
+Across all 12 heads, the final classifier marks 5 test files as rules-only. It
 matches test-case names only, so helpers, fixtures and config under a test
-directory stay in the main review. The 9 files make up 8.2% of all diff bytes
-(42.7 KB of 518.7 KB), and 6 of the 12 heads have at least one. 2 of the 54 known
+directory stay in the main review. The 5 files make up 6.5% of all diff bytes
+(33.6 KB of 518.7 KB), and 4 of the 12 heads have at least one. 2 of the 54 known
 issues sit in those files, both judgment calls rather than written-rule violations.
-The hook rule keeps a third known issue, which sits in a hook added to an existing
-spec, in the main review.
 
 **Cases.** The two heads with the most rules-only bytes:
 
@@ -31,9 +25,9 @@ spec, in the main review.
 | A    | 1                | 27.4 KB          | 36%           |
 | B    | 2                | 7.9 KB           | 26%           |
 
-The runs used an earlier classifier that also counted any file under a test
-directory. With the final name-based rule, case B routes 1 file (5.9 KB, 19%)
-instead of 2.
+The runs used an earlier classifier. It also counted any file under a test
+directory, and existing test files that only gained lines. With the final rule,
+case A is unchanged and case B routes no files.
 
 **Arms.** For each case, one run with the flag off and one with it on, run
 concurrently: 4 reviews in total. All runs use

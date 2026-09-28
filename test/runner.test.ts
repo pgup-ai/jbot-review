@@ -1800,7 +1800,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     );
   assert.match(
     rulesOnly([]),
-    /\*\*Rules-only tests:\*\* 1 test file\(s\).*checked them: `a\.spec\.ts`\./,
+    /\*\*Rules-only tests:\*\* 1 new test file\(s\).*checked them: `a\.spec\.ts`\./,
   );
   assert.match(
     rulesOnly([{ label: 'guideline-compliance-page-2', reason: 'timed out' }]),

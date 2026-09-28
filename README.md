@@ -1023,10 +1023,10 @@ and precision against seeded defects.
   staggered 8 s apart so sessions on one provider can hit its automatic prefix
   cache. The output reminder stays last. Cache hits only follow when sessions
   share a model and a byte-identical leading block; measure before flipping it),
-  `JBOT_RULES_ONLY_TESTS` (off by default; test files that only add tests, with
-  no removed line and no focus marker, hook or module mock added to an existing
-  file, skip main and lens review and get only the guideline pass, which must
-  run for that review; the review body lists them. Files count as tests by
+  `JBOT_RULES_ONLY_TESTS` (off by default; new test files skip main and lens
+  review and get only the guideline pass, which must run for that review;
+  changes to existing test files stay in the main review, and the review body
+  lists the skipped files. Files count as tests by
   test-case name (`*.test.*`, `*.spec.*`, `_test.go`, `test_*.py`, `_spec.rb`,
   `src/test/**/*Test.java`), so helpers, fixtures and config stay in the main
   review. Measure before enabling),

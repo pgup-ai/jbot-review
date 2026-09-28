@@ -2243,7 +2243,7 @@ export function buildRulesOnlyTestsContext(paths: string[]): string {
   if (paths.length === 0) return '';
   return [
     '## Rules-only test files',
-    "These changed test files only add new tests. The separate guideline pass checks them against the repository's rules, so they are not on your pages and are not mandatory review work.",
+    "These test files are new in this PR. The separate guideline pass checks them against the repository's rules, so they are not on your pages and are not mandatory review work.",
     'They are context: they show which tests this PR adds, so do not report missing tests for code they cover. Report a concrete defect in them only when you come across one.',
     'This explicit scope overrides the coverage protocol for these files.',
     boundedPromptContext(paths.join('\n'), 8192, 'Rules-only test file list'),
