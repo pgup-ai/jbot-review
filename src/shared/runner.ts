@@ -932,7 +932,7 @@ export interface ReviewRunOptions {
    * share its prefix cache. Off by default pending benchmark evidence.
    */
   sharedPrefixPrompt?: boolean;
-  /** JBOT_RULES_ONLY_TESTS arm: new test files get only the guideline pass. Off by default. */
+  /** JBOT_RULES_ONLY_TESTS arm: new test files get only the guideline pass. On by default. */
   rulesOnlyTests?: boolean;
   /**
    * TASK-065 arm: verification judges from a slim claim-checking context
@@ -4130,7 +4130,7 @@ export function normalizeOptions(
     commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     sharedPrefixPrompt: options?.sharedPrefixPrompt ?? false,
-    rulesOnlyTests: options?.rulesOnlyTests ?? false,
+    rulesOnlyTests: options?.rulesOnlyTests ?? true,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
     auxApiKey: options?.auxApiKey ?? '',

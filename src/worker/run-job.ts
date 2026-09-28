@@ -106,6 +106,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
         guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
         embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
+        rulesOnlyTests: parseEnvBoolean('JBOT_RULES_ONLY_TESTS', true),
         onReviewResult: (r) => {
           review = { findings: r.findings, incompleteSessions: r.incompleteSessions };
         },

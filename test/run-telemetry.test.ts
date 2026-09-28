@@ -54,11 +54,11 @@ test('configuration fingerprints policy changes while excluding credentials and 
     first.configurationHash,
     runConfiguration({ ...options, sharedPrefixPrompt: true }, 'opencode/a').configurationHash,
   );
-  assert.equal(
+  assert.notEqual(
     first.configurationHash,
     runConfiguration({ ...options, rulesOnlyTests: false }, 'opencode/a').configurationHash,
   );
-  assert.notEqual(
+  assert.equal(
     first.configurationHash,
     runConfiguration({ ...options, rulesOnlyTests: true }, 'opencode/a').configurationHash,
   );

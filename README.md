@@ -471,7 +471,7 @@ omissions. Main reviews continue to cover the full base-to-head diff.
 
 **Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on),
 `JBOT_CONTEXT_TRIM` (off), `JBOT_SHARED_PREFIX_PROMPT` (off) and
-`JBOT_RULES_ONLY_TESTS` (off) are set by environment rather than action input;
+`JBOT_RULES_ONLY_TESTS` (on) are set by environment rather than action input;
 the [local review](#local-review) knob list describes what each changes. Map
 them onto the `uses:` step to switch one from a repo variable without editing a
 file:
@@ -1023,13 +1023,14 @@ and precision against seeded defects.
   staggered 8 s apart so sessions on one provider can hit its automatic prefix
   cache. The output reminder stays last. Cache hits only follow when sessions
   share a model and a byte-identical leading block; measure before flipping it),
-  `JBOT_RULES_ONLY_TESTS` (off by default; new test files skip main and lens
+  `JBOT_RULES_ONLY_TESTS` (on by default; new test files skip main and lens
   review and get only the guideline pass, which must run for that review;
-  changes to existing test files stay in the main review, and the review body
-  lists the skipped files. Files count as tests by
-  test-case name (`*.test.*`, `*.spec.*`, `_test.go`, `test_*.py`, `_spec.rb`,
-  `src/test/**/*Test.java`), so helpers, fixtures and config stay in the main
-  review. Measure before enabling),
+  changes to existing test files stay in the main review, as does every file
+  when the PR only adds tests or `auto-approve` is on, and the review body
+  lists the skipped files. Files count as tests by test-case name (`*.test.*`,
+  `*.spec.*`, `_test.go`, `test_*.py`, `_spec.rb`, `src/test/**/*Test.java`),
+  so helpers, fixtures and config stay in the main review. `false` keeps new
+  test files in the main review),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;

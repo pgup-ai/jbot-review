@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
     verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
     sharedPrefixPrompt: parseEnvBoolean('JBOT_SHARED_PREFIX_PROMPT', false),
-    rulesOnlyTests: parseEnvBoolean('JBOT_RULES_ONLY_TESTS', false),
+    rulesOnlyTests: parseEnvBoolean('JBOT_RULES_ONLY_TESTS', true),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings(modelPool)) {
