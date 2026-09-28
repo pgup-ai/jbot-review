@@ -123,7 +123,8 @@ interface OpencodeKeyProbe {
 }
 
 /**
- * Most weekly allowance left wins; monthly breaks ties. Unlike CommandCode a
+ * Keys with the 5h and weekly windows open are eligible; most monthly allowance
+ * left wins, weekly breaks ties. Unlike CommandCode a
  * spent plan is never fatal here — overage bills the credit balance rather than
  * refusing the request — so an exhausted key stays selectable as a last resort.
  */
@@ -146,17 +147,17 @@ export function pickOpencodeApiKey(probes: readonly OpencodeKeyProbe[]): {
   const overageOk = reachable.filter((probe) => probe.usage.useBalance);
   const pool = windowOpen.length > 0 ? windowOpen : overageOk.length > 0 ? overageOk : reachable;
   const best = pool.reduce((a, b) => {
-    const headroomA = weeklyHeadroom(a.usage);
-    const headroomB = weeklyHeadroom(b.usage);
+    const headroomA = monthlyHeadroom(a.usage);
+    const headroomB = monthlyHeadroom(b.usage);
     if (headroomB > headroomA) return b;
-    if (headroomB === headroomA && monthlyHeadroom(b.usage) > monthlyHeadroom(a.usage)) return b;
+    if (headroomB === headroomA && weeklyHeadroom(b.usage) > weeklyHeadroom(a.usage)) return b;
     return a;
   });
   const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
   // The full-headroom sentinel for an unmetered account must not read as a real meter.
-  const standing = best.usage.week
-    ? `${Math.round(weeklyHeadroom(best.usage) * 100)}% of weekly limit left`
-    : 'no weekly limit';
+  const standing = best.usage.month
+    ? `${Math.round(monthlyHeadroom(best.usage) * 100)}% of monthly limit left`
+    : 'no monthly limit';
   return {
     key: best.key,
     reason:
@@ -200,8 +201,8 @@ async function fetchOpencodeGoUsage(key: string): Promise<OpencodeGoUsage | unde
 }
 
 /**
- * Resolves a comma-separated opencode key list to the account with the most
- * weekly allowance left, probing once per run so both roles share that account.
+ * Resolves a comma-separated opencode key list to the open-window account with
+ * the most monthly allowance left, probing once per run so both roles share that account.
  * A single key still reports its meters; a non-opencode provider is returned
  * untouched without a request.
  */
