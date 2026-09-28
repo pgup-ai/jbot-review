@@ -180,7 +180,7 @@ const LARGE_DELETION_DOMINANCE = 3;
  * out of the suppressed path so contract-api review still fires. Erring toward
  * over-review here is safe; under-reviewing a contract is not.
  */
-export const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
 export function classifyChangeShape(files: PrFile[]): ChangeShape {
   const filenames = files.map((file) => file.filename);

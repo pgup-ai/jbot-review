@@ -20,25 +20,41 @@ it('sends new test files and appended cases to the guideline pass alone', () => 
     'pkg/a_test.go',
     'tests/test_a.py',
     'spec/a_spec.rb',
+    'core/src/test/java/a/FooTest.java',
   ])
     assert.ok(rulesOnly(filename, '@@ -0,0 +1 @@\n+ok'), filename);
 });
 
-it('keeps edits, deletions and additions that change existing tests in the main review', () => {
+it('keeps edits, risky additions, patchless files and non-test files in the main review', () => {
   assert.ok(
     !rulesOnly('test/y.test.ts', '@@ -1,2 +1,2 @@\n-expect(a).toBe(1);\n+expect(a).toBe(2);'),
   );
   assert.ok(!rulesOnly('test/y.test.ts', '@@ -1,2 +0,0 @@\n-a\n-b'));
-  // A removed SQL comment reads `--- old`, which diffLineCounts skips as a file header.
-  assert.ok(!rulesOnly('test/q.sql', '@@ -1,2 +1 @@\n--- old\n keep'));
-  for (const line of [
-    "  it.only('b', () => {});",
-    'beforeEach(() => {});',
-    "jest.mock('x');",
-    '  @BeforeEach',
+  // A removed line reading `--- old` (a SQL-style comment) is one diffLineCounts skips as a header.
+  assert.ok(!rulesOnly('test/q.test.ts', '@@ -1,2 +1 @@\n--- old\n keep'));
+  assert.ok(!rulesOnlyTestFiles([{ filename: 'src/x.spec.ts' }, code], on).size);
+  for (const [filename, line] of [
+    ['test/y.test.ts', "  it.only('b', () => {});"],
+    ['test/y.test.ts', "  test.only.each([['b']])('b', () => {});"],
+    ['test/y.test.ts', "  it['only']('b', () => {});"],
+    ['test/y.test.ts', 'beforeEach(() => {});'],
+    ['test/y.test.ts', "jest.mock('x');"],
+    ['test/y.test.ts', '  @BeforeEach'],
+    ['spec/y_spec.rb', '  fcontext "x" do'],
+    ['spec/y_spec.rb', '  fit "x" do'],
+    ['spec/y_spec.rb', '  it "x", focus: true do'],
+    ['spec/y_spec.rb', '  before(:each) do'],
+    ['spec/y_spec.rb', '  let!(:user) { create(:user) }'],
   ])
-    assert.ok(!rulesOnly('test/y.test.ts', appended(line)), line);
-  for (const filename of ['spec/openapi.yaml', 'src/api-spec.ts'])
+    assert.ok(!rulesOnly(filename, appended(line)), line);
+  // Helpers, fixtures and config under a test dir are not test cases.
+  for (const filename of [
+    'spec/openapi.yaml',
+    'src/api-spec.ts',
+    'test/helpers/db.ts',
+    'test/fixtures/accounts.ts',
+    'test/jest.config.ts',
+  ])
     assert.ok(!rulesOnly(filename, '@@ -0,0 +1 @@\n+ok'), filename);
 });
 

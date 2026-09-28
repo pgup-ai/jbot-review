@@ -1026,7 +1026,10 @@ and precision against seeded defects.
   `JBOT_RULES_ONLY_TESTS` (off by default; test files that only add tests, with
   no removed line and no focus marker, hook or module mock added to an existing
   file, skip main and lens review and get only the guideline pass, which must
-  run for that review; the review body lists them. Measure before enabling),
+  run for that review; the review body lists them. Files count as tests by
+  test-case name (`*.test.*`, `*.spec.*`, `_test.go`, `test_*.py`, `_spec.rb`,
+  `src/test/**/*Test.java`), so helpers, fixtures and config stay in the main
+  review. Measure before enabling),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
