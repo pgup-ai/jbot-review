@@ -795,11 +795,11 @@ const CONTEXT_PACK_NOTE = `## Context pack
 These excerpts were read before this review started: code around the changes on
 this page, the definitions the changes use, and import-linked call sites of the
 changed symbols. They cover only the ranges shown; anything not shown, including
-Omitted items, has not been read. Treat the shown ranges as already read and do
-not re-read them. Line numbers match the new side of the diff. Callers are
-limited to import-linked call sites; a missing caller is not evidence that none
-exist. An item header names the lines this PR changes on another page, and
-"Changes on other pages" holds those files' diffs; their pages own their review.`;
+Omitted items, has not been read. Line numbers match the new side of the diff.
+Callers are limited to import-linked call sites; a missing caller is
+not evidence that none exist. An item header names the lines this PR changes
+on another page, and "Changes on other pages" holds those files' diffs; their
+pages own their review.`;
 
 const CONTEXT_PACK_TITLES: Record<ContextPackSlice, string> = {
   surrounding: '### Surrounding code',

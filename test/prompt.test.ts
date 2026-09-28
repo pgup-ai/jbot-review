@@ -1025,7 +1025,7 @@ describe('context pack prompt', () => {
       uncollected: 1,
     });
     assert.match(pack, /^## Context pack/);
-    assert.match(pack, /do\s+not re-read them/);
+    assert.doesNotMatch(pack, /re-read/);
     assert.match(pack, /not evidence that none\s+exist/);
     assert.match(
       pack,
