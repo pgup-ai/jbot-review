@@ -12,6 +12,7 @@ import {
   addContextPack,
   addReviewEvidence,
   planPageFiles,
+  diffUnits,
   targetedVerifierContext,
   targetedDiff,
   measureReviewPrompt,
@@ -167,6 +168,7 @@ import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
   buildIncrementalReviewContext,
+  buildRulesOnlyTestsContext,
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   GUIDELINE_REVIEW_LENS,
@@ -355,6 +357,7 @@ import {
   reviewCoverageSessions,
   renderOrphanedSection,
 } from './report.ts';
+import { rulesOnlyTestFiles } from './test-tiers.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 import { IncompleteReviewError } from './types.ts';
@@ -929,6 +932,8 @@ export interface ReviewRunOptions {
    * share its prefix cache. Off by default pending benchmark evidence.
    */
   sharedPrefixPrompt?: boolean;
+  /** JBOT_RULES_ONLY_TESTS arm: new test files get only the guideline pass. Off by default. */
+  rulesOnlyTests?: boolean;
   /**
    * TASK-065 arm: verification judges from a slim claim-checking context
    * (title/body/diff scope, linked issues, changed files, full diff) instead
@@ -2811,21 +2816,43 @@ async function runReviewPipeline(params: {
       usage: blastRadiusBlock,
       exploration: explorationEvidence,
     });
+    const standaloneCompliance =
+      guidelineCandidate && Boolean(complianceGuidelines) && !sweepGuidelines && !complianceInLens;
+    const rulesOnly = rulesOnlyTestFiles(files, {
+      enabled: options.rulesOnlyTests,
+      autoApprove: options.autoApprove,
+      standaloneCompliance,
+    });
+    const rulesOnlyFiles = files.filter((file) => rulesOnly.has(file.filename));
+    const rulesOnlyBytes = rulesOnlyFiles.reduce(
+      (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
+      0,
+    );
+    const rulesOnlyContext = buildRulesOnlyTestsContext([...rulesOnly]);
+    if (rulesOnly.size)
+      log(
+        `Rules-only tests: ${rulesOnly.size} file(s), ${rulesOnlyBytes} patch bytes; the guideline pass covers them: ${formatFileList([...rulesOnly])}.`,
+      );
     const fullCoreContext = joinContext(pageCores.full, incrementalContext);
-    const mainCoreContext = joinContext(pageCores.main, incrementalContext);
+    const mainCoreContext = joinContext(pageCores.main, incrementalContext, rulesOnlyContext);
     if (pageCores.compacted)
       log(
         `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(mainCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
       );
 
-    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    const shards = shardFilesForReview(
+      files.filter((file) => !rulesOnly.has(file.filename)),
+      { requestedShards: options.reviewShards },
+    );
     const recheck = new Set(recheckFiles);
     const complianceShards = recheck.size
       ? shardFilesForReview(
           files.filter((file) => recheck.has(file.filename)),
           { requestedShards: options.reviewShards },
         )
-      : shards;
+      : rulesOnly.size
+        ? shardFilesForReview(files, { requestedShards: options.reviewShards })
+        : shards;
     const buildPagePack = async (plan: ShardPlan, budgetBytes: number, signal: AbortSignal) =>
       buildContextPack(
         planPageFiles(plan.units ?? []),
@@ -2843,7 +2870,7 @@ async function runReviewPipeline(params: {
       return fits && diffHunks.truncatedFiles.length === 0 && diffHunks.omittedFiles.length === 0
         ? verifierPrContext
         : targetedVerifierContext(
-            shardPlans,
+            targetPlans,
             targets,
             joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks),
           );
@@ -2885,6 +2912,8 @@ async function runReviewPipeline(params: {
           ? diffScope
           : undefined,
     });
+    // Verification and the addressed check still need hunks that sit on no main page.
+    const targetPlans = [...shardPlans, { units: rulesOnlyFiles.flatMap(diffUnits) }];
 
     if (options.experiment.contextPack) {
       const packs = await addContextPack({
@@ -2930,6 +2959,9 @@ async function runReviewPipeline(params: {
       telemetry.recordExecution({
         reviewScope: scopeStats,
         ...(complianceScope ? { complianceScope } : {}),
+        ...(rulesOnly.size
+          ? { rulesOnlyTests: { files: rulesOnly.size, patchBytes: rulesOnlyBytes } }
+          : {}),
         reviewPasses: effectiveReviewPasses,
         reviewShards: shardPlans.length,
         lensKeys: candidateLensKeys,
@@ -3024,7 +3056,8 @@ async function runReviewPipeline(params: {
       model,
       guidelinesForPrompt,
       shardPlans,
-      changedFiles,
+      // Main findings on rules-only files are kept, like incremental mode's earlier PR files.
+      changedFiles: changedFiles.filter((path) => !rulesOnly.has(path)),
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
       context7Active,
@@ -3061,9 +3094,7 @@ async function runReviewPipeline(params: {
       guidelineCandidate && !sweepGuidelines && complianceInLens ? complianceGuidelines : '';
     const preparingFinders = new Set([
       ...candidateLensKeys.map((key) => `review-${key}`),
-      ...(guidelineCandidate && complianceGuidelines && !sweepGuidelines && !jointGuidelines
-        ? ['guideline-compliance']
-        : []),
+      ...(standaloneCompliance ? ['guideline-compliance'] : []),
     ]);
     let releaseBookkeeping!: () => void;
     const bookkeepingReady = new Promise<void>((resolve) => {
@@ -3100,7 +3131,7 @@ async function runReviewPipeline(params: {
                       commits: addressedCommits,
                       threads: priorJbotThreadBlock,
                       diff: targetedDiff(
-                        shardPlans,
+                        targetPlans,
                         priorJbotThreads.map((thread) => ({
                           path: thread.path,
                           line: thread.line ?? 0,
@@ -3150,6 +3181,7 @@ async function runReviewPipeline(params: {
           ? joinContext(
               UNTRUSTED_PR_CONTENT_NOTE,
               ...lensContextBlocks.filter((block) => block !== usageTrailer),
+              rulesOnlyContext,
             )
           : joinContext(
               fullCoreContext,
@@ -3719,6 +3751,7 @@ async function runReviewPipeline(params: {
             },
           }
         : {}),
+      ...(rulesOnly.size ? { rulesOnlyTests: [...rulesOnly] } : {}),
       baseline:
         verificationEnabled &&
         headSha &&
@@ -4097,6 +4130,7 @@ export function normalizeOptions(
     commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     sharedPrefixPrompt: options?.sharedPrefixPrompt ?? false,
+    rulesOnlyTests: options?.rulesOnlyTests ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
     auxApiKey: options?.auxApiKey ?? '',
@@ -5625,6 +5659,7 @@ export function buildBody(
     diagnosticsUrl?: string;
     reviewScope?: { mode: 'full' | 'incremental'; files: number; totalFiles: number };
     complianceScope?: { files: number; totalFiles: number; reviewedHead: string };
+    rulesOnlyTests?: string[];
     baseline?: ReviewBaseline;
   },
 ): string {
@@ -5642,6 +5677,20 @@ export function buildBody(
       recheck.files
         ? `**Guideline compliance:** re-checked ${recheck.files} of ${recheck.totalFiles} files; the others have the same edits as at ${since} and keep that review's results.`
         : `**Guideline compliance:** every file has the same edits as at ${since}, so that review's results stand.`,
+      '',
+    );
+  }
+  const rulesOnlyTests = experiment?.rulesOnlyTests;
+  if (rulesOnlyTests?.length) {
+    const checked = !incompleteSessions.some(
+      ({ label }) => label.replace(/-page-\d+$/, '') === 'guideline-compliance',
+    );
+    lines.push(
+      `**Rules-only tests:** ${rulesOnlyTests.length} new test file(s) skipped the deep review; ${
+        checked
+          ? 'the guideline pass checked them'
+          : 'the guideline pass did not finish, so they got no review this run'
+      }: ${formatFileList(rulesOnlyTests.map((path) => `\`${path}\``))}.`,
       '',
     );
   }

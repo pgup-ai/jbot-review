@@ -54,6 +54,14 @@ test('configuration fingerprints policy changes while excluding credentials and 
     first.configurationHash,
     runConfiguration({ ...options, sharedPrefixPrompt: true }, 'opencode/a').configurationHash,
   );
+  assert.equal(
+    first.configurationHash,
+    runConfiguration({ ...options, rulesOnlyTests: false }, 'opencode/a').configurationHash,
+  );
+  assert.notEqual(
+    first.configurationHash,
+    runConfiguration({ ...options, rulesOnlyTests: true }, 'opencode/a').configurationHash,
+  );
   const custom = { ...reviewExperiment({}), preset: 'custom' as const };
   const configuration = (experiment: ReviewExperiment) =>
     runConfiguration({ ...options, experiment }, 'opencode/a');

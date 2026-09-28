@@ -136,7 +136,7 @@ export function planPageFiles(
   }));
 }
 
-function diffUnits(file: PrFile): DiffUnit[] {
+export function diffUnits(file: PrFile): DiffUnit[] {
   const hunks = (file.patch ?? '').split(/\n(?=@@ -\d)/);
   return hunks.map((patch, index) => {
     const id = createHash('sha256').update(`${file.filename}\0${index}\0${patch}`).digest('hex');
@@ -557,7 +557,7 @@ export function reviewDelivery(plans: ShardPlan[], completed: Set<string>) {
 }
 
 export function targetedDiff(
-  plans: ShardPlan[],
+  plans: Pick<ShardPlan, 'units'>[],
   findings: Pick<Finding, 'path' | 'line' | 'body'>[],
 ): string {
   const refs = findingSourceLocations(findings);
@@ -582,7 +582,7 @@ export function targetedDiff(
 }
 
 export function targetedVerifierContext(
-  plans: ShardPlan[],
+  plans: Pick<ShardPlan, 'units'>[],
   findings: Finding[],
   core: string,
 ): string {

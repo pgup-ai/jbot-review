@@ -34,6 +34,7 @@ import {
   buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
+  buildRulesOnlyTestsContext,
   buildSemanticJudgePrompt,
   buildShardAssignmentBlock,
   compactReviewPageContexts,
@@ -923,6 +924,22 @@ describe('buildContextTrimNotice', () => {
       buildContextTrimNotice(['blast radius', 'summary scope']),
       /blast radius, summary scope/,
     );
+  });
+});
+
+describe('buildRulesOnlyTestsContext', () => {
+  it('names its files, overrides coverage for them, and stays within budget', () => {
+    assert.equal(buildRulesOnlyTestsContext([]), '');
+    const context = buildRulesOnlyTestsContext(['a.spec.ts']);
+    assert.match(context, /^## Rules-only test files/);
+    assert.match(context, /overrides the coverage protocol[^\n]*\na\.spec\.ts$/);
+    const paths = Array.from(
+      { length: 400 },
+      (_, i) => `test/${String(i).padStart(3, '0')}/${'x'.repeat(46)}.spec.ts`,
+    );
+    const list = buildRulesOnlyTestsContext(paths).split('these files.\n')[1];
+    assert.ok(Buffer.byteLength(list) <= 8192);
+    assert.match(list, /Rules-only test file list truncated/);
   });
 });
 

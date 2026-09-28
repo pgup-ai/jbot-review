@@ -235,6 +235,7 @@ export interface RunExecutionTelemetry {
     baseline?: string;
   };
   complianceScope?: { reason: string; files: number; totalFiles: number; reviewedHead?: string };
+  rulesOnlyTests?: { files: number; patchBytes: number };
   reviewPasses: number;
   reviewShards: number;
   lensKeys: string[];

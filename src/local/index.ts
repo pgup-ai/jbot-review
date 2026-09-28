@@ -763,6 +763,7 @@ async function review(
         config?.verifyOverlapGrace ?? parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
       sharedPrefixPrompt:
         config?.sharedPrefixPrompt ?? parseEnvBoolean('JBOT_SHARED_PREFIX_PROMPT', false),
+      rulesOnlyTests: !comparison && parseEnvBoolean('JBOT_RULES_ONLY_TESTS', false),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;
