@@ -169,7 +169,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       // A later review that set no baseline does not hide the completed one before it.
       priorBodies: [body(reviewed, base), 'A later review with an unverified finding.'],
       // An open finding on a file this follow-up leaves alone keeps it incremental.
-      openThreadPaths: ['other/label.ts'],
+      openThreadPaths: new Set(['other/label.ts']),
     };
     const result = await planIncrementalReview(input);
     assert.equal(result.mode, 'incremental');
@@ -184,9 +184,16 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
       [{ head: base }, 'history-or-impact-unavailable'],
-      [{ openThreadPaths: ['core/limit.ts'] }, 'open-finding-file-changed'],
+      [{ openThreadPaths: new Set(['core/limit.ts']) }, 'open-finding-file-changed'],
       [
         { files: [...files, { filename: 'config.json', patch: 'patch' }] },
+        'unsupported-or-large-pr',
+      ],
+      [
+        {
+          files: [...files, { filename: 'config.json', patch: 'patch' }],
+          openThreadPaths: new Set(['core/limit.ts']),
+        },
         'unsupported-or-large-pr',
       ],
     ] as const) {

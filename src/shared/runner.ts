@@ -1595,6 +1595,9 @@ async function runReviewPipeline(params: {
     guidelines: policyGuidelines,
     reviewer: runIdentity(process.env).reviewerRevision,
   });
+  const openThreadPaths = new Set(
+    allPriorJbotThreads.filter((thread) => !thread.isResolved).map((thread) => thread.path),
+  );
   const scopeStartedAt = Date.now();
   const reviewScope = await planIncrementalReview({
     workspace,
@@ -1616,9 +1619,7 @@ async function runReviewPipeline(params: {
             mainCliBackend,
             mainOnOpencode ? modelID : undefined,
           )),
-    openThreadPaths: allPriorJbotThreads
-      .filter((thread) => !thread.isResolved)
-      .map((thread) => thread.path),
+    openThreadPaths,
     worktree: !!localDiff,
   });
   const scopeStats = {
@@ -2914,8 +2915,15 @@ async function runReviewPipeline(params: {
           ? diffScope
           : undefined,
     });
-    // Verification and the addressed check still need hunks that sit on no main page.
-    const targetPlans = [...shardPlans, { units: rulesOnlyFiles.flatMap(diffUnits) }];
+    // Verification and the addressed check still need hunks that sit on no main page:
+    // rules-only tests, and open threads outside an incremental scope.
+    const scoped = new Set(files.map((file) => file.filename));
+    const offPage = fullReviewFiles.filter(
+      (file) =>
+        rulesOnly.has(file.filename) ||
+        (openThreadPaths.has(file.filename) && !scoped.has(file.filename)),
+    );
+    const targetPlans = [...shardPlans, { units: offPage.flatMap(diffUnits) }];
 
     if (options.experiment.contextPack) {
       const packs = await addContextPack({

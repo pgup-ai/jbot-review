@@ -132,7 +132,7 @@ export async function planIncrementalReview(input: {
   /** Prior jbot review bodies, oldest first. */
   priorBodies?: string[];
   forceFull?: boolean;
-  openThreadPaths?: readonly string[];
+  openThreadPaths?: ReadonlySet<string>;
   worktree?: boolean;
 }): Promise<IncrementalReviewPlan> {
   const full = (reason: string): IncrementalReviewPlan => ({
@@ -181,9 +181,6 @@ export async function planIncrementalReview(input: {
       if (entries[i] !== 'M') return full('added-removed-or-renamed-file');
       changed.push(entries[i + 1]);
     }
-    // Editing a file with an open finding is likely its fix, which can reach past the symbol graph.
-    const open = new Set(input.openThreadPaths);
-    if (changed.some((path) => open.has(path))) return full('open-finding-file-changed');
     if (!changed.length || changed.length > 3) return full('broad-or-empty-followup');
     if (
       input.files.length > 80 ||
@@ -286,6 +283,10 @@ export async function planIncrementalReview(input: {
       )
         return full('references-outside-pr');
     }
+    // Editing a file with an open finding is likely its fix, which can reach past the symbol graph.
+    // Checked last, so the reason names this rule only when nothing else forces a full review.
+    if (changed.some((path) => input.openThreadPaths?.has(path)))
+      return full('open-finding-file-changed');
     return { mode: 'incremental', reason: 'bounded-followup', files, baseline: baseline.head };
   } catch {
     return full('history-or-impact-unavailable');
