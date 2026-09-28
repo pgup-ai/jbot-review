@@ -180,7 +180,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     for (const [overrides, reason] of [
       [{ forceFull: true }, 'explicit-or-incomplete-review'],
       [{ priorBodies: [] }, 'no-completed-baseline'],
-      [{ base: head }, 'base-changed'],
+      [{ base: undefined }, 'base-changed'],
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
       [{ head: base }, 'history-or-impact-unavailable'],
@@ -305,6 +305,103 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       (await planIncrementalReview({ ...input, head: commit() })).reason,
       'added-removed-or-renamed-file',
     );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a merge from the base branch re-reviews only the PR files it or the author touched', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-incremental-merge-'));
+  const git = (...args: string[]) =>
+    execFileSync(
+      'git',
+      ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', ...args],
+      {
+        cwd: workspace,
+        encoding: 'utf8',
+      },
+    ).trim();
+  const write = (path: string, text: string) => {
+    mkdirSync(join(workspace, path, '..'), { recursive: true });
+    writeFileSync(join(workspace, path), text);
+  };
+  const commit = () => {
+    git('add', '.');
+    git('commit', '-qm', 'fixture');
+    return git('rev-parse', 'HEAD');
+  };
+  // Commits on main, then merges it into the PR branch.
+  const mergeMain = (path: string, text: string) => {
+    git('checkout', '-q', 'main');
+    write(path, text);
+    const main = commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    return main;
+  };
+  const charlie = (label: string, value: number) =>
+    `export function charlie() {\n  const label = '${label}';\n  // one\n  // two\n  // three\n  // four\n  return ${value};\n}\n`;
+  try {
+    git('init', '-q', '-b', 'main');
+    write('a/alpha.ts', 'export function alpha() {\n  return 1;\n}\n');
+    write(
+      'b/beta.ts',
+      "import { gamma } from '@app/shared/gamma';\nexport function beta() {\n  return gamma();\n}\n",
+    );
+    write('c/charlie.ts', charlie('c', 3));
+    write('shared/gamma.ts', 'export function gamma() {\n  return 3;\n}\n');
+    write('docs/notes.ts', 'export const notes = 0;\n');
+    const base = commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('a/alpha.ts', 'export function alpha() {\n  return 10;\n}\n');
+    write(
+      'b/beta.ts',
+      "import { gamma } from '@app/shared/gamma';\nexport function beta() {\n  return gamma() + 1;\n}\n",
+    );
+    write('c/charlie.ts', charlie('c', 30));
+    const reviewed = commit();
+    const files = ['a/alpha.ts', 'b/beta.ts', 'c/charlie.ts'].map((filename) => ({
+      filename,
+      patch: '@@ -1 +1 @@\n-a\n+b',
+    }));
+    const plan = (head: string, mainTip: string, prior: string, priorBase: string) =>
+      planIncrementalReview({
+        workspace,
+        files,
+        head,
+        base: mainTip,
+        policy,
+        priorBodies: [body(prior, priorBase)],
+      });
+    const scope = async (result: ReturnType<typeof plan>) => {
+      const { mode, reason, files: selected } = await result;
+      return [mode, reason, selected.map((file) => file.filename)];
+    };
+
+    // An unrelated main change stays out; the author's edit after the merge is reviewed.
+    let mainTip = mergeMain('docs/notes.ts', 'export const notes = 1;\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 11;\n}\n');
+    let head = commit();
+    assert.deepEqual(await scope(plan(head, mainTip, reviewed, base)), [
+      'incremental',
+      'bounded-base-merge',
+      ['a/alpha.ts'],
+    ]);
+    // A PR file importing a merged module by alias joins the review.
+    mainTip = mergeMain('shared/gamma.ts', 'export function gamma() {\n  return 4;\n}\n');
+    head = git('rev-parse', 'HEAD');
+    assert.deepEqual(await scope(plan(head, mainTip, reviewed, base)), [
+      'incremental',
+      'bounded-base-merge',
+      ['a/alpha.ts', 'b/beta.ts'],
+    ]);
+    // A PR file the merge itself edited is re-reviewed, even with no new author edit.
+    const nextTip = mergeMain('c/charlie.ts', charlie('C', 3));
+    assert.deepEqual(await scope(plan(git('rev-parse', 'HEAD'), nextTip, head, mainTip)), [
+      'incremental',
+      'bounded-base-merge',
+      ['c/charlie.ts'],
+    ]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

@@ -52,8 +52,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    Findings remain clamped to assigned files in code. Automatic incremental
    follow-ups may select affected files after a completed, matching baseline; every selected file still receives its complete base...head
    patch. Earlier PR files remain available as context, and findings there may
-   still be reported. Missing history, changed policy/base, uncertain dependencies,
-   explicit reruns and auto-approval require a full review. Never silently narrow
+   still be reported. Missing history, changed policy, uncertain dependencies,
+   explicit reruns and auto-approval require a full review. A merge from the base
+   branch does not: the follow-up selects the PR files the author or the merged
+   commits edited, plus PR files importing a module they changed. Never silently narrow
    scope via summary instructions. Incremental scope must be visible in the report
    and telemetry; incomplete or unverified runs cannot establish a new baseline.
    The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
