@@ -415,19 +415,23 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       'full',
       'base-changed',
     ]);
-    // Importing a sensitive module the merge changed gets the full review a sensitive edit gets.
+    // Importing a sensitive module the merge changed gets the full review a sensitive edit gets,
+    // whether or not the author also edited the importer.
     const sensitiveTip = mergeMain(
       'auth/session.ts',
       'export function session() {\n  return 2;\n}\n',
     );
-    const sensitiveScope = await scope(
-      git('rev-parse', 'HEAD'),
-      sensitiveTip,
-      merge,
-      nextTip,
-      prFiles('f/foxtrot.ts'),
+    const foxtrot = prFiles('f/foxtrot.ts');
+    const unedited = git('rev-parse', 'HEAD');
+    write(
+      'f/foxtrot.ts',
+      "import { session } from '@app/auth/session';\nexport function foxtrot() {\n  return session() + 1;\n}\n",
     );
-    assert.deepEqual(sensitiveScope.slice(0, 2), ['full', 'sensitive-followup']);
+    for (const head of [unedited, commit()])
+      assert.deepEqual((await scope(head, sensitiveTip, merge, nextTip, foxtrot)).slice(0, 2), [
+        'full',
+        'sensitive-followup',
+      ]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

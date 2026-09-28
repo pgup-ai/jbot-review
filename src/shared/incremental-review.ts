@@ -289,14 +289,13 @@ export async function planIncrementalReview(input: {
       // A PR file importing a module the merge changed can break without being edited.
       const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
       for (const [path, [, text]] of sources) {
-        if (changed.includes(path)) continue;
         const hits = indexEvidenceSource(path, text).imports.flatMap(
           (binding) => resolveEvidenceImport(path, binding.from, merged, aliases) ?? [],
         );
         if (!hits.length) continue;
         // A merged change reaching a sensitive area gets the same full review as a sensitive edit.
         if ([path, ...hits].some(sensitive)) return full('sensitive-followup');
-        changed.push(path);
+        if (!changed.includes(path)) changed.push(path);
       }
       if (changed.length > 3) return full('broad-or-empty-followup');
     }
