@@ -333,6 +333,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
     );
     write('c/charlie.ts', charlie('c', 3));
     write('shared/gamma.ts', 'export function gamma() {\n  return 3;\n}\n');
+    write('auth/session.ts', 'export function session() {\n  return 1;\n}\n');
     write('docs/notes.ts', 'export const notes = 0;\n');
     const base = commit();
     git('checkout', '-q', '-b', 'pr');
@@ -347,6 +348,10 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         `${name[0]}/${name}.ts`,
         `import { gamma } from '@app/shared/gamma';\nexport function ${name}() {\n  return gamma();\n}\n`,
       );
+    write(
+      'f/foxtrot.ts',
+      "import { session } from '@app/auth/session';\nexport function foxtrot() {\n  return session();\n}\n",
+    );
     const reviewed = commit();
     const prFiles = (...paths: string[]) =>
       paths.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }));
@@ -410,6 +415,19 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       'full',
       'base-changed',
     ]);
+    // Importing a sensitive module the merge changed gets the full review a sensitive edit gets.
+    const sensitiveTip = mergeMain(
+      'auth/session.ts',
+      'export function session() {\n  return 2;\n}\n',
+    );
+    const sensitiveScope = await scope(
+      git('rev-parse', 'HEAD'),
+      sensitiveTip,
+      merge,
+      nextTip,
+      prFiles('f/foxtrot.ts'),
+    );
+    assert.deepEqual(sensitiveScope.slice(0, 2), ['full', 'sensitive-followup']);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
