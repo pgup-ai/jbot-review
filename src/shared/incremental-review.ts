@@ -132,6 +132,7 @@ export async function planIncrementalReview(input: {
   /** Prior jbot review bodies, oldest first. */
   priorBodies?: string[];
   forceFull?: boolean;
+  openThreadPaths?: readonly string[];
   worktree?: boolean;
 }): Promise<IncrementalReviewPlan> {
   const full = (reason: string): IncrementalReviewPlan => ({
@@ -180,6 +181,9 @@ export async function planIncrementalReview(input: {
       if (entries[i] !== 'M') return full('added-removed-or-renamed-file');
       changed.push(entries[i + 1]);
     }
+    // Editing a file with an open finding is likely its fix, which can reach past the symbol graph.
+    const open = new Set(input.openThreadPaths);
+    if (changed.some((path) => open.has(path))) return full('open-finding-file-changed');
     if (!changed.length || changed.length > 3) return full('broad-or-empty-followup');
     if (
       input.files.length > 80 ||

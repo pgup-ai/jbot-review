@@ -1609,7 +1609,6 @@ async function runReviewPipeline(params: {
       !options.skipUnchanged ||
       options.autoApprove ||
       !priorThreadStateKnown ||
-      allPriorJbotThreads.some((thread) => !thread.isResolved) ||
       (mainCliBackend === 'commandcode'
         ? !options.commandCodeTools
         : backendRequiresCompleteEmbeddedDiff(
@@ -1617,6 +1616,9 @@ async function runReviewPipeline(params: {
             mainCliBackend,
             mainOnOpencode ? modelID : undefined,
           )),
+    openThreadPaths: allPriorJbotThreads
+      .filter((thread) => !thread.isResolved)
+      .map((thread) => thread.path),
     worktree: !!localDiff,
   });
   const scopeStats = {
