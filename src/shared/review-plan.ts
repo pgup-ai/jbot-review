@@ -556,6 +556,20 @@ export function reviewDelivery(plans: ShardPlan[], completed: Set<string>) {
   };
 }
 
+/** Files on no main page whose hunks verification and the addressed check still cite. */
+export function offPageFiles(
+  files: PrFile[],
+  scoped: ReadonlySet<string>,
+  rulesOnly: ReadonlySet<string>,
+  openThreadPaths: ReadonlySet<string>,
+): PrFile[] {
+  return files.filter(
+    (file) =>
+      rulesOnly.has(file.filename) ||
+      (openThreadPaths.has(file.filename) && !scoped.has(file.filename)),
+  );
+}
+
 export function targetedDiff(
   plans: Pick<ShardPlan, 'units'>[],
   findings: Pick<Finding, 'path' | 'line' | 'body'>[],

@@ -13,6 +13,7 @@ import {
   addReviewEvidence,
   planPageFiles,
   diffUnits,
+  offPageFiles,
   targetedVerifierContext,
   targetedDiff,
   measureReviewPrompt,
@@ -2915,13 +2916,12 @@ async function runReviewPipeline(params: {
           ? diffScope
           : undefined,
     });
-    // Verification and the addressed check still need hunks that sit on no main page:
-    // rules-only tests, and open threads outside an incremental scope.
-    const scoped = new Set(files.map((file) => file.filename));
-    const offPage = fullReviewFiles.filter(
-      (file) =>
-        rulesOnly.has(file.filename) ||
-        (openThreadPaths.has(file.filename) && !scoped.has(file.filename)),
+    // Verification and the addressed check still need hunks that sit on no main page.
+    const offPage = offPageFiles(
+      fullReviewFiles,
+      new Set(files.map((file) => file.filename)),
+      rulesOnly,
+      openThreadPaths,
     );
     const targetPlans = [...shardPlans, { units: offPage.flatMap(diffUnits) }];
 
