@@ -13,6 +13,7 @@ export type MainShardFailureClass =
   | 'model-no-response'
   | 'context-length'
   | 'unsupported-effort'
+  | 'runtime-stopped'
   | 'rate-limit'
   | 'timeout'
   | 'parse'
@@ -25,6 +26,7 @@ const NON_RETRYABLE: ReadonlySet<MainShardFailureClass> = new Set([
   'model-no-response',
   'context-length',
   'unsupported-effort',
+  'runtime-stopped',
 ]);
 
 export function classifyMainShardFailure(error: unknown): {
@@ -70,7 +72,10 @@ export function classifyMainShardFailure(error: unknown): {
                         /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable/i,
                       )
                     ? 'provider-transient'
-                    : 'unknown';
+                    : // A stopped CLI scope rejects every later session, so its retry fails at once.
+                      matches(/CLI runtime stopped/)
+                      ? 'runtime-stopped'
+                      : 'unknown';
   return { failureClass, retryable: !NON_RETRYABLE.has(failureClass) };
 }
 

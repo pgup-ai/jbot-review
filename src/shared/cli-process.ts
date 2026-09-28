@@ -8,6 +8,7 @@ const sessionSignal = new AsyncLocalStorage<AbortSignal>();
 const fatalSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 const fatalCleanups = new Set<() => void | Promise<void>>();
 let handlingSignal = false;
+let signalled = false;
 
 function finishFatalSignal(signal: NodeJS.Signals, force = false): void {
   for (const name of fatalSignals) process.removeListener(name, handleFatalSignal);
@@ -16,6 +17,7 @@ function finishFatalSignal(signal: NodeJS.Signals, force = false): void {
 }
 
 async function handleFatalSignal(signal: NodeJS.Signals): Promise<void> {
+  signalled = true;
   if (handlingSignal) {
     finishFatalSignal(signal, true);
     return;
@@ -40,6 +42,11 @@ export function onCliFatalSignal(cleanup: () => void | Promise<void>): () => voi
     if (fatalCleanups.size === 0 && !handlingSignal)
       for (const signal of fatalSignals) process.removeListener(signal, handleFatalSignal);
   };
+}
+
+/** Work that fails after a fatal signal was cancelled (a superseding push, Ctrl-C), not broken. */
+export function fatalSignalReceived(): boolean {
+  return signalled;
 }
 
 export function createCliProcessScope() {

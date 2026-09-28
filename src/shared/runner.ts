@@ -41,7 +41,7 @@ import {
   sharedPrefixLaunchDelayMs,
   wrapUpReserveMs,
 } from './time-budget.ts';
-import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
+import { createCliProcessScope, fatalSignalReceived, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { EvidenceStore } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
@@ -1235,7 +1235,10 @@ async function runReviewPipeline(params: {
     if (telemetryDone) return;
     telemetryDone = true;
     telemetryTerminalState = state;
-    if (!teardownPending) phases.finishOpen(state === 'failed' ? 'failed' : 'completed');
+    if (!teardownPending)
+      phases.finishOpen(
+        state === 'failed' ? 'failed' : state === 'cancelled' ? 'aborted' : 'completed',
+      );
     telemetry.finishRun(state, Date.now() - runStartedAt);
     if (!teardownPending) emitTelemetry();
   };
@@ -1254,7 +1257,7 @@ async function runReviewPipeline(params: {
           });
         }
       }
-      finishTelemetry('failed');
+      finishTelemetry(fatalSignalReceived() ? 'cancelled' : 'failed');
     };
   }
 

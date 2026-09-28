@@ -21,6 +21,10 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'auth',
       retryable: false,
     });
+    assert.deepEqual(classify('CLI runtime stopped'), {
+      failureClass: 'runtime-stopped',
+      retryable: false,
+    });
     assert.deepEqual(classify("Unknown model: 'opencode/nope'"), {
       failureClass: 'model-not-found',
       retryable: false,
