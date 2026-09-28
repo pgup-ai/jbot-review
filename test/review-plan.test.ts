@@ -12,6 +12,7 @@ import {
   buildShardPlans,
   buildAuxiliaryPlans,
   diffUnits,
+  offPageFiles,
   prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedDiff,
@@ -465,6 +466,21 @@ test('late diff pages receive actual unchanged caller code and verifier selectio
       [{ path: 't.spec.ts', line: 1, body: '' }],
     ),
     /\+it\(\)/,
+  );
+});
+
+test('off-page files are rules-only tests and open threads outside the scope', () => {
+  const files = ['a.ts', 'b.spec.ts', 'c.ts', 'd.ts'].map((filename) => ({ filename, patch: '' }));
+  const picked = offPageFiles(
+    files,
+    new Set(['a.ts', 'b.spec.ts']),
+    new Set(['b.spec.ts']),
+    // a.ts is on a main page already; d.ts has no open thread.
+    new Set(['a.ts', 'c.ts']),
+  );
+  assert.deepEqual(
+    picked.map((file) => file.filename),
+    ['b.spec.ts', 'c.ts'],
   );
 });
 

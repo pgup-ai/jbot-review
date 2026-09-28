@@ -434,11 +434,12 @@ files. It expands the selected files through declarations, references and their
 directories, delivering each selected file's **complete PR patch**, not only its
 latest edit. It falls back to full review for uncertain history or dependencies,
 references outside the PR, contract changes, default-export modules, unresolved
-relative imports, broad changes, open findings, tool-less reviewers, explicit
-reruns and auto-approval. Verification stays enabled according to its existing
-setting. Reports identify incremental reviews; telemetry records the baseline,
-selected/total files and fallback reason. Quiet clean runs keep the last posted
-baseline, so their changes remain included in the next follow-up.
+relative imports, broad changes, open findings on files the follow-up edits,
+tool-less reviewers, explicit reruns and auto-approval. Verification stays
+enabled according to its existing setting. Reports identify incremental reviews;
+telemetry records the baseline, selected/total files and fallback reason. Quiet
+clean runs keep the last posted baseline, so their changes remain included in
+the next follow-up.
 
 This is conservative impact detection, not proof that every possible runtime
 relationship is known. Keep full review for final approval. Compare locally with

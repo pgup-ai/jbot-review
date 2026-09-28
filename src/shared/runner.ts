@@ -13,6 +13,7 @@ import {
   addReviewEvidence,
   planPageFiles,
   diffUnits,
+  offPageFiles,
   targetedVerifierContext,
   targetedDiff,
   measureReviewPrompt,
@@ -1595,6 +1596,9 @@ async function runReviewPipeline(params: {
     guidelines: policyGuidelines,
     reviewer: runIdentity(process.env).reviewerRevision,
   });
+  const openThreadPaths = new Set(
+    allPriorJbotThreads.filter((thread) => !thread.isResolved).map((thread) => thread.path),
+  );
   const scopeStartedAt = Date.now();
   const reviewScope = await planIncrementalReview({
     workspace,
@@ -1609,7 +1613,6 @@ async function runReviewPipeline(params: {
       !options.skipUnchanged ||
       options.autoApprove ||
       !priorThreadStateKnown ||
-      allPriorJbotThreads.some((thread) => !thread.isResolved) ||
       (mainCliBackend === 'commandcode'
         ? !options.commandCodeTools
         : backendRequiresCompleteEmbeddedDiff(
@@ -1617,6 +1620,7 @@ async function runReviewPipeline(params: {
             mainCliBackend,
             mainOnOpencode ? modelID : undefined,
           )),
+    openThreadPaths,
     worktree: !!localDiff,
   });
   const scopeStats = {
@@ -2913,7 +2917,13 @@ async function runReviewPipeline(params: {
           : undefined,
     });
     // Verification and the addressed check still need hunks that sit on no main page.
-    const targetPlans = [...shardPlans, { units: rulesOnlyFiles.flatMap(diffUnits) }];
+    const offPage = offPageFiles(
+      fullReviewFiles,
+      new Set(files.map((file) => file.filename)),
+      rulesOnly,
+      openThreadPaths,
+    );
+    const targetPlans = [...shardPlans, { units: offPage.flatMap(diffUnits) }];
 
     if (options.experiment.contextPack) {
       const packs = await addContextPack({

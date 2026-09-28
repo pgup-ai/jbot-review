@@ -132,6 +132,7 @@ export async function planIncrementalReview(input: {
   /** Prior jbot review bodies, oldest first. */
   priorBodies?: string[];
   forceFull?: boolean;
+  openThreadPaths?: ReadonlySet<string>;
   worktree?: boolean;
 }): Promise<IncrementalReviewPlan> {
   const full = (reason: string): IncrementalReviewPlan => ({
@@ -282,6 +283,10 @@ export async function planIncrementalReview(input: {
       )
         return full('references-outside-pr');
     }
+    // Editing a file with an open finding is likely its fix, which can reach past the symbol graph.
+    // Checked last, so the reason names this rule only when nothing else forces a full review.
+    if (changed.some((path) => input.openThreadPaths?.has(path)))
+      return full('open-finding-file-changed');
     return { mode: 'incremental', reason: 'bounded-followup', files, baseline: baseline.head };
   } catch {
     return full('history-or-impact-unavailable');
