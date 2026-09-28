@@ -932,10 +932,7 @@ export interface ReviewRunOptions {
    * share its prefix cache. Off by default pending benchmark evidence.
    */
   sharedPrefixPrompt?: boolean;
-  /**
-   * JBOT_RULES_ONLY_TESTS arm: test files that only add tests skip main and
-   * lens pages; the guideline pass checks them. Off by default.
-   */
+  /** JBOT_RULES_ONLY_TESTS arm: additive test files get only the guideline pass. Off by default. */
   rulesOnlyTests?: boolean;
   /**
    * TASK-065 arm: verification judges from a slim claim-checking context
@@ -2848,7 +2845,7 @@ async function runReviewPipeline(params: {
       );
 
     const shards = shardFilesForReview(
-      rulesOnly.size ? files.filter((file) => !rulesOnly.has(file.filename)) : files,
+      files.filter((file) => !rulesOnly.has(file.filename)),
       { requestedShards: options.reviewShards },
     );
     const recheck = new Set(recheckFiles);
@@ -2919,10 +2916,8 @@ async function runReviewPipeline(params: {
           ? diffScope
           : undefined,
     });
-    // Rules-only files sit on no main page; verification and the addressed check still need their hunks.
-    const targetPlans = rulesOnly.size
-      ? [...shardPlans, { units: rulesOnlyFiles.flatMap(diffUnits) }]
-      : shardPlans;
+    // Verification and the addressed check still need hunks that sit on no main page.
+    const targetPlans = [...shardPlans, { units: rulesOnlyFiles.flatMap(diffUnits) }];
 
     if (options.experiment.contextPack) {
       const packs = await addContextPack({
@@ -3066,9 +3061,7 @@ async function runReviewPipeline(params: {
       guidelinesForPrompt,
       shardPlans,
       // Main findings on rules-only files are kept, like incremental mode's earlier PR files.
-      changedFiles: rulesOnly.size
-        ? changedFiles.filter((path) => !rulesOnly.has(path))
-        : changedFiles,
+      changedFiles: changedFiles.filter((path) => !rulesOnly.has(path)),
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
       context7Active,

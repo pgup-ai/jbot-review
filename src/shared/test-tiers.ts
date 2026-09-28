@@ -8,12 +8,12 @@ const TEST_SUFFIX =
 const RISKY_ADDITION =
   /^\+.*(?:\b(?:describe|it|test)\.only\s*\(|(?<![\w.])f(?:describe|it)\s*\(|\b(?:before|after)(?:Each|All)\s*\(|@(?:Before|After)(?:Each|All|Class)?\b|\bdef (?:setUp|tearDown)(?:Class)?\s*\(|autouse\s*=\s*True|\bfunc TestMain\s*\(|\b(?:jest|vi)\.(?:mock|doMock)\s*\()/m;
 
-function testTier(file: PrFile): 'routine' | 'critical' | undefined {
-  if (!TEST_ONLY_FILE.test(file.filename) && !TEST_SUFFIX.test(file.filename)) return undefined;
+function routineTest(file: PrFile): boolean {
+  if (!TEST_ONLY_FILE.test(file.filename) && !TEST_SUFFIX.test(file.filename)) return false;
   const patch = file.patch ?? '';
   // Patches are header-free, so any leading '-' is a removed line; diffLineCounts skips `-- ` content.
-  if (/^-/m.test(patch)) return 'critical';
-  return patch.startsWith('@@ -0,0 ') || !RISKY_ADDITION.test(patch) ? 'routine' : 'critical';
+  if (/^-/m.test(patch)) return false;
+  return patch.startsWith('@@ -0,0 ') || !RISKY_ADDITION.test(patch);
 }
 
 /** Test files only the guideline pass reviews: additive ones, when that pass covers every file. */
@@ -23,7 +23,7 @@ export function rulesOnlyTestFiles(
 ): Set<string> {
   // Auto-approval attests a full main review.
   if (!run.enabled || run.autoApprove || !run.standaloneCompliance) return new Set();
-  const routine = files.filter((file) => testTier(file) === 'routine').map((file) => file.filename);
+  const routine = files.filter(routineTest).map((file) => file.filename);
   // A PR of nothing but new tests keeps its main review.
   return new Set(routine.length < files.length ? routine : []);
 }

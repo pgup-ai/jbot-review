@@ -279,6 +279,7 @@ jobs:
           JBOT_CONTEXT_TRIM: ${{ vars.JBOT_CONTEXT_TRIM }}
           JBOT_EMBEDDED_FIRST_PROMPT: ${{ vars.JBOT_EMBEDDED_FIRST_PROMPT }}
           JBOT_SHARED_PREFIX_PROMPT: ${{ vars.JBOT_SHARED_PREFIX_PROMPT }}
+          JBOT_RULES_ONLY_TESTS: ${{ vars.JBOT_RULES_ONLY_TESTS }}
         with:
           # Precedence: /jbot comment flag > dispatch input > repo variable > default.
           provider: ${{ needs.command.outputs.provider || inputs.provider || vars.JBOT_REVIEW_PROVIDER || '' }}

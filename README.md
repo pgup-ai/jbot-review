@@ -472,14 +472,16 @@ omissions. Main reviews continue to cover the full base-to-head diff.
 **Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on),
 `JBOT_CONTEXT_TRIM` (off), `JBOT_SHARED_PREFIX_PROMPT` (off) and
 `JBOT_RULES_ONLY_TESTS` (off) are set by environment rather than action input;
-the [local review](#local-review) knob list describes what each changes. Map them onto the `uses:` step to switch one
-from a repo variable without editing a file:
+the [local review](#local-review) knob list describes what each changes. Map
+them onto the `uses:` step to switch one from a repo variable without editing a
+file:
 
 ```yaml
 env:
   JBOT_CONTEXT_TRIM: ${{ vars.JBOT_CONTEXT_TRIM }}
   JBOT_EMBEDDED_FIRST_PROMPT: ${{ vars.JBOT_EMBEDDED_FIRST_PROMPT }}
   JBOT_SHARED_PREFIX_PROMPT: ${{ vars.JBOT_SHARED_PREFIX_PROMPT }}
+  JBOT_RULES_ONLY_TESTS: ${{ vars.JBOT_RULES_ONLY_TESTS }}
 ```
 
 Only the literal `true`/`false` count; anything else, including an unset
