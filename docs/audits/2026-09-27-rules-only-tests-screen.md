@@ -18,10 +18,9 @@ repository, with 54 known issues.
 
 Across all 12 heads, the classifier marks 12 test files as rules-only. They make up
 9.6% of all diff bytes (49.6 KB of 518.7 KB), and 6 of the 12 heads have at least
-one. 4 of the 54 known issues sit at least partly in those files: unrun or
-low-value tests and specs, where catching them takes judgment rather than a written
-rule. The hook rule keeps a fifth known issue (a DB write added in an `afterEach`
-of an existing spec) in the main review.
+one. 4 of the 54 known issues sit at least partly in those files, all of them
+judgment calls rather than written-rule violations. The hook rule keeps a fifth
+known issue, which sits in a hook added to an existing spec, in the main review.
 
 **Cases.** The two heads with the most rules-only bytes:
 
@@ -69,8 +68,7 @@ The pass is the same by construction.
 known issues in either arm.
 
 - The one posted finding came from the guideline pass in A with the flag on. It is
-  a genuine rule violation in the rules-only test file: a hand-rolled fixture ID
-  where the repository's standards require a helper.
+  a genuine written-rule violation in the rules-only test file.
 - The flag-off guideline pass had the same input and missed it, which is ordinary
   run-to-run variance.
 - The flag-off main review, which did see the file, did not report it either.

@@ -16,7 +16,6 @@ function routineTest(file: PrFile): boolean {
   return patch.startsWith('@@ -0,0 ') || !RISKY_ADDITION.test(patch);
 }
 
-/** Test files only the guideline pass reviews: additive ones, when that pass covers every file. */
 export function rulesOnlyTestFiles(
   files: PrFile[],
   run: { enabled: boolean; autoApprove: boolean; standaloneCompliance: boolean },

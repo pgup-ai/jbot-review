@@ -2816,23 +2816,19 @@ async function runReviewPipeline(params: {
       usage: blastRadiusBlock,
       exploration: explorationEvidence,
     });
+    const standaloneCompliance =
+      guidelineCandidate && Boolean(complianceGuidelines) && !sweepGuidelines && !complianceInLens;
     const rulesOnly = rulesOnlyTestFiles(files, {
       enabled: options.rulesOnlyTests,
       autoApprove: options.autoApprove,
-      standaloneCompliance:
-        guidelineCandidate &&
-        Boolean(complianceGuidelines) &&
-        !sweepGuidelines &&
-        !complianceInLens,
+      standaloneCompliance,
     });
     const rulesOnlyFiles = files.filter((file) => rulesOnly.has(file.filename));
     const rulesOnlyBytes = rulesOnlyFiles.reduce(
       (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
       0,
     );
-    const rulesOnlyContext = buildRulesOnlyTestsContext(
-      rulesOnlyFiles.map((file) => file.filename),
-    );
+    const rulesOnlyContext = buildRulesOnlyTestsContext([...rulesOnly]);
     if (rulesOnly.size)
       log(
         `Rules-only tests: ${rulesOnly.size} file(s), ${rulesOnlyBytes} patch bytes; the guideline pass covers them: ${formatFileList([...rulesOnly])}.`,
@@ -3098,9 +3094,7 @@ async function runReviewPipeline(params: {
       guidelineCandidate && !sweepGuidelines && complianceInLens ? complianceGuidelines : '';
     const preparingFinders = new Set([
       ...candidateLensKeys.map((key) => `review-${key}`),
-      ...(guidelineCandidate && complianceGuidelines && !sweepGuidelines && !jointGuidelines
-        ? ['guideline-compliance']
-        : []),
+      ...(standaloneCompliance ? ['guideline-compliance'] : []),
     ]);
     let releaseBookkeeping!: () => void;
     const bookkeepingReady = new Promise<void>((resolve) => {

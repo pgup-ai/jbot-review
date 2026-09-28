@@ -16,7 +16,7 @@ it('sends new test files and appended cases to the guideline pass alone', () => 
   // A new file's hooks only set up its own new tests.
   assert.ok(rulesOnly('src/z.spec.ts', '@@ -0,0 +1 @@\n+beforeEach(() => seed());'));
   for (const filename of [
-    'apps/o/src/orders.api-spec.ts',
+    'src/users/users.api-spec.ts',
     'pkg/a_test.go',
     'tests/test_a.py',
     'spec/a_spec.rb',
