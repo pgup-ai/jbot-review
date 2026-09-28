@@ -1025,11 +1025,12 @@ and precision against seeded defects.
   share a model and a byte-identical leading block; measure before flipping it),
   `JBOT_RULES_ONLY_TESTS` (on by default; new test files skip main and lens
   review and get only the guideline pass, which must run for that review;
-  changes to existing test files stay in the main review, and the review body
-  lists the skipped files. Files count as tests by
-  test-case name (`*.test.*`, `*.spec.*`, `_test.go`, `test_*.py`, `_spec.rb`,
-  `src/test/**/*Test.java`), so helpers, fixtures and config stay in the main
-  review. `false` keeps new test files in the main review),
+  changes to existing test files stay in the main review, a PR that only adds
+  tests keeps them all there, and the review body lists the skipped files.
+  Files count as tests by test-case name (`*.test.*`, `*.spec.*`, `_test.go`,
+  `test_*.py`, `_spec.rb`, `src/test/**/*Test.java`), so helpers, fixtures and
+  config stay in the main review. `false` keeps new test files in the main
+  review),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;

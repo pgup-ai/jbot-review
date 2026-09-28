@@ -86,6 +86,11 @@ files are rarely on that page. The mechanism works as designed:
 A default flip would need a slow-page case, where test bytes sit on the page that
 finishes last. It would also need the full benchmark (AGENTS.md).
 
+**Update 2026-09-28:** the flag is now on by default for internal experiments
+([#263](https://github.com/pgup-ai/jbot-review/pull/263)). That was the owner's
+call, made without the full benchmark; this screen is still the only
+measurement.
+
 ## Caveats
 
 - One run per arm. Page timing and token counts vary more between runs than these
