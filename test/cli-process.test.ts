@@ -278,7 +278,7 @@ it('flags the signal, bounds fatal cleanup, forces repeated signals, and preserv
     const script = `
       import assert from 'node:assert/strict';
       import { onFatalSignal } from ${JSON.stringify(import.meta.resolve('@symma/protocol'))};
-      import { fatalSignalReceived, onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
+      import { markFatalSignals, onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
       const mode = ${JSON.stringify(mode)};
       let cleanups = 0;
       let signals = 0;
@@ -294,11 +294,14 @@ it('flags the signal, bounds fatal cleanup, forces repeated signals, and preserv
         } else if (mode !== 'host') await new Promise(() => {});
       });
       if (mode === 'protocol-last') registerProtocol();
-      assert.equal(fatalSignalReceived(), false);
+      const signalled = markFatalSignals();
+      assert.equal(signalled(), false);
       process.emit('SIGTERM', 'SIGTERM');
       setImmediate(() => {
         assert.equal(cleanups, 1);
-        assert.equal(fatalSignalReceived(), true);
+        // The interrupted run sees the signal; a run marked after it does not.
+        assert.equal(signalled(), true);
+        assert.equal(markFatalSignals()(), false);
         if (mode === 'repeat') {
           setTimeout(() => process.exit(91), 1000);
           process.emit('SIGTERM', 'SIGTERM');

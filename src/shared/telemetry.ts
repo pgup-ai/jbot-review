@@ -254,6 +254,10 @@ export interface RunExecutionTelemetry {
  */
 export type RunTerminalState = 'completed' | 'failed' | 'skipped' | 'cancelled';
 
+export function runPhaseStopReason(state: RunTerminalState): TelemetryStopReason {
+  return state === 'failed' ? 'failed' : state === 'cancelled' ? 'aborted' : 'completed';
+}
+
 export type SessionFailureClass = 'timeout' | 'provider' | 'parse' | 'aborted' | 'unknown';
 
 export interface SessionCoverage {

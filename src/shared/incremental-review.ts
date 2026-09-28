@@ -171,22 +171,31 @@ export async function planIncrementalReview(input: {
       return full('uncommitted-changes');
     await git('merge-base', '--is-ancestor', baseline.head, input.head);
     // A base-branch merge puts its commits in the head delta; only their edits to PR files count.
-    const forks =
-      baseline.base === input.base
-        ? undefined
-        : await Promise.all(
-            [
-              [baseline.base, baseline.head],
-              [input.base, input.head],
-            ].map(async ([base, head]) => (await git('merge-base', base, head)).trim()),
-          );
+    // Compare merge bases, not base SHAs: a head reviewed behind an unchanged base can merge it later.
+    const forks = await Promise.all(
+      [
+        [baseline.base, baseline.head],
+        [input.base, input.head],
+      ].map(async ([base, head]) => (await git('merge-base', base, head)).trim()),
+    );
     const merged =
-      forks &&
-      new Set(
-        (await git('diff', '--no-ext-diff', '--no-renames', '--name-only', '-z', ...forks, '--'))
-          .split('\0')
-          .filter(Boolean),
-      );
+      forks[0] === forks[1]
+        ? undefined
+        : new Set(
+            (
+              await git(
+                'diff',
+                '--no-ext-diff',
+                '--no-renames',
+                '--name-only',
+                '-z',
+                ...forks,
+                '--',
+              )
+            )
+              .split('\0')
+              .filter(Boolean),
+          );
     const delta = await git(
       'diff',
       '--no-ext-diff',

@@ -342,15 +342,25 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       "import { gamma } from '@app/shared/gamma';\nexport function beta() {\n  return gamma() + 1;\n}\n",
     );
     write('c/charlie.ts', charlie('c', 30));
+    for (const name of ['delta', 'echo'])
+      write(
+        `${name[0]}/${name}.ts`,
+        `import { gamma } from '@app/shared/gamma';\nexport function ${name}() {\n  return gamma();\n}\n`,
+      );
     const reviewed = commit();
-    const files = ['a/alpha.ts', 'b/beta.ts', 'c/charlie.ts'].map((filename) => ({
-      filename,
-      patch: '@@ -1 +1 @@\n-a\n+b',
-    }));
-    const scope = async (head: string, mainTip: string, prior: string, priorBase: string) => {
+    const prFiles = (...paths: string[]) =>
+      paths.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }));
+    const files = prFiles('a/alpha.ts', 'b/beta.ts', 'c/charlie.ts');
+    const scope = async (
+      head: string,
+      mainTip: string,
+      prior: string,
+      priorBase: string,
+      extra: PrFile[] = [],
+    ) => {
       const plan = await planIncrementalReview({
         workspace,
-        files,
+        files: [...files, ...extra],
         head,
         base: mainTip,
         policy,
@@ -359,22 +369,28 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
     };
 
-    // An unrelated main change stays out; the author's edit after the merge is reviewed.
+    // Main's change stays out even when the review already recorded that base tip.
     let mainTip = mergeMain('docs/notes.ts', 'export const notes = 1;\n');
     write('a/alpha.ts', 'export function alpha() {\n  return 11;\n}\n');
     let head = commit();
-    assert.deepEqual(await scope(head, mainTip, reviewed, base), [
+    assert.deepEqual(await scope(head, mainTip, reviewed, mainTip), [
       'incremental',
       'bounded-base-merge',
       ['a/alpha.ts'],
     ]);
-    // A PR file importing a merged module by alias joins the review.
+    // A PR file importing a merged module by alias joins the review, up to the file limit.
     mainTip = mergeMain('shared/gamma.ts', 'export function gamma() {\n  return 4;\n}\n');
     head = git('rev-parse', 'HEAD');
     assert.deepEqual(await scope(head, mainTip, reviewed, base), [
       'incremental',
       'bounded-base-merge',
       ['a/alpha.ts', 'b/beta.ts'],
+    ]);
+    const importers = prFiles('d/delta.ts', 'e/echo.ts');
+    assert.deepEqual(await scope(head, mainTip, reviewed, base, importers), [
+      'full',
+      'broad-or-empty-followup',
+      [...files, ...importers].map((file) => file.filename),
     ]);
     // A PR file the merge itself edited is re-reviewed, even with no new author edit.
     const nextTip = mergeMain('c/charlie.ts', charlie('C', 3));

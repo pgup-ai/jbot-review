@@ -22,6 +22,7 @@ import {
   changedEvidenceLines,
   resolveEvidenceImport,
   evidenceMode,
+  loadPathAliases,
   parseTsconfigPaths,
 } from '../src/shared/evidence.ts';
 import { normalizeOptions, requestFindingVerdicts } from '../src/shared/runner.ts';
@@ -779,6 +780,25 @@ test('resolves tsconfig path aliases to tracked files only', () => {
   const capped = parseTsconfigPaths(JSON.stringify({ compilerOptions: { paths: many } }));
   assert.equal(capped.length, 256);
   assert.ok(capped.every((alias) => alias.targets.length === 8));
+});
+
+test('path aliases come from the first tsconfig that declares them', async () => {
+  const base = '{ "compilerOptions": { "paths": { "@app/*": ["libs/*"] } } }';
+  const prefixes = async (configs: Record<string, string>) =>
+    (
+      await loadPathAliases(async (file) => {
+        if (!(file in configs)) throw new Error(`missing ${file}`);
+        return configs[file];
+      })
+    ).map((alias) => alias.prefix);
+  for (const primary of [{}, { 'tsconfig.json': '{}' }, { 'tsconfig.json': '{' }])
+    assert.deepEqual(await prefixes({ ...primary, 'tsconfig.base.json': base }), ['@app/']);
+  // tsc's `extends` replaces `paths` wholesale, so a primary that declares them wins.
+  assert.deepEqual(
+    await prefixes({ 'tsconfig.json': base.replace('@app', '@own'), 'tsconfig.base.json': base }),
+    ['@own/'],
+  );
+  assert.deepEqual(await prefixes({}), []);
 });
 
 test('pack provider reads tracked head sources with tsconfig aliases and word references', async (t) => {

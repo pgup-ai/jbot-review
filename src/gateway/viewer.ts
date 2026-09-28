@@ -272,12 +272,12 @@ function setReview(state, text) {
   mStatus.className = 'status' + (state ? ' ' + state : '');
   mStatusText.textContent = text;
 }
-function terminal() { return meta && (meta.runStatus === 'completed' || meta.runStatus === 'failed'); }
+function terminal() { return meta && (meta.runStatus === 'completed' || meta.runStatus === 'failed' || meta.runStatus === 'cancelled'); }
 function onRunStatus(d) {
   if (!meta || d.runId !== (active || '').split('/')[0]) return;
   meta.runStatus = d.status;
   // 'reviewing' is non-terminal: keep the session live so elapsed keeps ticking
-  // and frames still flow. completed/failed are terminal.
+  // and frames still flow. completed/failed/cancelled are terminal.
   meta.live = d.status === 'reviewing';
   setReview(d.status === 'reviewing' ? 'reviewing' : d.status, 'review ' + d.status);
   renderMeta();
