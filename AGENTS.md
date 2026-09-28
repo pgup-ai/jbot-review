@@ -67,7 +67,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    unavailable history check every file. Main review
    still covers its selected scope and verification remains enabled. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
-   With the opt-in `JBOT_RULES_ONLY_TESTS`, new test-case files (matched by
+   With `JBOT_RULES_ONLY_TESTS` (on by default), new test-case files (matched by
    name) leave the main and lens pages and are delivered by the guideline pass
    alone, only when that standalone pass runs, auto-approval is off and another
    file remains in the main review; the report and telemetry list them.
