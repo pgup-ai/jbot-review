@@ -2,7 +2,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { posix } from 'node:path';
 import { completedReviewHead, type PrFile } from './github.ts';
-import { indexEvidenceSource, resolveEvidenceImport, JS_SOURCE, JS_GLOBS } from './evidence.ts';
+import {
+  indexEvidenceSource,
+  loadPathAliases,
+  resolveEvidenceImport,
+  JS_SOURCE,
+  JS_GLOBS,
+} from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
 
@@ -164,22 +170,23 @@ export async function planIncrementalReview(input: {
     if (input.worktree && (await git('status', '--porcelain')).trim())
       return full('uncommitted-changes');
     await git('merge-base', '--is-ancestor', baseline.head, input.head);
-    // A merge from the base branch brings its commits into the head delta: set aside their
-    // edits outside the PR, and re-review the PR files they touched.
-    let merged: Set<string> | undefined;
-    if (baseline.base !== input.base) {
-      const forks = await Promise.all(
-        [
-          [baseline.base, baseline.head],
-          [input.base, input.head],
-        ].map(async ([base, head]) => (await git('merge-base', base, head)).trim()),
-      );
-      merged = new Set(
+    // A base-branch merge puts its commits in the head delta; only their edits to PR files count.
+    const forks =
+      baseline.base === input.base
+        ? undefined
+        : await Promise.all(
+            [
+              [baseline.base, baseline.head],
+              [input.base, input.head],
+            ].map(async ([base, head]) => (await git('merge-base', base, head)).trim()),
+          );
+    const merged =
+      forks &&
+      new Set(
         (await git('diff', '--no-ext-diff', '--no-renames', '--name-only', '-z', ...forks, '--'))
           .split('\0')
           .filter(Boolean),
       );
-    }
     const delta = await git(
       'diff',
       '--no-ext-diff',
@@ -268,15 +275,13 @@ export async function planIncrementalReview(input: {
       sources.set(file.filename, texts);
     }
     if (merged?.size) {
-      // Aliased imports resolve by module name only, so a merged edit to a same-named module counts.
-      const name = (path: string) =>
-        posix.basename(path.replace(/\.[cm]?[jt]sx?$/, '').replace(/\/index$/, ''));
-      const modules = new Set([...merged].filter((path) => JS_SOURCE.test(path)).map(name));
+      // A PR file importing a module the merge changed can break without being edited.
+      const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
       for (const [path, [, text]] of sources)
         if (
           !changed.includes(path) &&
-          indexEvidenceSource(path, text).imports.some(
-            (binding) => !binding.from.startsWith('.') && modules.has(name(binding.from)),
+          indexEvidenceSource(path, text).imports.some((binding) =>
+            resolveEvidenceImport(path, binding.from, merged, aliases),
           )
         )
           changed.push(path);

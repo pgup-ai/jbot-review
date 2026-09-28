@@ -44,7 +44,6 @@ export function onCliFatalSignal(cleanup: () => void | Promise<void>): () => voi
   };
 }
 
-/** Work that fails after a fatal signal was cancelled (a superseding push, Ctrl-C), not broken. */
 export function fatalSignalReceived(): boolean {
   return signalled;
 }
