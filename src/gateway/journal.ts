@@ -10,8 +10,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 
-export type RunStatus = 'reviewing' | 'completed' | 'failed';
-const RUN_STATUSES: RunStatus[] = ['reviewing', 'completed', 'failed'];
+export type RunStatus = 'reviewing' | 'completed' | 'failed' | 'cancelled';
+const RUN_STATUSES: RunStatus[] = ['reviewing', 'completed', 'failed', 'cancelled'];
 
 /** Run-level lifecycle control (the jbot verdict), sent on the ingest stream
  * alongside frames but stored per-run, not per-session. */

@@ -22,6 +22,26 @@ const policy = 'c'.repeat(64);
 const body = (head: string, base: string) =>
   withReviewCoverage(withReviewBaseline('<sup>driver</sup>', { head, base, policy }), head, true);
 
+function gitRepo(prefix: string) {
+  const workspace = mkdtempSync(join(tmpdir(), prefix));
+  const git = (...args: string[]) =>
+    execFileSync(
+      'git',
+      ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', ...args],
+      { cwd: workspace, encoding: 'utf8' },
+    ).trim();
+  const write = (path: string, text: string) => {
+    mkdirSync(join(workspace, path, '..'), { recursive: true });
+    writeFileSync(join(workspace, path), text);
+  };
+  const commit = () => {
+    git('add', '.');
+    git('commit', '-qm', 'fixture');
+    return git('rev-parse', 'HEAD');
+  };
+  return { workspace, git, write, commit };
+}
+
 test('incremental baselines require driver metadata and completed coverage', () => {
   const head = 'a'.repeat(40),
     base = 'b'.repeat(40);
@@ -124,26 +144,7 @@ test('impact expansion includes aliased callers and callees from earlier PR file
 });
 
 test('incremental planning uses a successful ancestor and falls back on uncertain follow-ups', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'jbot-incremental-'));
-  const git = (...args: string[]) =>
-    execFileSync('git', args, { cwd: workspace, encoding: 'utf8' }).trim();
-  const write = (path: string, text: string) => {
-    mkdirSync(join(workspace, path, '..'), { recursive: true });
-    writeFileSync(join(workspace, path), text);
-  };
-  const commit = () => {
-    git('add', '.');
-    git(
-      '-c',
-      'user.name=Fixture',
-      '-c',
-      'user.email=fixture@example.test',
-      'commit',
-      '-qm',
-      'fixture',
-    );
-    return git('rev-parse', 'HEAD');
-  };
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-');
   try {
     git('init', '-q');
     write('core/limit.ts', 'export function limit() {\n  return 5;\n}\n');
@@ -180,7 +181,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     for (const [overrides, reason] of [
       [{ forceFull: true }, 'explicit-or-incomplete-review'],
       [{ priorBodies: [] }, 'no-completed-baseline'],
-      [{ base: head }, 'base-changed'],
+      [{ base: undefined }, 'base-changed'],
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
       [{ head: base }, 'history-or-impact-unavailable'],
@@ -305,6 +306,132 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       (await planIncrementalReview({ ...input, head: commit() })).reason,
       'added-removed-or-renamed-file',
     );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a merge from the base branch re-reviews only the PR files it or the author touched', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-merge-');
+  const mergeMain = (path: string, text: string) => {
+    git('checkout', '-q', 'main');
+    write(path, text);
+    const main = commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    return main;
+  };
+  const charlie = (label: string, value: number) =>
+    `export function charlie() {\n  const label = '${label}';\n  // one\n  // two\n  // three\n  // four\n  return ${value};\n}\n`;
+  try {
+    git('init', '-q', '-b', 'main');
+    write('tsconfig.json', '{ "compilerOptions": { "paths": { "@app/*": ["*"] } } }\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 1;\n}\n');
+    write(
+      'b/beta.ts',
+      "import { gamma } from '@app/shared/gamma';\nexport function beta() {\n  return gamma();\n}\n",
+    );
+    write('c/charlie.ts', charlie('c', 3));
+    write('shared/gamma.ts', 'export function gamma() {\n  return 3;\n}\n');
+    write('auth/session.ts', 'export function session() {\n  return 1;\n}\n');
+    write('docs/notes.ts', 'export const notes = 0;\n');
+    const base = commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('a/alpha.ts', 'export function alpha() {\n  return 10;\n}\n');
+    write(
+      'b/beta.ts',
+      "import { gamma } from '@app/shared/gamma';\nexport function beta() {\n  return gamma() + 1;\n}\n",
+    );
+    write('c/charlie.ts', charlie('c', 30));
+    for (const name of ['delta', 'echo'])
+      write(
+        `${name[0]}/${name}.ts`,
+        `import { gamma } from '@app/shared/gamma';\nexport function ${name}() {\n  return gamma();\n}\n`,
+      );
+    write(
+      'f/foxtrot.ts',
+      "import { session } from '@app/auth/session';\nexport function foxtrot() {\n  return session();\n}\n",
+    );
+    const reviewed = commit();
+    const prFiles = (...paths: string[]) =>
+      paths.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }));
+    const files = prFiles('a/alpha.ts', 'b/beta.ts', 'c/charlie.ts');
+    const scope = async (
+      head: string,
+      mainTip: string,
+      prior: string,
+      priorBase: string,
+      extra: PrFile[] = [],
+    ) => {
+      const plan = await planIncrementalReview({
+        workspace,
+        files: [...files, ...extra],
+        head,
+        base: mainTip,
+        policy,
+        priorBodies: [body(prior, priorBase)],
+      });
+      return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
+    };
+
+    // Main's change stays out even when the review already recorded that base tip.
+    let mainTip = mergeMain('docs/notes.ts', 'export const notes = 1;\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 11;\n}\n');
+    let head = commit();
+    assert.deepEqual(await scope(head, mainTip, reviewed, mainTip), [
+      'incremental',
+      'bounded-base-merge',
+      ['a/alpha.ts'],
+    ]);
+    // A PR file importing a merged module by alias joins the review, up to the file limit.
+    mainTip = mergeMain('shared/gamma.ts', 'export function gamma() {\n  return 4;\n}\n');
+    head = git('rev-parse', 'HEAD');
+    assert.deepEqual(await scope(head, mainTip, reviewed, base), [
+      'incremental',
+      'bounded-base-merge',
+      ['a/alpha.ts', 'b/beta.ts'],
+    ]);
+    const importers = prFiles('d/delta.ts', 'e/echo.ts');
+    assert.deepEqual(await scope(head, mainTip, reviewed, base, importers), [
+      'full',
+      'broad-or-empty-followup',
+      [...files, ...importers].map((file) => file.filename),
+    ]);
+    // A PR file the merge itself edited is re-reviewed, even with no new author edit.
+    const nextTip = mergeMain('c/charlie.ts', charlie('C', 3));
+    const merge = git('rev-parse', 'HEAD');
+    assert.deepEqual(await scope(merge, nextTip, head, mainTip), [
+      'incremental',
+      'bounded-base-merge',
+      ['c/charlie.ts'],
+    ]);
+    // A base tip the PR has not merged forces a full review, whatever the author edited.
+    git('checkout', '-q', 'main');
+    write('docs/notes.ts', 'export const notes = 2;\n');
+    const unmergedTip = commit();
+    git('checkout', '-q', 'pr');
+    write('a/alpha.ts', 'export function alpha() {\n  return 12;\n}\n');
+    assert.deepEqual((await scope(commit(), unmergedTip, merge, nextTip)).slice(0, 2), [
+      'full',
+      'base-changed',
+    ]);
+    // Importing a sensitive module the merge changed gets the full review a sensitive edit gets,
+    // whether or not the author also edited the importer.
+    const sensitiveTip = mergeMain(
+      'auth/session.ts',
+      'export function session() {\n  return 2;\n}\n',
+    );
+    const foxtrot = prFiles('f/foxtrot.ts');
+    const unedited = git('rev-parse', 'HEAD');
+    write(
+      'f/foxtrot.ts',
+      "import { session } from '@app/auth/session';\nexport function foxtrot() {\n  return session() + 1;\n}\n",
+    );
+    for (const head of [unedited, commit()])
+      assert.deepEqual((await scope(head, sensitiveTip, merge, nextTip, foxtrot)).slice(0, 2), [
+        'full',
+        'sensitive-followup',
+      ]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

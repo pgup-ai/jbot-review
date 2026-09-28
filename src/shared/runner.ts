@@ -41,7 +41,7 @@ import {
   sharedPrefixLaunchDelayMs,
   wrapUpReserveMs,
 } from './time-budget.ts';
-import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
+import { createCliProcessScope, markFatalSignals, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { EvidenceStore } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
@@ -79,6 +79,7 @@ import {
   assembledContextWarning,
   createPhaseTelemetryTracker,
   createTelemetryRecorder,
+  runPhaseStopReason,
   type RunTerminalState,
   type SessionCoverageRecorder,
   type TelemetryRecorder,
@@ -1098,7 +1099,7 @@ async function runReviewPipeline(params: {
    * throw anywhere after the recorder exists — setup, sessions, or posting —
    * still emits the run's terminal telemetry.
    */
-  telemetryLifecycle?: { onFailure?: () => void };
+  telemetryLifecycle?: { onFailure?: (state: RunTerminalState) => void };
   log: (msg: string) => void;
 }): Promise<void> {
   const {
@@ -1235,7 +1236,7 @@ async function runReviewPipeline(params: {
     if (telemetryDone) return;
     telemetryDone = true;
     telemetryTerminalState = state;
-    if (!teardownPending) phases.finishOpen(state === 'failed' ? 'failed' : 'completed');
+    if (!teardownPending) phases.finishOpen(runPhaseStopReason(state));
     telemetry.finishRun(state, Date.now() - runStartedAt);
     if (!teardownPending) emitTelemetry();
   };
@@ -1244,7 +1245,7 @@ async function runReviewPipeline(params: {
     // any later throw — setup, sessions, or posting. Aux sessions still in
     // flight when the run dies are recorded as aborted: an absent row would
     // read as "never ran".
-    params.telemetryLifecycle.onFailure = () => {
+    params.telemetryLifecycle.onFailure = (state) => {
       for (const session of trackedAux) {
         if (!session.isSettled()) {
           recordCoverage({
@@ -1254,7 +1255,7 @@ async function runReviewPipeline(params: {
           });
         }
       }
-      finishTelemetry('failed');
+      finishTelemetry(state);
     };
   }
 
@@ -4043,13 +4044,15 @@ export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0
   // Announce the run as in-progress so live/mid-run viewers see "reviewing"
   // until the terminal verdict overwrites it.
   reportRun('reviewing');
-  const telemetryLifecycle: { onFailure?: () => void } = {};
+  const signalled = markFatalSignals();
+  const telemetryLifecycle: { onFailure?: (state: RunTerminalState) => void } = {};
   try {
     await runReviewPipeline({ ...params, telemetryLifecycle });
     reportRun('completed');
   } catch (error) {
-    telemetryLifecycle.onFailure?.();
-    reportRun('failed');
+    const state = signalled() ? 'cancelled' : 'failed';
+    telemetryLifecycle.onFailure?.(state);
+    reportRun(state);
     throw error;
   } finally {
     // The streaming tee holds the event loop open, so this explicit close is

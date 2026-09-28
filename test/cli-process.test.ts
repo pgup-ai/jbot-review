@@ -271,14 +271,14 @@ it('stops queued work before spawn and reaps a timed-out child before rejecting'
   );
 });
 
-it('bounds fatal cleanup, forces repeated signals, and preserves a surviving host listener', async () => {
+it('flags the signal, bounds fatal cleanup, forces repeated signals, and preserves a surviving host listener', async () => {
   const execute = promisify(execFile);
   const moduleUrl = new URL('../src/shared/cli-process.ts', import.meta.url).href;
   for (const mode of ['timeout', 'repeat', 'host', 'protocol-first', 'protocol-last']) {
     const script = `
       import assert from 'node:assert/strict';
       import { onFatalSignal } from ${JSON.stringify(import.meta.resolve('@symma/protocol'))};
-      import { onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
+      import { markFatalSignals, onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
       const mode = ${JSON.stringify(mode)};
       let cleanups = 0;
       let signals = 0;
@@ -294,9 +294,14 @@ it('bounds fatal cleanup, forces repeated signals, and preserves a surviving hos
         } else if (mode !== 'host') await new Promise(() => {});
       });
       if (mode === 'protocol-last') registerProtocol();
+      const signalled = markFatalSignals();
+      assert.equal(signalled(), false);
       process.emit('SIGTERM', 'SIGTERM');
       setImmediate(() => {
         assert.equal(cleanups, 1);
+        // The interrupted run sees the signal; a run marked after it does not.
+        assert.equal(signalled(), true);
+        assert.equal(markFatalSignals()(), false);
         if (mode === 'repeat') {
           setTimeout(() => process.exit(91), 1000);
           process.emit('SIGTERM', 'SIGTERM');

@@ -248,8 +248,15 @@ export interface RunExecutionTelemetry {
   roles: Record<'main' | 'auxiliary' | 'verification', ReturnType<typeof roleTelemetry>>;
 }
 
-/** 'skipped' = the run exited before any session (doc-only PR, empty diff). */
-export type RunTerminalState = 'completed' | 'failed' | 'skipped';
+/**
+ * 'skipped' = the run exited before any session (doc-only PR, empty diff);
+ * 'cancelled' = it failed after a fatal signal stopped it.
+ */
+export type RunTerminalState = 'completed' | 'failed' | 'skipped' | 'cancelled';
+
+export function runPhaseStopReason(state: RunTerminalState): TelemetryStopReason {
+  return state === 'failed' ? 'failed' : state === 'cancelled' ? 'aborted' : 'completed';
+}
 
 export type SessionFailureClass = 'timeout' | 'provider' | 'parse' | 'aborted' | 'unknown';
 

@@ -302,6 +302,22 @@ export function parseTsconfigPaths(text: string): PathAlias[] {
     .sort((a, b) => Number(a.wildcard) - Number(b.wildcard) || b.prefix.length - a.prefix.length);
 }
 
+export async function loadPathAliases(
+  read: (file: string) => Promise<string | undefined>,
+): Promise<PathAlias[]> {
+  // Nx-style repos keep `paths` in tsconfig.base.json.
+  for (const file of ['tsconfig.json', 'tsconfig.base.json']) {
+    try {
+      const text = await read(file);
+      const aliases = text ? parseTsconfigPaths(text) : [];
+      if (aliases.length) return aliases;
+    } catch {
+      // An unreadable or invalid config keeps relative imports only.
+    }
+  }
+  return [];
+}
+
 const IMPORT_SUFFIXES = [
   '.ts',
   '.tsx',
@@ -448,17 +464,10 @@ export class EvidenceStore {
   async packProvider(signal: AbortSignal): Promise<PackSourceProvider> {
     this.packInventory ??= (async () => {
       const tracked = await this.tracked(AbortSignal.timeout(4000));
-      // Nx-style repos keep `paths` in tsconfig.base.json.
-      for (const file of ['tsconfig.json', 'tsconfig.base.json']) {
-        try {
-          const config = await this.read(file, AbortSignal.timeout(1000), tracked);
-          const aliases = config ? parseTsconfigPaths(config.text) : [];
-          if (aliases.length) return { tracked, aliases };
-        } catch {
-          // An unreadable or invalid config keeps relative imports only.
-        }
-      }
-      return { tracked, aliases: [] };
+      const aliases = await loadPathAliases(
+        async (file) => (await this.read(file, AbortSignal.timeout(1000), tracked))?.text,
+      );
+      return { tracked, aliases };
     })().catch((error) => {
       // The next page retries instead of every page falling back for the rest of the run.
       this.packInventory = undefined;

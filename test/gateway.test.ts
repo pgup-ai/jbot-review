@@ -71,6 +71,12 @@ describe('gateway', () => {
         JSON.stringify({ v: 1, kind: 'run', runId: 'run-1', status: 'failed', ts: 1 }),
       );
       assert.equal(control?.status, 'failed');
+      assert.equal(
+        parseRunControl(
+          JSON.stringify({ v: 1, kind: 'run', runId: 'run-1', status: 'cancelled', ts: 1 }),
+        )?.status,
+        'cancelled',
+      );
       // A frame is not a control, and a bad status / unsafe id is rejected.
       assert.equal(parseRunControl(JSON.stringify(envelope())), undefined);
       assert.equal(

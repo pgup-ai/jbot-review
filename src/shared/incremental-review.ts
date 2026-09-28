@@ -2,7 +2,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { posix } from 'node:path';
 import { completedReviewHead, type PrFile } from './github.ts';
-import { indexEvidenceSource, resolveEvidenceImport, JS_SOURCE, JS_GLOBS } from './evidence.ts';
+import {
+  indexEvidenceSource,
+  loadPathAliases,
+  resolveEvidenceImport,
+  JS_SOURCE,
+  JS_GLOBS,
+} from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
 
@@ -145,7 +151,7 @@ export async function planIncrementalReview(input: {
   // incomplete) does not erase an earlier one: the follow-up still covers every change since it.
   const baseline = (input.priorBodies ?? []).map(reviewBaseline).reverse().find(Boolean);
   if (!baseline) return full('no-completed-baseline');
-  if (baseline.base !== input.base) return full('base-changed');
+  if (!input.base) return full('base-changed');
   if (baseline.policy !== input.policy) return full('policy-changed');
   if (!input.head || input.head === baseline.head) return full('same-head-rerun');
   const deadline = Date.now() + 5000;
@@ -164,6 +170,34 @@ export async function planIncrementalReview(input: {
     if (input.worktree && (await git('status', '--porcelain')).trim())
       return full('uncommitted-changes');
     await git('merge-base', '--is-ancestor', baseline.head, input.head);
+    // A base-branch merge puts its commits in the head delta; only their edits to PR files count.
+    // Compare merge bases, not base SHAs: a head reviewed behind an unchanged base can merge it later.
+    const forks = await Promise.all(
+      [
+        [baseline.base, baseline.head],
+        [input.base, input.head],
+      ].map(async ([base, head]) => (await git('merge-base', base, head)).trim()),
+    );
+    // A base tip the PR has not merged can change code its unchanged files depend on.
+    if (input.base !== baseline.base && forks[1] !== input.base) return full('base-changed');
+    const merged =
+      forks[0] === forks[1]
+        ? undefined
+        : new Set(
+            (
+              await git(
+                'diff',
+                '--no-ext-diff',
+                '--no-renames',
+                '--name-only',
+                '-z',
+                ...forks,
+                '--',
+              )
+            )
+              .split('\0')
+              .filter(Boolean),
+          );
     const delta = await git(
       'diff',
       '--no-ext-diff',
@@ -175,9 +209,11 @@ export async function planIncrementalReview(input: {
       input.head,
       '--',
     );
+    const paths = new Set(input.files.map((file) => file.filename));
     const entries = delta.split('\0').filter(Boolean);
     const changed: string[] = [];
     for (let i = 0; i < entries.length; i += 2) {
+      if (merged?.has(entries[i + 1]) && !paths.has(entries[i + 1])) continue;
       if (entries[i] !== 'M') return full('added-removed-or-renamed-file');
       changed.push(entries[i + 1]);
     }
@@ -187,18 +223,18 @@ export async function planIncrementalReview(input: {
       input.files.some((file) => !file.patch || !JS_SOURCE.test(file.filename))
     )
       return full('unsupported-or-large-pr');
-    const paths = new Set(input.files.map((file) => file.filename));
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
-    const sensitive = [
-      PATH_PATTERNS.security,
-      PATH_PATTERNS.data,
-      PATH_PATTERNS.api,
-      PATH_PATTERNS.infra,
-      PATH_PATTERNS.tooling,
-    ];
-    if (changed.some((path) => sensitive.some((pattern) => pattern.test(path))))
-      return full('sensitive-followup');
+    const sensitive = (path: string) =>
+      [
+        PATH_PATTERNS.security,
+        PATH_PATTERNS.data,
+        PATH_PATTERNS.api,
+        PATH_PATTERNS.infra,
+        PATH_PATTERNS.tooling,
+      ].some((pattern) => pattern.test(path));
+    if (changed.some(sensitive)) return full('sensitive-followup');
     const patch = await git(
+      '--literal-pathspecs',
       'diff',
       '--no-ext-diff',
       '--no-textconv',
@@ -206,6 +242,7 @@ export async function planIncrementalReview(input: {
       baseline.head,
       input.head,
       '--',
+      ...changed,
     );
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
     if (edits.length > 120 || edits.some((line) => /\b(import|export|require)\b/.test(line)))
@@ -248,6 +285,20 @@ export async function planIncrementalReview(input: {
         return full('unresolved-import');
       sources.set(file.filename, texts);
     }
+    if (merged?.size) {
+      // A PR file importing a module the merge changed can break without being edited.
+      const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
+      for (const [path, [, text]] of sources) {
+        const hits = indexEvidenceSource(path, text).imports.flatMap(
+          (binding) => resolveEvidenceImport(path, binding.from, merged, aliases) ?? [],
+        );
+        if (!hits.length) continue;
+        // A merged change reaching a sensitive area gets the same full review as a sensitive edit.
+        if ([path, ...hits].some(sensitive)) return full('sensitive-followup');
+        if (!changed.includes(path)) changed.push(path);
+      }
+      if (changed.length > 3) return full('broad-or-empty-followup');
+    }
     const files = impactedReviewFiles(input.files, changed, sources);
     if (files.length === input.files.length || files.length > 8) return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
@@ -287,7 +338,12 @@ export async function planIncrementalReview(input: {
     // Checked last, so the reason names this rule only when nothing else forces a full review.
     if (changed.some((path) => input.openThreadPaths?.has(path)))
       return full('open-finding-file-changed');
-    return { mode: 'incremental', reason: 'bounded-followup', files, baseline: baseline.head };
+    return {
+      mode: 'incremental',
+      reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',
+      files,
+      baseline: baseline.head,
+    };
   } catch {
     return full('history-or-impact-unavailable');
   }

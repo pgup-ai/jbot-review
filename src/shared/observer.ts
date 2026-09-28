@@ -13,7 +13,7 @@ const token = process.env.JBOT_OBSERVER_TOKEN?.trim();
 export const observerEnabled = Boolean(rawUrl);
 const ingestUrl = rawUrl ? `${rawUrl.replace(/\/+$/, '')}/api/ingest` : '';
 
-export type RunStatus = 'reviewing' | 'completed' | 'failed';
+export type RunStatus = 'reviewing' | 'completed' | 'failed' | 'cancelled';
 
 // A run = one process (a review:local invocation, an Action run). The name is
 // resolved lazily so an entry point can set JBOT_OBSERVER_RUN (or setRunName)

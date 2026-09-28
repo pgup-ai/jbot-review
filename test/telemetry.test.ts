@@ -7,6 +7,7 @@ import {
   assembledContextWarning,
   createPhaseTelemetryTracker,
   createTelemetryRecorder,
+  runPhaseStopReason,
   type OutcomeTelemetryRow,
 } from '../src/shared/telemetry.ts';
 import {
@@ -190,6 +191,10 @@ describe('phase and tool telemetry', () => {
     phases.start({ phase: 'posting', scope: 'run' });
     now = 80;
     phases.finishOpen('timeout');
+    assert.deepEqual(
+      (['completed', 'skipped', 'failed', 'cancelled'] as const).map(runPhaseStopReason),
+      ['completed', 'completed', 'failed', 'aborted'],
+    );
 
     const rows = rec
       .toJsonl()
