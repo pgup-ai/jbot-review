@@ -11,6 +11,7 @@ import {
   addContextPack,
   buildShardPlans,
   buildAuxiliaryPlans,
+  diffUnits,
   prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedDiff,
@@ -455,6 +456,15 @@ test('late diff pages receive actual unchanged caller code and verifier selectio
   assert.match(
     targetedDiff(plans, [{ path: 'money.ts', line: 0, body: 'file-level concern' }]),
     /return n \* 100/,
+  );
+  // Rules-only test files sit on no page, so their hunks come in as bare units.
+  const test = { filename: 't.spec.ts', patch: '@@ -0,0 +1 @@\n+it()' };
+  assert.match(
+    targetedDiff(
+      [...plans, { units: diffUnits(test) }],
+      [{ path: 't.spec.ts', line: 1, body: '' }],
+    ),
+    /\+it\(\)/,
   );
 });
 

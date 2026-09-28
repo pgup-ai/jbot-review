@@ -470,9 +470,9 @@ of delta diff plus a bounded file overview; larger deltas disclose summary-only
 omissions. Main reviews continue to cover the full base-to-head diff.
 
 **Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on),
-`JBOT_CONTEXT_TRIM` (off) and `JBOT_SHARED_PREFIX_PROMPT` (off) are set by
-environment rather than action input; the [local review](#local-review) knob
-list describes what each changes. Map them onto the `uses:` step to switch one
+`JBOT_CONTEXT_TRIM` (off), `JBOT_SHARED_PREFIX_PROMPT` (off) and
+`JBOT_RULES_ONLY_TESTS` (off) are set by environment rather than action input;
+the [local review](#local-review) knob list describes what each changes. Map them onto the `uses:` step to switch one
 from a repo variable without editing a file:
 
 ```yaml
@@ -1021,6 +1021,10 @@ and precision against seeded defects.
   staggered 8 s apart so sessions on one provider can hit its automatic prefix
   cache. The output reminder stays last. Cache hits only follow when sessions
   share a model and a byte-identical leading block; measure before flipping it),
+  `JBOT_RULES_ONLY_TESTS` (off by default; test files that only add tests, with
+  no removed line and no focus marker, hook or module mock added to an existing
+  file, skip main and lens review and get only the guideline pass, which must
+  run for that review; the review body lists them. Measure before enabling),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;

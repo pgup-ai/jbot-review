@@ -51,6 +51,8 @@ export function runConfiguration(
   const { cacheDir, ...reuse } = experiment.reuse;
   const configuration = {
     ...Object.fromEntries(POLICY_KEYS.map((key) => [key, options[key]])),
+    // Absent when off, so adding the arm leaves every default policy hash unchanged.
+    ...(options.rulesOnlyTests ? { rulesOnlyTests: true } : {}),
     sdkEngine: ['auto', 'opencode'].includes(options.sdkEngine ?? '')
       ? options.sdkEngine
       : 'unrecognized',

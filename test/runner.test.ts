@@ -1779,6 +1779,33 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     /re-checked 1 of 40 files; the others have the same edits as at \[`b{12}`\]/,
   );
   assert.match(recheck(0), /every file has the same edits as at \[`b{12}`\]/);
+  const rulesOnly = (incomplete: { label: string; reason: string }[]) =>
+    buildBody(
+      '',
+      '',
+      [],
+      [],
+      'model',
+      'owner',
+      'repo',
+      head,
+      undefined,
+      undefined,
+      undefined,
+      incomplete,
+      {
+        auxiliaryBaselines: [],
+        rulesOnlyTests: ['a.spec.ts'],
+      },
+    );
+  assert.match(
+    rulesOnly([]),
+    /\*\*Rules-only tests:\*\* 1 test file\(s\).*checked them: `a\.spec\.ts`\./,
+  );
+  assert.match(
+    rulesOnly([{ label: 'guideline-compliance-page-2', reason: 'timed out' }]),
+    /did not finish, so they got no review this run: `a\.spec\.ts`/,
+  );
   assert.equal(completedReviewHead(incremental), undefined);
   assert.equal(completedReviewHead(incremental, 'incremental'), head);
   assert.equal(
