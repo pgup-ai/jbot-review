@@ -455,7 +455,7 @@ CommandCode's space-bunny defaults to `medium` instead of `high` on diffs over
 20 KB, where `high` ran past the finder cap. An explicit `model-options` still wins.
 
 CommandCode MiMo v2.6 Flash, Pro and Pro UltraSpeed have no adjustable reasoning
-effort in CLI 1.62.0 through 1.66.0. J-Bot omits `--effort` and logs `effort=not-configurable`;
+effort in CLI 1.62.0 through 1.69.0. J-Bot omits `--effort` and logs `effort=not-configurable`;
 the global low default does not control these models. Other models without a
 mapped effort log `effort=cli-default`.
 Xiaomi's [Responses API documentation](https://mimo.mi.com/docs/en-US/api/chat/responses)
