@@ -142,7 +142,11 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(effortOf(deepseek, undefined), undefined);
     // The flash variants have no medium: mains fall back to low, an explicit
     // medium clamps upward.
-    for (const flash of ['deepseek-v4.1-flash', 'deepseek-v4-flash-fast']) {
+    for (const flash of [
+      'deepseek-v4.1-flash',
+      'deepseek-v4.1-flash-fast',
+      'deepseek-v4-flash-fast',
+    ]) {
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'low' }), 'low');
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }), 'low');
       assert.equal(

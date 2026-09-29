@@ -31,7 +31,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `opencode`              | CLI snapshot         |      76 | `opencode/deepseek-v4-flash`                                    |
 | `opencode-go`           | CLI snapshot         |      32 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      82 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      85 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
 | `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |       7 | `codex/default`                                                 |
@@ -929,11 +929,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.66.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.69.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-83 J-Bot model values:
+85 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
@@ -944,11 +944,13 @@ The CLI does not expose a complete list.
 - `commandcode/claude-opus-5-5`
 - `commandcode/claude-sonnet-4-6`
 - `commandcode/claude-sonnet-5`
+- `commandcode/claude-sonnet-5-5`
 - `commandcode/deepseek/deepseek-v4-flash`
 - `commandcode/deepseek/deepseek-v4-flash-fast`
 - `commandcode/deepseek/deepseek-v4-flash-vision-exp`
 - `commandcode/deepseek/deepseek-v4-pro`
 - `commandcode/deepseek/deepseek-v4.1-flash`
+- `commandcode/deepseek/deepseek-v4.1-flash-fast`
 - `commandcode/default` **(default)**
 - `commandcode/google/gemini-3.1-flash-lite`
 - `commandcode/google/gemini-3.5-flash`
