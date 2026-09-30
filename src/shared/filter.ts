@@ -58,7 +58,7 @@ export function isWithheldFinding(
   return isUnresolvedFinding(finding) && !finding.publishUnverified;
 }
 
-const MAX_PUBLISHED_UNVERIFIED = 2;
+const MAX_PUBLISHED_UNVERIFIED = 5;
 
 export const SEVERITY_RANK: Record<Severity, number> = {
   P0: 0,

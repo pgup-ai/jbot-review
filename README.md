@@ -933,7 +933,7 @@ Failed or missing verdicts retain candidates as `not-completed` diagnostics and
 report incomplete coverage. An uncertain verdict is `inconclusive`, not an
 unattempted check. Both remain withheld from PR findings, with one exception: a
 concrete P0–P2 finding whose verification returned no verdict is posted labeled
-Unverified, at most two a run, within `max-findings` and `min-severity` (judged by
+Unverified, at most five a run, within `max-findings` and `min-severity` (judged by
 its original severity) and outside the severity counts.
 
 ## Local review
