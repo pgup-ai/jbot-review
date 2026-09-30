@@ -439,6 +439,8 @@ describe('superseded clean review selection', () => {
       '## J-Bot Code Review',
       '',
       '✅ _No new findings._',
+      '',
+      `<!-- jbot-review:completed-head:${'a'.repeat(40)} -->`,
       '<!-- jbot-review:threads:0 -->',
       '<!-- jbot-review:review -->',
     ].join('\n');
@@ -462,6 +464,10 @@ describe('superseded clean review selection', () => {
       review({ id: 4, body: `${REVIEW_BODY}\n<!-- jbot-review:threads:0 -->` }),
       // Legacy body without the thread-count marker.
       review({ id: 5, body: '## J-Bot Code Review\n\n✅ _No new findings._' }),
+      review({
+        id: 6,
+        body: clean.replace(/completed-head:[0-9a-f]+/, 'incomplete'),
+      }),
     ]);
 
     assert.deepEqual(

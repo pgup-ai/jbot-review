@@ -1225,7 +1225,10 @@ export function selectResolvedJbotReviewsToFinalize(
   });
 }
 
-/** Prior clean reviews a newly posted review supersedes; findings-bearing ones stay visible. */
+/**
+ * Prior clean reviews a newly posted review supersedes. Findings-bearing and
+ * incomplete-coverage reviews stay visible.
+ */
 export function selectSupersededCleanJbotReviews(
   reviews: readonly JbotReviewGroup[],
 ): JbotReviewGroup[] {
@@ -1235,7 +1238,8 @@ export function selectSupersededCleanJbotReviews(
       review.threads.length === 0 &&
       parseExpectedThreadCount(review.body) === 0 &&
       // Outside-the-diff findings live only in the body, behind a nonzero total.
-      (parseReviewFindingCount(review.body) ?? 0) === 0,
+      (parseReviewFindingCount(review.body) ?? 0) === 0 &&
+      Boolean(completedReviewHead(review.body) ?? completedReviewHead(review.body, 'incremental')),
   );
 }
 
