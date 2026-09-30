@@ -468,11 +468,12 @@ describe('superseded clean review selection', () => {
         id: 6,
         body: clean.replace(/completed-head:[0-9a-f]+/, 'incomplete'),
       }),
+      review({ id: 7, body: clean.replace('completed-head', 'incremental-head') }),
     ]);
 
     assert.deepEqual(
       selected.map((item) => item.id),
-      [1],
+      [1, 7],
     );
   });
 });

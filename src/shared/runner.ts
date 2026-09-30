@@ -3990,7 +3990,8 @@ async function runReviewPipeline(params: {
     }
 
     if (deferCleanComment && !approved) await postCurrentReviewIfNeeded();
-    if (posted) {
+    // An incomplete run doesn't replace an earlier completed clean result.
+    if (posted && incompleteSessions.length === 0) {
       await minimizeSupersededCleanReviews(
         params.threadResolutionOctokit ?? octokit,
         priorJbotReviewGroups,
