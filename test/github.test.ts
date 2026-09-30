@@ -19,6 +19,7 @@ import {
   postReview,
   removeOwnPrReaction,
   selectResolvedJbotReviewsToFinalize,
+  selectSupersededCleanJbotReviews,
   updateReviewBody,
   type JbotReviewGroup,
   type Octokit,
@@ -432,6 +433,44 @@ describe('classifyPriorJbotThread', () => {
   });
 });
 
+describe('superseded clean review selection', () => {
+  it('selects only visible prior reviews that reported no findings', () => {
+    const clean = [
+      '## J-Bot Code Review',
+      '',
+      '✅ _No new findings._',
+      '<!-- jbot-review:threads:0 -->',
+      '<!-- jbot-review:review -->',
+    ].join('\n');
+    const review = (overrides: Partial<JbotReviewGroup>): JbotReviewGroup => ({
+      id: 1,
+      nodeId: 'PRR_1',
+      body: clean,
+      isMinimized: false,
+      threads: [],
+      ...overrides,
+    });
+    const selected = selectSupersededCleanJbotReviews([
+      review({ id: 1 }),
+      review({ id: 2, isMinimized: true }),
+      review({
+        id: 3,
+        body: `${REVIEW_BODY}\n<!-- jbot-review:threads:1 -->`,
+        threads: [{ id: 't3', isResolved: false }],
+      }),
+      // Outside-the-diff finding: no thread, but the body still carries it.
+      review({ id: 4, body: `${REVIEW_BODY}\n<!-- jbot-review:threads:0 -->` }),
+      // Legacy body without the thread-count marker.
+      review({ id: 5, body: '## J-Bot Code Review\n\n✅ _No new findings._' }),
+    ]);
+
+    assert.deepEqual(
+      selected.map((item) => item.id),
+      [1],
+    );
+  });
+});
+
 describe('resolved review finalization', () => {
   it('selects only reviews whose full finding count is represented by resolved threads', () => {
     const review = (overrides: Partial<JbotReviewGroup>): JbotReviewGroup => ({
@@ -559,6 +598,9 @@ describe('resolved review finalization', () => {
     assert.match(query, /minimizeComment/);
     assert.match(query, /classifier: RESOLVED/);
     assert.deepEqual(variables, { reviewNodeId: 'PRR_77' });
+
+    await minimizePullRequestReview(octokit as unknown as Octokit, 'PRR_77', 'OUTDATED');
+    assert.match(query, /classifier: OUTDATED/);
   });
 
   it('reads summary minimization while grouping direct and linked threads', async () => {
