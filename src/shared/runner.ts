@@ -327,6 +327,7 @@ import {
   minimizePullRequestReview,
   isJbotReviewBody,
   selectResolvedJbotReviewsToFinalize,
+  selectSupersededCleanJbotReviews,
   compactJbotReviewBody,
   updateReviewBody,
   type JbotReviewGroup,
@@ -3838,6 +3839,7 @@ async function runReviewPipeline(params: {
         incompleteSessions,
         reviewMetadata,
       );
+    let posted = false;
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
         log('No new findings on a re-run; skipping the review comment (reacting instead).');
@@ -3885,6 +3887,7 @@ async function runReviewPipeline(params: {
         fileLevelCommentIds,
         headSha as string,
       );
+      posted = true;
       log(
         inlineDropped > 0
           ? `Review posted; ${inlineDropped} inline comment(s) failed to anchor (${inlinePosted} salvaged).`
@@ -3966,7 +3969,7 @@ async function runReviewPipeline(params: {
             buildCurrentBody(),
             reviewedHeadSha,
           );
-          approved = true;
+          approved = posted = true;
           log(`Approved reviewed head ${reviewedHeadSha}.`);
         } catch (error) {
           if (!isDefinitiveApprovalRejection(error)) throw error;
@@ -3987,6 +3990,14 @@ async function runReviewPipeline(params: {
     }
 
     if (deferCleanComment && !approved) await postCurrentReviewIfNeeded();
+    // An incomplete run doesn't replace an earlier completed clean result.
+    if (posted && incompleteSessions.length === 0) {
+      await minimizeSupersededCleanReviews(
+        params.threadResolutionOctokit ?? octokit,
+        priorJbotReviewGroups,
+        log,
+      );
+    }
 
     if (
       isPrCleanAfterRun(
@@ -5623,6 +5634,26 @@ async function finalizeResolvedReviews(params: {
     } catch (error) {
       params.log(
         `Failed to minimize resolved jbot-review ${review.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+}
+
+/** Collapses earlier "no new findings" reviews so re-runs don't stack them. Best-effort. */
+async function minimizeSupersededCleanReviews(
+  octokit: Octokit,
+  reviews: readonly JbotReviewGroup[],
+  log: (msg: string) => void,
+): Promise<void> {
+  for (const review of selectSupersededCleanJbotReviews(reviews)) {
+    try {
+      await minimizePullRequestReview(octokit, review.nodeId, 'OUTDATED');
+      log(`Minimized superseded clean jbot-review ${review.id}.`);
+    } catch (error) {
+      log(
+        `Failed to minimize superseded clean jbot-review ${review.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

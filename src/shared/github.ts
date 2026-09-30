@@ -1023,11 +1023,12 @@ export async function resolveReviewThread(octokit: Octokit, threadId: string): P
 export async function minimizePullRequestReview(
   octokit: Octokit,
   reviewNodeId: string,
+  classifier: 'RESOLVED' | 'OUTDATED' = 'RESOLVED',
 ): Promise<void> {
   await octokit.graphql(
     `
-      mutation MinimizeResolvedReview($reviewNodeId: ID!) {
-        minimizeComment(input: { subjectId: $reviewNodeId, classifier: RESOLVED }) {
+      mutation MinimizeReview($reviewNodeId: ID!) {
+        minimizeComment(input: { subjectId: $reviewNodeId, classifier: ${classifier} }) {
           minimizedComment {
             isMinimized
           }
@@ -1222,6 +1223,24 @@ export function selectResolvedJbotReviewsToFinalize(
       return false;
     return !review.isMinimized || !hasInternalMarker(review.body, COMPACTED_REVIEW_MARKER);
   });
+}
+
+/**
+ * Prior clean reviews a newly posted review supersedes. Findings-bearing and
+ * incomplete-coverage reviews stay visible.
+ */
+export function selectSupersededCleanJbotReviews(
+  reviews: readonly JbotReviewGroup[],
+): JbotReviewGroup[] {
+  return reviews.filter(
+    (review) =>
+      !review.isMinimized &&
+      review.threads.length === 0 &&
+      parseExpectedThreadCount(review.body) === 0 &&
+      // Outside-the-diff findings live only in the body, behind a nonzero total.
+      (parseReviewFindingCount(review.body) ?? 0) === 0 &&
+      Boolean(completedReviewHead(review.body) ?? completedReviewHead(review.body, 'incremental')),
+  );
 }
 
 export function compactJbotReviewBody(body: string, threadCount: number): string {
