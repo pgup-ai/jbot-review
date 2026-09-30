@@ -413,7 +413,7 @@ describe('applyFindingVerdicts', () => {
       minSeverity: 'nit',
       maxFindings: 0,
     });
-    assert.equal(unchecked.filter((f) => f.publishUnverified).length, 2);
+    assert.equal(unchecked.filter((f) => f.publishUnverified).length, 3);
     const flagged = applyFindingVerdicts(findings, selected, []).findings;
     for (const [limits, posted] of [
       [{ minSeverity: 'nit', maxFindings: 2 }, 1],
@@ -428,23 +428,23 @@ describe('applyFindingVerdicts', () => {
         posted,
       );
     const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
-    assert.equal(routed.inline.length, 2);
-    assert.equal(routed.withheld.length, 3);
+    assert.equal(routed.inline.length, 3);
+    assert.equal(routed.withheld.length, 2);
     assert.ok(routed.inline.every((f) => f.verificationUncertain));
   });
 
   it('gives the limited Unverified slots to the most severe unchecked findings', () => {
     const ordered = filterFindings(
       applyFindingVerdicts(
-        (['P2', 'P2', 'P0'] as const).map((severity) => finding({ severity })),
-        [0, 1, 2],
+        (['P2', 'P2', 'P2', 'P2', 'P2', 'P0'] as const).map((severity) => finding({ severity })),
+        [0, 1, 2, 3, 4, 5],
         [],
       ).findings,
       { minSeverity: 'nit', maxFindings: 0 },
     );
     assert.deepEqual(
       ordered.filter((f) => f.publishUnverified).map((f) => f.publishUnverified),
-      ['P2', 'P0'],
+      ['P2', 'P2', 'P2', 'P2', 'P0'],
     );
   });
 });
