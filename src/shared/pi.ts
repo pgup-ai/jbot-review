@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 
 import { supportedModelOptions } from './config.ts';
+import { resolveDshBin } from './dsh.ts';
 import { parseModelName } from '@symma/protocol';
 import {
   formatTokenUsage,
@@ -153,17 +154,18 @@ function parseSemver(value: string): [number, number, number] | undefined {
 }
 
 /**
- * Opt-in + runtime gate, resolved once per run and fed to
- * `selectReviewBackends` as `piEnabled`. JBOT_SDK_ENGINE accepts `opencode`
- * (default; same-model runs measured pi no faster or more accurate), `auto`,
- * and the experimental `dsh` (DeepSeek Harness in pi's slot); anything else
- * fails safe to opencode so a config typo can never force a broken engine.
+ * Engine gate, resolved once per run and fed to `selectReviewBackends` as
+ * `piEnabled`. JBOT_SDK_ENGINE accepts `dsh` (default: DeepSeek Harness in
+ * pi's slot, for opencode/opencode-go models), `auto` (pi) and `opencode`.
+ * A default with no installed `dsh` binary, or anything unrecognized, falls
+ * back to opencode so a missing CLI or config typo can never break a run.
  */
 export function resolvePiEngine(
   env: NodeJS.ProcessEnv,
   nodeVersion: string,
-): { enabled: boolean; reason: string; dsh?: true } {
-  const engine = env.JBOT_SDK_ENGINE?.trim() || 'opencode';
+  dshBin = resolveDshBin(process.env),
+): { enabled: boolean; reason: string; dshBin?: string } {
+  const engine = env.JBOT_SDK_ENGINE?.trim() || 'dsh';
   if (engine === 'opencode') {
     return { enabled: false, reason: '' };
   }
@@ -179,9 +181,13 @@ export function resolvePiEngine(
       reason: `Node ${nodeVersion} is below the pi engine floor (>= ${PI_MIN_NODE_VERSION})`,
     };
   }
-  return engine === 'dsh'
-    ? { enabled: true, reason: '', dsh: true }
-    : { enabled: true, reason: '' };
+  if (engine === 'auto') return { enabled: true, reason: '' };
+  return dshBin
+    ? { enabled: true, reason: '', dshBin }
+    : {
+        enabled: false,
+        reason: 'no dsh binary (set JBOT_DSH_BIN or put dsh on PATH); using the opencode engine',
+      };
 }
 
 const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);

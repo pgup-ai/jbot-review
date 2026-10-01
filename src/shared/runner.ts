@@ -146,7 +146,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
-import { createDshBackend, dshSupportsProvider, startDsh } from './dsh.ts';
+import { createDshBackend, dshModelLimits, dshSupportsProvider, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -1435,9 +1435,10 @@ async function runReviewPipeline(params: {
     options.sdkEngine ? { JBOT_SDK_ENGINE: options.sdkEngine } : process.env,
     process.version,
   );
-  if (!piEngine.enabled && piEngine.reason) log(`pi engine disabled: ${piEngine.reason}`);
+  const sdkEngineLabel = piEngine.dshBin ? 'dsh' : 'pi';
+  if (!piEngine.enabled && piEngine.reason) log(`SDK engine disabled: ${piEngine.reason}`);
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? piEngine.dsh
+    ? piEngine.dshBin
       ? [dshSupportsProvider(providerID), dshSupportsProvider(auxProviderID)]
       : await Promise.all([
           piModelAvailable(providerID, modelID),
@@ -1446,10 +1447,14 @@ async function runReviewPipeline(params: {
     : [false, false];
   if (piEngine.enabled) {
     if (piSupportsProvider(providerID) && !mainPiModelAvailable) {
-      log(`pi engine does not serve ${model}; routing main sessions through opencode.`);
+      log(
+        `${sdkEngineLabel} engine does not serve ${model}; routing main sessions through opencode.`,
+      );
     }
     if (piSupportsProvider(auxProviderID) && !auxPiModelAvailable && auxModel !== model) {
-      log(`pi engine does not serve ${auxModel}; routing auxiliary sessions through opencode.`);
+      log(
+        `${sdkEngineLabel} engine does not serve ${auxModel}; routing auxiliary sessions through opencode.`,
+      );
     }
   }
   // A comma-separated opencode key list resolves to the account with the most
@@ -1518,7 +1523,7 @@ async function runReviewPipeline(params: {
     );
   }
   const sdkEngineName = (engine?: string) =>
-    engine === 'pi' && piEngine.dsh ? 'dsh' : (engine ?? 'opencode');
+    engine === 'pi' && piEngine.dshBin ? 'dsh' : (engine ?? 'opencode');
   if (mainOnPi || auxOnPi || mainOnPoolside || auxOnPoolside) {
     log(
       `Backend routing: main=${mainCliBackend ?? sdkEngineName(backendSelection.mainSdkEngine)} aux=${auxCliBackend ?? sdkEngineName(backendSelection.auxSdkEngine)}`,
@@ -2320,7 +2325,8 @@ async function runReviewPipeline(params: {
 
   let piRuntime: { stop: () => void } | undefined;
   let piBackend: ReviewBackend | undefined;
-  if (backendSelection.pi && piEngine.dsh) {
+  if (backendSelection.pi && piEngine.dshBin) {
+    const dshBin = piEngine.dshBin;
     const {
       providerID: dshProviderID,
       modelID: dshModelID,
@@ -2328,7 +2334,7 @@ async function runReviewPipeline(params: {
     } = backendSelection.pi;
     log('Starting dsh engine');
     try {
-      const dsh = await startDsh(workspace, dshProviderID, dshModelID, dshApiKey, log, {
+      const dsh = await startDsh(workspace, dshProviderID, dshModelID, dshApiKey, log, dshBin, {
         modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
         auxModelOptions,
         reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
@@ -2500,7 +2506,9 @@ async function runReviewPipeline(params: {
     mainBaseBackend.name,
     (mainBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${providerID}/${modelID}`]
-      : undefined) ??
+      : mainBaseBackend.name === 'dsh'
+        ? dshModelLimits(modelID)
+        : undefined) ??
       (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
       (providerID === COMMANDCODE_PROVIDER_ID
         ? COMMANDCODE_MODEL_LIMITS[modelID.toLowerCase()]
@@ -2511,7 +2519,9 @@ async function runReviewPipeline(params: {
     auxBaseBackend.name,
     (auxBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${auxProviderID}/${auxModelID}`]
-      : undefined) ??
+      : auxBaseBackend.name === 'dsh'
+        ? dshModelLimits(auxModelID)
+        : undefined) ??
       (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
       (auxProviderID === COMMANDCODE_PROVIDER_ID
         ? COMMANDCODE_MODEL_LIMITS[auxModelID.toLowerCase()]

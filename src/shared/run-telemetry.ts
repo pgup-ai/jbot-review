@@ -53,7 +53,7 @@ export function runConfiguration(
     ...Object.fromEntries(POLICY_KEYS.map((key) => [key, options[key]])),
     // Absent when off, so an opted-out run keeps the hash it had before the arm existed.
     ...(options.rulesOnlyTests ? { rulesOnlyTests: true } : {}),
-    sdkEngine: ['auto', 'opencode'].includes(options.sdkEngine ?? '')
+    sdkEngine: ['auto', 'dsh', 'opencode'].includes(options.sdkEngine ?? '')
       ? options.sdkEngine
       : 'unrecognized',
     shardCacheEnabled: Boolean(options.shardCachePath),

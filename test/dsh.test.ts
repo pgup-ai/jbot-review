@@ -5,12 +5,15 @@ import { buildDshPatch, dshReasoningEffort, parseDshEvents } from '../src/shared
 import { resolvePiEngine } from '../src/shared/pi.ts';
 
 describe('dsh engine', () => {
-  it('is selected by JBOT_SDK_ENGINE=dsh', () => {
-    assert.deepEqual(resolvePiEngine({ JBOT_SDK_ENGINE: 'dsh' }, 'v24.18.0'), {
+  it('is the default engine, falling back to opencode without a dsh binary', () => {
+    assert.deepEqual(resolvePiEngine({}, 'v24.18.0', '/bin/dsh'), {
       enabled: true,
       reason: '',
-      dsh: true,
+      dshBin: '/bin/dsh',
     });
+    const fallback = resolvePiEngine({}, 'v24.18.0', '');
+    assert.equal(fallback.enabled, false);
+    assert.match(fallback.reason, /no dsh binary/);
   });
 
   it('maps efforts onto DeepSeek thinking modes only', () => {

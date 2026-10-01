@@ -639,7 +639,7 @@ async function review(
   // Preflight-only resolution (the runner re-resolves for its own routing):
   // roles served by the in-process pi engine need no opencode binary.
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? piEngine.dsh
+    ? piEngine.dshBin
       ? [dshSupportsProvider(providerID), dshSupportsProvider(aux.providerID)]
       : await Promise.all([
           piModelAvailable(providerID, modelID),

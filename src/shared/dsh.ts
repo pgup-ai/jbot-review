@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { createCliProcessScope, runCliProcess } from './cli-process.ts';
@@ -37,15 +37,22 @@ import {
 import { parseModelName } from '@symma/protocol';
 
 /**
- * Experimental DeepSeek Harness engine (`JBOT_SDK_ENGINE=dsh`): each session is
+ * DeepSeek Harness engine (`JBOT_SDK_ENGINE=dsh`, the default): each session is
  * one `dsh --profile headless --json` child per turn, resumed by session id for
  * repair and sweep turns. Opencode Zen/Go only. The CLI is not a dependency
- * (its install is ~0.5 GB); `JBOT_DSH_BIN` points at an installed `dsh`.
+ * (its install is ~0.5 GB); it is found via `JBOT_DSH_BIN` or PATH.
  */
 
 export const DSH_TELEMETRY_CAPABILITY = 'observable' as const;
 const DSH_PROMPT_TIMEOUT_MS = 15 * 60_000;
-const DSH_MAX_OUTPUT_TOKENS = 32_768;
+
+/** What the patch tells dsh and what jbot budgets prompts against: one source for both. */
+export function dshModelLimits(modelID: string): { contextTokens: number; outputTokens: number } {
+  return {
+    contextTokens: modelID.startsWith('deepseek') ? 1_000_000 : 262_144,
+    outputTokens: 32_768,
+  };
+}
 
 const DSH_BASE_URLS: Record<string, string> = {
   opencode: 'https://opencode.ai/zen/v1',
@@ -70,6 +77,25 @@ const DSH_DISABLED_ROWS = [
   'plugin-package-inventory-deepseek',
 ];
 const DSH_TOOL_ROWS = ['tool-bash', 'tool-fs-search', 'tool-jobs'];
+
+/** `JBOT_DSH_BIN`, else `dsh` on PATH; undefined when neither is executable. */
+export function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
+  const configured = env.JBOT_DSH_BIN?.trim();
+  const candidates = configured
+    ? [configured]
+    : (env.PATH ?? '')
+        .split(delimiter)
+        .filter((dir) => isAbsolute(dir))
+        .map((dir) => join(dir, 'dsh'));
+  return candidates.find((path) => {
+    try {
+      accessSync(path, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
 
 export function dshSupportsProvider(providerID: string): boolean {
   return Object.hasOwn(DSH_BASE_URLS, providerID);
@@ -97,6 +123,7 @@ export function buildDshPatch(input: {
   toolLess: boolean;
 }): string {
   const deepseek = input.modelID.startsWith('deepseek');
+  const limits = dshModelLimits(input.modelID);
   const rows: unknown[] = [
     {
       id: 'agent-default-model',
@@ -120,8 +147,8 @@ export function buildDshPatch(input: {
             models: [
               {
                 id: input.modelID,
-                contextWindow: deepseek ? 1_000_000 : 262_144,
-                maxTokens: DSH_MAX_OUTPUT_TOKENS,
+                contextWindow: limits.contextTokens,
+                maxTokens: limits.outputTokens,
                 ...(deepseek
                   ? {
                       compat: { thinkingFormat: 'deepseek' },
@@ -258,6 +285,7 @@ export async function startDsh(
   modelID: string,
   apiKey: string,
   log: (msg: string) => void,
+  bin: string,
   options: {
     modelOptions?: Record<string, unknown>;
     auxModelOptions?: Record<string, unknown>;
@@ -268,7 +296,6 @@ export async function startDsh(
   if (!dshSupportsProvider(providerID)) {
     throw new Error(`The dsh engine serves only opencode and opencode-go, not "${providerID}".`);
   }
-  const bin = process.env.JBOT_DSH_BIN?.trim() || 'dsh';
   const root = mkdtempSync(join(tmpdir(), 'jbot-dsh-'));
   const remove = () => rmSync(root, { recursive: true, force: true });
   const template = join(root, 'template');

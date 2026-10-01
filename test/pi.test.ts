@@ -159,8 +159,7 @@ describe('piRuntimeSupported', () => {
 describe('resolvePiEngine', () => {
   it('keeps pi off unless JBOT_SDK_ENGINE=auto opts in', async () => {
     const off = { enabled: false, reason: '' };
-    assert.deepEqual(resolvePiEngine({}, 'v24.18.0'), off);
-    assert.deepEqual(resolvePiEngine({ JBOT_SDK_ENGINE: 'opencode' }, 'v24.18.0'), off);
+    assert.deepEqual(resolvePiEngine({ JBOT_SDK_ENGINE: 'opencode' }, 'v24.18.0', '/bin/dsh'), off);
     assert.equal(await catalogModelLimits('openai', 'gpt-5', off.enabled), undefined);
     assert.deepEqual(resolvePiEngine({ JBOT_SDK_ENGINE: 'auto' }, 'v24.18.0'), {
       enabled: true,
