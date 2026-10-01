@@ -86,7 +86,7 @@ describe('dsh engine', () => {
       mkdirSync(dirname(bin), { recursive: true });
       writeFileSync(bin, '');
       assert.equal(dshSandboxUsable(bin, 'linux', only('bwrap')), true);
-      assert.equal(dshSandboxUsable(bin, 'linux', only(landlockRun)), false); // not installed
+      assert.equal(dshSandboxUsable(bin, 'linux', only(landlockRun)), false);
       mkdirSync(dirname(landlockRun), { recursive: true });
       writeFileSync(landlockRun, '');
       assert.equal(dshSandboxUsable(bin, 'linux', only(landlockRun)), true);
@@ -110,7 +110,7 @@ describe('dsh engine', () => {
     try {
       mkdirSync(dirname(bin), { recursive: true });
       writeFileSync(bin, '');
-      assert.equal(readDshCatalog(bin), undefined); // no catalog installed
+      assert.equal(readDshCatalog(bin), undefined);
       mkdirSync(dirname(catalog), { recursive: true });
       writeFileSync(
         catalog,
