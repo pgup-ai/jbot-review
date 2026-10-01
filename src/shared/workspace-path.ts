@@ -37,10 +37,25 @@ function tryRealpath(candidate: string): string | undefined {
 }
 
 /**
- * Reads a file resolveWithinWorkspace accepted, without a check-then-use gap:
- * O_NOFOLLOW guards only the last component, so after opening, the path must
- * still resolve to itself inside the root and name the very file the
- * descriptor holds. A parent directory swapped for a symlink fails that.
+ * Whether an open descriptor still holds the in-workspace file `target` names:
+ * the path resolves to itself inside the root and names the descriptor's own
+ * file (dev/ino). A parent directory swapped for a symlink fails it.
+ */
+export function openedFileWithinWorkspace(root: string, target: string, fd: number): boolean {
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || resolveWithinWorkspace(root, target) !== target) return false;
+    const named = statSync(target);
+    return named.dev === opened.dev && named.ino === opened.ino;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reads a file resolveWithinWorkspace accepted without a check-then-use gap:
+ * O_NOFOLLOW guards only the last component, so the descriptor is checked
+ * after opening and the read comes from that same descriptor.
  */
 export function readFileWithinWorkspace(root: string, target: string): string | undefined {
   let fd: number;
@@ -53,11 +68,7 @@ export function readFileWithinWorkspace(root: string, target: string): string | 
     return undefined;
   }
   try {
-    const opened = fstatSync(fd);
-    if (!opened.isFile() || resolveWithinWorkspace(root, target) !== target) return undefined;
-    const named = statSync(target);
-    if (named.dev !== opened.dev || named.ino !== opened.ino) return undefined;
-    return readFileSync(fd, 'utf8');
+    return openedFileWithinWorkspace(root, target, fd) ? readFileSync(fd, 'utf8') : undefined;
   } catch {
     return undefined;
   } finally {

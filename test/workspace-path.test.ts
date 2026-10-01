@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
+  closeSync,
   mkdirSync,
+  openSync,
   mkdtempSync,
   realpathSync,
   renameSync,
@@ -12,7 +14,11 @@ import { tmpdir } from 'node:os';
 import { basename, join, parse } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { readFileWithinWorkspace, resolveWithinWorkspace } from '../src/shared/workspace-path.ts';
+import {
+  openedFileWithinWorkspace,
+  readFileWithinWorkspace,
+  resolveWithinWorkspace,
+} from '../src/shared/workspace-path.ts';
 
 describe('resolveWithinWorkspace', () => {
   // Security boundary for reads served outside a sandbox; follows symlinks, so
@@ -72,6 +78,23 @@ describe('resolveWithinWorkspace', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a descriptor once its path names a different file', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-')));
+    const target = join(root, 'f.txt');
+    writeFileSync(target, 'first');
+    const fd = openSync(target, 'r');
+    try {
+      assert.equal(openedFileWithinWorkspace(root, target, fd), true);
+      // Same canonical path, new inode: only the dev/ino comparison can tell.
+      rmSync(target);
+      writeFileSync(target, 'second');
+      assert.equal(openedFileWithinWorkspace(root, target, fd), false);
+    } finally {
+      closeSync(fd);
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
