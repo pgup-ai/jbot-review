@@ -109,10 +109,11 @@ function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
  * Linux confinement is bwrap or Landlock; with neither, dsh fails every shell
  * call closed, so the review would run blind. Docker Desktop's kernel lacks
  * Landlock and Docker's default seccomp stops bwrap; Ubuntu runner kernels
- * enforce Landlock. Seatbelt is always present on macOS.
+ * enforce Landlock. Seatbelt is always present on macOS; Windows' ACL runner
+ * leaves reads unconfined and is not a route jbot takes.
  */
 function dshSandboxUsable(bin: string): boolean {
-  if (process.platform !== 'linux') return true;
+  if (process.platform !== 'linux') return process.platform === 'darwin';
   const succeeds = (command: string, args: string[]) =>
     spawnSync(command, args, { stdio: 'ignore', timeout: 5_000 }).status === 0;
   if (succeeds('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', 'true'])) {
@@ -192,7 +193,7 @@ function dshUnusableReason(bin: string): string | undefined {
     unusableByBin.set(
       bin,
       !dshSandboxUsable(bin)
-        ? 'no usable dsh sandbox (needs bwrap or a Landlock-enforcing kernel)'
+        ? 'no usable dsh sandbox (needs Landlock or bwrap on Linux, Seatbelt on macOS)'
         : !dshBoots(bin)
           ? 'dsh failed its headless boot check'
           : undefined,
