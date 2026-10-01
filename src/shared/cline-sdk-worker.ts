@@ -2,13 +2,13 @@
 // SDK's bare Agent, never ClineCore, which runs a checkout's .cline hooks and loads its
 // .clinerules; its only tools are the three below, which read tracked files in the checkout.
 import { execFile } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { AgentTool } from '@cline/sdk';
-import { resolveWithinWorkspace } from './workspace-path.ts';
+import { readFileWithinWorkspace, resolveWithinWorkspace } from './workspace-path.ts';
 import { CLINE_SDK_VERIFIER_SYSTEM_PROMPT, truncateUtf8WithNotice } from './prompt.ts';
 
 const MAX_TOOL_OUTPUT_BYTES = 32 * 1024;
@@ -93,8 +93,9 @@ export function readOnlyTools(workspace: string, calls: { denied: boolean }[]): 
         const target = await allow(path, true);
         if (!target) return denied;
         try {
-          if (!statSync(target).isFile()) return denied;
-          const lines = readFileSync(target, 'utf8').split('\n');
+          const text = readFileWithinWorkspace(root, target);
+          if (text === undefined) return denied;
+          const lines = text.split('\n');
           const start = Math.max(1, Number(start_line) || 1);
           const end = Math.min(lines.length, Number(end_line) || start + 399);
           return cap(

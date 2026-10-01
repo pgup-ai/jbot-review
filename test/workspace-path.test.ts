@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, parse } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { resolveWithinWorkspace } from '../src/shared/workspace-path.ts';
+import { readFileWithinWorkspace, resolveWithinWorkspace } from '../src/shared/workspace-path.ts';
 
 describe('resolveWithinWorkspace', () => {
   // Security boundary for reads served outside a sandbox; follows symlinks, so
@@ -37,6 +45,33 @@ describe('resolveWithinWorkspace', () => {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
       rmSync(sibling, { force: true });
+    }
+  });
+
+  it('reads only the validated file when a path component is swapped after the check', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-')));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'out-')));
+    mkdirSync(join(root, 'dir'));
+    writeFileSync(join(root, 'dir', 'f.txt'), 'inside');
+    writeFileSync(join(root, 'g.txt'), 'inside');
+    writeFileSync(join(outside, 'f.txt'), 'SECRET');
+    writeFileSync(join(outside, 'g.txt'), 'SECRET');
+    try {
+      const nested = resolveWithinWorkspace(root, 'dir/f.txt')!;
+      const leaf = resolveWithinWorkspace(root, 'g.txt')!;
+      assert.equal(readFileWithinWorkspace(root, nested), 'inside');
+      assert.equal(readFileWithinWorkspace(root, join(root, 'dir')), undefined); // not a file
+      // The validated file itself becomes a symlink out: O_NOFOLLOW refuses it.
+      rmSync(leaf);
+      symlinkSync(join(outside, 'g.txt'), leaf);
+      assert.equal(readFileWithinWorkspace(root, leaf), undefined);
+      // A parent directory becomes a symlink out: the open follows it, the recheck rejects it.
+      renameSync(join(root, 'dir'), join(root, 'dir-old'));
+      symlinkSync(outside, join(root, 'dir'));
+      assert.equal(readFileWithinWorkspace(root, nested), undefined);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 });
