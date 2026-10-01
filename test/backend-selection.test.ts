@@ -938,7 +938,7 @@ describe('selectReviewBackends dsh engine routing', () => {
     );
   });
 
-  it('keeps models dsh does not serve on opencode even when enabled', () => {
+  it('keeps models outside the dsh catalog, and -free ones, on opencode', () => {
     for (const [providerID, modelID] of [
       ['google', 'deepseek-v4.1-flash'],
       ['deepseek', 'deepseek-v4.1-flash'],
