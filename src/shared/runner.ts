@@ -25,7 +25,6 @@ import {
 } from './review-plan.ts';
 import { buildContextPack } from './context-pack.ts';
 import { mergeSuppliedContexts, type SuppliedContext } from './review-read-locations.ts';
-import { catalogModelLimits } from './pi.ts';
 import { reviewExperiment, toolLessAuxiliary, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -121,22 +120,6 @@ import {
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
 import {
-  abortPiSessionsByLabel,
-  finalizePiSessionsByLabel,
-  piModelAvailable,
-  piSupportsProvider,
-  resolvePiEngine,
-  runPiAddressedPriorCommentsCheck,
-  runPiChangesSinceLastReview,
-  runPiFindingVerification,
-  runPiGuidelineComplianceCheck,
-  runPiReview,
-  piThinkingLevel,
-  startPi,
-  PI_TELEMETRY_CAPABILITY,
-  type PiRuntime,
-} from './pi.ts';
-import {
   assertPoolsideApiKey,
   poolsideReasoningEffort,
   runPoolsideAddressedPriorCommentsCheck,
@@ -146,7 +129,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
-import { createDshBackend, dshModelLimits, dshSupportsProvider, startDsh } from './dsh.ts';
+import { createDshBackend, dshModelLimits, resolveSdkEngine, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -433,61 +416,6 @@ function createOpencodeBackend(
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
-  };
-}
-
-function createPiBackend(runtime: PiRuntime): ReviewBackend {
-  return {
-    name: 'pi',
-    supportsGuidelineSweep: true,
-    observability: PI_TELEMETRY_CAPABILITY,
-    abortSessionsByLabel: (label, log) => abortPiSessionsByLabel(runtime, label, log),
-    finalizeSessionsByLabel: (label, log, budgetMs) =>
-      finalizePiSessionsByLabel(runtime, label, log, budgetMs),
-    runReview: (model, prContext, guidelines, log, options) =>
-      runPiReview(runtime, model, prContext, guidelines, log, options),
-    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runPiAddressedPriorCommentsCheck(runtime, model, prContext, log, timeoutMs, onTokenUsage),
-    runGuidelineComplianceCheck: (
-      model,
-      prContext,
-      guidelines,
-      log,
-      timeoutMs,
-      onTokenUsage,
-      modelOptions,
-    ) =>
-      runPiGuidelineComplianceCheck(
-        runtime,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        modelOptions,
-      ),
-    runFindingVerification: (
-      model,
-      prContext,
-      findings,
-      log,
-      timeoutMs,
-      onTokenUsage,
-      modelOptions,
-    ) =>
-      runPiFindingVerification(
-        runtime,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        modelOptions,
-      ),
-    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runPiChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
   };
 }
 
@@ -860,7 +788,7 @@ function requireCliBackend(
 
 function requireSdkBackend(
   backend: ReviewBackend | undefined,
-  engine: 'opencode' | 'pi' | 'poolside',
+  engine: 'opencode' | 'dsh' | 'poolside',
   role: 'main' | 'aux',
 ): ReviewBackend {
   if (!backend) {
@@ -1431,35 +1359,13 @@ async function runReviewPipeline(params: {
     }
   }
 
-  const piEngine = resolvePiEngine(
+  const sdkEngine = resolveSdkEngine(
     options.sdkEngine ? { JBOT_SDK_ENGINE: options.sdkEngine } : process.env,
-    process.version,
   );
-  const sdkEngineLabel = piEngine.dshBin ? 'dsh' : 'pi';
-  if (!piEngine.enabled && piEngine.reason) log(`SDK engine disabled: ${piEngine.reason}`);
-  const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? piEngine.dshBin
-      ? [dshSupportsProvider(providerID), dshSupportsProvider(auxProviderID)]
-      : await Promise.all([
-          piModelAvailable(providerID, modelID),
-          piModelAvailable(auxProviderID, auxModelID),
-        ])
-    : [false, false];
-  if (piEngine.enabled) {
-    if (piSupportsProvider(providerID) && !mainPiModelAvailable) {
-      log(
-        `${sdkEngineLabel} engine does not serve ${model}; routing main sessions through opencode.`,
-      );
-    }
-    if (piSupportsProvider(auxProviderID) && !auxPiModelAvailable && auxModel !== model) {
-      log(
-        `${sdkEngineLabel} engine does not serve ${auxModel}; routing auxiliary sessions through opencode.`,
-      );
-    }
-  }
+  if (sdkEngine.reason) log(`dsh engine disabled: ${sdkEngine.reason}`);
   // A comma-separated opencode key list resolves to the account with the most
   // weekly plan allowance left. Resolved before backend selection so the
-  // opencode server, pi, and both roles all receive the same single key.
+  // opencode server, dsh, and both roles all receive the same single key.
   const { apiKey, auxApiKey } = await resolveOpencodeApiKeys(
     {
       providerID,
@@ -1476,9 +1382,7 @@ async function runReviewPipeline(params: {
     auxProviderID,
     auxModelID,
     auxApiKey,
-    piEnabled: piEngine.enabled,
-    mainPiModelAvailable,
-    auxPiModelAvailable,
+    dshEnabled: Boolean(sdkEngine.dshBin),
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   // Backend selection owns the main-wins key policy; empty when no role
@@ -1496,12 +1400,12 @@ async function runReviewPipeline(params: {
     // The absence line keeps alpha-API drift visible instead of silent.
     log(planUsage ?? 'CommandCode plan usage unavailable.');
   }
-  const mainOnPi = backendSelection.mainSdkEngine === 'pi';
-  const auxOnPi = backendSelection.auxSdkEngine === 'pi';
+  const mainOnDsh = backendSelection.mainSdkEngine === 'dsh';
+  const auxOnDsh = backendSelection.auxSdkEngine === 'dsh';
   const mainOnPoolside = backendSelection.mainSdkEngine === 'poolside';
   const auxOnPoolside = backendSelection.auxSdkEngine === 'poolside';
-  const mainOnOpencode = !mainCliBackend && !mainOnPi && !mainOnPoolside;
-  const auxOnOpencode = !auxCliBackend && !auxOnPi && !auxOnPoolside;
+  const mainOnOpencode = !mainCliBackend && !mainOnDsh && !mainOnPoolside;
+  const auxOnOpencode = !auxCliBackend && !auxOnDsh && !auxOnPoolside;
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -1522,11 +1426,9 @@ async function runReviewPipeline(params: {
       `Prompt cache disabled for provider ${providerID} because aux model ${auxModel} does not support it; main model ${model} shares that provider config.`,
     );
   }
-  const sdkEngineName = (engine?: string) =>
-    engine === 'pi' && piEngine.dshBin ? 'dsh' : (engine ?? 'opencode');
-  if (mainOnPi || auxOnPi || mainOnPoolside || auxOnPoolside) {
+  if (mainOnDsh || auxOnDsh || mainOnPoolside || auxOnPoolside) {
     log(
-      `Backend routing: main=${mainCliBackend ?? sdkEngineName(backendSelection.mainSdkEngine)} aux=${auxCliBackend ?? sdkEngineName(backendSelection.auxSdkEngine)}`,
+      `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
     );
   }
   // The entry points chose default options before the diff size was known.
@@ -1944,7 +1846,7 @@ async function runReviewPipeline(params: {
   // avoid double-limiting OpenCode sessions inside this runner path.
   configureSessionConcurrency(0);
   // Only the selected providers the gateway actually serves; a gateway
-  // configured alongside an opencode/pi/other-CLI run must not touch it.
+  // configured alongside an opencode/dsh/other-CLI run must not touch it.
   const routedAgents = [...new Set([mainCliBackend, auxCliBackend])].filter(
     (id): id is CliBackendID =>
       Boolean(id) && (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(id as string),
@@ -2311,7 +2213,7 @@ async function runReviewPipeline(params: {
   // Falling back to the main key would hand the main provider's secret to a
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
-    auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+    auxProviderID !== providerID && ((mainOnDsh && auxOnDsh) || (mainOnOpencode && auxOnOpencode));
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
@@ -2323,69 +2225,42 @@ async function runReviewPipeline(params: {
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
   }
 
-  let piRuntime: { stop: () => void } | undefined;
-  let piBackend: ReviewBackend | undefined;
-  if (backendSelection.pi && piEngine.dshBin) {
-    const dshBin = piEngine.dshBin;
+  let dshRuntime: Awaited<ReturnType<typeof startDsh>> | undefined;
+  let dshBackend: ReviewBackend | undefined;
+  if (backendSelection.dsh && sdkEngine.dshBin) {
     const {
       providerID: dshProviderID,
       modelID: dshModelID,
       apiKey: dshApiKey,
-    } = backendSelection.pi;
+    } = backendSelection.dsh;
+    if (!dshApiKey) {
+      await cleanupCliHomes();
+      throw new Error(`Missing API key for provider "${dshProviderID}".`);
+    }
     log('Starting dsh engine');
     try {
-      const dsh = await startDsh(workspace, dshProviderID, dshModelID, dshApiKey, log, dshBin, {
-        modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
-        auxModelOptions,
-        reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
-        toolTelemetry: backendToolTelemetry,
-      });
-      piRuntime = dsh;
-      piBackend = createDshBackend(dsh.runtime);
-    } catch (error) {
-      await cleanupCliHomes();
-      throw error;
-    }
-  } else if (backendSelection.pi) {
-    const piConfig = backendSelection.pi;
-    if (!piConfig.apiKey) {
-      await cleanupCliHomes();
-      throw new Error(`Missing API key for provider "${piConfig.providerID}".`);
-    }
-    log('Starting pi engine');
-    try {
-      const pi = await startPi(
+      dshRuntime = await startDsh(
         workspace,
-        piConfig.providerID,
-        piConfig.modelID,
-        piConfig.apiKey,
+        dshProviderID,
+        dshModelID,
+        dshApiKey,
         log,
+        sdkEngine.dshBin,
         {
-          // Levels are per session: main-model sessions take the main effort,
-          // a distinct aux model takes the aux default (a runtime serving aux
-          // alone sees the aux model as its main).
-          modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
-          // Clamped like startPi clamps the main options — the raw aux `low`
-          // would resurrect mimo's below-floor collapse on shared runtimes.
-          auxThinkingLevel: piThinkingLevel(
-            supportedModelOptions(auxProviderID, auxModelID, auxModelOptions),
-          ),
-          // pi's prompt caching is provider-managed (no setCacheKey knob);
-          // resolvePromptCachePolicy applies to the opencode server only.
-          additionalProviderKeys: auxNeedsOwnKey
-            ? [{ providerID: auxProviderID, apiKey: auxApiKey }]
-            : undefined,
+          modelOptions: mainOnDsh ? options.modelOptions : auxModelOptions,
+          auxModelOptions,
           reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
           toolTelemetry: backendToolTelemetry,
-          embeddedFirstPrompt: options.embeddedFirstPrompt,
+          ...(mainOnDsh && auxOnDsh
+            ? { auxProviderKey: { providerID: auxProviderID, apiKey: auxApiKey || dshApiKey } }
+            : {}),
         },
       );
-      piRuntime = pi;
-      piBackend = createPiBackend(pi.runtime);
     } catch (error) {
       await cleanupCliHomes();
       throw error;
     }
+    dshBackend = createDshBackend(dshRuntime.runtime);
   }
 
   let auxOpencodeBootError: unknown;
@@ -2407,7 +2282,7 @@ async function runReviewPipeline(params: {
         opencodeApiKey,
         log,
         {
-          // Symmetric to the pi runtime below: when main is not on opencode the
+          // Symmetric to the dsh runtime above: when main is not on opencode the
           // root model IS the aux model, so it carries the aux options — and
           // the verifier alias, since verification runs on the aux model.
           modelOptions: mainOnOpencode ? options.modelOptions : auxModelOptions,
@@ -2450,7 +2325,7 @@ async function runReviewPipeline(params: {
       opencodeBackend = createOpencodeBackend(opencodeRuntime, backendToolTelemetry);
     } catch (error) {
       if (mainOnOpencode) {
-        piRuntime?.stop();
+        dshRuntime?.stop();
         await cleanupCliHomes();
         throw error;
       }
@@ -2487,15 +2362,15 @@ async function runReviewPipeline(params: {
   }
   const mainBaseBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
-    : mainOnPi
-      ? requireSdkBackend(piBackend, 'pi', 'main')
+    : mainOnDsh
+      ? requireSdkBackend(dshBackend, 'dsh', 'main')
       : mainOnPoolside
         ? requireSdkBackend(mainPoolsideBackend, 'poolside', 'main')
         : requireSdkBackend(opencodeBackend, 'opencode', 'main');
   const auxBaseBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
-    : auxOnPi
-      ? requireSdkBackend(piBackend, 'pi', 'aux')
+    : auxOnDsh
+      ? requireSdkBackend(dshBackend, 'dsh', 'aux')
       : auxOnPoolside
         ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
         : auxOpencodeBootError
@@ -2512,8 +2387,7 @@ async function runReviewPipeline(params: {
       (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
       (providerID === COMMANDCODE_PROVIDER_ID
         ? COMMANDCODE_MODEL_LIMITS[modelID.toLowerCase()]
-        : undefined) ??
-      (await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined)),
+        : undefined),
   );
   const auxPromptBudget = reviewPromptBudget(
     auxBaseBackend.name,
@@ -2525,10 +2399,7 @@ async function runReviewPipeline(params: {
       (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
       (auxProviderID === COMMANDCODE_PROVIDER_ID
         ? COMMANDCODE_MODEL_LIMITS[auxModelID.toLowerCase()]
-        : undefined) ??
-      (await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(
-        () => undefined,
-      )),
+        : undefined),
   );
   const mainBackend = budgetReviewBackend(
     limitReviewBackendSessions(
@@ -2581,9 +2452,9 @@ async function runReviewPipeline(params: {
       log(`opencode teardown failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
-      piRuntime?.stop();
+      dshRuntime?.stop();
     } catch (error) {
-      log(`pi teardown failed: ${error instanceof Error ? error.message : String(error)}`);
+      log(`dsh teardown failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
   teardownPending = true;
@@ -2599,7 +2470,7 @@ async function runReviewPipeline(params: {
     // session there must be able to drive a tool loop. A single-shot model
     // (proxied Gemini) runs tool-free; a visible Context7 tool would let it make
     // the call that 400s on the thought_signature continuation, and it cannot
-    // use the tool anyway. Aux only counts when it runs on opencode (not pi/CLI,
+    // use the tool anyway. Aux only counts when it runs on opencode (not dsh/CLI,
     // which never touch this client).
     const opencodeModelsAgentic =
       modelSupportsAgenticTools(providerID, modelID) &&
@@ -2613,8 +2484,8 @@ async function runReviewPipeline(params: {
         log('Context7 MCP skipped: a single-shot model runs the review without tools.');
       }
     } else if (context7.enabled) {
-      // pi has no MCP support; framework-behavior claims fall back to the
-      // abstention discipline. CLI backends likewise run without Context7.
+      // dsh and CLI backends run without Context7; framework-behavior claims
+      // fall back to the abstention discipline.
       log(
         `Context7 MCP skipped: main review uses the ${mainBackend.name} backend (${context7.reason}).`,
       );
@@ -2950,7 +2821,7 @@ async function runReviewPipeline(params: {
       batchDiffScope:
         options.experiment.exploration.batchDiffRecovery &&
         guidelineSelection.mainCanReadWorkspace &&
-        !['pi', 'commandcode'].includes(mainBackend.name)
+        mainBackend.name !== 'commandcode'
           ? diffScope
           : undefined,
     });
@@ -3285,7 +3156,7 @@ async function runReviewPipeline(params: {
           backend: auxBackend,
           model: auxModel,
           workspace,
-          embedDiff: auxOnPi || auxRequiresCompleteEmbeddedDiff,
+          embedDiff: auxOnDsh || auxRequiresCompleteEmbeddedDiff,
           // Summarize re-reviews even when finder prompts exclude prior comments.
           reviewedHead,
           headSha,
@@ -5874,8 +5745,8 @@ export function renderReviewMetadataBlock(
 export function formatReviewedWith(
   model: string,
   tokenUsage?: ReviewTokenUsage,
-  // Model → SDK engine / CLI ('pi', 'opencode', 'kilo', …). The model prefix no
-  // longer implies the engine (opencode/… can run on pi), so name it explicitly.
+  // Model → SDK engine / CLI ('dsh', 'opencode', 'kilo', …). The model prefix no
+  // longer implies the engine (opencode/… can run on dsh), so name it explicitly.
   engineByModel?: Record<string, string>,
 ): string {
   const withEngine = (usageModel: string): string => {

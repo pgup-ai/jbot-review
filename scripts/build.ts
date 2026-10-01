@@ -19,8 +19,6 @@ const shared: esbuild.BuildOptions = {
     '@actions/core',
     '@actions/github',
     '@cline/sdk',
-    '@earendil-works/pi-ai',
-    '@earendil-works/pi-coding-agent',
     '@opencode/client',
     '@qoder-ai/qoder-agent-sdk',
     '@octokit/auth-app',

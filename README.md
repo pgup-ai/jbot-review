@@ -523,32 +523,18 @@ enumerable catalog command and is documented as that explicit boundary.
 (`sdk-engine: dsh`): each session is a `dsh --profile headless --json` child
 with a per-session `DSH_HOME`, its read-only OS sandbox, approvals off, and its
 file-write, web, skill, subagent, instruction-file and DeepSeek log/telemetry
-plugins disabled. The CLI is found via `JBOT_DSH_BIN` or `PATH`; without it,
-and for every other non-CLI provider except Poolside, sessions run on the
-opencode server. `sdk-engine: opencode` pins opencode. Set the Action input `sdk-engine: auto` or, for hosted/local runs,
-`JBOT_SDK_ENGINE=auto` to route a session to the in-process
-[pi SDK](https://pi.dev/docs/latest/sdk) instead when pi's catalog contains the
-selected model; catalog misses stay on the opencode server so newly released
-models do not fail while pi catches up. pi's allowlist covers `anthropic`,
-`openai`, `google`, `deepseek`, `xai`, `openrouter`, `fireworks-ai`,
-`zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
-`opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
-endpoint directly, not through the opencode server). The Kimi providers,
-`tokenrouter`, and `openai-compatible` always use opencode.
-The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
-disables itself and logs why. pi sessions run hermetically (no user-level pi
-config, skills, or prompt templates are loaded), get no shell (pi ships no
-sandbox, so read-only is enforced by withholding `bash` rather than by
-filtering it). Sessions use Pi's native `read`, `grep`, `find`, and `ls` tools,
-including their line limits, regex search and output truncation. J-Bot supplies
-every assigned diff hunk before investigation. Verification can recover omitted
-patches and removed lines from a temporary canonical diff using native reads.
-Native tools can read outside the checkout. Disposable checkouts do not isolate
-host files or runtime credentials.
-The provider catalog supplies each model's context window. Repository investigation has
-no tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
-existing session deadlines and per-command process limits still apply. Pi manages
-provider prompt caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions only.
+plugins disabled. The published images include `dsh`; elsewhere it is found via
+`JBOT_DSH_BIN` or `PATH`. On Linux its shell needs a Landlock-enforcing kernel
+or a working `bwrap` (Docker Desktop's kernel has neither); without a binary or
+a usable sandbox, those models run on the opencode server and the log says why.
+Every other non-CLI provider except Poolside runs on the opencode server, and
+`sdk-engine: opencode` pins it for all of them. Sessions read the repository
+with `glob`, `grep` and read-only shell commands; J-Bot supplies every assigned
+diff hunk first, and verification can recover omitted hunks from a temporary
+canonical diff. The sandbox confines writes, not reads: disposable checkouts do
+not isolate host files or runtime credentials. DeepSeek Harness manages provider
+prompt caching itself, so `JBOT_PROMPT_CACHE` applies to opencode-served
+sessions only.
 
 **CLI and ACP routing.** Without `JBOT_ACP_GATEWAY_URL`, `devin` runs through
 its headless CLI from an isolated temporary workspace, with repository-controlled
@@ -870,7 +856,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs opencode/opencode-go sessions on DeepSeek Harness when installed; `opencode` pins opencode; `auto` uses pi for cataloged models                                                                                                                   |
+| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs opencode/opencode-go sessions on DeepSeek Harness when its sandbox is usable; `opencode` pins opencode                                                                                                                                            |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |

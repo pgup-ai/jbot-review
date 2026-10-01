@@ -15,7 +15,7 @@ import {
 } from '@symma/protocol';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from '@symma/protocol';
-import { piSupportsProvider } from './pi.ts';
+import { dshSupportsProvider } from './dsh.ts';
 import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
@@ -37,14 +37,11 @@ export interface ReviewBackendSelectionInput {
   auxProviderID: string;
   auxModelID: string;
   auxApiKey: string;
-  /** Whether the pi engine may be used at all (see resolvePiEngine). */
-  piEnabled?: boolean;
-  /** Per-role catalog checks; false routes that role through opencode. */
-  mainPiModelAvailable?: boolean;
-  auxPiModelAvailable?: boolean;
+  /** Whether the dsh engine may be used at all (see resolveSdkEngine). */
+  dshEnabled?: boolean;
 }
 
-export interface PiEngineConfig {
+export interface DshEngineConfig {
   providerID: string;
   modelID: string;
   apiKey: string;
@@ -77,8 +74,8 @@ export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;
   /** Present only when the role bypasses the OpenCode server. */
-  mainSdkEngine?: 'pi' | 'poolside';
-  auxSdkEngine?: 'pi' | 'poolside';
+  mainSdkEngine?: 'dsh' | 'poolside';
+  auxSdkEngine?: 'dsh' | 'poolside';
   needsOpencode: boolean;
   devinApiKey: string;
   commandCodeAccessKey: string;
@@ -92,8 +89,8 @@ export interface ReviewBackendSelection {
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
-  /** pi engine init config (main role wins), present only when needsPi. */
-  pi?: PiEngineConfig;
+  /** dsh engine init config (main role wins), present only when needsDsh. */
+  dsh?: DshEngineConfig;
 }
 
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
@@ -101,22 +98,17 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
   const mainPoolside = !mainCliBackend && isPoolsideProvider(input.providerID);
   const auxPoolside = !auxCliBackend && isPoolsideProvider(input.auxProviderID);
-  const mainPi =
-    !mainCliBackend &&
-    !mainPoolside &&
-    !!input.piEnabled &&
-    input.mainPiModelAvailable !== false &&
-    piSupportsProvider(input.providerID);
-  const auxPi =
+  const mainDsh =
+    !mainCliBackend && !mainPoolside && !!input.dshEnabled && dshSupportsProvider(input.providerID);
+  const auxDsh =
     !auxCliBackend &&
     !auxPoolside &&
-    !!input.piEnabled &&
-    input.auxPiModelAvailable !== false &&
-    piSupportsProvider(input.auxProviderID);
-  const mainOpencode = !mainCliBackend && !mainPi && !mainPoolside;
-  const auxOpencode = !auxCliBackend && !auxPi && !auxPoolside;
+    !!input.dshEnabled &&
+    dshSupportsProvider(input.auxProviderID);
+  const mainOpencode = !mainCliBackend && !mainDsh && !mainPoolside;
+  const auxOpencode = !auxCliBackend && !auxDsh && !auxPoolside;
   const needsOpencode = mainOpencode || auxOpencode;
-  const needsPi = mainPi || auxPi;
+  const needsDsh = mainDsh || auxDsh;
   const effectiveAuxApiKey =
     input.auxApiKey || (input.auxProviderID === input.providerID ? input.apiKey : '');
   const opencodeApiKey = mainOpencode
@@ -135,13 +127,13 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     ...(auxCliBackend ? { auxCliBackend } : {}),
     ...(mainPoolside
       ? { mainSdkEngine: 'poolside' as const }
-      : mainPi
-        ? { mainSdkEngine: 'pi' as const }
+      : mainDsh
+        ? { mainSdkEngine: 'dsh' as const }
         : {}),
     ...(auxPoolside
       ? { auxSdkEngine: 'poolside' as const }
-      : auxPi
-        ? { auxSdkEngine: 'pi' as const }
+      : auxDsh
+        ? { auxSdkEngine: 'dsh' as const }
         : {}),
     needsOpencode,
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
@@ -156,16 +148,16 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
       ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
       : {}),
     // The opencode server boots with the config of the role it serves: main
-    // when main is on opencode, else aux (a CLI or pi main defers to aux).
+    // when main is on opencode, else aux (a CLI or dsh main defers to aux).
     opencodeProviderID: mainOpencode ? input.providerID : input.auxProviderID,
     opencodeModelID: mainOpencode ? input.modelID : input.auxModelID,
     opencodeApiKey,
-    ...(needsPi
+    ...(needsDsh
       ? {
-          pi: {
-            providerID: mainPi ? input.providerID : input.auxProviderID,
-            modelID: mainPi ? input.modelID : input.auxModelID,
-            apiKey: mainPi ? input.apiKey : effectiveAuxApiKey,
+          dsh: {
+            providerID: mainDsh ? input.providerID : input.auxProviderID,
+            modelID: mainDsh ? input.modelID : input.auxModelID,
+            apiKey: mainDsh ? input.apiKey : effectiveAuxApiKey,
           },
         }
       : {}),

@@ -48,8 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { dshSupportsProvider } from '../shared/dsh.ts';
-import { catalogModelLimits, piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
+import { dshModelLimits, dshSupportsProvider, resolveSdkEngine } from '../shared/dsh.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -537,9 +536,8 @@ async function review(
     return;
   }
 
-  const piEngine = resolvePiEngine(
+  const sdkEngine = resolveSdkEngine(
     comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
-    process.version,
   );
   // Before credential resolution on purpose: a preview must cost nothing and
   // need no key.
@@ -568,13 +566,14 @@ async function review(
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     const { providerID, modelID } = parseModelName(model);
+    const onDsh = Boolean(sdkEngine.dshBin) && dshSupportsProvider(providerID);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',
       shards,
       budget: reviewPromptBudget(
-        cliBackendForProvider(providerID) ?? 'opencode',
-        await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined),
+        cliBackendForProvider(providerID) ?? (onDsh ? 'dsh' : 'opencode'),
+        onDsh ? dshModelLimits(modelID) : undefined,
       ),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });
@@ -637,15 +636,7 @@ async function review(
   const { providerID, modelID } = parseModelName(model);
   const aux = parseModelName(auxModel || model);
   // Preflight-only resolution (the runner re-resolves for its own routing):
-  // roles served by the in-process pi engine need no opencode binary.
-  const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? piEngine.dshBin
-      ? [dshSupportsProvider(providerID), dshSupportsProvider(aux.providerID)]
-      : await Promise.all([
-          piModelAvailable(providerID, modelID),
-          piModelAvailable(aux.providerID, aux.modelID),
-        ])
-    : [false, false];
+  // roles served by the dsh engine need no opencode binary.
   const selection = selectReviewBackends({
     providerID,
     modelID,
@@ -653,9 +644,7 @@ async function review(
     auxProviderID: aux.providerID,
     auxModelID: aux.modelID,
     auxApiKey: auxApiKey ?? '',
-    piEnabled: piEngine.enabled,
-    mainPiModelAvailable,
-    auxPiModelAvailable,
+    dshEnabled: Boolean(sdkEngine.dshBin),
   });
   const configuredModelOptions = comparison
     ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider, modelID))

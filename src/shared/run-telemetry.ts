@@ -5,7 +5,7 @@ import { backendCanReadWorkspace, cliBackendForProvider } from './backend-select
 import { modelSupportsAgenticTools } from './config.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 import { commandCodeSessionEffort } from './commandcode.ts';
-import { piThinkingLevel } from './pi.ts';
+import { dshReasoningEffort } from './dsh.ts';
 import { poolsideReasoningEffort } from './poolside.ts';
 import type { ReviewRunOptions } from './runner.ts';
 
@@ -132,7 +132,7 @@ export function effectiveReasoningEffort(
 ): string | undefined {
   if (backend === 'commandcode')
     return commandCodeSessionEffort(model, override, commandCodeContext);
-  if (backend === 'pi') return piThinkingLevel(modelOptions);
+  if (backend === 'dsh') return dshReasoningEffort(parseModelName(model).modelID, modelOptions);
   if (backend !== 'opencode' && backend !== 'poolside') return undefined;
   const effort = knownEffort(
     backend === 'poolside' ? poolsideReasoningEffort(modelOptions) : modelOptions?.reasoningEffort,

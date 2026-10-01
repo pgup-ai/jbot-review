@@ -1,7 +1,17 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { accessSync, constants, cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  accessSync,
+  constants,
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { createCliProcessScope, runCliProcess } from './cli-process.ts';
@@ -21,7 +31,7 @@ import {
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
-  buildPiDiffRecoveryNote,
+  buildDiffRecoveryNote,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
 } from './prompt.ts';
@@ -95,6 +105,63 @@ export function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
       return false;
     }
   });
+}
+
+/**
+ * Linux confinement is bwrap or Landlock; with neither, dsh fails every shell
+ * call closed, so the review would run blind. Docker Desktop's kernel lacks
+ * Landlock and Docker's default seccomp stops bwrap; Ubuntu runner kernels
+ * enforce Landlock. Seatbelt is always present on macOS.
+ */
+export function dshSandboxUsable(bin: string): boolean {
+  if (process.platform !== 'linux') return true;
+  const succeeds = (command: string, args: string[]) =>
+    spawnSync(command, args, { stdio: 'ignore', timeout: 5_000 }).status === 0;
+  if (succeeds('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', 'true'])) {
+    return true;
+  }
+  const runner = join('node_modules', '@deepseek-ai', `node-addon-system-linux-${process.arch}`);
+  // Nested under dsh or hoisted beside it, depending on how npm laid it out.
+  for (let dir = dirname(realpathSync(bin)); dir !== dirname(dir); dir = dirname(dir)) {
+    const landlockRun = join(dir, runner, 'bin', 'landlock-run');
+    if (existsSync(landlockRun)) return succeeds(landlockRun, ['--probe']);
+  }
+  return false;
+}
+
+/**
+ * JBOT_SDK_ENGINE: `dsh` (default) serves opencode/opencode-go models on
+ * DeepSeek Harness, `opencode` pins the opencode server. A missing dsh, an
+ * unusable sandbox, the removed pi engine (`auto`) or an unknown value all
+ * fall back to opencode, so the engine choice can never fail a run.
+ */
+export function resolveSdkEngine(
+  env: NodeJS.ProcessEnv,
+  dshBin = resolveDshBin(process.env),
+  sandboxUsable = dshSandboxUsable,
+): { dshBin?: string; reason: string } {
+  const engine = env.JBOT_SDK_ENGINE?.trim() || 'dsh';
+  if (engine === 'opencode') return { reason: '' };
+  if (engine !== 'dsh') {
+    return {
+      reason:
+        engine === 'auto'
+          ? 'the pi engine (JBOT_SDK_ENGINE=auto) was removed; using the opencode engine'
+          : `unknown JBOT_SDK_ENGINE value "${engine}"; using the opencode engine`,
+    };
+  }
+  if (!dshBin) {
+    return {
+      reason: 'no dsh binary (set JBOT_DSH_BIN or put dsh on PATH); using the opencode engine',
+    };
+  }
+  if (!sandboxUsable(dshBin)) {
+    return {
+      reason:
+        'no usable dsh sandbox (needs bwrap or a Landlock-enforcing kernel); using the opencode engine',
+    };
+  }
+  return { dshBin, reason: '' };
 }
 
 export function dshSupportsProvider(providerID: string): boolean {
@@ -263,8 +330,8 @@ interface DshRuntime {
   /** A booted DSH_HOME copied per session, so no two children share state. */
   template: string;
   workspace: string;
-  providerID: string;
-  apiKey: string;
+  /** Per served provider; the aux role may sit on the other opencode gateway. */
+  apiKeys: Record<string, string>;
   mainModel: string;
   modelOptions?: Record<string, unknown>;
   auxModelOptions?: Record<string, unknown>;
@@ -275,6 +342,7 @@ interface DshRuntime {
 
 interface DshSession {
   home: string;
+  apiKey: string;
   patch: string;
   model: string;
   label: string;
@@ -303,6 +371,7 @@ export async function startDsh(
     auxModelOptions?: Record<string, unknown>;
     reviewDiff?: string;
     toolTelemetry?: ToolTelemetryAccumulator;
+    auxProviderKey?: { providerID: string; apiKey: string };
   } = {},
 ): Promise<{ runtime: DshRuntime; stop: () => void }> {
   if (!dshSupportsProvider(providerID)) {
@@ -351,13 +420,18 @@ export async function startDsh(
     root,
     template,
     workspace,
-    providerID,
-    apiKey,
+    apiKeys: {
+      ...(options.auxProviderKey &&
+        dshSupportsProvider(options.auxProviderKey.providerID) && {
+          [options.auxProviderKey.providerID]: options.auxProviderKey.apiKey,
+        }),
+      [providerID]: apiKey,
+    },
     mainModel: `${providerID}/${modelID}`,
     modelOptions: options.modelOptions,
     auxModelOptions: options.auxModelOptions,
     systemPrompt:
-      DSH_REVIEW_SYSTEM_PROMPT + (options.reviewDiff ? buildPiDiffRecoveryNote(diffPath) : ''),
+      DSH_REVIEW_SYSTEM_PROMPT + (options.reviewDiff ? buildDiffRecoveryNote(diffPath) : ''),
     scope,
     ...(options.toolTelemetry ? { toolTelemetry: options.toolTelemetry } : {}),
   };
@@ -376,9 +450,8 @@ function createDshSession(
   modelOptions?: Record<string, unknown>,
 ): DshSession {
   const { providerID, modelID } = parseModelName(model);
-  if (providerID !== runtime.providerID) {
-    throw new Error(`dsh engine serves ${runtime.providerID}, not ${model}`);
-  }
+  const apiKey = runtime.apiKeys[providerID];
+  if (!apiKey) throw new Error(`dsh engine has no key for ${model}`);
   const home = mkdtempSync(join(runtime.root, 'session-'));
   cpSync(join(runtime.template, 'dsh'), join(home, 'dsh'), { recursive: true });
   const patch = join(home, 'patch.yml');
@@ -399,7 +472,7 @@ function createDshSession(
       subagents: process.env.JBOT_DSH_SUBAGENTS === '1',
     }),
   );
-  return { home, patch, model, label };
+  return { home, apiKey, patch, model, label };
 }
 
 function disposeDshSession(session: DshSession): void {
@@ -440,7 +513,7 @@ async function promptDshSession(
     ({ stdout } = await runtime.scope.run(session.label, () =>
       runCliProcess(runtime.bin, args, {
         cwd: runtime.workspace,
-        env: childEnv(runtime.apiKey, session.home),
+        env: childEnv(session.apiKey, session.home),
         input: prompt,
         timeoutMs,
         timeoutMessage: `dsh ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,

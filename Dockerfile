@@ -16,6 +16,13 @@ RUN npm install -g @opencode/cli@2.0.16 command-code@1.69.0 \
   && opencode --version \
   && command-code --no-auto-update --version
 
+# DeepSeek Harness (~515MB), the default engine for opencode/opencode-go models, in
+# both variants. Its shell runs under Landlock or bwrap; on a host with neither,
+# jbot logs why and serves those models on opencode instead.
+RUN npm install -g @deepseek-ai/dsh@0.2.0-rc.2 \
+  && npm cache clean --force \
+  && dsh --version
+
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 ARG DEVIN_CLI_VERSION=3000.10.21
 RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \

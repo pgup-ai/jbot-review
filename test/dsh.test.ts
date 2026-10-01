@@ -1,19 +1,30 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildDshPatch, dshReasoningEffort, parseDshEvents } from '../src/shared/dsh.ts';
-import { resolvePiEngine } from '../src/shared/pi.ts';
+import {
+  buildDshPatch,
+  dshReasoningEffort,
+  parseDshEvents,
+  resolveSdkEngine,
+} from '../src/shared/dsh.ts';
 
 describe('dsh engine', () => {
-  it('is the default engine, falling back to opencode without a dsh binary', () => {
-    assert.deepEqual(resolvePiEngine({}, 'v24.18.0', '/bin/dsh'), {
-      enabled: true,
+  it('is the default engine and falls back to opencode rather than fail a run', () => {
+    const usable = () => true;
+    assert.deepEqual(resolveSdkEngine({}, '/bin/dsh', usable), { dshBin: '/bin/dsh', reason: '' });
+    assert.deepEqual(resolveSdkEngine({ JBOT_SDK_ENGINE: 'opencode' }, '/bin/dsh', usable), {
       reason: '',
-      dshBin: '/bin/dsh',
     });
-    const fallback = resolvePiEngine({}, 'v24.18.0', '');
-    assert.equal(fallback.enabled, false);
-    assert.match(fallback.reason, /no dsh binary/);
+    for (const [env, bin, sandbox, reason] of [
+      [{}, '', usable, /no dsh binary/],
+      [{}, '/bin/dsh', () => false, /no usable dsh sandbox/],
+      [{ JBOT_SDK_ENGINE: 'auto' }, '/bin/dsh', usable, /pi engine .* was removed/],
+      [{ JBOT_SDK_ENGINE: 'pi-please' }, '/bin/dsh', usable, /unknown JBOT_SDK_ENGINE/],
+    ] as const) {
+      const resolved = resolveSdkEngine(env, bin, sandbox);
+      assert.equal(resolved.dshBin, undefined);
+      assert.match(resolved.reason, reason);
+    }
   });
 
   it('maps efforts onto DeepSeek thinking modes only', () => {

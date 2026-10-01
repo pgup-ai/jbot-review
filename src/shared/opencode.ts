@@ -128,7 +128,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Shared by the pi engine (pi.ts); a timeout rejection never leaks an unhandled rejection. */
+/** A timeout rejection never leaks an unhandled rejection. */
 export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,

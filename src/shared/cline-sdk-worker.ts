@@ -8,7 +8,7 @@ import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { AgentTool } from '@cline/sdk';
-import { resolveWithinWorkspace } from './pi.ts';
+import { resolveWithinWorkspace } from './workspace-path.ts';
 import { CLINE_SDK_VERIFIER_SYSTEM_PROMPT, truncateUtf8WithNotice } from './prompt.ts';
 
 const MAX_TOOL_OUTPUT_BYTES = 32 * 1024;

@@ -1,0 +1,29 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it } from 'node:test';
+
+import { resolveWithinWorkspace } from '../src/shared/workspace-path.ts';
+
+describe('resolveWithinWorkspace', () => {
+  // Security boundary for reads served outside a sandbox; follows symlinks, so
+  // it runs against a real filesystem.
+  it('confines to the real workspace and refuses symlink + lexical escapes', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-')));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'out-')));
+    writeFileSync(join(root, 'inside.txt'), 'x');
+    writeFileSync(join(outside, 'secret.txt'), 'SECRET');
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'evil')); // escapes the repo
+    try {
+      assert.equal(resolveWithinWorkspace(root, 'inside.txt'), join(root, 'inside.txt'));
+      assert.equal(resolveWithinWorkspace(root, 'evil'), undefined); // P0: symlink escape
+      assert.equal(resolveWithinWorkspace(root, '/etc/hosts'), undefined); // absolute
+      assert.equal(resolveWithinWorkspace(root, '../../etc/hosts'), undefined); // ..
+      assert.equal(resolveWithinWorkspace(root, 'missing.txt'), undefined); // non-existent
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});

@@ -135,6 +135,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    bash stays allowed for git diff/log/grep. Scope is the model sessions — the
    local driver's opt-in, gitignored `.jbot-review/last-run.md` report is
    post-review output, not a session write.
+   dsh sessions get the equivalent from their `--patch` overlay: a read-only
+   OS sandbox (Landlock, bwrap or Seatbelt; no usable sandbox routes to
+   opencode), approvals never, the write/web/skill/subagent/instruction-file
+   rows disabled, a per-session `DSH_HOME`, and an env holding only the key.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure

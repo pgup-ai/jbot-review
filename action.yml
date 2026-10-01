@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ''
   sdk-engine:
-    description: 'SDK routing: dsh (default) runs opencode/opencode-go sessions on DeepSeek Harness when a dsh binary is installed, otherwise opencode; opencode pins opencode (Poolside keeps its own backend); auto uses pi when its catalog has the selected model, otherwise opencode.'
+    description: 'SDK routing: dsh (default) runs opencode/opencode-go sessions on DeepSeek Harness when its sandbox is usable, otherwise opencode; opencode pins opencode (Poolside keeps its own backend).'
     required: false
     default: ''
   opencode-proxy-url:

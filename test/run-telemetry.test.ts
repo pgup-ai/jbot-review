@@ -199,8 +199,13 @@ test('effective effort follows the backend contract rather than claiming every r
     undefined,
   );
   assert.equal(
-    effectiveReasoningEffort('pi', 'opencode/a', { reasoningEffort: 'high' }, ctx),
-    'high',
+    effectiveReasoningEffort(
+      'dsh',
+      'opencode-go/deepseek-v4.1-flash',
+      { reasoningEffort: 'xhigh' },
+      ctx,
+    ),
+    'max',
   );
   assert.equal(
     effectiveReasoningEffort('opencode', 'opencode/a', { reasoningEffort: 'default' }, ctx),
@@ -232,7 +237,7 @@ test('effective effort follows the backend contract rather than claiming every r
   );
   assert.equal(roleTelemetry(undefined, 'opencode/a', 'low').reasoningEffort, undefined);
   assert.equal(roleTelemetry(undefined, 'opencode/a').workspaceAccess, 'unavailable');
-  for (const backend of ['opencode', 'pi']) {
+  for (const backend of ['opencode', 'dsh']) {
     assert.equal(
       roleTelemetry({ name: backend }, 'opencode/a', 'high').workspaceAccess,
       'read-only',

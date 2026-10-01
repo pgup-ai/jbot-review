@@ -36,7 +36,7 @@ import {
   withNoToolsReviewDirective,
   compactReviewPageContext,
 } from '../src/shared/prompt.ts';
-import { catalogModelLimits } from '../src/shared/pi.ts';
+import { dshModelLimits } from '../src/shared/dsh.ts';
 import { formatGuidelines } from '../src/shared/review-context.ts';
 import {
   limitReviewBackendSessions,
@@ -182,11 +182,12 @@ test('uses known free-model capacity for fewer complete pages and ranks auxiliar
 });
 
 test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {
-  const limits = await catalogModelLimits('opencode', 'kimi-k2.7-code', true);
-  assert.ok(limits);
-  assert.equal(limits.contextTokens, limits.outputTokens);
-  assert.ok(measureReviewPrompt(renderPrompt(''), reviewPromptBudget('pi', limits)).fits);
-  assert.equal(await catalogModelLimits('openai', 'jbot-nonexistent-model', true), undefined);
+  assert.ok(
+    measureReviewPrompt(
+      renderPrompt(''),
+      reviewPromptBudget('dsh', dshModelLimits('deepseek-v4.1-flash')),
+    ).fits,
+  );
   assert.ok(
     measureReviewPrompt(
       'x'.repeat(150000),
