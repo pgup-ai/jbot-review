@@ -561,7 +561,7 @@ async function review(
     });
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
-    const { providerID, modelID } = parseModelName(model);
+    const { providerID } = parseModelName(model);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',

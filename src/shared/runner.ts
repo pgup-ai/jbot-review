@@ -20,7 +20,6 @@ import {
   reviewPromptBudget,
   reviewDelivery,
   REVIEW_EVIDENCE_BYTES,
-  COMPLETE_DIFF_OPTIONS,
   type ShardPlan,
 } from './review-plan.ts';
 import { buildContextPack } from './context-pack.ts';
