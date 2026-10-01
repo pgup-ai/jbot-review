@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { resolveWithinWorkspace } from '../src/shared/workspace-path.ts';
@@ -25,7 +25,11 @@ describe('resolveWithinWorkspace', () => {
       assert.equal(resolveWithinWorkspace(root, 'inside.txt'), join(root, 'inside.txt'));
       assert.equal(resolveWithinWorkspace(root, 'evil'), undefined); // P0: symlink escape
       assert.equal(resolveWithinWorkspace(root, '/etc/hosts'), undefined); // absolute
-      assert.equal(resolveWithinWorkspace(root, '../../etc/hosts'), undefined); // ..
+      // `..` into a sibling that exists whatever the TMPDIR depth.
+      assert.equal(
+        resolveWithinWorkspace(root, join('..', basename(outside), 'secret.txt')),
+        undefined,
+      );
       assert.equal(resolveWithinWorkspace(root, 'missing.txt'), undefined); // non-existent
     } finally {
       rmSync(root, { recursive: true, force: true });

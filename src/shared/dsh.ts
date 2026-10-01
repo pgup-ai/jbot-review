@@ -229,7 +229,8 @@ export function dshServesModel(providerID: string, modelID: string): boolean {
 /** DeepSeek's thinking modes are off/high/max; anything else maps to its nearest. */
 export function dshReasoningEffort(modelOptions?: Record<string, unknown>): string | undefined {
   const effort = modelOptions?.reasoningEffort;
-  if (typeof effort !== 'string') return undefined;
+  // `default` leaves the provider's own setting, as on the opencode engine.
+  if (typeof effort !== 'string' || effort === 'default') return undefined;
   if (effort === 'max' || effort === 'xhigh') return 'max';
   return effort === 'off' || effort === 'none' ? 'off' : 'high';
 }
@@ -396,7 +397,9 @@ interface DshRuntime {
   template: string;
   workspace: string;
   /** Per served provider; the aux role may sit on the other opencode gateway. */
-  apiKeys: Record<string, string>;
+  mainKey: string;
+  /** The aux role's own resolved key, even on the main role's provider. */
+  auxKey?: string;
   mainModel: string;
   modelOptions?: Record<string, unknown>;
   auxModelOptions?: Record<string, unknown>;
@@ -441,6 +444,7 @@ function childEnv(apiKey: string, home: string): NodeJS.ProcessEnv {
     HOME: home,
     DSH_HOME: join(home, 'dsh'),
     DSH_TELEMETRY_DISABLED: '1',
+    GIT_OPTIONAL_LOCKS: '0',
     JBOT_DSH_API_KEY: apiKey,
   };
 }
@@ -457,7 +461,7 @@ export async function startDsh(
     auxModelOptions?: Record<string, unknown>;
     reviewDiff?: string;
     toolTelemetry?: ToolTelemetryAccumulator;
-    auxProviderKey?: { providerID: string; apiKey: string };
+    auxKey?: string;
   } = {},
 ): Promise<{ runtime: DshRuntime; stop: () => Promise<void> }> {
   if (!dshServesModel(providerID, modelID)) {
@@ -506,13 +510,8 @@ export async function startDsh(
     root,
     template,
     workspace,
-    apiKeys: {
-      ...(options.auxProviderKey &&
-        Object.hasOwn(DSH_BASE_URLS, options.auxProviderKey.providerID) && {
-          [options.auxProviderKey.providerID]: options.auxProviderKey.apiKey,
-        }),
-      [providerID]: apiKey,
-    },
+    mainKey: apiKey,
+    ...(options.auxKey ? { auxKey: options.auxKey } : {}),
     mainModel: `${providerID}/${modelID}`,
     modelOptions: options.modelOptions,
     auxModelOptions: options.auxModelOptions,
@@ -536,8 +535,9 @@ function createDshSession(
   modelOptions?: Record<string, unknown>,
 ): DshSession {
   const { providerID, modelID } = parseModelName(model);
-  const apiKey = runtime.apiKeys[providerID];
-  if (!apiKey) throw new Error(`dsh engine has no key for ${model}`);
+  if (!dshServesModel(providerID, modelID)) throw new Error(`dsh engine does not serve ${model}`);
+  const apiKey =
+    model === runtime.mainModel ? runtime.mainKey : (runtime.auxKey ?? runtime.mainKey);
   const home = mkdtempSync(join(runtime.root, 'session-'));
   cpSync(join(runtime.template, 'dsh'), join(home, 'dsh'), { recursive: true });
   const patch = join(home, 'patch.yml');
@@ -560,8 +560,13 @@ function createDshSession(
   return { home, apiKey, patch, model, label };
 }
 
+// Never throws: a cleanup error must not replace the session's own failure.
 function disposeDshSession(session: DshSession): void {
-  rmSync(session.home, { recursive: true, force: true });
+  try {
+    rmSync(session.home, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    /* the runtime root is removed again at stop() */
+  }
 }
 
 async function promptDshSession(

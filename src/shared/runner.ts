@@ -2252,9 +2252,7 @@ async function runReviewPipeline(params: {
           auxModelOptions,
           reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
           toolTelemetry: backendToolTelemetry,
-          ...(mainOnDsh && auxOnDsh
-            ? { auxProviderKey: { providerID: auxProviderID, apiKey: auxApiKey || dshApiKey } }
-            : {}),
+          ...(mainOnDsh && auxOnDsh ? { auxKey: auxApiKey || dshApiKey } : {}),
         },
       );
       dshBackend = createDshBackend(dshRuntime.runtime);

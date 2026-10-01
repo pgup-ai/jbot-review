@@ -39,7 +39,10 @@ describe('dsh engine', () => {
   it('maps efforts onto DeepSeek thinking modes only', () => {
     assert.equal(dshReasoningEffort({ reasoningEffort: 'low' }), 'high');
     assert.equal(dshReasoningEffort({ reasoningEffort: 'xhigh' }), 'max');
-    assert.equal(dshReasoningEffort(), undefined);
+    assert.equal(dshReasoningEffort({ reasoningEffort: 'max' }), 'max');
+    assert.equal(dshReasoningEffort({ reasoningEffort: 'none' }), 'off');
+    for (const reasoningEffort of [undefined, 'default', 3])
+      assert.equal(dshReasoningEffort({ reasoningEffort }), undefined);
   });
 
   it('pins the read-only sandbox and strips write, web and customization rows', () => {

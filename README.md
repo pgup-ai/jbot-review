@@ -468,7 +468,7 @@ no findings. These runs retain findings from completed passes but do not receive
 an automatic approval or review-done reaction. CommandCode cancellation stops its
 process tree and waits for output pipes to close before removing its temporary home.
 Queued passes cancelled before execution never start a provider session.
-Pi and tool-capable OpenCode verifiers can read and search repository evidence;
+DeepSeek Harness and tool-capable OpenCode verifiers can read and search repository evidence;
 CommandCode verifiers can investigate when `JBOT_COMMANDCODE_TOOLS=true`.
 Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
@@ -1045,7 +1045,7 @@ preset. Finder pages also compact repeated metadata above 16 KiB while retaining
 PR intent, guidelines, caller evidence and mandatory diff content; the log records
 the bytes saved. This is independent of the older `JBOT_CONTEXT_TRIM` experiment.
 Batching has not established a reliable end-to-end speedup. The presets
-are mutually exclusive. Batching hints require repository shell tools; Pi,
+are mutually exclusive. Batching hints require repository shell tools;
 CommandCode and tool-less backends do not receive them.
 
 | Value                    | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Evidence / recommendation                                                                                                                                                                                                                                                    |
@@ -1220,7 +1220,7 @@ separate sessions. Aborted durations are not completed latency samples, and para
 session durations do not sum to wall time.
 
 `auxiliaryRuns[].promptUsage` pairs each reported call's submitted `promptBytes`
-with input and cache read/write tokens. OpenCode, Pi, and CommandCode record the
+with input and cache read/write tokens. OpenCode, DeepSeek Harness, and CommandCode record the
 UTF-8 size of the text submitted by J-Bot, including its backend directives;
 other backends leave that size absent. Missing provider usage leaves token counters
 absent without losing the prompt size. Failed attempts also retain their payload
@@ -1494,11 +1494,11 @@ queued pages. With `time-budget-minutes: 0`, there is no post-main cutoff.
 Auxiliary pages prioritize higher-risk code using the same path ranking as diff
 context. Findings from completed pages survive a deadline, and unfinished coverage
 is reported. Main review still covers every hunk.
-OpenCode and Pi can request a wrap-up near a session's own deadline
+OpenCode can request a wrap-up near a session's own deadline
 when the reserved fifth of its budget leaves at least 45 seconds for the response.
 OpenCode retains native read/search tools for model compatibility and denies shell
 access during wrap-up. Its prompt requests a final answer without further
-investigation. Pi's wrap-up is tool-free.
+investigation. DeepSeek Harness sessions have no wrap-up and end at their deadline.
 The remaining deadline still bounds the turn. Repair and formatting remain tool-less.
 Completed auxiliary findings remain eligible for verification. A partial main
 page fails the run before posting; it is never cached as a completed review.
@@ -1515,7 +1515,7 @@ run logs and coverage telemetry. A skipped addressed-thread check leaves prior
 threads unresolved.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
-OpenCode, Pi, or CommandCode main review session, reusing its investigation.
+OpenCode, DeepSeek Harness, or CommandCode main review session, reusing its investigation.
 Verification still uses a fresh session. An enabled sweep is independent of
 auxiliary availability and fan-out; `enable-guideline-pass: false` disables it. This experiment defaults off; other backends retain the
 auxiliary guideline check, and Arena comparisons keep their existing policy.
