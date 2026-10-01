@@ -132,7 +132,13 @@ export function dshSandboxUsable(bin: string, platform = process.platform): bool
 
 /** A file of a dsh dependency: nested under dsh or hoisted beside it, as npm laid it out. */
 function installedBeside(bin: string, file: string): string | undefined {
-  for (let dir = dirname(realpathSync(bin)); dir !== dirname(dir); dir = dirname(dir)) {
+  let start: string;
+  try {
+    start = realpathSync(bin);
+  } catch {
+    return undefined; // removed or replaced since it was resolved
+  }
+  for (let dir = dirname(start); dir !== dirname(dir); dir = dirname(dir)) {
     const candidate = join(dir, 'node_modules', file);
     if (existsSync(candidate)) return candidate;
   }
@@ -230,15 +236,24 @@ const probeByBin = new Map<string, DshProbe>();
 function probeDsh(bin: string): DshProbe {
   let probe = probeByBin.get(bin);
   if (!probe) {
-    const catalog = readDshCatalog(bin);
-    const goModel = Object.keys(catalog?.['opencode-go'] ?? {}).find((id) => !id.endsWith('-free'));
-    probe = !dshSandboxUsable(bin)
-      ? { reason: 'no usable dsh sandbox (needs Landlock or bwrap on Linux, Seatbelt on macOS)' }
-      : !catalog || !goModel
-        ? { reason: "dsh's model catalog is unreadable" }
-        : !dshBoots(bin, goModel)
-          ? { reason: 'dsh failed its headless boot check' }
-          : { catalog };
+    // The engine choice never fails a run: any probe error is a fallback reason.
+    try {
+      const catalog = readDshCatalog(bin);
+      const goModel = Object.keys(catalog?.['opencode-go'] ?? {}).find(
+        (id) => !id.endsWith('-free'),
+      );
+      probe = !dshSandboxUsable(bin)
+        ? { reason: 'no usable dsh sandbox (needs Landlock or bwrap on Linux, Seatbelt on macOS)' }
+        : !catalog || !goModel
+          ? { reason: "dsh's model catalog is unreadable" }
+          : !dshBoots(bin, goModel)
+            ? { reason: 'dsh failed its headless boot check' }
+            : { catalog };
+    } catch (error) {
+      probe = {
+        reason: `dsh probe failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     probeByBin.set(bin, probe);
   }
   return probe;
