@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   buildDshPatch,
+  createDshBackend,
+  startDsh,
   dshReasoningEffort,
   dshBootSucceeded,
   parseDshTurn,
@@ -131,5 +136,49 @@ describe('dsh engine', () => {
       parseDshTurn({ stdout: '{"type":"final","text":"{}"}', stderr: 'boom\n', exitCode: 1 }).error,
       'exit 1: boom',
     );
+  });
+
+  it('repairs malformed verification JSON in the same session', async () => {
+    // A stand-in dsh: the first turn breaks its JSON, the resumed turn answers.
+    const dir = mkdtempSync(join(tmpdir(), 'fake-dsh-'));
+    const bin = join(dir, 'dsh');
+    writeFileSync(
+      bin,
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.includes('--dump-config')) {
+  require('node:fs').mkdirSync(process.env.DSH_HOME, { recursive: true });
+  process.exit(0);
+}
+const text = args.includes('--session-id')
+  ? JSON.stringify({ verdicts: [{ index: 0, verdict: 'confirmed', reason: 'ok' }] })
+  : '{"verdicts": [';
+process.stdin.resume();
+process.stdin.on('end', () =>
+  console.log([{ type: 'session', sessionId: 's1' }, { type: 'final', text }].map((e) => JSON.stringify(e)).join('\\n')),
+);
+`,
+      { mode: 0o755 },
+    );
+    const { runtime, stop } = await startDsh(
+      dir,
+      'opencode-go',
+      'deepseek-v4.1-flash',
+      'key',
+      () => undefined,
+      bin,
+    );
+    try {
+      const verdicts = await createDshBackend(runtime).runFindingVerification(
+        'opencode-go/deepseek-v4.1-flash',
+        'context',
+        [{ path: 'a.ts', line: 1, severity: 'P2', title: 't', body: 'b' }],
+        () => undefined,
+      );
+      assert.deepEqual(verdicts, [{ index: 0, verdict: 'confirmed', reason: 'ok' }]);
+    } finally {
+      await stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

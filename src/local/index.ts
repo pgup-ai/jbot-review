@@ -581,7 +581,7 @@ async function review(
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });
     log(
-      'Approximate preview: uses full guidelines and default prompt options. Runtime guideline selection, prompt options, PR metadata and caller evidence can change page counts and assignments.',
+      'Approximate preview: uses full guidelines and default prompt options. Runtime guideline selection, prompt options, PR metadata, caller evidence and the dsh sandbox/boot checks (skipped here) can change page counts and assignments.',
     );
     console.log(
       `\n${renderReviewPreview({
