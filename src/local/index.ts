@@ -48,6 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
+import { dshSupportsProvider } from '../shared/dsh.ts';
 import { catalogModelLimits, piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
@@ -638,10 +639,12 @@ async function review(
   // Preflight-only resolution (the runner re-resolves for its own routing):
   // roles served by the in-process pi engine need no opencode binary.
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? await Promise.all([
-        piModelAvailable(providerID, modelID),
-        piModelAvailable(aux.providerID, aux.modelID),
-      ])
+    ? piEngine.dsh
+      ? [dshSupportsProvider(providerID), dshSupportsProvider(aux.providerID)]
+      : await Promise.all([
+          piModelAvailable(providerID, modelID),
+          piModelAvailable(aux.providerID, aux.modelID),
+        ])
     : [false, false];
   const selection = selectReviewBackends({
     providerID,

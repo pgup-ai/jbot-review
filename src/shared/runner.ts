@@ -146,6 +146,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
+import { createDshBackend, dshSupportsProvider, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -1436,10 +1437,12 @@ async function runReviewPipeline(params: {
   );
   if (!piEngine.enabled && piEngine.reason) log(`pi engine disabled: ${piEngine.reason}`);
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? await Promise.all([
-        piModelAvailable(providerID, modelID),
-        piModelAvailable(auxProviderID, auxModelID),
-      ])
+    ? piEngine.dsh
+      ? [dshSupportsProvider(providerID), dshSupportsProvider(auxProviderID)]
+      : await Promise.all([
+          piModelAvailable(providerID, modelID),
+          piModelAvailable(auxProviderID, auxModelID),
+        ])
     : [false, false];
   if (piEngine.enabled) {
     if (piSupportsProvider(providerID) && !mainPiModelAvailable) {
@@ -1514,9 +1517,11 @@ async function runReviewPipeline(params: {
       `Prompt cache disabled for provider ${providerID} because aux model ${auxModel} does not support it; main model ${model} shares that provider config.`,
     );
   }
+  const sdkEngineName = (engine?: string) =>
+    engine === 'pi' && piEngine.dsh ? 'dsh' : (engine ?? 'opencode');
   if (mainOnPi || auxOnPi || mainOnPoolside || auxOnPoolside) {
     log(
-      `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
+      `Backend routing: main=${mainCliBackend ?? sdkEngineName(backendSelection.mainSdkEngine)} aux=${auxCliBackend ?? sdkEngineName(backendSelection.auxSdkEngine)}`,
     );
   }
   // The entry points chose default options before the diff size was known.
@@ -2313,9 +2318,29 @@ async function runReviewPipeline(params: {
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
   }
 
-  let piRuntime: Awaited<ReturnType<typeof startPi>> | undefined;
+  let piRuntime: { stop: () => void } | undefined;
   let piBackend: ReviewBackend | undefined;
-  if (backendSelection.pi) {
+  if (backendSelection.pi && piEngine.dsh) {
+    const {
+      providerID: dshProviderID,
+      modelID: dshModelID,
+      apiKey: dshApiKey,
+    } = backendSelection.pi;
+    log('Starting dsh engine');
+    try {
+      const dsh = await startDsh(workspace, dshProviderID, dshModelID, dshApiKey, log, {
+        modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
+        auxModelOptions,
+        reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
+        toolTelemetry: backendToolTelemetry,
+      });
+      piRuntime = dsh;
+      piBackend = createDshBackend(dsh.runtime);
+    } catch (error) {
+      await cleanupCliHomes();
+      throw error;
+    }
+  } else if (backendSelection.pi) {
     const piConfig = backendSelection.pi;
     if (!piConfig.apiKey) {
       await cleanupCliHomes();
@@ -2323,7 +2348,7 @@ async function runReviewPipeline(params: {
     }
     log('Starting pi engine');
     try {
-      piRuntime = await startPi(
+      const pi = await startPi(
         workspace,
         piConfig.providerID,
         piConfig.modelID,
@@ -2349,11 +2374,12 @@ async function runReviewPipeline(params: {
           embeddedFirstPrompt: options.embeddedFirstPrompt,
         },
       );
+      piRuntime = pi;
+      piBackend = createPiBackend(pi.runtime);
     } catch (error) {
       await cleanupCliHomes();
       throw error;
     }
-    piBackend = createPiBackend(piRuntime.runtime);
   }
 
   let auxOpencodeBootError: unknown;

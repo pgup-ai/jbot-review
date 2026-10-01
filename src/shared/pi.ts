@@ -155,19 +155,19 @@ function parseSemver(value: string): [number, number, number] | undefined {
 /**
  * Opt-in + runtime gate, resolved once per run and fed to
  * `selectReviewBackends` as `piEnabled`. JBOT_SDK_ENGINE accepts `opencode`
- * (default; same-model runs measured pi no faster or more accurate) and `auto`;
- * anything else fails safe to opencode so a config typo can never force a
- * broken engine.
+ * (default; same-model runs measured pi no faster or more accurate), `auto`,
+ * and the experimental `dsh` (DeepSeek Harness in pi's slot); anything else
+ * fails safe to opencode so a config typo can never force a broken engine.
  */
 export function resolvePiEngine(
   env: NodeJS.ProcessEnv,
   nodeVersion: string,
-): { enabled: boolean; reason: string } {
+): { enabled: boolean; reason: string; dsh?: true } {
   const engine = env.JBOT_SDK_ENGINE?.trim() || 'opencode';
   if (engine === 'opencode') {
     return { enabled: false, reason: '' };
   }
-  if (engine !== 'auto') {
+  if (engine !== 'auto' && engine !== 'dsh') {
     return {
       enabled: false,
       reason: `unknown JBOT_SDK_ENGINE value "${engine}"; using the opencode engine`,
@@ -179,7 +179,9 @@ export function resolvePiEngine(
       reason: `Node ${nodeVersion} is below the pi engine floor (>= ${PI_MIN_NODE_VERSION})`,
     };
   }
-  return { enabled: true, reason: '' };
+  return engine === 'dsh'
+    ? { enabled: true, reason: '', dsh: true }
+    : { enabled: true, reason: '' };
 }
 
 const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);

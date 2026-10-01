@@ -722,6 +722,11 @@ Use the native read, grep, find and ls tools to investigate repository code. Sta
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
+export const DSH_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
+Use the glob and grep tools and read-only shell commands (cat -n, sed -n with line ranges, git diff, git log) to investigate repository code. Stay inside the reviewed repository. The complete assigned diff is supplied in the user message. Use small line ranges and follow callers or imports when needed.
+The workspace is mounted read-only. Never request sandbox escalation or attempt to modify files.
+Follow the task instructions in the user message exactly; reply with only the requested output.`;
+
 export const CLINE_SDK_VERIFIER_SYSTEM_PROMPT = `You verify code review findings in a checked-out repository. Your only tools are read_file, grep and list_files; nothing can be changed or run.`;
 
 export function buildPiDiffRecoveryNote(path: string): string {
