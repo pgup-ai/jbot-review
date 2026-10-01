@@ -30,7 +30,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 | `@symma/protocol` (npm)             | ACP engine: framing, JSON-RPC peer, session driving, read-only permission floor, agent specs and their credential helpers, relay controls. Extracted from this repo; the local copies are gone                                                         |
 | `@symma/client` (npm)               | Drives one ACP prompt: local child-process lifecycle, timeouts, teardown, and the gateway transport. Extracted from this repo                                                                                                                          |
 | `src/shared/acp.ts`                 | ACP ReviewBackends over those runners: the shared backend surface both local and gateway-remote use, plus response parsing                                                                                                                             |
-| `src/shared/dsh.ts`                 | DeepSeek Harness engine (default for DeepSeek on opencode/opencode-go): `dsh --profile headless --json` children with a per-session home and a read-only patch overlay                                                                                 |
+| `src/shared/dsh.ts`                 | DeepSeek Harness engine (default for non-`-free` DeepSeek on opencode/opencode-go): `dsh --profile headless --json` children with a per-session home and a read-only patch overlay                                                                     |
 | `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                                                                                                                                              |
 | `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                                                                                                                                          |
 | `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                                                                                                                                         |
@@ -137,10 +137,12 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    post-review output, not a session write.
    dsh sessions get the equivalent from their `--patch` overlay: a read-only
    OS sandbox (Landlock, bwrap or Seatbelt; no usable sandbox routes to
-   opencode), approvals never, the write/web/skill/subagent/instruction-file
-   rows disabled, a per-session `DSH_HOME`, an env holding only the key (dsh
-   keeps it out of tool env), and a launch dir outside the checkout so the
-   repo's `.env` never loads.
+   opencode), approvals never, the write/web/skill/instruction-file rows
+   disabled (subagent rows too, unless `JBOT_DSH_SUBAGENTS=1`; children share
+   the session's sandbox and tools), a per-session `DSH_HOME`, an env holding
+   only the key and credential-free network settings (dsh keeps the key out of
+   tool env; a credentialed proxy routes to opencode), and a launch dir
+   outside the checkout so the repo's `.env` never loads.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
