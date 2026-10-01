@@ -1110,7 +1110,7 @@ async function runReviewPipeline(params: {
       repository: `${owner}/${repo}`,
       identity: runIdentity(process.env),
       policy: runConfiguration(
-        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'opencode' },
+        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'dsh' },
         model,
       ),
       ...(baseSha ? { baseSha } : {}),

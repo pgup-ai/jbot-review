@@ -24,6 +24,7 @@ import {
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import {
   DSH_REVIEW_SYSTEM_PROMPT,
+  DSH_TOOL_LESS_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
@@ -74,6 +75,7 @@ const DSH_DISABLED_ROWS = [
   'tool-skill',
   'tool-web',
   'tool-workflow',
+  'otel', // its packages are pruned from the image; left on, it fails the boot check
   'session-title-llm',
   'session-log-deepseek',
   'session-telemetry-otel',
@@ -124,15 +126,71 @@ function dshSandboxUsable(bin: string): boolean {
 }
 
 /**
+ * Starts the headless profile under jbot's own patch with no key: a plugin
+ * that cannot load (say, a pruned package) is reported as an entry that "did
+ * not activate", and the missing credential ends the turn before any network.
+ */
+function dshBoots(bin: string): boolean {
+  const dir = mkdtempSync(join(tmpdir(), 'jbot-dsh-probe-'));
+  try {
+    const patch = join(dir, 'patch.yml');
+    writeFileSync(
+      patch,
+      buildDshPatch({
+        providerID: 'opencode-go',
+        modelID: 'deepseek-probe',
+        workspace: dir,
+        systemPrompt: '',
+        routingSession: 'probe',
+        toolLess: false,
+      }),
+    );
+    const run = spawnSync(bin, ['--profile', 'headless', '--patch', patch, '--json', '-'], {
+      cwd: dir,
+      input: 'ping',
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: {
+        PATH: process.env.PATH,
+        HOME: dir,
+        DSH_HOME: join(dir, 'dsh'),
+        DSH_TELEMETRY_DISABLED: '1',
+      },
+    });
+    return run.stdout.includes('"type":"session"') && !run.stderr.includes('did not activate');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const unusableByBin = new Map<string, string | undefined>();
+
+function dshUnusableReason(bin: string): string | undefined {
+  if (!unusableByBin.has(bin)) {
+    unusableByBin.set(
+      bin,
+      !dshSandboxUsable(bin)
+        ? 'no usable dsh sandbox (needs bwrap or a Landlock-enforcing kernel)'
+        : !dshBoots(bin)
+          ? 'dsh failed its headless boot check'
+          : undefined,
+    );
+  }
+  return unusableByBin.get(bin);
+}
+
+/**
  * JBOT_SDK_ENGINE: `dsh` (default; `auto`, once pi, now means the same)
  * serves DeepSeek opencode/opencode-go models on DeepSeek Harness, `opencode`
- * pins the opencode server. A missing dsh, an unusable sandbox or an unknown
- * value falls back to opencode, so the engine choice can never fail a run.
+ * pins the opencode server. A missing or broken dsh, an unusable sandbox, a
+ * credentialed proxy or an unknown value falls back to opencode, so the engine
+ * choice can never fail a run.
  */
 export function resolveSdkEngine(
   env: NodeJS.ProcessEnv,
   dshBin = resolveDshBin(process.env),
-  sandboxUsable = dshSandboxUsable,
+  unusableReason = dshUnusableReason,
+  networkEnv: NodeJS.ProcessEnv = process.env,
 ): { dshBin?: string; reason: string } {
   const engine = env.JBOT_SDK_ENGINE?.trim() || 'dsh';
   if (engine === 'opencode') return { reason: '' };
@@ -144,13 +202,15 @@ export function resolveSdkEngine(
       reason: 'no dsh binary (set JBOT_DSH_BIN or put dsh on PATH); using the opencode engine',
     };
   }
-  if (!sandboxUsable(dshBin)) {
-    return {
-      reason:
-        'no usable dsh sandbox (needs bwrap or a Landlock-enforcing kernel); using the opencode engine',
-    };
+  // dsh hands its launch env to the shell tool, where a model could read the userinfo.
+  const credentialed = DSH_NETWORK_ENV.find((name) =>
+    /^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i.test(networkEnv[name] ?? ''),
+  );
+  if (credentialed) {
+    return { reason: `${credentialed} carries credentials; using the opencode engine` };
   }
-  return { dshBin, reason: '' };
+  const unusable = unusableReason(dshBin);
+  return unusable ? { reason: `${unusable}; using the opencode engine` } : { dshBin, reason: '' };
 }
 
 /**
@@ -258,8 +318,16 @@ interface DshTurn {
   tools: Array<{ name: string; input: unknown; result?: unknown; ok?: boolean }>;
 }
 
-/** Folds the `--json` event stream; malformed lines are skipped, not fatal. */
-export function parseDshEvents(stdout: string): DshTurn {
+/** Folds one turn's `--json` events and exit; malformed lines are skipped, not fatal. */
+export function parseDshTurn({
+  stdout,
+  stderr,
+  exitCode,
+}: {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}): DshTurn {
   const turn: DshTurn = { text: '', steps: 0, tools: [] };
   const usage: PromptTokenUsage = {
     input: 0,
@@ -307,6 +375,10 @@ export function parseDshEvents(stdout: string): DshTurn {
     }
   }
   if (turn.steps > 0) turn.usage = usage;
+  // exit 1 = aborted or errored turn, which may surface without an error event.
+  if (!turn.error && exitCode !== 0) {
+    turn.error = `exit ${exitCode}: ${stderr.trim() || 'no stderr'}`;
+  }
   return turn;
 }
 
@@ -475,7 +547,7 @@ function createDshSession(
       providerID,
       modelID,
       workspace: runtime.workspace,
-      systemPrompt: runtime.systemPrompt,
+      systemPrompt: toolLess ? DSH_TOOL_LESS_SYSTEM_PROMPT : runtime.systemPrompt,
       routingSession: `jbot-${randomUUID()}`,
       reasoningEffort: dshReasoningEffort(
         modelOptions ??
@@ -537,11 +609,7 @@ async function promptDshSession(
     onTokenUsage?.({ promptBytes }, session.model, label);
     throw error;
   }
-  const turn = parseDshEvents(result.stdout);
-  // exit 1 = aborted or errored turn, which may surface without an error event.
-  if (!turn.error && result.exitCode !== 0) {
-    turn.error = `exit ${result.exitCode}: ${result.stderr.trim() || 'no stderr'}`;
-  }
+  const turn = parseDshTurn(result);
   session.sessionId ??= turn.sessionId;
   for (const tool of turn.tools) {
     const toolClass = classifyReadonlyTool(tool.name, tool.input);

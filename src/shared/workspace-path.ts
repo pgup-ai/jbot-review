@@ -13,8 +13,11 @@ export function resolveWithinWorkspace(
   if (!root) return undefined;
   const target = tryRealpath(resolve(root, requestedPath));
   if (!target) return undefined;
-  // The trailing sep stops a sibling like `/repo-x` matching the `/repo` root.
-  return target === root || target.startsWith(root + sep) ? target : undefined;
+  // The trailing sep stops a sibling like `/repo-x` matching the `/repo` root;
+  // a filesystem-root workspace already ends in one.
+  return target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
+    ? target
+    : undefined;
 }
 
 function tryRealpath(candidate: string): string | undefined {

@@ -889,7 +889,7 @@ describe('selectReviewBackends dsh engine routing', () => {
     });
   });
 
-  it('splits engines: dsh main with an aux dsh cannot serve on opencode', () => {
+  it('keeps an aux model dsh cannot serve on opencode behind a dsh main', () => {
     assert.deepEqual(
       selectReviewBackends({
         ...go,

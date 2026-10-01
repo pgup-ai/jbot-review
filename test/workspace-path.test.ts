@@ -15,7 +15,13 @@ describe('resolveWithinWorkspace', () => {
     writeFileSync(join(root, 'inside.txt'), 'x');
     writeFileSync(join(outside, 'secret.txt'), 'SECRET');
     symlinkSync(join(outside, 'secret.txt'), join(root, 'evil')); // escapes the repo
+    symlinkSync(join(root, 'inside.txt'), join(root, 'alias')); // stays inside
+    const sibling = `${root}-sib`; // shares the root's prefix but not its directory
+    writeFileSync(sibling, 'x');
     try {
+      assert.equal(resolveWithinWorkspace(root, '.'), root); // callers check the root first
+      assert.equal(resolveWithinWorkspace(root, 'alias'), join(root, 'inside.txt'));
+      assert.equal(resolveWithinWorkspace(root, sibling), undefined);
       assert.equal(resolveWithinWorkspace(root, 'inside.txt'), join(root, 'inside.txt'));
       assert.equal(resolveWithinWorkspace(root, 'evil'), undefined); // P0: symlink escape
       assert.equal(resolveWithinWorkspace(root, '/etc/hosts'), undefined); // absolute
@@ -24,6 +30,7 @@ describe('resolveWithinWorkspace', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
+      rmSync(sibling, { force: true });
     }
   });
 });

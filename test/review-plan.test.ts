@@ -182,8 +182,9 @@ test('uses known free-model capacity for fewer complete pages and ranks auxiliar
 });
 
 test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {
+  // dsh's 1M window takes a prompt the 128k default rejects (asserted below).
   assert.ok(
-    measureReviewPrompt(renderPrompt(''), reviewPromptBudget('dsh', DSH_MODEL_LIMITS)).fits,
+    measureReviewPrompt('x'.repeat(150000), reviewPromptBudget('dsh', DSH_MODEL_LIMITS)).fits,
   );
   assert.ok(
     measureReviewPrompt(

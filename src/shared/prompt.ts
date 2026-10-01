@@ -2043,6 +2043,10 @@ export const verifierOmissionNote = (count: number) =>
 export const TOOLS_OFF_MESSAGE =
   'Tools are off for this pass; answer from the evidence in the prompt.';
 
+/** For tool-less dsh sessions, which DSH_REVIEW_SYSTEM_PROMPT would send looking for tools. */
+export const DSH_TOOL_LESS_SYSTEM_PROMPT = `You are a read-only code reviewer. ${TOOLS_OFF_MESSAGE}
+Follow the task instructions in the user message exactly; reply with only the requested output.`;
+
 export function buildJsonRepairPrompt(parseError: string): string {
   return [
     'Your previous response could not be parsed as JSON.',

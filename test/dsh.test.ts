@@ -4,28 +4,33 @@ import { describe, it } from 'node:test';
 import {
   buildDshPatch,
   dshReasoningEffort,
-  parseDshEvents,
+  parseDshTurn,
   resolveSdkEngine,
 } from '../src/shared/dsh.ts';
 
 describe('dsh engine', () => {
   it('is the default engine and falls back to opencode rather than fail a run', () => {
-    const usable = () => true;
+    const usable = () => undefined;
     for (const env of [{}, { JBOT_SDK_ENGINE: 'auto' }]) {
-      assert.deepEqual(resolveSdkEngine(env, '/bin/dsh', usable), {
-        dshBin: '/bin/dsh',
-        reason: '',
-      });
+      assert.deepEqual(
+        resolveSdkEngine(env, '/bin/dsh', usable, { HTTPS_PROXY: 'http://proxy:8080' }),
+        {
+          dshBin: '/bin/dsh',
+          reason: '',
+        },
+      );
     }
     assert.deepEqual(resolveSdkEngine({ JBOT_SDK_ENGINE: 'opencode' }, '/bin/dsh', usable), {
       reason: '',
     });
-    for (const [env, bin, sandbox, reason] of [
-      [{}, '', usable, /no dsh binary/],
-      [{}, '/bin/dsh', () => false, /no usable dsh sandbox/],
-      [{ JBOT_SDK_ENGINE: 'pi-please' }, '/bin/dsh', usable, /unknown JBOT_SDK_ENGINE/],
+    const broken = () => 'dsh failed its headless boot check';
+    for (const [env, bin, unusable, network, reason] of [
+      [{}, '', usable, {}, /no dsh binary/],
+      [{}, '/bin/dsh', broken, {}, /headless boot check; using the opencode engine/],
+      [{}, '/bin/dsh', usable, { HTTPS_PROXY: 'http://u:p@proxy:8080' }, /HTTPS_PROXY carries/],
+      [{ JBOT_SDK_ENGINE: 'pi-please' }, '/bin/dsh', usable, {}, /unknown JBOT_SDK_ENGINE/],
     ] as const) {
-      const resolved = resolveSdkEngine(env, bin, sandbox);
+      const resolved = resolveSdkEngine(env, bin, unusable, network);
       assert.equal(resolved.dshBin, undefined);
       assert.match(resolved.reason, reason);
     }
@@ -88,9 +93,11 @@ describe('dsh engine', () => {
       },
       { type: 'final', text: '{}' },
     ];
-    const turn = parseDshEvents(
-      `${lines.map((line) => JSON.stringify(line)).join('\n')}\nnot json\n`,
-    );
+    const turn = parseDshTurn({
+      stdout: `${lines.map((line) => JSON.stringify(line)).join('\n')}\nnot json\n`,
+      stderr: '',
+      exitCode: 1,
+    });
     assert.equal(turn.sessionId, 'session-1');
     assert.equal(turn.text, '{}');
     assert.equal(turn.error, '400: bad');
@@ -105,5 +112,10 @@ describe('dsh engine', () => {
     assert.deepEqual(turn.tools, [
       { name: 'grep', input: { pattern: 'x' }, result: 'a.ts', ok: true },
     ]);
+    // A failed exit with no error event still fails the turn, carrying stderr.
+    assert.equal(
+      parseDshTurn({ stdout: '{"type":"final","text":"{}"}', stderr: 'boom\n', exitCode: 1 }).error,
+      'exit 1: boom',
+    );
   });
 });
