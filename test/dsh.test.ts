@@ -9,6 +9,7 @@ import {
   createDshBackend,
   startDsh,
   dshReasoningEffort,
+  dshSandboxUsable,
   dshBootSucceeded,
   parseDshTurn,
   resolveSdkEngine,
@@ -61,6 +62,12 @@ describe('dsh engine', () => {
       [composed, { stdout: '', stderr: '' }],
     ] as const)
       assert.equal(dshBootSucceeded(config, run), false);
+  });
+
+  it('trusts Seatbelt on macOS and no sandbox off Linux otherwise', () => {
+    assert.equal(dshSandboxUsable('/bin/dsh', 'darwin'), true);
+    for (const platform of ['win32', 'freebsd'] as const)
+      assert.equal(dshSandboxUsable('/bin/dsh', platform), false);
   });
 
   it('maps efforts onto DeepSeek thinking modes', () => {

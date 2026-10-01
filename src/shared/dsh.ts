@@ -112,8 +112,8 @@ function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
  * enforce Landlock. Seatbelt is always present on macOS; Windows' ACL runner
  * leaves reads unconfined and is not a route jbot takes.
  */
-function dshSandboxUsable(bin: string): boolean {
-  if (process.platform !== 'linux') return process.platform === 'darwin';
+export function dshSandboxUsable(bin: string, platform = process.platform): boolean {
+  if (platform !== 'linux') return platform === 'darwin';
   const succeeds = (command: string, args: string[]) =>
     spawnSync(command, args, { stdio: 'ignore', timeout: 5_000 }).status === 0;
   if (succeeds('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', 'true'])) {
