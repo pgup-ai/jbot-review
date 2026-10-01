@@ -4,6 +4,7 @@ import {
   fstatSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   statSync,
 } from 'node:fs';
@@ -37,14 +38,19 @@ function tryRealpath(candidate: string): string | undefined {
 }
 
 /**
- * Whether an open descriptor still holds the in-workspace file `target` names:
- * the path resolves to itself inside the root and names the descriptor's own
- * file (dev/ino). A parent directory swapped for a symlink fails it.
+ * Whether an open descriptor holds the in-workspace file `target` names. On
+ * Linux the kernel names the descriptor's own file, so no path lookup can be
+ * raced. Elsewhere (local macOS runs) it is best effort: the path must resolve
+ * to itself inside the root and name the descriptor's file (dev/ino), which a
+ * single parent swap fails but repeated swaps between the lookups can pass.
  */
 export function openedFileWithinWorkspace(root: string, target: string, fd: number): boolean {
   try {
+    if (!fstatSync(fd).isFile()) return false;
+    // A deleted or moved file reads back with a different name (or a " (deleted)" suffix).
+    if (process.platform === 'linux') return readlinkSync(`/proc/self/fd/${fd}`) === target;
+    if (resolveWithinWorkspace(root, target) !== target) return false;
     const opened = fstatSync(fd);
-    if (!opened.isFile() || resolveWithinWorkspace(root, target) !== target) return false;
     const named = statSync(target);
     return named.dev === opened.dev && named.ino === opened.ino;
   } catch {
