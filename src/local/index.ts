@@ -48,7 +48,6 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { catalogModelLimits, piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -536,10 +535,6 @@ async function review(
     return;
   }
 
-  const piEngine = resolvePiEngine(
-    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
-    process.version,
-  );
   // Before credential resolution on purpose: a preview must cost nothing and
   // need no key.
   if (preview) {
@@ -566,15 +561,12 @@ async function review(
     });
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
-    const { providerID, modelID } = parseModelName(model);
+    const { providerID } = parseModelName(model);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',
       shards,
-      budget: reviewPromptBudget(
-        cliBackendForProvider(providerID) ?? 'opencode',
-        await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined),
-      ),
+      budget: reviewPromptBudget(cliBackendForProvider(providerID) ?? 'opencode'),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });
     log(
@@ -635,14 +627,6 @@ async function review(
   // backends bring their own binary.
   const { providerID, modelID } = parseModelName(model);
   const aux = parseModelName(auxModel || model);
-  // Preflight-only resolution (the runner re-resolves for its own routing):
-  // roles served by the in-process pi engine need no opencode binary.
-  const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
-    ? await Promise.all([
-        piModelAvailable(providerID, modelID),
-        piModelAvailable(aux.providerID, aux.modelID),
-      ])
-    : [false, false];
   const selection = selectReviewBackends({
     providerID,
     modelID,
@@ -650,9 +634,6 @@ async function review(
     auxProviderID: aux.providerID,
     auxModelID: aux.modelID,
     auxApiKey: auxApiKey ?? '',
-    piEnabled: piEngine.enabled,
-    mainPiModelAvailable,
-    auxPiModelAvailable,
   });
   const configuredModelOptions = comparison
     ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider, modelID))

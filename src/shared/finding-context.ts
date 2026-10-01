@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { resolveWithinWorkspace } from './pi.ts';
+import { resolveWithinWorkspace } from './workspace-path.ts';
 import { formatFindingSources, type FindingSource } from './prompt.ts';
 import type { Finding } from './types.ts';
 

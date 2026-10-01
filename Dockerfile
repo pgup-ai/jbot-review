@@ -11,8 +11,11 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
+# opencode's npm package installs both the glibc and musl binaries (~190MB each);
+# this Debian image only runs the glibc one.
 RUN npm install -g @opencode/cli@2.0.16 command-code@1.69.0 \
   && npm cache clean --force \
+  && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules/@opencode/cli-linux-*-musl \
   && opencode --version \
   && command-code --no-auto-update --version
 

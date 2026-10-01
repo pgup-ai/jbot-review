@@ -152,7 +152,7 @@ test('a pool draw is not a policy change; explicit options and a single model ar
     );
   assert.equal(aux({ reasoningEffort: 'high' }), aux({ reasoningEffort: 'medium' }));
   assert.notEqual(aux({ topP: 1 }, { explicit: true }), aux({ topP: 0.5 }, { explicit: true }));
-  assert.notEqual(aux({}), aux({}, { auxBackend: 'pi' }));
+  assert.notEqual(aux({}), aux({}, { auxBackend: 'poolside' }));
   assert.equal(aux({}, { options: pool }), aux({}, { options: pool, auxBackend: 'commandcode' }));
 });
 
@@ -199,10 +199,6 @@ test('effective effort follows the backend contract rather than claiming every r
     undefined,
   );
   assert.equal(
-    effectiveReasoningEffort('pi', 'opencode/a', { reasoningEffort: 'high' }, ctx),
-    'high',
-  );
-  assert.equal(
     effectiveReasoningEffort('opencode', 'opencode/a', { reasoningEffort: 'default' }, ctx),
     undefined,
   );
@@ -232,7 +228,7 @@ test('effective effort follows the backend contract rather than claiming every r
   );
   assert.equal(roleTelemetry(undefined, 'opencode/a', 'low').reasoningEffort, undefined);
   assert.equal(roleTelemetry(undefined, 'opencode/a').workspaceAccess, 'unavailable');
-  for (const backend of ['opencode', 'pi']) {
+  for (const backend of ['opencode', 'poolside']) {
     assert.equal(
       roleTelemetry({ name: backend }, 'opencode/a', 'high').workspaceAccess,
       'read-only',
