@@ -163,22 +163,25 @@ function dshBoots(bin: string): boolean {
       });
     const config = launch(['--dump-config']);
     const run = launch(['--json', '-']);
-    return (
-      !config.error &&
-      !run.error &&
-      dshBootSucceeded({ stdout: run.stdout, stderr: config.stderr + run.stderr })
-    );
+    return !config.error && !run.error && dshBootSucceeded(config, run);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-/** A session started, and every row jbot's patch names exists and activated. */
-export function dshBootSucceeded(run: { stdout: string; stderr: string }): boolean {
+/**
+ * The patch composed cleanly (as startDsh requires) with every row it names
+ * present, and a session started with every entry activated.
+ */
+export function dshBootSucceeded(
+  config: { status: number | null; stderr: string },
+  run: { stdout: string; stderr: string },
+): boolean {
   return (
+    config.status === 0 &&
+    !/patch: entry "[^"]*" not found/.test(config.stderr) &&
     run.stdout.includes('"type":"session"') &&
-    !run.stderr.includes('did not activate') &&
-    !/patch: entry "[^"]*" not found/.test(run.stderr)
+    !run.stderr.includes('did not activate')
   );
 }
 

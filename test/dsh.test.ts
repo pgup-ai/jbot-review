@@ -44,20 +44,23 @@ describe('dsh engine', () => {
 
   it('passes the boot probe only for a session with every entry activated', () => {
     const session = '{"type":"session","sessionId":"s"}\n';
-    assert.equal(dshBootSucceeded({ stdout: session, stderr: '' }), true);
-    assert.equal(
-      dshBootSucceeded({ stdout: session, stderr: 'dsh: warning: 1 entry did not activate' }),
-      false,
-    );
-    assert.equal(dshBootSucceeded({ stdout: '', stderr: '' }), false);
-    // A misspelled disabled row would silently stay on.
-    assert.equal(
-      dshBootSucceeded({
-        stdout: session,
-        stderr: 'dsh: [p.yml] patch: entry "tool-webz" not found',
-      }),
-      false,
-    );
+    const composed = { status: 0, stderr: '' };
+    assert.equal(dshBootSucceeded(composed, { stdout: session, stderr: '' }), true);
+    for (const [config, run] of [
+      // A failed compose that startDsh would reject, even though the session starts.
+      [
+        { status: 1, stderr: 'boom' },
+        { stdout: session, stderr: '' },
+      ],
+      // A misspelled disabled row would silently stay on.
+      [
+        { status: 0, stderr: 'dsh: [p.yml] patch: entry "tool-webz" not found' },
+        { stdout: session, stderr: '' },
+      ],
+      [composed, { stdout: session, stderr: 'dsh: warning: 1 entry did not activate' }],
+      [composed, { stdout: '', stderr: '' }],
+    ] as const)
+      assert.equal(dshBootSucceeded(config, run), false);
   });
 
   it('maps efforts onto DeepSeek thinking modes', () => {
