@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   const options = {
     enhancedContext: true,
     opencodeProxyEnv: {},
-    sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'opencode',
+    sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'dsh',
     dryRun: parseBooleanInput('dry-run', false),
     autoApprove: parseBooleanInput('auto-approve', false),
     maxFindings: parseNumberInput('max-findings', 0),

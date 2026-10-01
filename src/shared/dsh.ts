@@ -57,12 +57,7 @@ const DSH_TELEMETRY_CAPABILITY = 'observable' as const;
 const DSH_PROMPT_TIMEOUT_MS = 15 * 60_000;
 
 /** What the patch tells dsh and what jbot budgets prompts against: one source for both. */
-export function dshModelLimits(modelID: string): { contextTokens: number; outputTokens: number } {
-  return {
-    contextTokens: modelID.startsWith('deepseek') ? 1_000_000 : 262_144,
-    outputTokens: 32_768,
-  };
-}
+export const DSH_MODEL_LIMITS = { contextTokens: 1_000_000, outputTokens: 32_768 };
 
 const DSH_BASE_URLS: Record<string, string> = {
   opencode: 'https://opencode.ai/zen/v1',
@@ -129,10 +124,10 @@ function dshSandboxUsable(bin: string): boolean {
 }
 
 /**
- * JBOT_SDK_ENGINE: `dsh` (default) serves opencode/opencode-go models on
- * DeepSeek Harness, `opencode` pins the opencode server. A missing dsh, an
- * unusable sandbox, the removed pi engine (`auto`) or an unknown value all
- * fall back to opencode, so the engine choice can never fail a run.
+ * JBOT_SDK_ENGINE: `dsh` (default; `auto`, once pi, now means the same)
+ * serves DeepSeek opencode/opencode-go models on DeepSeek Harness, `opencode`
+ * pins the opencode server. A missing dsh, an unusable sandbox or an unknown
+ * value falls back to opencode, so the engine choice can never fail a run.
  */
 export function resolveSdkEngine(
   env: NodeJS.ProcessEnv,
@@ -141,13 +136,8 @@ export function resolveSdkEngine(
 ): { dshBin?: string; reason: string } {
   const engine = env.JBOT_SDK_ENGINE?.trim() || 'dsh';
   if (engine === 'opencode') return { reason: '' };
-  if (engine !== 'dsh') {
-    return {
-      reason:
-        engine === 'auto'
-          ? 'the pi engine (JBOT_SDK_ENGINE=auto) was removed; using the opencode engine'
-          : `unknown JBOT_SDK_ENGINE value "${engine}"; using the opencode engine`,
-    };
+  if (engine !== 'dsh' && engine !== 'auto') {
+    return { reason: `unknown JBOT_SDK_ENGINE value "${engine}"; using the opencode engine` };
   }
   if (!dshBin) {
     return {
@@ -163,17 +153,23 @@ export function resolveSdkEngine(
   return { dshBin, reason: '' };
 }
 
-export function dshSupportsProvider(providerID: string): boolean {
-  return Object.hasOwn(DSH_BASE_URLS, providerID);
+/**
+ * DeepSeek on the opencode gateways: the measured route, served on chat
+ * completions. Zen serves Claude/GPT/Grok (and some Qwen/MiniMax) on other
+ * APIs, and its `-free` models answer only the opencode client.
+ */
+export function dshServesModel(providerID: string, modelID: string): boolean {
+  return (
+    Object.hasOwn(DSH_BASE_URLS, providerID) &&
+    modelID.startsWith('deepseek') &&
+    !modelID.endsWith('-free')
+  );
 }
 
 /** DeepSeek's thinking modes are off/high/max; anything else maps to its nearest. */
-export function dshReasoningEffort(
-  modelID: string,
-  modelOptions?: Record<string, unknown>,
-): string | undefined {
+export function dshReasoningEffort(modelOptions?: Record<string, unknown>): string | undefined {
   const effort = modelOptions?.reasoningEffort;
-  if (!modelID.startsWith('deepseek') || typeof effort !== 'string') return undefined;
+  if (typeof effort !== 'string') return undefined;
   if (effort === 'max' || effort === 'xhigh') return 'max';
   return effort === 'off' || effort === 'none' ? 'off' : 'high';
 }
@@ -189,8 +185,6 @@ export function buildDshPatch(input: {
   toolLess: boolean;
   subagents?: boolean;
 }): string {
-  const deepseek = input.modelID.startsWith('deepseek');
-  const limits = dshModelLimits(input.modelID);
   const rows: unknown[] = [
     {
       id: 'agent-default-model',
@@ -214,14 +208,10 @@ export function buildDshPatch(input: {
             models: [
               {
                 id: input.modelID,
-                contextWindow: limits.contextTokens,
-                maxTokens: limits.outputTokens,
-                ...(deepseek
-                  ? {
-                      compat: { thinkingFormat: 'deepseek' },
-                      reasoningEfforts: { off: null, high: 'high', max: 'max' },
-                    }
-                  : {}),
+                contextWindow: DSH_MODEL_LIMITS.contextTokens,
+                maxTokens: DSH_MODEL_LIMITS.outputTokens,
+                compat: { thinkingFormat: 'deepseek' },
+                reasoningEfforts: { off: null, high: 'high', max: 'max' },
               },
             ],
           },
@@ -304,6 +294,7 @@ export function parseDshEvents(stdout: string): DshTurn {
       usage.output += n('outputTokens');
       usage.cacheRead += n('cacheReadTokens');
       usage.cacheWrite += n('cacheWriteTokens');
+      usage.reasoning += n('reasoningTokens');
     } else if (event.type === 'status' && event.phase === 'turn_end' && isRecord(event.reason)) {
       if (event.reason.kind !== 'completed') {
         const error = isRecord(event.reason.error) ? event.reason.error.message : undefined;
@@ -351,8 +342,29 @@ interface DshSession {
   sessionId?: string;
 }
 
+// The host's route to the model endpoint, which dsh only takes from its launch env.
+const DSH_NETWORK_ENV = [
+  'HTTPS_PROXY',
+  'https_proxy',
+  'HTTP_PROXY',
+  'http_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+];
+
 function childEnv(apiKey: string, home: string): NodeJS.ProcessEnv {
   return {
+    ...Object.fromEntries(
+      DSH_NETWORK_ENV.flatMap((name) => {
+        const value = process.env[name];
+        return value ? [[name, value]] : [];
+      }),
+    ),
     PATH: process.env.PATH,
     HOME: home,
     DSH_HOME: join(home, 'dsh'),
@@ -375,9 +387,9 @@ export async function startDsh(
     toolTelemetry?: ToolTelemetryAccumulator;
     auxProviderKey?: { providerID: string; apiKey: string };
   } = {},
-): Promise<{ runtime: DshRuntime; stop: () => void }> {
-  if (!dshSupportsProvider(providerID)) {
-    throw new Error(`The dsh engine serves only opencode and opencode-go, not "${providerID}".`);
+): Promise<{ runtime: DshRuntime; stop: () => Promise<void> }> {
+  if (!dshServesModel(providerID, modelID)) {
+    throw new Error(`The dsh engine does not serve ${providerID}/${modelID}.`);
   }
   const root = mkdtempSync(join(tmpdir(), 'jbot-dsh-'));
   const remove = () => rmSync(root, { recursive: true, force: true });
@@ -424,7 +436,7 @@ export async function startDsh(
     workspace,
     apiKeys: {
       ...(options.auxProviderKey &&
-        dshSupportsProvider(options.auxProviderKey.providerID) && {
+        Object.hasOwn(DSH_BASE_URLS, options.auxProviderKey.providerID) && {
           [options.auxProviderKey.providerID]: options.auxProviderKey.apiKey,
         }),
       [providerID]: apiKey,
@@ -439,8 +451,8 @@ export async function startDsh(
   };
   return {
     runtime,
-    // Children are signalled synchronously; the temp dirs go once they have exited.
-    stop: () => void scope.stop().finally(remove),
+    // The temp dirs go once every child has exited.
+    stop: () => scope.stop().finally(remove),
   };
 }
 
@@ -466,7 +478,6 @@ function createDshSession(
       systemPrompt: runtime.systemPrompt,
       routingSession: `jbot-${randomUUID()}`,
       reasoningEffort: dshReasoningEffort(
-        modelID,
         modelOptions ??
           (model === runtime.mainModel ? runtime.modelOptions : runtime.auxModelOptions),
       ),
@@ -509,10 +520,10 @@ async function promptDshSession(
         stopReason === 'completed' ? 'completed' : classifyTelemetryStopReason(stopReason),
       turnCount: steps,
     });
-  let stdout: string;
+  let result: Awaited<ReturnType<typeof runCliProcess>>;
   try {
     // Labelled by the session, so the runner's grace abort reaches repair turns too.
-    ({ stdout } = await runtime.scope.run(session.label, () =>
+    result = await runtime.scope.run(session.label, () =>
       runCliProcess(runtime.bin, args, {
         cwd: session.home,
         env: childEnv(session.apiKey, session.home),
@@ -520,13 +531,17 @@ async function promptDshSession(
         timeoutMs,
         timeoutMessage: `dsh ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
       }),
-    ));
+    );
   } catch (error) {
     telemetry(error, 0);
     onTokenUsage?.({ promptBytes }, session.model, label);
     throw error;
   }
-  const turn = parseDshEvents(stdout);
+  const turn = parseDshEvents(result.stdout);
+  // exit 1 = aborted or errored turn, which may surface without an error event.
+  if (!turn.error && result.exitCode !== 0) {
+    turn.error = `exit ${result.exitCode}: ${result.stderr.trim() || 'no stderr'}`;
+  }
   session.sessionId ??= turn.sessionId;
   for (const tool of turn.tools) {
     const toolClass = classifyReadonlyTool(tool.name, tool.input);
@@ -669,7 +684,10 @@ export function createDshBackend(runtime: DshRuntime): ReviewBackend {
     },
     runReview: (model, prContext, guidelines, log, options = {}) => {
       const label = options.label ?? 'review';
-      const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
+      const deadlineAt = Math.min(
+        options.deadlineAt ?? Infinity,
+        options.timeoutMs ? Date.now() + options.timeoutMs : Infinity,
+      );
       const prompt = assembleReviewPrompt(
         prContext,
         guidelines,

@@ -129,7 +129,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
-import { createDshBackend, dshModelLimits, resolveSdkEngine, startDsh } from './dsh.ts';
+import { createDshBackend, DSH_MODEL_LIMITS, resolveSdkEngine, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -2225,6 +2225,7 @@ async function runReviewPipeline(params: {
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
   }
 
+  let auxBootError: unknown;
   let dshRuntime: Awaited<ReturnType<typeof startDsh>> | undefined;
   let dshBackend: ReviewBackend | undefined;
   if (backendSelection.dsh && sdkEngine.dshBin) {
@@ -2256,14 +2257,23 @@ async function runReviewPipeline(params: {
             : {}),
         },
       );
+      dshBackend = createDshBackend(dshRuntime.runtime);
     } catch (error) {
-      await cleanupCliHomes();
-      throw error;
+      if (mainOnDsh) {
+        await cleanupCliHomes();
+        throw error;
+      }
+      // Invariant #3, as for an aux-only opencode boot below.
+      auxBootError = error;
+      recordCoverage({ session: 'aux-dsh-boot', state: 'failed', error });
+      log(
+        `Auxiliary dsh backend unavailable; auxiliary sessions are disabled for this run (fail-open): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
-    dshBackend = createDshBackend(dshRuntime.runtime);
   }
 
-  let auxOpencodeBootError: unknown;
   void evidence.warm({
     log,
     onStats: (row) => telemetry.recordJevPrefetch(row),
@@ -2325,14 +2335,14 @@ async function runReviewPipeline(params: {
       opencodeBackend = createOpencodeBackend(opencodeRuntime, backendToolTelemetry);
     } catch (error) {
       if (mainOnOpencode) {
-        dshRuntime?.stop();
+        await dshRuntime?.stop();
         await cleanupCliHomes();
         throw error;
       }
       // Opencode serves only aux roles here — invariant #3: a broken aux
       // backend must never fail the run. The auxSessionsEnabled gate below
       // keeps every aux session off; main review continues.
-      auxOpencodeBootError = error;
+      auxBootError = error;
       recordCoverage({ session: 'aux-opencode-boot', state: 'failed', error });
       log(
         `Auxiliary opencode backend unavailable; lens/guideline/addressed/changes-since/verification sessions are disabled for this run (fail-open): ${
@@ -2369,20 +2379,20 @@ async function runReviewPipeline(params: {
         : requireSdkBackend(opencodeBackend, 'opencode', 'main');
   const auxBaseBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
-    : auxOnDsh
-      ? requireSdkBackend(dshBackend, 'dsh', 'aux')
-      : auxOnPoolside
-        ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
-        : auxOpencodeBootError
-          ? // Fail-open stand-in only: auxSessionsEnabled keeps it undispatched.
-            mainBaseBackend
+    : auxBootError
+      ? // Fail-open stand-in only: auxSessionsEnabled keeps it undispatched.
+        mainBaseBackend
+      : auxOnDsh
+        ? requireSdkBackend(dshBackend, 'dsh', 'aux')
+        : auxOnPoolside
+          ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
           : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
     (mainBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${providerID}/${modelID}`]
       : mainBaseBackend.name === 'dsh'
-        ? dshModelLimits(modelID)
+        ? DSH_MODEL_LIMITS
         : undefined) ??
       (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
       (providerID === COMMANDCODE_PROVIDER_ID
@@ -2394,7 +2404,7 @@ async function runReviewPipeline(params: {
     (auxBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${auxProviderID}/${auxModelID}`]
       : auxBaseBackend.name === 'dsh'
-        ? dshModelLimits(auxModelID)
+        ? DSH_MODEL_LIMITS
         : undefined) ??
       (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
       (auxProviderID === COMMANDCODE_PROVIDER_ID
@@ -2427,7 +2437,7 @@ async function runReviewPipeline(params: {
     ),
     auxPromptBudget,
   );
-  const auxSessionsEnabled = !auxOpencodeBootError && !auxGatewayPreflightError;
+  const auxSessionsEnabled = !auxBootError && !auxGatewayPreflightError;
   const verificationEnabled = options.verifyFindings && auxSessionsEnabled;
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, verificationEnabled);
   if (finderTimeoutMs) {
@@ -2450,11 +2460,6 @@ async function runReviewPipeline(params: {
       opencodeRuntime?.stop();
     } catch (error) {
       log(`opencode teardown failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    try {
-      dshRuntime?.stop();
-    } catch (error) {
-      log(`dsh teardown failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
   teardownPending = true;
@@ -3931,6 +3936,11 @@ async function runReviewPipeline(params: {
     let teardownCompleted = false;
     try {
       stop();
+      await dshRuntime
+        ?.stop()
+        .catch((error: unknown) =>
+          log(`dsh teardown failed: ${error instanceof Error ? error.message : String(error)}`),
+        );
       await cleanupCliHomes();
       teardownCompleted = true;
     } finally {

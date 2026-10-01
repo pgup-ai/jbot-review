@@ -15,7 +15,7 @@ import {
 } from '@symma/protocol';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from '@symma/protocol';
-import { dshSupportsProvider } from './dsh.ts';
+import { dshServesModel } from './dsh.ts';
 import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
@@ -99,12 +99,15 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   const mainPoolside = !mainCliBackend && isPoolsideProvider(input.providerID);
   const auxPoolside = !auxCliBackend && isPoolsideProvider(input.auxProviderID);
   const mainDsh =
-    !mainCliBackend && !mainPoolside && !!input.dshEnabled && dshSupportsProvider(input.providerID);
+    !mainCliBackend &&
+    !mainPoolside &&
+    !!input.dshEnabled &&
+    dshServesModel(input.providerID, input.modelID);
   const auxDsh =
     !auxCliBackend &&
     !auxPoolside &&
     !!input.dshEnabled &&
-    dshSupportsProvider(input.auxProviderID);
+    dshServesModel(input.auxProviderID, input.auxModelID);
   const mainOpencode = !mainCliBackend && !mainDsh && !mainPoolside;
   const auxOpencode = !auxCliBackend && !auxDsh && !auxPoolside;
   const needsOpencode = mainOpencode || auxOpencode;

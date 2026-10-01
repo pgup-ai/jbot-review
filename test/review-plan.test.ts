@@ -36,7 +36,7 @@ import {
   withNoToolsReviewDirective,
   compactReviewPageContext,
 } from '../src/shared/prompt.ts';
-import { dshModelLimits } from '../src/shared/dsh.ts';
+import { DSH_MODEL_LIMITS } from '../src/shared/dsh.ts';
 import { formatGuidelines } from '../src/shared/review-context.ts';
 import {
   limitReviewBackendSessions,
@@ -183,10 +183,7 @@ test('uses known free-model capacity for fewer complete pages and ranks auxiliar
 
 test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {
   assert.ok(
-    measureReviewPrompt(
-      renderPrompt(''),
-      reviewPromptBudget('dsh', dshModelLimits('deepseek-v4.1-flash')),
-    ).fits,
+    measureReviewPrompt(renderPrompt(''), reviewPromptBudget('dsh', DSH_MODEL_LIMITS)).fits,
   );
   assert.ok(
     measureReviewPrompt(

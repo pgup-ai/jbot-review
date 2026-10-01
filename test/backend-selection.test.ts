@@ -935,14 +935,20 @@ describe('selectReviewBackends dsh engine routing', () => {
     );
   });
 
-  it('keeps providers dsh does not serve on opencode even when enabled', () => {
-    for (const providerID of ['google', 'deepseek', 'kimi-code-plan-global', 'openai-compatible']) {
+  it('keeps models dsh does not serve on opencode even when enabled', () => {
+    for (const [providerID, modelID] of [
+      ['google', 'deepseek-v4.1-flash'],
+      ['deepseek', 'deepseek-v4.1-flash'],
+      ['opencode', 'claude-opus-5-5'],
+      ['opencode-go', 'glm-5.3'],
+      ['opencode', 'deepseek-v4-flash-free'],
+    ]) {
       const selection = selectReviewBackends({
         providerID,
-        modelID: 'model',
+        modelID,
         apiKey: 'main-key',
         auxProviderID: providerID,
-        auxModelID: 'model',
+        auxModelID: modelID,
         auxApiKey: '',
         dshEnabled: true,
       });

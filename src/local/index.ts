@@ -48,7 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { dshModelLimits, dshSupportsProvider, resolveSdkEngine } from '../shared/dsh.ts';
+import { DSH_MODEL_LIMITS, dshServesModel, resolveSdkEngine } from '../shared/dsh.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -566,14 +566,14 @@ async function review(
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     const { providerID, modelID } = parseModelName(model);
-    const onDsh = Boolean(sdkEngine.dshBin) && dshSupportsProvider(providerID);
+    const onDsh = Boolean(sdkEngine.dshBin) && dshServesModel(providerID, modelID);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',
       shards,
       budget: reviewPromptBudget(
         cliBackendForProvider(providerID) ?? (onDsh ? 'dsh' : 'opencode'),
-        onDsh ? dshModelLimits(modelID) : undefined,
+        onDsh ? DSH_MODEL_LIMITS : undefined,
       ),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });

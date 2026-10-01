@@ -132,7 +132,7 @@ export function effectiveReasoningEffort(
 ): string | undefined {
   if (backend === 'commandcode')
     return commandCodeSessionEffort(model, override, commandCodeContext);
-  if (backend === 'dsh') return dshReasoningEffort(parseModelName(model).modelID, modelOptions);
+  if (backend === 'dsh') return dshReasoningEffort(modelOptions);
   if (backend !== 'opencode' && backend !== 'poolside') return undefined;
   const effort = knownEffort(
     backend === 'poolside' ? poolsideReasoningEffort(modelOptions) : modelOptions?.reasoningEffort,

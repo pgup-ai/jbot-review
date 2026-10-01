@@ -11,14 +11,18 @@ import {
 describe('dsh engine', () => {
   it('is the default engine and falls back to opencode rather than fail a run', () => {
     const usable = () => true;
-    assert.deepEqual(resolveSdkEngine({}, '/bin/dsh', usable), { dshBin: '/bin/dsh', reason: '' });
+    for (const env of [{}, { JBOT_SDK_ENGINE: 'auto' }]) {
+      assert.deepEqual(resolveSdkEngine(env, '/bin/dsh', usable), {
+        dshBin: '/bin/dsh',
+        reason: '',
+      });
+    }
     assert.deepEqual(resolveSdkEngine({ JBOT_SDK_ENGINE: 'opencode' }, '/bin/dsh', usable), {
       reason: '',
     });
     for (const [env, bin, sandbox, reason] of [
       [{}, '', usable, /no dsh binary/],
       [{}, '/bin/dsh', () => false, /no usable dsh sandbox/],
-      [{ JBOT_SDK_ENGINE: 'auto' }, '/bin/dsh', usable, /pi engine .* was removed/],
       [{ JBOT_SDK_ENGINE: 'pi-please' }, '/bin/dsh', usable, /unknown JBOT_SDK_ENGINE/],
     ] as const) {
       const resolved = resolveSdkEngine(env, bin, sandbox);
@@ -28,23 +32,27 @@ describe('dsh engine', () => {
   });
 
   it('maps efforts onto DeepSeek thinking modes only', () => {
-    assert.equal(dshReasoningEffort('deepseek-v4.1-flash', { reasoningEffort: 'low' }), 'high');
-    assert.equal(dshReasoningEffort('deepseek-v4.1-flash', { reasoningEffort: 'xhigh' }), 'max');
-    assert.equal(dshReasoningEffort('glm-5.3', { reasoningEffort: 'high' }), undefined);
+    assert.equal(dshReasoningEffort({ reasoningEffort: 'low' }), 'high');
+    assert.equal(dshReasoningEffort({ reasoningEffort: 'xhigh' }), 'max');
+    assert.equal(dshReasoningEffort(), undefined);
   });
 
   it('pins the read-only sandbox and strips write, web and customization rows', () => {
-    const rows = JSON.parse(
-      buildDshPatch({
-        providerID: 'opencode-go',
-        modelID: 'deepseek-v4.1-flash',
-        workspace: '/repo',
-        systemPrompt: 'sys',
-        routingSession: 's1',
-        toolLess: true,
-      }),
-    ) as Array<{ id: string; disabled?: boolean; config?: Record<string, unknown> }>;
-    const byId = new Map(rows.map((row) => [row.id, row]));
+    const rowsFor = (toolLess: boolean, subagents: boolean) => {
+      const rows = JSON.parse(
+        buildDshPatch({
+          providerID: 'opencode-go',
+          modelID: 'deepseek-v4.1-flash',
+          workspace: '/repo',
+          systemPrompt: 'sys',
+          routingSession: 's1',
+          toolLess,
+          subagents,
+        }),
+      ) as Array<{ id: string; disabled?: boolean; config?: Record<string, unknown> }>;
+      return new Map(rows.map((row) => [row.id, row]));
+    };
+    const byId = rowsFor(true, false);
     assert.deepEqual(byId.get('sandbox-policy')?.config, {
       mode: 'read-only',
       workspaceRoot: '/repo',
@@ -53,6 +61,13 @@ describe('dsh engine', () => {
     assert.deepEqual(byId.get('fs-sandbox')?.config, { cwd: '/repo' });
     for (const id of ['tool-fs', 'tool-web', 'agent-instructions', 'skill-filesystem', 'tool-bash'])
       assert.equal(byId.get(id)?.disabled, true, id);
+    // The subagent opt-in keeps only its own rows; the read-only floor stays.
+    const withSubagents = rowsFor(false, true);
+    for (const id of ['tool-subagent', 'tool-subagent-fork', 'tool-bash'])
+      assert.equal(withSubagents.get(id), undefined, id);
+    for (const id of ['tool-fs', 'tool-web', 'agent-instructions'])
+      assert.equal(withSubagents.get(id)?.disabled, true, id);
+    assert.deepEqual(withSubagents.get('approval')?.config, { policy: 'never' });
   });
 
   it('folds the event stream into text, usage, tools and errors', () => {
@@ -63,7 +78,7 @@ describe('dsh engine', () => {
       {
         type: 'status',
         phase: 'step_end',
-        usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 90 },
+        usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 90, reasoningTokens: 7 },
       },
       { type: 'status', phase: 'step_end', usage: { inputTokens: 5, outputTokens: 3 } },
       {
@@ -83,7 +98,7 @@ describe('dsh engine', () => {
     assert.deepEqual(turn.usage, {
       input: 15,
       output: 5,
-      reasoning: 0,
+      reasoning: 7,
       cacheRead: 90,
       cacheWrite: 0,
     });
