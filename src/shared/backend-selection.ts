@@ -15,7 +15,7 @@ import {
 } from '@symma/protocol';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from '@symma/protocol';
-import { dshServesModel } from './dsh.ts';
+import { dshServesModel, type DshCatalog } from './dsh.ts';
 import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
@@ -37,8 +37,8 @@ export interface ReviewBackendSelectionInput {
   auxProviderID: string;
   auxModelID: string;
   auxApiKey: string;
-  /** Whether the dsh engine may be used at all (see resolveSdkEngine). */
-  dshEnabled?: boolean;
+  /** dsh's model catalog when the engine is usable (see resolveSdkEngine). */
+  dshCatalog?: DshCatalog;
 }
 
 interface DshEngineConfig {
@@ -101,13 +101,11 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   const mainDsh =
     !mainCliBackend &&
     !mainPoolside &&
-    !!input.dshEnabled &&
-    dshServesModel(input.providerID, input.modelID);
+    dshServesModel(input.dshCatalog, input.providerID, input.modelID);
   const auxDsh =
     !auxCliBackend &&
     !auxPoolside &&
-    !!input.dshEnabled &&
-    dshServesModel(input.auxProviderID, input.auxModelID);
+    dshServesModel(input.dshCatalog, input.auxProviderID, input.auxModelID);
   const mainOpencode = !mainCliBackend && !mainDsh && !mainPoolside;
   const auxOpencode = !auxCliBackend && !auxDsh && !auxPoolside;
   const needsOpencode = mainOpencode || auxOpencode;

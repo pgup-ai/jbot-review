@@ -129,7 +129,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
-import { createDshBackend, DSH_MODEL_LIMITS, resolveSdkEngine, startDsh } from './dsh.ts';
+import { createDshBackend, resolveSdkEngine, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -1382,7 +1382,7 @@ async function runReviewPipeline(params: {
     auxProviderID,
     auxModelID,
     auxApiKey,
-    dshEnabled: Boolean(sdkEngine.dshBin),
+    dshCatalog: sdkEngine.catalog,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   // Backend selection owns the main-wins key policy; empty when no role
@@ -2390,7 +2390,7 @@ async function runReviewPipeline(params: {
     (mainBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${providerID}/${modelID}`]
       : mainBaseBackend.name === 'dsh'
-        ? DSH_MODEL_LIMITS
+        ? sdkEngine.catalog?.[providerID]?.[modelID]
         : undefined) ??
       (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
       (providerID === COMMANDCODE_PROVIDER_ID
@@ -2402,7 +2402,7 @@ async function runReviewPipeline(params: {
     (auxBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${auxProviderID}/${auxModelID}`]
       : auxBaseBackend.name === 'dsh'
-        ? DSH_MODEL_LIMITS
+        ? sdkEngine.catalog?.[auxProviderID]?.[auxModelID]
         : undefined) ??
       (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
       (auxProviderID === COMMANDCODE_PROVIDER_ID

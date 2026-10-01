@@ -865,9 +865,12 @@ describe('selectReviewBackends dsh engine routing', () => {
     auxApiKey: '',
   };
   const dsh = { providerID: 'opencode-go', modelID: 'deepseek-v4.1-flash', apiKey: 'go-key' };
+  const dshCatalog = {
+    'opencode-go': { 'deepseek-v4.1-flash': { contextTokens: 1_000_000, outputTokens: 32_768 } },
+  };
 
   it('routes both SDK roles to dsh for an opencode gateway', () => {
-    assert.deepEqual(selectReviewBackends({ ...go, dshEnabled: true }), {
+    assert.deepEqual(selectReviewBackends({ ...go, dshCatalog }), {
       mainSdkEngine: 'dsh',
       auxSdkEngine: 'dsh',
       needsOpencode: false,
@@ -879,7 +882,7 @@ describe('selectReviewBackends dsh engine routing', () => {
     });
   });
 
-  it('leaves the selection on opencode when dshEnabled is omitted', () => {
+  it('leaves the selection on opencode without a dsh catalog', () => {
     assert.deepEqual(selectReviewBackends(go), {
       needsOpencode: true,
       ...noCliKeys,
@@ -896,7 +899,7 @@ describe('selectReviewBackends dsh engine routing', () => {
         auxProviderID: 'google',
         auxModelID: 'gemini-2.5-flash',
         auxApiKey: 'aux-key',
-        dshEnabled: true,
+        dshCatalog,
       }),
       {
         mainSdkEngine: 'dsh',
@@ -919,7 +922,7 @@ describe('selectReviewBackends dsh engine routing', () => {
         auxProviderID: 'opencode-go',
         auxModelID: 'deepseek-v4.1-flash',
         auxApiKey: 'go-key',
-        dshEnabled: true,
+        dshCatalog,
       }),
       {
         mainCliBackend: 'kilo',
@@ -950,7 +953,7 @@ describe('selectReviewBackends dsh engine routing', () => {
         auxProviderID: providerID,
         auxModelID: modelID,
         auxApiKey: '',
-        dshEnabled: true,
+        dshCatalog,
       });
       assert.equal(selection.mainSdkEngine, undefined);
       assert.equal(selection.needsOpencode, true);

@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { createCliProcessScope, runCliProcess } from './cli-process.ts';
@@ -58,13 +59,16 @@ import { parseModelName } from '@symma/protocol';
 const DSH_TELEMETRY_CAPABILITY = 'observable' as const;
 const DSH_PROMPT_TIMEOUT_MS = 15 * 60_000;
 
-/** What the patch tells dsh and what jbot budgets prompts against: one source for both. */
-export const DSH_MODEL_LIMITS = { contextTokens: 1_000_000, outputTokens: 32_768 };
-
-const DSH_BASE_URLS: Record<string, string> = {
-  opencode: 'https://opencode.ai/zen/v1',
-  'opencode-go': 'https://opencode.ai/zen/go/v1',
-};
+/**
+ * The opencode Zen/Go models dsh's bundled pi-ai catalog knows, with their
+ * limits. The catalog also fixes each model's API (chat completions, Responses
+ * or Anthropic Messages) and base URL, so jbot routes by membership alone.
+ */
+export type DshCatalog = Record<
+  string,
+  Record<string, { contextTokens: number; outputTokens: number }>
+>;
+const DSH_GATEWAYS = ['opencode', 'opencode-go'];
 
 // Rows that would write, read repo/HOME customizations, reach the network beyond
 // the model route, or spend extra model calls on session titles.
@@ -119,13 +123,47 @@ export function dshSandboxUsable(bin: string, platform = process.platform): bool
   if (succeeds('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', 'true'])) {
     return true;
   }
-  const runner = join('node_modules', '@deepseek-ai', `node-addon-system-linux-${process.arch}`);
-  // Nested under dsh or hoisted beside it, depending on how npm laid it out.
+  const landlockRun = installedBeside(
+    bin,
+    join('@deepseek-ai', `node-addon-system-linux-${process.arch}`, 'bin', 'landlock-run'),
+  );
+  return landlockRun !== undefined && succeeds(landlockRun, ['--probe']);
+}
+
+/** A file of a dsh dependency: nested under dsh or hoisted beside it, as npm laid it out. */
+function installedBeside(bin: string, file: string): string | undefined {
   for (let dir = dirname(realpathSync(bin)); dir !== dirname(dir); dir = dirname(dir)) {
-    const landlockRun = join(dir, runner, 'bin', 'landlock-run');
-    if (existsSync(landlockRun)) return succeeds(landlockRun, ['--probe']);
+    const candidate = join(dir, 'node_modules', file);
+    if (existsSync(candidate)) return candidate;
   }
-  return false;
+  return undefined;
+}
+
+export function readDshCatalog(bin: string): DshCatalog | undefined {
+  const file = installedBeside(
+    bin,
+    join('@earendil-works', 'pi-ai', 'dist', 'models.generated.js'),
+  );
+  if (!file) return undefined;
+  const run = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const { MODELS } = await import(${JSON.stringify(pathToFileURL(file).href)});
+console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(DSH_GATEWAYS)}.map((gateway) => [
+  gateway,
+  Object.fromEntries(Object.entries(MODELS[gateway] ?? {}).map(([id, m]) =>
+    [id, { contextTokens: m.contextWindow, outputTokens: m.maxTokens }])),
+]))));`,
+    ],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  try {
+    return run.status === 0 ? (JSON.parse(run.stdout) as DshCatalog) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -134,7 +172,7 @@ export function dshSandboxUsable(bin: string, platform = process.platform): bool
  * row would stay on); starting reports a plugin that cannot load (say, a
  * pruned package); the missing credential ends the turn before any network.
  */
-function dshBoots(bin: string): boolean {
+function dshBoots(bin: string, modelID: string): boolean {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-dsh-probe-'));
   try {
     const patch = join(dir, 'patch.yml');
@@ -142,7 +180,7 @@ function dshBoots(bin: string): boolean {
       patch,
       buildDshPatch({
         providerID: 'opencode-go',
-        modelID: 'deepseek-probe',
+        modelID,
         workspace: dir,
         systemPrompt: '',
         routingSession: 'probe',
@@ -186,35 +224,39 @@ export function dshBootSucceeded(
   );
 }
 
-const unusableByBin = new Map<string, string | undefined>();
+type DshProbe = { catalog: DshCatalog } | { reason: string };
+const probeByBin = new Map<string, DshProbe>();
 
-function dshUnusableReason(bin: string): string | undefined {
-  if (!unusableByBin.has(bin)) {
-    unusableByBin.set(
-      bin,
-      !dshSandboxUsable(bin)
-        ? 'no usable dsh sandbox (needs Landlock or bwrap on Linux, Seatbelt on macOS)'
-        : !dshBoots(bin)
-          ? 'dsh failed its headless boot check'
-          : undefined,
-    );
+function probeDsh(bin: string): DshProbe {
+  let probe = probeByBin.get(bin);
+  if (!probe) {
+    const catalog = readDshCatalog(bin);
+    const goModel = Object.keys(catalog?.['opencode-go'] ?? {}).find((id) => !id.endsWith('-free'));
+    probe = !dshSandboxUsable(bin)
+      ? { reason: 'no usable dsh sandbox (needs Landlock or bwrap on Linux, Seatbelt on macOS)' }
+      : !catalog || !goModel
+        ? { reason: "dsh's model catalog is unreadable" }
+        : !dshBoots(bin, goModel)
+          ? { reason: 'dsh failed its headless boot check' }
+          : { catalog };
+    probeByBin.set(bin, probe);
   }
-  return unusableByBin.get(bin);
+  return probe;
 }
 
 /**
  * JBOT_SDK_ENGINE: `dsh` (default; `auto`, once pi, now means the same)
- * serves DeepSeek opencode/opencode-go models on DeepSeek Harness, `opencode`
- * pins the opencode server. A missing or broken dsh, an unusable sandbox, a
- * credentialed proxy or an unknown value falls back to opencode, so the engine
- * choice can never fail a run.
+ * serves opencode/opencode-go models on DeepSeek Harness, `opencode` pins the
+ * opencode server. A missing or broken dsh, an unusable sandbox, an unreadable
+ * catalog, a credentialed proxy or an unknown value falls back to opencode, so
+ * the engine choice can never fail a run.
  */
 export function resolveSdkEngine(
   env: NodeJS.ProcessEnv,
   dshBin = resolveDshBin(process.env),
-  unusableReason = dshUnusableReason,
+  probe: (bin: string) => DshProbe = probeDsh,
   networkEnv: NodeJS.ProcessEnv = process.env,
-): { dshBin?: string; reason: string } {
+): { dshBin?: string; catalog?: DshCatalog; reason: string } {
   const engine = env.JBOT_SDK_ENGINE?.trim() || 'dsh';
   if (engine === 'opencode') return { reason: '' };
   if (engine !== 'dsh' && engine !== 'auto') {
@@ -232,30 +274,27 @@ export function resolveSdkEngine(
   if (credentialed) {
     return { reason: `${credentialed} carries credentials; using the opencode engine` };
   }
-  const unusable = unusableReason(dshBin);
-  return unusable ? { reason: `${unusable}; using the opencode engine` } : { dshBin, reason: '' };
+  const probed = probe(dshBin);
+  return 'reason' in probed
+    ? { reason: `${probed.reason}; using the opencode engine` }
+    : { dshBin, catalog: probed.catalog, reason: '' };
 }
 
-/**
- * DeepSeek on the opencode gateways: the measured route, served on chat
- * completions. Zen serves Claude/GPT/Grok (and some Qwen/MiniMax) on other
- * APIs, and its `-free` models answer only the opencode client.
- */
-export function dshServesModel(providerID: string, modelID: string): boolean {
-  return (
-    Object.hasOwn(DSH_BASE_URLS, providerID) &&
-    modelID.startsWith('deepseek') &&
-    !modelID.endsWith('-free')
-  );
+/** Catalogued gateway models, except `-free` ones, which Zen serves only to the opencode client. */
+export function dshServesModel(
+  catalog: DshCatalog | undefined,
+  providerID: string,
+  modelID: string,
+): boolean {
+  return !modelID.endsWith('-free') && Boolean(catalog?.[providerID]?.[modelID]);
 }
 
-/** DeepSeek's thinking modes are off/high/max; anything else maps to its nearest. */
+const DSH_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+/** pi-ai's thinking levels, which it maps per model; `default` leaves the provider's own. */
 export function dshReasoningEffort(modelOptions?: Record<string, unknown>): string | undefined {
-  const effort = modelOptions?.reasoningEffort;
-  // `default` leaves the provider's own setting, as on the opencode engine.
-  if (typeof effort !== 'string' || effort === 'default') return undefined;
-  if (effort === 'max' || effort === 'xhigh') return 'max';
-  return effort === 'off' || effort === 'none' ? 'off' : 'high';
+  const effort = modelOptions?.reasoningEffort === 'none' ? 'off' : modelOptions?.reasoningEffort;
+  return typeof effort === 'string' && DSH_THINKING_LEVELS.has(effort) ? effort : undefined;
 }
 
 /** The `--patch` overlay for one session; JSON is valid YAML, so no tags are needed. */
@@ -273,7 +312,7 @@ export function buildDshPatch(input: {
     {
       id: 'agent-default-model',
       config: {
-        provider: 'jbot',
+        provider: input.providerID,
         model: input.modelID,
         ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
       },
@@ -281,23 +320,12 @@ export function buildDshPatch(input: {
     {
       id: 'llm-pi-ai',
       config: {
+        // pi-ai's built-in gateway: its catalog picks the model's API and base URL.
         providers: {
-          jbot: {
+          [input.providerID]: {
             apiKeyEnv: 'JBOT_DSH_API_KEY',
-            api: 'openai-completions',
-            baseURL: DSH_BASE_URLS[input.providerID],
             // Opencode Go rejects requests it cannot route to a session.
             headers: { 'x-opencode-session': input.routingSession, 'x-opencode-client': 'jbot' },
-            compat: { supportsDeveloperRole: false, maxTokensField: 'max_tokens' },
-            models: [
-              {
-                id: input.modelID,
-                contextWindow: DSH_MODEL_LIMITS.contextTokens,
-                maxTokens: DSH_MODEL_LIMITS.outputTokens,
-                compat: { thinkingFormat: 'deepseek' },
-                reasoningEfforts: { off: null, high: 'high', max: 'max' },
-              },
-            ],
           },
         },
       },
@@ -486,9 +514,6 @@ export async function startDsh(
     auxKey?: string;
   } = {},
 ): Promise<{ runtime: DshRuntime; stop: () => Promise<void> }> {
-  if (!dshServesModel(providerID, modelID)) {
-    throw new Error(`The dsh engine does not serve ${providerID}/${modelID}.`);
-  }
   const root = mkdtempSync(join(tmpdir(), 'jbot-dsh-'));
   const remove = () => rmSync(root, { recursive: true, force: true });
   const template = join(root, 'template');

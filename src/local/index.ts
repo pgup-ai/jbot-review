@@ -48,7 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { DSH_MODEL_LIMITS, dshServesModel, resolveSdkEngine } from '../shared/dsh.ts';
+import { dshServesModel, readDshCatalog, resolveSdkEngine } from '../shared/dsh.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -566,17 +566,19 @@ async function review(
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     const { providerID, modelID } = parseModelName(model);
-    // Budget only: skip the sandbox and boot probes, which spawn dsh.
-    const onDsh =
-      Boolean(resolveSdkEngine(engineEnv, undefined, () => undefined).dshBin) &&
-      dshServesModel(providerID, modelID);
+    // Budget only: read the catalog, skipping the sandbox and boot probes, which spawn dsh.
+    const { catalog } = resolveSdkEngine(engineEnv, undefined, (bin) => {
+      const catalog = readDshCatalog(bin);
+      return catalog ? { catalog } : { reason: "dsh's model catalog is unreadable" };
+    });
+    const onDsh = dshServesModel(catalog, providerID, modelID);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',
       shards,
       budget: reviewPromptBudget(
         cliBackendForProvider(providerID) ?? (onDsh ? 'dsh' : 'opencode'),
-        onDsh ? DSH_MODEL_LIMITS : undefined,
+        onDsh ? catalog?.[providerID]?.[modelID] : undefined,
       ),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });
@@ -649,7 +651,7 @@ async function review(
     auxProviderID: aux.providerID,
     auxModelID: aux.modelID,
     auxApiKey: auxApiKey ?? '',
-    dshEnabled: Boolean(sdkEngine.dshBin),
+    dshCatalog: sdkEngine.catalog,
   });
   const configuredModelOptions = comparison
     ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider, modelID))

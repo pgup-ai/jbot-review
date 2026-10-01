@@ -19,7 +19,7 @@ RUN npm install -g @opencode/cli@2.0.16 \
   && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules/@opencode/cli-linux-*-musl \
   && opencode --version
 
-# DeepSeek Harness, the default engine for DeepSeek opencode/opencode-go models. Its shell
+# DeepSeek Harness, the default engine for opencode/opencode-go models. Its shell
 # runs under Landlock or bwrap; on a host with neither, jbot logs why and serves
 # those models on opencode. The pruned packages (~390MB) serve the desktop/web UI,
 # office preview, speech, images, telemetry, MCP/ACP, the PTY terminal and other

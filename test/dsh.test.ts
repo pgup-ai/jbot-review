@@ -9,6 +9,7 @@ import {
   createDshBackend,
   startDsh,
   dshReasoningEffort,
+  dshServesModel,
   dshSandboxUsable,
   dshBootSucceeded,
   parseDshTurn,
@@ -17,20 +18,18 @@ import {
 
 describe('dsh engine', () => {
   it('is the default engine and falls back to opencode rather than fail a run', () => {
-    const usable = () => undefined;
+    const catalog = { 'opencode-go': { 'mimo-v2.6-flash': { contextTokens: 1, outputTokens: 1 } } };
+    const usable = () => ({ catalog });
     for (const env of [{}, { JBOT_SDK_ENGINE: 'auto' }]) {
       assert.deepEqual(
         resolveSdkEngine(env, '/bin/dsh', usable, { HTTPS_PROXY: 'http://proxy:8080' }),
-        {
-          dshBin: '/bin/dsh',
-          reason: '',
-        },
+        { dshBin: '/bin/dsh', catalog, reason: '' },
       );
     }
     assert.deepEqual(resolveSdkEngine({ JBOT_SDK_ENGINE: 'opencode' }, '/bin/dsh', usable), {
       reason: '',
     });
-    const broken = () => 'dsh failed its headless boot check';
+    const broken = () => ({ reason: 'dsh failed its headless boot check' });
     for (const [env, bin, unusable, network, reason] of [
       [{}, '', usable, {}, /no dsh binary/],
       [{}, '/bin/dsh', broken, {}, /headless boot check; using the opencode engine/],
@@ -70,13 +69,24 @@ describe('dsh engine', () => {
       assert.equal(dshSandboxUsable('/bin/dsh', platform), false);
   });
 
-  it('maps efforts onto DeepSeek thinking modes', () => {
-    assert.equal(dshReasoningEffort({ reasoningEffort: 'low' }), 'high');
-    assert.equal(dshReasoningEffort({ reasoningEffort: 'xhigh' }), 'max');
-    assert.equal(dshReasoningEffort({ reasoningEffort: 'max' }), 'max');
+  it('passes pi-ai thinking levels through and leaves the rest to the provider', () => {
+    assert.equal(dshReasoningEffort({ reasoningEffort: 'low' }), 'low');
+    assert.equal(dshReasoningEffort({ reasoningEffort: 'xhigh' }), 'xhigh');
     assert.equal(dshReasoningEffort({ reasoningEffort: 'none' }), 'off');
-    for (const reasoningEffort of [undefined, 'default', 3])
+    for (const reasoningEffort of [undefined, 'default', 'turbo', 3])
       assert.equal(dshReasoningEffort({ reasoningEffort }), undefined);
+  });
+
+  it('serves catalogued gateway models except Zen free-tier ones', () => {
+    const limits = { contextTokens: 1, outputTokens: 1 };
+    const catalog = {
+      'opencode-go': { 'muse-spark-1.3-contributor': limits, 'mimo-v2.6-flash-free': limits },
+    };
+    assert.equal(dshServesModel(catalog, 'opencode-go', 'muse-spark-1.3-contributor'), true);
+    assert.equal(dshServesModel(catalog, 'opencode-go', 'mimo-v2.6-flash-free'), false);
+    assert.equal(dshServesModel(catalog, 'opencode-go', 'not-in-catalog'), false);
+    assert.equal(dshServesModel(catalog, 'openrouter', 'muse-spark-1.3-contributor'), false);
+    assert.equal(dshServesModel(undefined, 'opencode-go', 'muse-spark-1.3-contributor'), false);
   });
 
   it('pins the read-only sandbox and strips write, web and customization rows', () => {

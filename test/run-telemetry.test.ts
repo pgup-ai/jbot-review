@@ -205,7 +205,7 @@ test('effective effort follows the backend contract rather than claiming every r
       { reasoningEffort: 'xhigh' },
       ctx,
     ),
-    'max',
+    'xhigh',
   );
   assert.equal(
     effectiveReasoningEffort('opencode', 'opencode/a', { reasoningEffort: 'default' }, ctx),

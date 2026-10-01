@@ -519,10 +519,12 @@ authenticated locally. The generator uses the npm versions pinned in the
 Docker image; Cursor comes from its vendor-installed binary, while Devin has no
 enumerable catalog command and is documented as that explicit boundary.
 
-**SDK engines.** DeepSeek models on `opencode`/`opencode-go` (except `-free`
-ones, which Zen serves only to opencode) run on
+**SDK engines.** `opencode`/`opencode-go` models run on
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) by default
-(`sdk-engine: dsh`; `auto` means the same): each session is a `dsh --profile headless --json` child
+(`sdk-engine: dsh`; `auto` means the same) when they are in its bundled pi-ai
+catalog, which picks each model's API (chat completions, Responses or
+Anthropic Messages) and limits; `-free` models stay on opencode, since Zen
+serves its free tier only to the opencode client. Each session is a `dsh --profile headless --json` child
 with a per-session `DSH_HOME`, its read-only OS sandbox, approvals off, and its
 file-write, web, skill, subagent, instruction-file and DeepSeek log/telemetry
 plugins disabled. The published images include `dsh`; elsewhere it is found via
@@ -858,7 +860,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs DeepSeek opencode/opencode-go sessions on DeepSeek Harness when its sandbox is usable; `opencode` pins opencode                                                                                                                                   |
+| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs opencode/opencode-go sessions (not `-free` models) on DeepSeek Harness when its sandbox is usable; `opencode` pins opencode                                                                                                                       |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
