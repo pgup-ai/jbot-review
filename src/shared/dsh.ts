@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { createCliProcessScope, runCliProcess } from './cli-process.ts';
@@ -87,8 +87,9 @@ const DSH_SUBAGENT_ROWS = ['tool-subagent', 'tool-subagent-fork'];
 
 function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
   const configured = env.JBOT_DSH_BIN?.trim();
+  // Absolute, because the probe and sessions spawn it from their own dirs.
   const candidates = configured
-    ? [configured]
+    ? [resolve(configured)]
     : (env.PATH ?? '')
         .split(delimiter)
         .filter((dir) => isAbsolute(dir))
@@ -157,10 +158,15 @@ function dshBoots(bin: string): boolean {
         DSH_TELEMETRY_DISABLED: '1',
       },
     });
-    return run.stdout.includes('"type":"session"') && !run.stderr.includes('did not activate');
+    return !run.error && dshBootSucceeded(run);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** A session started and every entry of jbot's patch activated. */
+export function dshBootSucceeded(run: { stdout: string; stderr: string }): boolean {
+  return run.stdout.includes('"type":"session"') && !run.stderr.includes('did not activate');
 }
 
 const unusableByBin = new Map<string, string | undefined>();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, parse } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { resolveWithinWorkspace } from '../src/shared/workspace-path.ts';
@@ -22,6 +22,8 @@ describe('resolveWithinWorkspace', () => {
       assert.equal(resolveWithinWorkspace(root, '.'), root); // callers check the root first
       assert.equal(resolveWithinWorkspace(root, 'alias'), join(root, 'inside.txt'));
       assert.equal(resolveWithinWorkspace(root, sibling), undefined);
+      // A filesystem-root workspace already ends in a separator and keeps its children.
+      assert.equal(resolveWithinWorkspace(parse(root).root, outside), outside);
       assert.equal(resolveWithinWorkspace(root, 'inside.txt'), join(root, 'inside.txt'));
       assert.equal(resolveWithinWorkspace(root, 'evil'), undefined); // P0: symlink escape
       assert.equal(resolveWithinWorkspace(root, '/etc/hosts'), undefined); // absolute

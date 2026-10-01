@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   buildDshPatch,
   dshReasoningEffort,
+  dshBootSucceeded,
   parseDshTurn,
   resolveSdkEngine,
 } from '../src/shared/dsh.ts';
@@ -34,6 +35,16 @@ describe('dsh engine', () => {
       assert.equal(resolved.dshBin, undefined);
       assert.match(resolved.reason, reason);
     }
+  });
+
+  it('passes the boot probe only for a session with every entry activated', () => {
+    const session = '{"type":"session","sessionId":"s"}\n';
+    assert.equal(dshBootSucceeded({ stdout: session, stderr: '' }), true);
+    assert.equal(
+      dshBootSucceeded({ stdout: session, stderr: 'dsh: warning: 1 entry did not activate' }),
+      false,
+    );
+    assert.equal(dshBootSucceeded({ stdout: '', stderr: '' }), false);
   });
 
   it('maps efforts onto DeepSeek thinking modes only', () => {
