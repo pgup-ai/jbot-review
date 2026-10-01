@@ -60,7 +60,7 @@ describe('dsh engine', () => {
     );
   });
 
-  it('maps efforts onto DeepSeek thinking modes only', () => {
+  it('maps efforts onto DeepSeek thinking modes', () => {
     assert.equal(dshReasoningEffort({ reasoningEffort: 'low' }), 'high');
     assert.equal(dshReasoningEffort({ reasoningEffort: 'xhigh' }), 'max');
     assert.equal(dshReasoningEffort({ reasoningEffort: 'max' }), 'max');

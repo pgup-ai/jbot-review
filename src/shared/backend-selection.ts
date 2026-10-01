@@ -41,7 +41,7 @@ export interface ReviewBackendSelectionInput {
   dshEnabled?: boolean;
 }
 
-export interface DshEngineConfig {
+interface DshEngineConfig {
   providerID: string;
   modelID: string;
   apiKey: string;

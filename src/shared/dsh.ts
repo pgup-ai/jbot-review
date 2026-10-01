@@ -23,6 +23,7 @@ import {
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import {
+  DSH_PERSONA_SUFFIX,
   DSH_REVIEW_SYSTEM_PROMPT,
   DSH_TOOL_LESS_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
@@ -48,10 +49,10 @@ import {
 import { parseModelName } from '@symma/protocol';
 
 /**
- * DeepSeek Harness engine (`JBOT_SDK_ENGINE=dsh`, the default): each session is
- * one `dsh --profile headless --json` child per turn, resumed by session id for
- * repair and sweep turns. Opencode Zen/Go only. The CLI is not a dependency
- * (its install is ~0.5 GB); it is found via `JBOT_DSH_BIN` or PATH.
+ * DeepSeek Harness engine (`JBOT_SDK_ENGINE=dsh`, the default): one `dsh
+ * --profile headless --json` child per turn, resumed by session id for repair
+ * and sweep turns. Not an npm dependency: the image installs it, and it is
+ * found via `JBOT_DSH_BIN` or PATH.
  */
 
 const DSH_TELEMETRY_CAPABILITY = 'observable' as const;
@@ -65,8 +66,8 @@ const DSH_BASE_URLS: Record<string, string> = {
   'opencode-go': 'https://opencode.ai/zen/go/v1',
 };
 
-// Rows that would read repo/HOME customizations, reach the network beyond the
-// model route, spawn subagents, or spend extra model calls on session titles.
+// Rows that would write, read repo/HOME customizations, reach the network beyond
+// the model route, or spend extra model calls on session titles.
 const DSH_DISABLED_ROWS = [
   'tool-fs', // registers write/edit with read; bash under the read-only sandbox reads instead
   'tool-pwsh',
@@ -301,7 +302,7 @@ export function buildDshPatch(input: {
       id: 'system-prompt',
       config: {
         personaPrefix: input.systemPrompt,
-        personaSuffix: 'Your working directory is {{cwd}}.',
+        personaSuffix: DSH_PERSONA_SUFFIX,
       },
     },
     { id: 'sandbox-policy', config: { mode: 'read-only', workspaceRoot: input.workspace } },
@@ -414,7 +415,6 @@ interface DshRuntime {
   /** A booted DSH_HOME copied per session, so no two children share state. */
   template: string;
   workspace: string;
-  /** Per served provider; the aux role may sit on the other opencode gateway. */
   mainKey: string;
   /** The aux role's own resolved key, even on the main role's provider. */
   auxKey?: string;
@@ -553,7 +553,6 @@ function createDshSession(
   modelOptions?: Record<string, unknown>,
 ): DshSession {
   const { providerID, modelID } = parseModelName(model);
-  if (!dshServesModel(providerID, modelID)) throw new Error(`dsh engine does not serve ${model}`);
   const apiKey =
     model === runtime.mainModel ? runtime.mainKey : (runtime.auxKey ?? runtime.mainKey);
   const home = mkdtempSync(join(runtime.root, 'session-'));
