@@ -53,7 +53,7 @@ import { parseModelName } from '@symma/protocol';
  * (its install is ~0.5 GB); it is found via `JBOT_DSH_BIN` or PATH.
  */
 
-export const DSH_TELEMETRY_CAPABILITY = 'observable' as const;
+const DSH_TELEMETRY_CAPABILITY = 'observable' as const;
 const DSH_PROMPT_TIMEOUT_MS = 15 * 60_000;
 
 /** What the patch tells dsh and what jbot budgets prompts against: one source for both. */
@@ -88,8 +88,7 @@ const DSH_TOOL_ROWS = ['tool-bash', 'tool-fs-search', 'tool-jobs'];
 // In-process children share the sandbox, tools and scrubbed env; off unless JBOT_DSH_SUBAGENTS=1.
 const DSH_SUBAGENT_ROWS = ['tool-subagent', 'tool-subagent-fork'];
 
-/** `JBOT_DSH_BIN`, else `dsh` on PATH; undefined when neither is executable. */
-export function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
+function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
   const configured = env.JBOT_DSH_BIN?.trim();
   const candidates = configured
     ? [configured]
@@ -113,7 +112,7 @@ export function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
  * Landlock and Docker's default seccomp stops bwrap; Ubuntu runner kernels
  * enforce Landlock. Seatbelt is always present on macOS.
  */
-export function dshSandboxUsable(bin: string): boolean {
+function dshSandboxUsable(bin: string): boolean {
   if (process.platform !== 'linux') return true;
   const succeeds = (command: string, args: string[]) =>
     spawnSync(command, args, { stdio: 'ignore', timeout: 5_000 }).status === 0;
@@ -237,6 +236,9 @@ export function buildDshPatch(input: {
       },
     },
     { id: 'sandbox-policy', config: { mode: 'read-only', workspaceRoot: input.workspace } },
+    // Sessions work in the checkout while dsh itself launches from a jbot-owned
+    // dir: it applies the launch dir's `.env` and refuses to start on bootstrap names.
+    { id: 'fs-sandbox', config: { cwd: input.workspace } },
     { id: 'approval', config: { policy: 'never' } },
     {
       id: 'permission',
@@ -257,7 +259,7 @@ export function buildDshPatch(input: {
   return JSON.stringify(rows, null, 2);
 }
 
-export interface DshTurn {
+interface DshTurn {
   text: string;
   sessionId?: string;
   error?: string;
@@ -512,7 +514,7 @@ async function promptDshSession(
     // Labelled by the session, so the runner's grace abort reaches repair turns too.
     ({ stdout } = await runtime.scope.run(session.label, () =>
       runCliProcess(runtime.bin, args, {
-        cwd: runtime.workspace,
+        cwd: session.home,
         env: childEnv(session.apiKey, session.home),
         input: prompt,
         timeoutMs,

@@ -50,6 +50,7 @@ describe('dsh engine', () => {
       workspaceRoot: '/repo',
     });
     assert.deepEqual(byId.get('approval')?.config, { policy: 'never' });
+    assert.deepEqual(byId.get('fs-sandbox')?.config, { cwd: '/repo' });
     for (const id of ['tool-fs', 'tool-web', 'agent-instructions', 'skill-filesystem', 'tool-bash'])
       assert.equal(byId.get(id)?.disabled, true, id);
   });

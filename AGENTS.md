@@ -138,7 +138,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    dsh sessions get the equivalent from their `--patch` overlay: a read-only
    OS sandbox (Landlock, bwrap or Seatbelt; no usable sandbox routes to
    opencode), approvals never, the write/web/skill/subagent/instruction-file
-   rows disabled, a per-session `DSH_HOME`, and an env holding only the key.
+   rows disabled, a per-session `DSH_HOME`, an env holding only the key (dsh
+   keeps it out of tool env), and a launch dir outside the checkout so the
+   repo's `.env` never loads.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
