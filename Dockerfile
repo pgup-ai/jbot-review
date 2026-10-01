@@ -11,16 +11,22 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
+# opencode's npm package installs both the glibc and musl binaries (~190MB each);
+# this Debian image only runs the glibc one.
 RUN npm install -g @opencode/cli@2.0.16 command-code@1.69.0 \
   && npm cache clean --force \
+  && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules/@opencode/cli-linux-*-musl \
   && opencode --version \
   && command-code --no-auto-update --version
 
-# DeepSeek Harness (~515MB), the default engine for opencode/opencode-go models, in
-# both variants. Its shell runs under Landlock or bwrap; on a host with neither,
-# jbot logs why and serves those models on opencode instead.
+# DeepSeek Harness, the default engine for opencode/opencode-go models, in both
+# variants. Its shell runs under Landlock or bwrap; on a host with neither, jbot
+# logs why and serves those models on opencode instead. The headless profile never
+# loads the office preview, web UI, speech or image packages (~210MB) pruned here.
 RUN npm install -g @deepseek-ai/dsh@0.2.0-rc.2 \
   && npm cache clean --force \
+  && cd /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules \
+  && rm -rf @deepseek-ai/libreoffice-kit* @deepseek-ai/dsh-client-ui-* @deepseek-ai/dsh-web-frontend sherpa-onnx* @img \
   && dsh --version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
