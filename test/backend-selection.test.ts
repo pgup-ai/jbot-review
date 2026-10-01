@@ -845,123 +845,6 @@ describe('selectReviewBackends', () => {
   });
 });
 
-describe('selectReviewBackends dsh engine routing', () => {
-  const noCliKeys = {
-    devinApiKey: '',
-    commandCodeAccessKey: '',
-    cursorApiKey: '',
-    codexAuth: '',
-    clineAuth: '',
-    grokAuth: '',
-    kiloAuth: '',
-    dimAuth: '',
-  };
-  const go = {
-    providerID: 'opencode-go',
-    modelID: 'deepseek-v4.1-flash',
-    apiKey: 'go-key',
-    auxProviderID: 'opencode-go',
-    auxModelID: 'deepseek-v4.1-flash',
-    auxApiKey: '',
-  };
-  const dsh = { providerID: 'opencode-go', modelID: 'deepseek-v4.1-flash', apiKey: 'go-key' };
-  const dshCatalog = {
-    'opencode-go': { 'deepseek-v4.1-flash': { contextTokens: 1_000_000, outputTokens: 32_768 } },
-  };
-
-  it('routes both SDK roles to dsh for an opencode gateway', () => {
-    assert.deepEqual(selectReviewBackends({ ...go, dshCatalog }), {
-      mainSdkEngine: 'dsh',
-      auxSdkEngine: 'dsh',
-      needsOpencode: false,
-      ...noCliKeys,
-      opencodeProviderID: 'opencode-go',
-      opencodeModelID: 'deepseek-v4.1-flash',
-      opencodeApiKey: '',
-      dsh,
-    });
-  });
-
-  it('leaves the selection on opencode without a dsh catalog', () => {
-    assert.deepEqual(selectReviewBackends(go), {
-      needsOpencode: true,
-      ...noCliKeys,
-      opencodeProviderID: 'opencode-go',
-      opencodeModelID: 'deepseek-v4.1-flash',
-      opencodeApiKey: 'go-key',
-    });
-  });
-
-  it('keeps an aux model dsh cannot serve on opencode behind a dsh main', () => {
-    assert.deepEqual(
-      selectReviewBackends({
-        ...go,
-        auxProviderID: 'google',
-        auxModelID: 'gemini-2.5-flash',
-        auxApiKey: 'aux-key',
-        dshCatalog,
-      }),
-      {
-        mainSdkEngine: 'dsh',
-        needsOpencode: true,
-        ...noCliKeys,
-        opencodeProviderID: 'google',
-        opencodeModelID: 'gemini-2.5-flash',
-        opencodeApiKey: 'aux-key',
-        dsh,
-      },
-    );
-  });
-
-  it('routes a dsh aux behind a CLI main and skips opencode entirely', () => {
-    assert.deepEqual(
-      selectReviewBackends({
-        providerID: 'kilo',
-        modelID: 'kilo-auto/free',
-        apiKey: 'kilo-auth',
-        auxProviderID: 'opencode-go',
-        auxModelID: 'deepseek-v4.1-flash',
-        auxApiKey: 'go-key',
-        dshCatalog,
-      }),
-      {
-        mainCliBackend: 'kilo',
-        auxSdkEngine: 'dsh',
-        needsOpencode: false,
-        ...noCliKeys,
-        kiloAuth: 'kilo-auth',
-        opencodeProviderID: 'opencode-go',
-        opencodeModelID: 'deepseek-v4.1-flash',
-        opencodeApiKey: 'go-key',
-        dsh,
-      },
-    );
-  });
-
-  it('keeps models outside the dsh catalog, and -free ones, on opencode', () => {
-    for (const [providerID, modelID] of [
-      ['google', 'deepseek-v4.1-flash'],
-      ['deepseek', 'deepseek-v4.1-flash'],
-      ['opencode', 'claude-opus-5-5'],
-      ['opencode-go', 'glm-5.3'],
-      ['opencode', 'deepseek-v4-flash-free'],
-    ]) {
-      const selection = selectReviewBackends({
-        providerID,
-        modelID,
-        apiKey: 'main-key',
-        auxProviderID: providerID,
-        auxModelID: modelID,
-        auxApiKey: '',
-        dshCatalog,
-      });
-      assert.equal(selection.mainSdkEngine, undefined);
-      assert.equal(selection.needsOpencode, true);
-      assert.equal(selection.opencodeApiKey, 'main-key');
-    }
-  });
-});
-
 describe('swallowedProviderWarnings', () => {
   it('flags a CLI-backend id that a pinned provider turned into a model id', () => {
     // `provider: opencode` + `model: devin/glm-5.2` resolves here, then fails at
@@ -1009,11 +892,16 @@ describe('swallowedProviderWarnings', () => {
 
 describe('assertImageSupportsModels', () => {
   it('rejects every omitted local runtime in a mixed slim pool before selection', () => {
-    const supported = ['opencode/muse', 'opencode-go/muse', 'anthropic/claude', 'poolside/model'];
+    const supported = [
+      'opencode/muse',
+      'opencode-go/muse',
+      'anthropic/claude',
+      'poolside/model',
+      'commandcode/model',
+      'devin/model',
+    ];
     assert.doesNotThrow(() => assertImageSupportsModels(supported, { JBOT_IMAGE_VARIANT: 'slim' }));
     for (const provider of [
-      'commandcode',
-      'devin',
       'cline',
       'cline-pass',
       'codex',

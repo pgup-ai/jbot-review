@@ -14,9 +14,8 @@ on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts
 ## Image variants
 
 The default `ghcr.io/pgup-ai/jbot-review:latest` includes every supported local
-provider CLI. `:latest-slim` includes only **OpenCode and DeepSeek Harness** (pruned to what
-its headless review profile loads), plus the same reviewer code and SDK
-dependencies. Existing workflows continue
+provider CLI. `:latest-slim` includes only **OpenCode, CommandCode and Devin**,
+plus the same reviewer code and SDK dependencies. Existing workflows continue
 using the full image. Review prompts, model selection and finding policy are
 identical for supported routes.
 
@@ -468,7 +467,7 @@ no findings. These runs retain findings from completed passes but do not receive
 an automatic approval or review-done reaction. CommandCode cancellation stops its
 process tree and waits for output pipes to close before removing its temporary home.
 Queued passes cancelled before execution never start a provider session.
-DeepSeek Harness and tool-capable OpenCode verifiers can read and search repository evidence;
+Tool-capable OpenCode verifiers can read and search repository evidence;
 CommandCode verifiers can investigate when `JBOT_COMMANDCODE_TOOLS=true`.
 Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
@@ -519,26 +518,12 @@ authenticated locally. The generator uses the npm versions pinned in the
 Docker image; Cursor comes from its vendor-installed binary, while Devin has no
 enumerable catalog command and is documented as that explicit boundary.
 
-**SDK engines.** `opencode`/`opencode-go` models run on
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) by default
-(`sdk-engine: dsh`; `auto` means the same) when they are in its bundled pi-ai
-catalog, which picks each model's API (chat completions, Responses or
-Anthropic Messages) and limits; `-free` models stay on opencode, since Zen
-serves its free tier only to the opencode client. Each session is a `dsh --profile headless --json` child
-with a per-session `DSH_HOME`, its read-only OS sandbox, approvals off, and its
-file-write, web, skill, subagent, instruction-file and DeepSeek log/telemetry
-plugins disabled. The published images include `dsh`; elsewhere it is found via
-`JBOT_DSH_BIN` or `PATH`. On Linux its shell needs a Landlock-enforcing kernel
-or a working `bwrap` (Docker Desktop's kernel has neither); without a binary or
-a usable sandbox, those models run on the opencode server and the log says why.
-Every other non-CLI provider except Poolside runs on the opencode server, and
-`sdk-engine: opencode` pins it for all of them. Sessions read the repository
-with `glob`, `grep` and read-only shell commands; J-Bot supplies every assigned
-diff hunk first, and verification can recover omitted hunks from a temporary
-canonical diff. The sandbox confines writes, not reads: disposable checkouts do
-not isolate host files or runtime credentials. DeepSeek Harness manages provider
-prompt caching itself, so `JBOT_PROMPT_CACHE` applies to opencode-served
-sessions only.
+**SDK engines.** Non-CLI providers other than Poolside run on the opencode
+server. The in-process pi SDK engine was removed: `sdk-engine: auto` (or
+`JBOT_SDK_ENGINE=auto`) now logs that and uses opencode. The provider catalog
+supplies each model's context window. Repository investigation has no
+tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
+existing session deadlines and per-command process limits still apply.
 
 **CLI and ACP routing.** Without `JBOT_ACP_GATEWAY_URL`, `devin` runs through
 its headless CLI from an isolated temporary workspace, with repository-controlled
@@ -860,7 +845,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs opencode/opencode-go sessions (not `-free` models) on DeepSeek Harness when its sandbox is usable; `opencode` pins opencode                                                                                                                       |
+| `sdk-engine`                 | No       | `opencode`            | Only `opencode` remains; `auto` (the removed pi engine) logs and uses opencode                                                                                                                                                                               |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
@@ -1222,7 +1207,7 @@ separate sessions. Aborted durations are not completed latency samples, and para
 session durations do not sum to wall time.
 
 `auxiliaryRuns[].promptUsage` pairs each reported call's submitted `promptBytes`
-with input and cache read/write tokens. OpenCode, DeepSeek Harness, and CommandCode record the
+with input and cache read/write tokens. OpenCode and CommandCode record the
 UTF-8 size of the text submitted by J-Bot, including its backend directives;
 other backends leave that size absent. Missing provider usage leaves token counters
 absent without losing the prompt size. Failed attempts also retain their payload
@@ -1500,7 +1485,7 @@ OpenCode can request a wrap-up near a session's own deadline
 when the reserved fifth of its budget leaves at least 45 seconds for the response.
 OpenCode retains native read/search tools for model compatibility and denies shell
 access during wrap-up. Its prompt requests a final answer without further
-investigation. DeepSeek Harness sessions have no wrap-up and end at their deadline.
+investigation.
 The remaining deadline still bounds the turn. Repair and formatting remain tool-less.
 Completed auxiliary findings remain eligible for verification. A partial main
 page fails the run before posting; it is never cached as a completed review.
@@ -1517,7 +1502,7 @@ run logs and coverage telemetry. A skipped addressed-thread check leaves prior
 threads unresolved.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
-OpenCode, DeepSeek Harness, or CommandCode main review session, reusing its investigation.
+OpenCode or CommandCode main review session, reusing its investigation.
 Verification still uses a fresh session. An enabled sweep is independent of
 auxiliary availability and fan-out; `enable-guideline-pass: false` disables it. This experiment defaults off; other backends retain the
 auxiliary guideline check, and Arena comparisons keep their existing policy.

@@ -12,18 +12,9 @@ if output=$(timeout 30s env -u GITHUB_APP_ID MODEL=opencode/smoke PROVIDER=openc
 fi
 printf '%s\n' "$output" | grep -q 'Error: Missing required env var: GITHUB_APP_ID'
 opencode --version
-dsh --version
-# Pruning must not break the headless profile: with no key it starts a session,
-# then stops at the missing credential before any network call.
-dsh_home=$(mktemp -d)
-(cd "$dsh_home" && echo ping | HOME="$dsh_home" DSH_HOME="$dsh_home/dsh" timeout 60s dsh --profile headless --json - 2>/dev/null || true) |
-  grep -q '"type":"session"'
-rm -rf "$dsh_home"
-if [ "$variant" != slim ]; then
-  command-code --no-auto-update --version
-  env PATH=/usr/local/bin:/usr/bin:/bin devin --version
-fi
-for cli in command-code devin cline grok kilo codex-acp qodercli dim cursor-agent; do
+command-code --no-auto-update --version
+env PATH=/usr/local/bin:/usr/bin:/bin devin --version
+for cli in cline grok kilo codex-acp qodercli dim cursor-agent; do
   if [ "$variant" = slim ]; then
     if command -v "$cli" >/dev/null 2>&1; then
       echo "Unexpected CLI in slim image: $cli" >&2

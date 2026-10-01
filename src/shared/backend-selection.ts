@@ -15,7 +15,6 @@ import {
 } from '@symma/protocol';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from '@symma/protocol';
-import { dshServesModel, type DshCatalog } from './dsh.ts';
 import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
@@ -37,14 +36,6 @@ export interface ReviewBackendSelectionInput {
   auxProviderID: string;
   auxModelID: string;
   auxApiKey: string;
-  /** dsh's model catalog when the engine is usable (see resolveSdkEngine). */
-  dshCatalog?: DshCatalog;
-}
-
-interface DshEngineConfig {
-  providerID: string;
-  modelID: string;
-  apiKey: string;
 }
 
 export function backendRequiresCompleteEmbeddedDiff(
@@ -74,8 +65,8 @@ export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;
   /** Present only when the role bypasses the OpenCode server. */
-  mainSdkEngine?: 'dsh' | 'poolside';
-  auxSdkEngine?: 'dsh' | 'poolside';
+  mainSdkEngine?: 'poolside';
+  auxSdkEngine?: 'poolside';
   needsOpencode: boolean;
   devinApiKey: string;
   commandCodeAccessKey: string;
@@ -89,8 +80,6 @@ export interface ReviewBackendSelection {
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
-  /** dsh engine init config (main role wins), present only when needsDsh. */
-  dsh?: DshEngineConfig;
 }
 
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
@@ -98,20 +87,9 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
   const mainPoolside = !mainCliBackend && isPoolsideProvider(input.providerID);
   const auxPoolside = !auxCliBackend && isPoolsideProvider(input.auxProviderID);
-  const mainDsh =
-    !mainCliBackend &&
-    !mainPoolside &&
-    dshServesModel(input.dshCatalog, input.providerID, input.modelID);
-  const auxDsh =
-    !auxCliBackend &&
-    !auxPoolside &&
-    dshServesModel(input.dshCatalog, input.auxProviderID, input.auxModelID);
-  const mainOpencode = !mainCliBackend && !mainDsh && !mainPoolside;
-  const auxOpencode = !auxCliBackend && !auxDsh && !auxPoolside;
+  const mainOpencode = !mainCliBackend && !mainPoolside;
+  const auxOpencode = !auxCliBackend && !auxPoolside;
   const needsOpencode = mainOpencode || auxOpencode;
-  const needsDsh = mainDsh || auxDsh;
-  const effectiveAuxApiKey =
-    input.auxApiKey || (input.auxProviderID === input.providerID ? input.apiKey : '');
   const opencodeApiKey = mainOpencode
     ? input.apiKey
     : input.auxApiKey ||
@@ -126,16 +104,8 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   return {
     ...(mainCliBackend ? { mainCliBackend } : {}),
     ...(auxCliBackend ? { auxCliBackend } : {}),
-    ...(mainPoolside
-      ? { mainSdkEngine: 'poolside' as const }
-      : mainDsh
-        ? { mainSdkEngine: 'dsh' as const }
-        : {}),
-    ...(auxPoolside
-      ? { auxSdkEngine: 'poolside' as const }
-      : auxDsh
-        ? { auxSdkEngine: 'dsh' as const }
-        : {}),
+    ...(mainPoolside ? { mainSdkEngine: 'poolside' as const } : {}),
+    ...(auxPoolside ? { auxSdkEngine: 'poolside' as const } : {}),
     needsOpencode,
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
     commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),
@@ -149,19 +119,10 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
       ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
       : {}),
     // The opencode server boots with the config of the role it serves: main
-    // when main is on opencode, else aux (a CLI or dsh main defers to aux).
+    // when main is on opencode, else aux (a CLI or Poolside main defers to aux).
     opencodeProviderID: mainOpencode ? input.providerID : input.auxProviderID,
     opencodeModelID: mainOpencode ? input.modelID : input.auxModelID,
     opencodeApiKey,
-    ...(needsDsh
-      ? {
-          dsh: {
-            providerID: mainDsh ? input.providerID : input.auxProviderID,
-            modelID: mainDsh ? input.modelID : input.auxModelID,
-            apiKey: mainDsh ? input.apiKey : effectiveAuxApiKey,
-          },
-        }
-      : {}),
   };
 }
 
@@ -215,7 +176,7 @@ export function assertImageSupportsModels(pool: string[], env: NodeJS.ProcessEnv
   const missing = new Set<string>();
   for (const model of pool) {
     const backend = cliBackendForProvider(parseModelName(model).providerID);
-    if (!backend) continue;
+    if (!backend || backend === COMMANDCODE_PROVIDER_ID || backend === DEVIN_PROVIDER_ID) continue;
     if (env.JBOT_ACP_GATEWAY_URL?.trim() && gatewayRoutedModels([model])) continue;
     missing.add(backend);
   }

@@ -48,7 +48,6 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { dshServesModel, readDshCatalog, resolveSdkEngine } from '../shared/dsh.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -536,9 +535,6 @@ async function review(
     return;
   }
 
-  const engineEnv = comparison
-    ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine }
-    : process.env;
   // Before credential resolution on purpose: a preview must cost nothing and
   // need no key.
   if (preview) {
@@ -566,24 +562,15 @@ async function review(
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     const { providerID, modelID } = parseModelName(model);
-    // Budget only: read the catalog, skipping the sandbox and boot probes, which spawn dsh.
-    const { catalog } = resolveSdkEngine(engineEnv, undefined, (bin) => {
-      const catalog = readDshCatalog(bin);
-      return catalog ? { catalog } : { reason: "dsh's model catalog is unreadable" };
-    });
-    const onDsh = dshServesModel(catalog, providerID, modelID);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',
       shards,
-      budget: reviewPromptBudget(
-        cliBackendForProvider(providerID) ?? (onDsh ? 'dsh' : 'opencode'),
-        onDsh ? catalog?.[providerID]?.[modelID] : undefined,
-      ),
+      budget: reviewPromptBudget(cliBackendForProvider(providerID) ?? 'opencode'),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });
     log(
-      'Approximate preview: uses full guidelines and default prompt options. Runtime guideline selection, prompt options, PR metadata, caller evidence and the dsh sandbox/boot checks (skipped here) can change page counts and assignments.',
+      'Approximate preview: uses full guidelines and default prompt options. Runtime guideline selection, prompt options, PR metadata and caller evidence can change page counts and assignments.',
     );
     console.log(
       `\n${renderReviewPreview({
@@ -614,8 +601,6 @@ async function review(
     return;
   }
 
-  const sdkEngine = resolveSdkEngine(engineEnv);
-
   // The whole pool, not just the picked pair: a missing key must fail the next
   // run rather than only the runs that happen to draw that provider. Still
   // below the no-review exits, so a clean tree needs no key at all.
@@ -642,8 +627,6 @@ async function review(
   // backends bring their own binary.
   const { providerID, modelID } = parseModelName(model);
   const aux = parseModelName(auxModel || model);
-  // Preflight-only resolution (the runner re-resolves for its own routing):
-  // roles served by the dsh engine need no opencode binary.
   const selection = selectReviewBackends({
     providerID,
     modelID,
@@ -651,7 +634,6 @@ async function review(
     auxProviderID: aux.providerID,
     auxModelID: aux.modelID,
     auxApiKey: auxApiKey ?? '',
-    dshCatalog: sdkEngine.catalog,
   });
   const configuredModelOptions = comparison
     ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider, modelID))
