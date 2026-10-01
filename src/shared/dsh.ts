@@ -68,8 +68,6 @@ const DSH_DISABLED_ROWS = [
   'skill-filesystem',
   'tool-skill',
   'tool-web',
-  'tool-subagent',
-  'tool-subagent-fork',
   'tool-workflow',
   'session-title-llm',
   'session-log-deepseek',
@@ -77,6 +75,8 @@ const DSH_DISABLED_ROWS = [
   'plugin-package-inventory-deepseek',
 ];
 const DSH_TOOL_ROWS = ['tool-bash', 'tool-fs-search', 'tool-jobs'];
+// In-process children share the sandbox, tools and scrubbed env; off unless JBOT_DSH_SUBAGENTS=1.
+const DSH_SUBAGENT_ROWS = ['tool-subagent', 'tool-subagent-fork'];
 
 /** `JBOT_DSH_BIN`, else `dsh` on PATH; undefined when neither is executable. */
 export function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
@@ -121,6 +121,7 @@ export function buildDshPatch(input: {
   routingSession: string;
   reasoningEffort?: string;
   toolLess: boolean;
+  subagents?: boolean;
 }): string {
   const deepseek = input.modelID.startsWith('deepseek');
   const limits = dshModelLimits(input.modelID);
@@ -177,7 +178,11 @@ export function buildDshPatch(input: {
         defaultPreset: 'read-only',
       },
     },
-    ...[...DSH_DISABLED_ROWS, ...(input.toolLess ? DSH_TOOL_ROWS : [])].map((id) => ({
+    ...[
+      ...DSH_DISABLED_ROWS,
+      ...(input.toolLess ? DSH_TOOL_ROWS : []),
+      ...(input.toolLess || !input.subagents ? DSH_SUBAGENT_ROWS : []),
+    ].map((id) => ({
       id,
       disabled: true,
     })),
@@ -243,6 +248,13 @@ export function parseDshEvents(stdout: string): DshTurn {
   }
   if (turn.steps > 0) turn.usage = usage;
   return turn;
+}
+
+/** `: bash×12, grep×3` — which tools ran is not in exploration telemetry. */
+function toolMix(tools: DshTurn['tools']): string {
+  const counts = new Map<string, number>();
+  for (const { name } of tools) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return counts.size ? `: ${[...counts].map(([name, n]) => `${name}×${n}`).join(', ')}` : '';
 }
 
 interface DshRuntime {
@@ -384,6 +396,7 @@ function createDshSession(
           (model === runtime.mainModel ? runtime.modelOptions : runtime.auxModelOptions),
       ),
       toolLess,
+      subagents: process.env.JBOT_DSH_SUBAGENTS === '1',
     }),
   );
   return { home, patch, model, label };
@@ -463,7 +476,7 @@ async function promptDshSession(
           output: turn.usage.output,
           cache: { read: turn.usage.cacheRead, write: turn.usage.cacheWrite },
         },
-      })} (${turn.steps} model calls, ${turn.tools.length} tool calls)`,
+      })} (${turn.steps} model calls, ${turn.tools.length} tool calls${toolMix(turn.tools)})`,
     );
   }
   onTokenUsage?.({ ...turn.usage, promptBytes } as PromptTokenUsage, session.model, label);
