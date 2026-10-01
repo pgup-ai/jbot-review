@@ -1,7 +1,8 @@
 # node 24 matches cursor-agent's bundled Node major, so it shares the system node (see cursor stage).
+# runtime is what slim ships: opencode and DeepSeek Harness only.
 FROM node:24-slim AS runtime
 
-# git: review shells out to it. curl: used by the provider installers below.
+# git: review shells out to it. curl: the proxy egress check and the full-tools installers.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git \
   && rm -rf /var/lib/apt/lists/*
@@ -13,21 +14,34 @@ RUN npm config set fetch-retries 5 \
 
 # opencode's npm package installs both the glibc and musl binaries (~190MB each);
 # this Debian image only runs the glibc one.
-RUN npm install -g @opencode/cli@2.0.16 command-code@1.69.0 \
+RUN npm install -g @opencode/cli@2.0.16 \
   && npm cache clean --force \
   && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules/@opencode/cli-linux-*-musl \
-  && opencode --version \
-  && command-code --no-auto-update --version
+  && opencode --version
 
-# DeepSeek Harness, the default engine for opencode/opencode-go models, in both
-# variants. Its shell runs under Landlock or bwrap; on a host with neither, jbot
-# logs why and serves those models on opencode instead. The headless profile never
-# loads the office preview, web UI, speech or image packages (~210MB) pruned here.
+# DeepSeek Harness, the default engine for opencode/opencode-go models. Its shell
+# runs under Landlock or bwrap; on a host with neither, jbot logs why and serves
+# those models on opencode. The pruned packages (~390MB) serve the desktop/web UI,
+# office preview, speech, images, telemetry, MCP/ACP, the PTY terminal and other
+# providers' SDKs, none of which the headless review profile loads; @vscode holds
+# the ripgrep behind its grep tool and stays.
 RUN npm install -g @deepseek-ai/dsh@0.2.0-rc.2 \
   && npm cache clean --force \
   && cd /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules \
-  && rm -rf @deepseek-ai/libreoffice-kit* @deepseek-ai/dsh-client-ui-* @deepseek-ai/dsh-web-frontend sherpa-onnx* @img \
+  && rm -rf @deepseek-ai/libreoffice-kit* @deepseek-ai/dsh-client-ui-* @deepseek-ai/dsh-web-frontend \
+    sherpa-onnx* @img sharp @opentelemetry protobufjs node-pty @xterm @anthropic-ai @google @smithy \
+    @aws-sdk @mixmark-io @modelcontextprotocol @agentclientprotocol fontkit @octokit \
   && dsh --version
+
+WORKDIR /app
+EXPOSE 3000
+ENTRYPOINT ["node", "/app/dist/app/server.js"]
+
+FROM runtime AS full-tools
+
+RUN npm install -g command-code@1.69.0 \
+  && npm cache clean --force \
+  && command-code --no-auto-update --version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 ARG DEVIN_CLI_VERSION=3000.10.21
@@ -47,12 +61,6 @@ ENV JBOT_IMAGE_VARIANT=full
 # Depot's env-file may replace PATH; keep Devin on the default executable path.
 RUN ln -s /root/.local/bin/devin /usr/local/bin/devin \
   && env PATH=/usr/local/bin:/usr/bin:/bin devin --version >/dev/null
-
-WORKDIR /app
-EXPOSE 3000
-ENTRYPOINT ["node", "/app/dist/app/server.js"]
-
-FROM runtime AS full-tools
 
 RUN npm install -g cline@3.0.65 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
   && npm cache clean --force \

@@ -214,7 +214,7 @@ export function assertImageSupportsModels(pool: string[], env: NodeJS.ProcessEnv
   const missing = new Set<string>();
   for (const model of pool) {
     const backend = cliBackendForProvider(parseModelName(model).providerID);
-    if (!backend || backend === COMMANDCODE_PROVIDER_ID || backend === DEVIN_PROVIDER_ID) continue;
+    if (!backend) continue;
     if (env.JBOT_ACP_GATEWAY_URL?.trim() && gatewayRoutedModels([model])) continue;
     missing.add(backend);
   }

@@ -1000,16 +1000,11 @@ describe('swallowedProviderWarnings', () => {
 
 describe('assertImageSupportsModels', () => {
   it('rejects every omitted local runtime in a mixed slim pool before selection', () => {
-    const supported = [
-      'opencode/muse',
-      'opencode-go/muse',
-      'anthropic/claude',
-      'poolside/model',
-      'commandcode/model',
-      'devin/model',
-    ];
+    const supported = ['opencode/muse', 'opencode-go/muse', 'anthropic/claude', 'poolside/model'];
     assert.doesNotThrow(() => assertImageSupportsModels(supported, { JBOT_IMAGE_VARIANT: 'slim' }));
     for (const provider of [
+      'commandcode',
+      'devin',
       'cline',
       'cline-pass',
       'codex',

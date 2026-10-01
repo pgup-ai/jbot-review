@@ -14,8 +14,9 @@ on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts
 ## Image variants
 
 The default `ghcr.io/pgup-ai/jbot-review:latest` includes every supported local
-provider CLI. `:latest-slim` includes only **OpenCode, CommandCode and Devin**,
-plus the same reviewer code and SDK dependencies. Existing workflows continue
+provider CLI. `:latest-slim` includes only **OpenCode and DeepSeek Harness** (pruned to what
+its headless review profile loads), plus the same reviewer code and SDK
+dependencies. Existing workflows continue
 using the full image. Review prompts, model selection and finding policy are
 identical for supported routes.
 
