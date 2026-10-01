@@ -12,9 +12,12 @@ if output=$(timeout 30s env -u GITHUB_APP_ID MODEL=opencode/smoke PROVIDER=openc
 fi
 printf '%s\n' "$output" | grep -q 'Error: Missing required env var: GITHUB_APP_ID'
 opencode --version
-command-code --no-auto-update --version
-env PATH=/usr/local/bin:/usr/bin:/bin devin --version
-for cli in cline grok kilo codex-acp qodercli dim cursor-agent; do
+dsh --version
+if [ "$variant" != slim ]; then
+  command-code --no-auto-update --version
+  env PATH=/usr/local/bin:/usr/bin:/bin devin --version
+fi
+for cli in command-code devin cline grok kilo codex-acp qodercli dim cursor-agent; do
   if [ "$variant" = slim ]; then
     if command -v "$cli" >/dev/null 2>&1; then
       echo "Unexpected CLI in slim image: $cli" >&2
