@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -13,6 +13,7 @@ import {
   dshSandboxUsable,
   dshBootSucceeded,
   parseDshTurn,
+  readDshCatalog,
   resolveSdkEngine,
 } from '../src/shared/dsh.ts';
 
@@ -67,6 +68,63 @@ describe('dsh engine', () => {
     assert.equal(dshSandboxUsable('/bin/dsh', 'darwin'), true);
     for (const platform of ['win32', 'freebsd'] as const)
       assert.equal(dshSandboxUsable('/bin/dsh', platform), false);
+  });
+
+  it('probes bwrap, then the Landlock runner installed beside dsh, on Linux', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-install-')));
+    const bin = join(root, 'bin', 'dsh');
+    const landlockRun = join(
+      root,
+      'node_modules',
+      '@deepseek-ai',
+      `node-addon-system-linux-${process.arch}`,
+      'bin',
+      'landlock-run',
+    );
+    const only = (ok: string) => (command: string) => command === ok;
+    try {
+      mkdirSync(dirname(bin), { recursive: true });
+      writeFileSync(bin, '');
+      assert.equal(dshSandboxUsable(bin, 'linux', only('bwrap')), true);
+      assert.equal(dshSandboxUsable(bin, 'linux', only(landlockRun)), false); // not installed
+      mkdirSync(dirname(landlockRun), { recursive: true });
+      writeFileSync(landlockRun, '');
+      assert.equal(dshSandboxUsable(bin, 'linux', only(landlockRun)), true);
+      assert.equal(dshSandboxUsable(bin, 'linux', only('nothing')), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reads gateway model limits from the pi-ai catalog installed beside dsh', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-install-')));
+    const bin = join(root, 'bin', 'dsh');
+    const catalog = join(
+      root,
+      'node_modules',
+      '@earendil-works',
+      'pi-ai',
+      'dist',
+      'models.generated.js',
+    );
+    try {
+      mkdirSync(dirname(bin), { recursive: true });
+      writeFileSync(bin, '');
+      assert.equal(readDshCatalog(bin), undefined); // no catalog installed
+      mkdirSync(dirname(catalog), { recursive: true });
+      writeFileSync(
+        catalog,
+        "export const MODELS = { 'opencode-go': { m: { contextWindow: 10, maxTokens: 2 } }, other: {} };",
+      );
+      assert.deepEqual(readDshCatalog(bin), {
+        opencode: {},
+        'opencode-go': { m: { contextTokens: 10, outputTokens: 2 } },
+      });
+      writeFileSync(catalog, "throw new Error('broken');");
+      assert.equal(readDshCatalog(bin), undefined);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('passes pi-ai thinking levels through and leaves the rest to the provider', () => {

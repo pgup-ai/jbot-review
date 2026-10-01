@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -116,10 +117,13 @@ function resolveDshBin(env: NodeJS.ProcessEnv): string | undefined {
  * enforce Landlock. Seatbelt is always present on macOS; Windows' ACL runner
  * leaves reads unconfined and is not a route jbot takes.
  */
-export function dshSandboxUsable(bin: string, platform = process.platform): boolean {
+export function dshSandboxUsable(
+  bin: string,
+  platform = process.platform,
+  succeeds = (command: string, args: string[]) =>
+    spawnSync(command, args, { stdio: 'ignore', timeout: 5_000 }).status === 0,
+): boolean {
   if (platform !== 'linux') return platform === 'darwin';
-  const succeeds = (command: string, args: string[]) =>
-    spawnSync(command, args, { stdio: 'ignore', timeout: 5_000 }).status === 0;
   if (succeeds('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', 'true'])) {
     return true;
   }
@@ -234,7 +238,16 @@ type DshProbe = { catalog: DshCatalog } | { reason: string };
 const probeByBin = new Map<string, DshProbe>();
 
 function probeDsh(bin: string): DshProbe {
-  let probe = probeByBin.get(bin);
+  // Keyed by the executable's identity, so a dsh upgraded in place under a
+  // long-running app is probed again rather than trusted from before.
+  let key: string;
+  try {
+    const { ino, mtimeMs } = statSync(bin);
+    key = `${bin}:${ino}:${mtimeMs}`;
+  } catch {
+    return { reason: 'dsh binary disappeared' };
+  }
+  let probe = probeByBin.get(key);
   if (!probe) {
     // The engine choice never fails a run: any probe error is a fallback reason.
     try {
@@ -254,7 +267,7 @@ function probeDsh(bin: string): DshProbe {
         reason: `dsh probe failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    probeByBin.set(bin, probe);
+    probeByBin.set(key, probe);
   }
   return probe;
 }
