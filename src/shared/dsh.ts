@@ -870,13 +870,34 @@ export function createDshBackend(runtime: DshRuntime): ReviewBackend {
       const label = 'finding-verification';
       // Unprojected findings: a field subset would drop `evidence` (see the opencode engine).
       const prompt = assembleFindingVerificationPrompt(prContext, findings, false);
-      return withDshSession(runtime, model, label, false, modelOptions, async (session) =>
-        parseFindingVerdicts(
-          await promptDshSession(runtime, session, prompt, label, log, timeoutMs, onTokenUsage),
-          findings.length,
+      return withDshSession(runtime, model, label, false, modelOptions, async (session) => {
+        const raw = await promptDshSession(
+          runtime,
+          session,
+          prompt,
+          label,
           log,
-        ),
-      );
+          timeoutMs,
+          onTokenUsage,
+        );
+        try {
+          return parseFindingVerdicts(raw, findings.length, log, { strict: true });
+        } catch (error) {
+          // One repair turn, as the opencode and Devin verifiers recover, so a
+          // formatting slip does not withhold the whole batch.
+          const repaired = await repromptDshForJson(
+            runtime,
+            session,
+            raw,
+            error,
+            label,
+            log,
+            timeoutMs,
+            onTokenUsage,
+          );
+          return parseFindingVerdicts(repaired, findings.length, log);
+        }
+      });
     },
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) => {
       const label = 'changes-since-last-review';

@@ -536,9 +536,9 @@ async function review(
     return;
   }
 
-  const sdkEngine = resolveSdkEngine(
-    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
-  );
+  const engineEnv = comparison
+    ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine }
+    : process.env;
   // Before credential resolution on purpose: a preview must cost nothing and
   // need no key.
   if (preview) {
@@ -566,7 +566,10 @@ async function review(
     const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     const { providerID, modelID } = parseModelName(model);
-    const onDsh = Boolean(sdkEngine.dshBin) && dshServesModel(providerID, modelID);
+    // Budget only: skip the sandbox and boot probes, which spawn dsh.
+    const onDsh =
+      Boolean(resolveSdkEngine(engineEnv, undefined, () => undefined).dshBin) &&
+      dshServesModel(providerID, modelID);
     const plans = buildShardPlans({
       coreContext: '',
       context7Block: '',
@@ -608,6 +611,8 @@ async function review(
     );
     return;
   }
+
+  const sdkEngine = resolveSdkEngine(engineEnv);
 
   // The whole pool, not just the picked pair: a missing key must fail the next
   // run rather than only the runs that happen to draw that provider. Still
