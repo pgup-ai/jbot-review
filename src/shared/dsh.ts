@@ -127,9 +127,10 @@ function dshSandboxUsable(bin: string): boolean {
 }
 
 /**
- * Starts the headless profile under jbot's own patch with no key: a plugin
- * that cannot load (say, a pruned package) is reported as an entry that "did
- * not activate", and the missing credential ends the turn before any network.
+ * Composes jbot's patch, then starts the headless profile under it with no
+ * key. Composing reports a row id dsh does not have (so a misspelled disabled
+ * row would stay on); starting reports a plugin that cannot load (say, a
+ * pruned package); the missing credential ends the turn before any network.
  */
 function dshBoots(bin: string): boolean {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-dsh-probe-'));
@@ -146,27 +147,38 @@ function dshBoots(bin: string): boolean {
         toolLess: false,
       }),
     );
-    const run = spawnSync(bin, ['--profile', 'headless', '--patch', patch, '--json', '-'], {
-      cwd: dir,
-      input: 'ping',
-      encoding: 'utf8',
-      timeout: 60_000,
-      env: {
-        PATH: process.env.PATH,
-        HOME: dir,
-        DSH_HOME: join(dir, 'dsh'),
-        DSH_TELEMETRY_DISABLED: '1',
-      },
-    });
-    return !run.error && dshBootSucceeded(run);
+    const launch = (args: string[]) =>
+      spawnSync(bin, ['--profile', 'headless', '--patch', patch, ...args], {
+        cwd: dir,
+        input: 'ping',
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: {
+          PATH: process.env.PATH,
+          HOME: dir,
+          DSH_HOME: join(dir, 'dsh'),
+          DSH_TELEMETRY_DISABLED: '1',
+        },
+      });
+    const config = launch(['--dump-config']);
+    const run = launch(['--json', '-']);
+    return (
+      !config.error &&
+      !run.error &&
+      dshBootSucceeded({ stdout: run.stdout, stderr: config.stderr + run.stderr })
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-/** A session started and every entry of jbot's patch activated. */
+/** A session started, and every row jbot's patch names exists and activated. */
 export function dshBootSucceeded(run: { stdout: string; stderr: string }): boolean {
-  return run.stdout.includes('"type":"session"') && !run.stderr.includes('did not activate');
+  return (
+    run.stdout.includes('"type":"session"') &&
+    !run.stderr.includes('did not activate') &&
+    !/patch: entry "[^"]*" not found/.test(run.stderr)
+  );
 }
 
 const unusableByBin = new Map<string, string | undefined>();

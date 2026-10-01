@@ -50,6 +50,14 @@ describe('dsh engine', () => {
       false,
     );
     assert.equal(dshBootSucceeded({ stdout: '', stderr: '' }), false);
+    // A misspelled disabled row would silently stay on.
+    assert.equal(
+      dshBootSucceeded({
+        stdout: session,
+        stderr: 'dsh: [p.yml] patch: entry "tool-webz" not found',
+      }),
+      false,
+    );
   });
 
   it('maps efforts onto DeepSeek thinking modes only', () => {
