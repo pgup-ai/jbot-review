@@ -55,7 +55,7 @@ export function renderUnverifiedSection(
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
     lines.push(`<pre>${truncateUtf8WithNotice(text, 2400, 'Concern')}</pre>`, '');
-    if (headSha) {
+    if (headSha && !/(^|\/)\.{1,2}(\/|$)/.test(finding.path)) {
       const path = finding.path
         .split('/')
         .map((segment) => encodeURIComponent(segment).replaceAll('(', '%28').replaceAll(')', '%29'))

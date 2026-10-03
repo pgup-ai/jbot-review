@@ -75,6 +75,13 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
     /https:\/\/github.example.com\/owner\/repo\/blob\/abc123\/src\/a.ts#L10/,
   );
   assert.doesNotMatch(enterprise, /https:\/\/github.com/);
+  for (const path of ['../a.ts', './a.ts', 'src/../../a.ts', 'src/.', 'src/..']) {
+    const invalidPath = renderUnverifiedSection([f({ path })], 'owner', 'repo', 'abc123').join(
+      '\n',
+    );
+    assert.doesNotMatch(invalidPath, /View code/);
+    assert.ok(invalidPath.includes(path));
+  }
   assert.equal(text.match(/<\/details>/g)?.length, 1);
   assert.deepEqual(renderUnverifiedSection([], 'owner', 'repo'), []);
 });
