@@ -52,51 +52,6 @@ async function waitFor<T>(probe: () => Promise<T | undefined>, what: string): Pr
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** A random port can be taken: an early exit retries elsewhere, and failures carry stderr. */
-async function startGateway(dataDir: string): Promise<{ gateway: ChildProcess; base: string }> {
-  const failures: string[] = [];
-  const tried = new Set<number>();
-  for (let attempt = 1; ; attempt++) {
-    let port: number;
-    do port = 24000 + Math.floor(Math.random() * 2000);
-    while (tried.has(port));
-    tried.add(port);
-    const gateway = spawn(process.execPath, ['--import', 'tsx', 'src/gateway/server.ts'], {
-      env: {
-        ...process.env,
-        JBOT_GATEWAY_PORT: String(port),
-        JBOT_GATEWAY_DATA: dataDir,
-        JBOT_GATEWAY_TOKEN: 'client-tok',
-        JBOT_GATEWAY_HOST: '127.0.0.1',
-        JBOT_GATEWAY_ENDPOINTS: 'box:endpoint-tok',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    gateway.stderr?.on('data', (chunk: Buffer) => (stderr += chunk));
-    const listening = await new Promise<boolean>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        gateway.kill('SIGKILL');
-        reject(new Error(`gateway did not start: ${stderr.slice(-500)}`));
-      }, 15_000);
-      gateway.stdout?.on('data', (chunk: Buffer) => {
-        if (String(chunk).includes('listening')) {
-          clearTimeout(timer);
-          resolve(true);
-        }
-      });
-      // `close` waits for stderr to drain, unlike `exit`.
-      gateway.once('close', () => {
-        clearTimeout(timer);
-        resolve(false);
-      });
-    });
-    if (listening) return { gateway, base: `http://127.0.0.1:${port}` };
-    failures.push(`attempt ${attempt} (port ${port}): ${stderr.slice(-500)}`);
-    if (attempt === 3) throw new Error(`gateway exited before listening:\n${failures.join('\n')}`);
-  }
-}
-
 describe('remote acp backend', () => {
   it('uses the gateway URL as the remote-routing switch', () => {
     const saved = { ...process.env };
@@ -126,9 +81,56 @@ describe('remote acp backend', () => {
     let gateway: ChildProcess | undefined;
     let companion: ChildProcess | undefined;
     try {
-      const started = await startGateway(dataDir);
-      gateway = started.gateway;
-      const { base } = started;
+      // A random port can be taken: an early exit retries on an untried port, and failures carry stderr.
+      const failures: string[] = [];
+      const tried = new Set<number>();
+      let base = '';
+      for (let attempt = 1; !base; attempt++) {
+        let port: number;
+        do port = 24000 + Math.floor(Math.random() * 2000);
+        while (tried.has(port));
+        tried.add(port);
+        const child = spawn(process.execPath, ['--import', 'tsx', 'src/gateway/server.ts'], {
+          env: {
+            ...process.env,
+            JBOT_GATEWAY_PORT: String(port),
+            JBOT_GATEWAY_DATA: dataDir,
+            JBOT_GATEWAY_TOKEN: 'client-tok',
+            JBOT_GATEWAY_HOST: '127.0.0.1',
+            JBOT_GATEWAY_ENDPOINTS: 'box:endpoint-tok',
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        gateway = child;
+        let stdout = '';
+        let stderr = '';
+        child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk));
+        const listening = await new Promise<boolean>((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error(`gateway did not start: ${stderr.slice(-500)}`)),
+            15_000,
+          );
+          // Chunk boundaries are arbitrary, so match the accumulated output.
+          child.stdout?.on('data', (chunk: Buffer) => {
+            stdout += chunk;
+            if (stdout.includes('listening')) {
+              clearTimeout(timer);
+              resolve(true);
+            }
+          });
+          // `close` waits for stderr to drain, unlike `exit`.
+          child.once('close', () => {
+            clearTimeout(timer);
+            resolve(false);
+          });
+        });
+        if (listening) base = `http://127.0.0.1:${port}`;
+        else {
+          failures.push(`attempt ${attempt} (port ${port}): ${stderr.slice(-500)}`);
+          if (attempt === 3)
+            throw new Error(`gateway exited before listening:\n${failures.join('\n')}`);
+        }
+      }
       companion = spawn(process.execPath, ['--import', 'tsx', 'src/companion/index.ts'], {
         env: {
           ...process.env,
