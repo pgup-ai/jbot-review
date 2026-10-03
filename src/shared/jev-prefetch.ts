@@ -267,11 +267,12 @@ export async function buildJevPrefetch(
       options.selectCandidates?.(candidates) ?? candidates,
       options.prepared?.task,
     );
+    // Reads swallow aborts, so a lapsed deadline can leave the pool empty.
+    signal.throwIfAborted();
     if (!request.candidates.length) {
       stats.reason = 'no-candidates';
       return '';
     }
-    signal.throwIfAborted();
     stats.candidateHash = evidenceHash(JSON.stringify(request.candidates));
     const baseline = selectPrefetchCandidates(
       request.candidates,

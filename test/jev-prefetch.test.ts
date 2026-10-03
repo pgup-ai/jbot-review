@@ -253,6 +253,15 @@ test('HTTP errors, invalid or oversized responses, and timeout fail open without
     baseline,
   );
   assert.equal(rows.at(-1).reason, 'timeout');
+  // A deadline that lapses while collecting candidates is a timeout too, not an empty pool.
+  const callsBefore = mock.mock.callCount();
+  assert.equal(
+    await buildBlastRadiusBlock(workspace, files, grep, { ...options, timeoutMs: 0 }),
+    baseline,
+  );
+  assert.equal(rows.at(-1).collectedCandidates, 0);
+  assert.equal(mock.mock.callCount(), callsBefore);
+  assert.equal(rows.at(-1).reason, 'timeout');
   const count = mock.mock.callCount();
   await buildBlastRadiusBlock(workspace, files, grep, { ...options, apiKey: undefined });
   assert.equal(rows.at(-1).reason, 'missing-key');
