@@ -602,8 +602,11 @@ function traceTurn(
     calls,
   };
   try {
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, 'evidence-trace.jsonl'), `${JSON.stringify(row)}\n`);
+    // Unsanitized prompts and tool output: owner-only.
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    appendFileSync(join(dir, 'evidence-trace.jsonl'), `${JSON.stringify(row)}\n`, {
+      mode: 0o600,
+    });
   } catch (error) {
     log(`(evidence trace failed for ${turn.label}: ${formatUnknown(error)})`);
   }
