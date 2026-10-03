@@ -933,4 +933,34 @@ describe('assertImageSupportsModels', () => {
       /local runtimes: cursor/,
     );
   });
+
+  it('restricts the opencode image to Zen and Go even when a gateway is configured', () => {
+    const supported = ['opencode/muse', 'opencode-go/muse'];
+    for (const gateway of [undefined, 'https://gateway.example']) {
+      const env = { JBOT_IMAGE_VARIANT: 'opencode', JBOT_ACP_GATEWAY_URL: gateway };
+      assert.doesNotThrow(() => assertImageSupportsModels(supported, env));
+      for (const provider of [
+        'anthropic',
+        'openrouter',
+        'poolside',
+        'commandcode',
+        'devin',
+        'cline',
+        'cline-pass',
+        'codex',
+        'cursor',
+        'grok',
+        'kilo',
+        'qoder',
+        'dim',
+      ]) {
+        const pool = [...supported, `${provider}/model`];
+        assert.throws(
+          () => assertImageSupportsModels(pool, env),
+          /opencode image supports only OpenCode Zen .* and Go .*Unsupported models:/,
+        );
+        assert.deepEqual(pool, [...supported, `${provider}/model`]);
+      }
+    }
+  });
 });

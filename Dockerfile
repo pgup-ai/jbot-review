@@ -1,5 +1,5 @@
 # node 24 matches cursor-agent's bundled Node major, so it shares the system node (see cursor stage).
-FROM node:24-slim AS runtime
+FROM node:24-slim AS base
 
 # git: review shells out to it. curl: used by the provider installers below.
 RUN apt-get update \
@@ -10,6 +10,12 @@ RUN apt-get update \
 RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
+
+WORKDIR /app
+EXPOSE 3000
+ENTRYPOINT ["node", "/app/dist/app/server.js"]
+
+FROM base AS runtime
 
 # opencode's npm package installs both the glibc and musl binaries (~190MB each);
 # this Debian image only runs the glibc one.
@@ -37,10 +43,6 @@ ENV JBOT_IMAGE_VARIANT=full
 # Depot's env-file may replace PATH; keep Devin on the default executable path.
 RUN ln -s /root/.local/bin/devin /usr/local/bin/devin \
   && env PATH=/usr/local/bin:/usr/bin:/bin devin --version >/dev/null
-
-WORKDIR /app
-EXPOSE 3000
-ENTRYPOINT ["node", "/app/dist/app/server.js"]
 
 FROM runtime AS full-tools
 
@@ -87,7 +89,14 @@ RUN set -eux; \
 RUN ln -s /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
   && env PATH=/usr/local/bin:/usr/bin:/bin cursor-agent --help >/dev/null
 
-FROM runtime AS app
+FROM base AS opencode-tools
+# Use the amd64 baseline binary so runners without AVX2 work too.
+RUN npm install -g @opencode/cli-linux-x64-baseline@2.0.16 \
+  && ln -s /usr/local/lib/node_modules/@opencode/cli-linux-x64-baseline/bin/opencode /usr/local/bin/opencode \
+  && npm cache clean --force \
+  && opencode --version
+
+FROM base AS app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
@@ -95,8 +104,17 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY dist/ ./dist/
 RUN test -s /app/dist/local/index.js
 
-FROM app AS slim
+FROM runtime AS slim
+COPY --from=app /app /app
 ENV JBOT_IMAGE_VARIANT=slim
+
+FROM app AS opencode-app
+RUN npm uninstall --omit=dev --ignore-scripts @qoder-ai/qoder-agent-sdk @symma/client @symma/protocol \
+  && npm cache clean --force
+
+FROM opencode-tools AS opencode
+COPY --from=opencode-app /app /app
+ENV JBOT_IMAGE_VARIANT=opencode
 
 # Keep the default target full for existing docker build callers and dogfooding.
 FROM full-tools AS full

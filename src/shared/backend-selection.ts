@@ -172,7 +172,21 @@ export function swallowedProviderWarnings(pool: string[]): string[] {
 
 /** Validate the whole pool before the draw so missing local CLIs never fail randomly. */
 export function assertImageSupportsModels(pool: string[], env: NodeJS.ProcessEnv): void {
-  if (env.JBOT_IMAGE_VARIANT !== 'slim') return;
+  const variant = env.JBOT_IMAGE_VARIANT;
+  if (variant === 'opencode') {
+    const unsupported = pool.filter((model) => {
+      const { providerID } = parseModelName(model);
+      return providerID !== 'opencode' && providerID !== 'opencode-go';
+    });
+    if (unsupported.length) {
+      throw new Error(
+        `The opencode image supports only OpenCode Zen (opencode/) and Go (opencode-go/). ` +
+          `Unsupported models: ${unsupported.join(', ')}. Use ghcr.io/pgup-ai/jbot-review:latest (full). No models were removed from the pool.`,
+      );
+    }
+    return;
+  }
+  if (variant !== 'slim') return;
   const missing = new Set<string>();
   for (const model of pool) {
     const backend = cliBackendForProvider(parseModelName(model).providerID);

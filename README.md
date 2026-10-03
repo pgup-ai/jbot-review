@@ -13,26 +13,32 @@ on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts
 
 ## Image variants
 
-The default `ghcr.io/pgup-ai/jbot-review:latest` includes every supported local
-provider CLI. `:latest-slim` includes only **OpenCode, CommandCode and Devin**,
-plus the same reviewer code and SDK dependencies. Existing workflows continue
-using the full image. Review prompts, model selection and finding policy are
-identical for supported routes.
+All variants include the same reviewer code. Review prompts,
+model selection and finding policy are identical for supported routes.
 
-Use `:<commit-sha>` (full) or `:<commit-sha>-slim` to pin a published revision;
-`latest` and `latest-slim` track successful builds of main. Both variants are
-published for Linux amd64. Build locally with `docker build --target slim .`;
+| Image tag          | Included local CLIs                  | Action entry point                       |
+| ------------------ | ------------------------------------ | ---------------------------------------- |
+| `latest` (default) | All supported CLIs                   | `pgup-ai/jbot-review-action@v0`          |
+| `latest-slim`      | OpenCode, CommandCode, Devin         | `pgup-ai/jbot-review-action/slim@v0`     |
+| `latest-opencode`  | OpenCode only (including Zen and Go) | `pgup-ai/jbot-review-action/opencode@v0` |
+
+Use `:<commit-sha>`, `:<commit-sha>-slim` or `:<commit-sha>-opencode` to pin a
+published revision; the `latest` tags track successful builds of main. All
+variants are published for Linux amd64. Build locally with
+`docker build --platform linux/amd64 --target opencode .` (or `--target slim`);
 a build without `--target` remains full.
 
-Choose slim only when every model in the pool uses an included local runtime
-or an SDK provider. Cursor, Codex and Kilo can also run through a configured
-ACP gateway; their CLIs then live on the companion. An incompatible local
-runtime fails pool validation before selection, with a message to use the full
-image. No candidates are silently removed and no CLIs are installed on demand.
+The OpenCode image accepts only Zen (`opencode/…`) and Go (`opencode-go/…`) for
+every main and auxiliary model. It contains no other provider CLI or SDK and
+does not allow gateway routes. It uses one amd64 baseline binary.
 
-Direct Docker/Depot callers can select the image tag. The companion
-`pgup-ai/jbot-review-action` change exposes `slim/action.yml` for GitHub Actions;
-use that entry point only after the slim image and action version are published.
+Slim supports its included local runtimes and SDK providers. Cursor, Codex,
+Devin and Kilo can also run through a configured ACP gateway with slim.
+Unsupported models fail pool validation before selection; no candidates are
+silently removed and no CLIs are installed on demand.
+
+Direct Docker/Depot callers can select the image tag. Use the matching action
+entry point only after its image and action version are published.
 
 ## In-repo workflow
 
