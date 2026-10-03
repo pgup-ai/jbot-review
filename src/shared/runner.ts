@@ -5637,6 +5637,7 @@ export function buildBody(
       repo,
       headSha,
       experiment?.diagnosticsUrl,
+      process.env.GITHUB_SERVER_URL,
     ),
   );
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));

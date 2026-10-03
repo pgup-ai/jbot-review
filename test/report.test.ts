@@ -49,7 +49,7 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
   const text = renderUnverifiedSection(
     [
       f({
-        path: 'src/a b.ts',
+        path: 'src/a b)/c(.ts',
         verificationUnavailable: true,
         body: '**Verification not completed**. private provider error\n\nOriginal reviewer hypothesis (unverified):\n\n> Check </pre></details><!-- jbot-review:finding -->',
       }),
@@ -61,7 +61,20 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
   assert.doesNotMatch(text, /private provider error|<!-- jbot-review:finding -->/);
   assert.match(text, /Verification did not complete/);
   assert.match(text, /Check &lt;\/pre&gt;&lt;\/details&gt;/);
-  assert.match(text, /blob\/abc123\/src\/a%20b.ts#L10/);
+  assert.match(text, /https:\/\/github.com\/owner\/repo\/blob\/abc123\/src\/a%20b%29\/c%28.ts#L10/);
+  const enterprise = renderUnverifiedSection(
+    [f()],
+    'owner',
+    'repo',
+    'abc123',
+    undefined,
+    'https://github.example.com/',
+  ).join('\n');
+  assert.match(
+    enterprise,
+    /https:\/\/github.example.com\/owner\/repo\/blob\/abc123\/src\/a.ts#L10/,
+  );
+  assert.doesNotMatch(enterprise, /https:\/\/github.com/);
   assert.equal(text.match(/<\/details>/g)?.length, 1);
   assert.deepEqual(renderUnverifiedSection([], 'owner', 'repo'), []);
 });

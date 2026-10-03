@@ -34,6 +34,7 @@ export function renderUnverifiedSection(
   repo: string,
   headSha?: string,
   diagnosticsUrl?: string,
+  serverUrl = 'https://github.com',
 ): string[] {
   if (!findings.length) return [];
   const lines = [
@@ -55,9 +56,12 @@ export function renderUnverifiedSection(
       .replaceAll('>', '&gt;');
     lines.push(`<pre>${truncateUtf8WithNotice(text, 2400, 'Concern')}</pre>`, '');
     if (headSha) {
-      const path = finding.path.split('/').map(encodeURIComponent).join('/');
+      const path = finding.path
+        .split('/')
+        .map((segment) => encodeURIComponent(segment).replaceAll('(', '%28').replaceAll(')', '%29'))
+        .join('/');
       lines.push(
-        `[View code](https://github.com/${owner}/${repo}/blob/${headSha}/${path}${finding.line > 0 ? `#L${finding.line}` : ''})`,
+        `[View code](${serverUrl.replace(/\/$/, '')}/${owner}/${repo}/blob/${headSha}/${path}${finding.line > 0 ? `#L${finding.line}` : ''})`,
         '',
       );
     }
