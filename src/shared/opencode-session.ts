@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   closeSync,
   constants,
   fchmodSync,
@@ -7,7 +8,6 @@ import {
   readFileSync,
   renameSync,
   writeFileSync,
-  writeSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -621,7 +621,8 @@ function traceTurn(
     );
     try {
       fchmodSync(fd, 0o600);
-      writeSync(fd, `${JSON.stringify(row)}\n`);
+      // appendFileSync on an fd loops until the whole row is written.
+      appendFileSync(fd, `${JSON.stringify(row)}\n`);
     } finally {
       closeSync(fd);
     }
