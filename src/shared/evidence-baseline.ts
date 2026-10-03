@@ -1,0 +1,127 @@
+import {
+  reviewReadLocations,
+  suppliedOverlap,
+  type SuppliedContext,
+} from './review-read-locations.ts';
+
+/** One opencode turn as `JBOT_TRANSCRIPT_DIR` writes it to `evidence-trace.jsonl`. */
+export interface EvidenceTraceRow {
+  label: string;
+  sessionID: string;
+  workspace: string;
+  prompt: string;
+  /** False when the turn's message listing was cut short, so earlier calls are missing. */
+  complete: boolean;
+  supplied?: {
+    ranges: [string, [number, number][]][];
+    lines: [string, number][];
+    symbols: string[];
+    directories: string[];
+  };
+  calls: {
+    name: string;
+    toolClass: string;
+    input: Record<string, unknown>;
+    status: string;
+    output?: unknown;
+  }[];
+}
+
+/**
+ * supplied: the diff or pack already held it; repeat: lines this session already read;
+ * new: lines it had not seen; unlocated: a search, listing or diff the parser cannot place.
+ */
+export type EvidenceCallClass = 'supplied' | 'repeat' | 'new' | 'unlocated';
+
+export interface ClassifiedCall {
+  label: string;
+  sessionID: string;
+  name: string;
+  toolClass: string;
+  input: Record<string, unknown>;
+  class: EvidenceCallClass;
+  /** A finding lands in the lines this call read. */
+  cited: boolean;
+  outputBytes: number;
+}
+
+/** Lines of [line, end] inside ranges; interval arithmetic keeps a whole-file cat's open end cheap. */
+function coveredLines(ranges: [number, number][], line: number, end: number): number {
+  let covered = 0;
+  let next = line;
+  for (const [start, stop] of [...ranges].sort((a, b) => a[0] - b[0])) {
+    const from = Math.max(start, next);
+    const to = Math.min(stop, end);
+    if (to >= from) {
+      covered += to - from + 1;
+      next = to + 1;
+    }
+  }
+  return covered;
+}
+
+export function classifyEvidenceTrace(
+  rows: EvidenceTraceRow[],
+  findings: { path: string; line: number }[],
+): ClassifiedCall[] {
+  const seen = new Map<string, Map<string, [number, number][]>>();
+  const classified: ClassifiedCall[] = [];
+  for (const row of rows) {
+    const supplied: SuppliedContext | undefined = row.supplied && {
+      ranges: new Map(row.supplied.ranges),
+      lines: new Map(row.supplied.lines),
+      symbols: new Set(row.supplied.symbols),
+      directories: new Set(row.supplied.directories),
+    };
+    // Pages that share a label run in separate sessions, each with its own reads.
+    const read = seen.get(row.sessionID) ?? new Map<string, [number, number][]>();
+    seen.set(row.sessionID, read);
+    for (const call of row.calls) {
+      // A read starting past a supplied file's end shows nothing.
+      const locations = reviewReadLocations(row.workspace, call.name, call.input)
+        .map((location) => ({
+          ...location,
+          endLine: Math.min(
+            location.endLine,
+            supplied?.lines.get(location.path) ?? Number.MAX_SAFE_INTEGER,
+          ),
+        }))
+        .filter(({ line, endLine }) => endLine >= line);
+      // Per file, not per call: a read that adds an unseen file fetched new evidence.
+      const repeat =
+        locations.length > 0 &&
+        locations.every(
+          ({ path, line, endLine }) =>
+            coveredLines(read.get(path) ?? [], line, endLine) * 2 >= endLine - line + 1,
+        );
+      classified.push({
+        label: row.label,
+        sessionID: row.sessionID,
+        name: call.name,
+        toolClass: call.toolClass,
+        input: call.input,
+        class:
+          supplied && suppliedOverlap(row.workspace, call.name, call.input, supplied)
+            ? 'supplied'
+            : !locations.length
+              ? 'unlocated'
+              : repeat
+                ? 'repeat'
+                : 'new',
+        cited:
+          call.status === 'completed' &&
+          findings.some((finding) =>
+            locations.some(
+              ({ path, line, endLine }) =>
+                finding.path === path && finding.line >= line && finding.line <= endLine,
+            ),
+          ),
+        outputBytes: Buffer.byteLength(JSON.stringify(call.output) ?? ''),
+      });
+      if (call.status === 'completed')
+        for (const { path, line, endLine } of locations)
+          read.set(path, [...(read.get(path) ?? []), [line, endLine]]);
+    }
+  }
+  return classified;
+}
