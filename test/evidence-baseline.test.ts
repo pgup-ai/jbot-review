@@ -9,11 +9,12 @@ test('classifies each call against the supplied evidence and the session’s ear
     input: { filePath: `/ws/${file}`, offset, limit },
     status,
   });
-  const turn = (calls: EvidenceTraceRow['calls']): EvidenceTraceRow => ({
+  const turn = (calls: EvidenceTraceRow['calls'], sessionID = 's'): EvidenceTraceRow => ({
     label: 'review-shard-1',
-    sessionID: 's',
+    sessionID,
     workspace: '/ws',
     prompt: '',
+    complete: true,
     supplied: {
       ranges: [['a.ts', [[1, 20]]]],
       lines: [['a.ts', 100]],
@@ -30,19 +31,25 @@ test('classifies each call against the supplied evidence and the session’s ear
         { name: 'grep', toolClass: 'search', input: { pattern: 'foo' }, status: 'completed' },
         read('c.ts', 1, 10),
       ]),
+      // Another session under the same label has not read b.ts.
+      turn([read('b.ts', 10, 20)], 'other'),
     ],
-    [{ path: 'b.ts', line: 10 }],
+    [
+      { path: 'b.ts', line: 10 },
+      { path: 'c.ts', line: 5 },
+    ],
   );
   assert.deepEqual(
     calls.map((call) => [call.class, call.cited]),
     [
       ['supplied', false],
       ['new', true],
+      // A failed read showed nothing, so it is neither cited nor seen.
       ['new', false],
       ['repeat', true],
       ['unlocated', false],
-      // The failed read did not show c.ts, so this one is still new.
-      ['new', false],
+      ['new', true],
+      ['new', true],
     ],
   );
 });

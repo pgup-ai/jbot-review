@@ -568,6 +568,7 @@ function traceTurn(
     prompt: string;
     supplied?: SuppliedContext;
     messages: AssistantMessage[];
+    complete: boolean;
   },
   log: (msg: string) => void,
 ): void {
@@ -658,9 +659,11 @@ async function promptHoldingSlot(
       recorded = true;
       // Usage spans the whole turn: V2 writes one assistant message per step.
       let turn = fallback;
+      let complete = false;
       try {
         const since = await assistantsSince(client, sessionID, previous?.id, startedAt);
         if (since.messages.length > 0) turn = since.messages;
+        complete = since.complete;
         if (!since.complete)
           log(`${label} turn listing incomplete; usage and tools are under-counted`);
       } catch (error) {
@@ -685,6 +688,7 @@ async function promptHoldingSlot(
             prompt: spec.text,
             supplied,
             messages: turn,
+            complete,
           },
           log,
         );

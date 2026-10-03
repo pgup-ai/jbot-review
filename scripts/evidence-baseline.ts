@@ -14,10 +14,13 @@ const findings = telemetry
       (row) => row.kind === 'finding',
     )
   : [];
-const calls = classifyEvidenceTrace(
-  readJsonLines<EvidenceTraceRow>(join(trace, 'evidence-trace.jsonl')),
-  findings,
-);
+const rows = readJsonLines<EvidenceTraceRow>(join(trace, 'evidence-trace.jsonl'));
+const incomplete = rows.filter((row) => !row.complete);
+if (incomplete.length)
+  console.warn(
+    `${incomplete.length} turn(s) have truncated message listings; their earlier calls are missing: ${[...new Set(incomplete.map((row) => row.label))].join(', ')}`,
+  );
+const calls = classifyEvidenceTrace(rows, findings);
 writeFileSync(
   join(trace, 'evidence-calls.jsonl'),
   calls.map((call) => JSON.stringify(call)).join('\n') + '\n',

@@ -10,6 +10,8 @@ export interface EvidenceTraceRow {
   sessionID: string;
   workspace: string;
   prompt: string;
+  /** False when the turn's message listing was cut short, so earlier calls are missing. */
+  complete: boolean;
   supplied?: {
     ranges: [string, [number, number][]][];
     lines: [string, number][];
@@ -33,6 +35,7 @@ export type EvidenceCallClass = 'supplied' | 'repeat' | 'new' | 'unlocated';
 
 export interface ClassifiedCall {
   label: string;
+  sessionID: string;
   name: string;
   toolClass: string;
   input: Record<string, unknown>;
@@ -58,8 +61,9 @@ export function classifyEvidenceTrace(
       symbols: new Set(row.supplied.symbols),
       directories: new Set(row.supplied.directories),
     };
-    const read = seen.get(row.label) ?? new Map<string, [number, number][]>();
-    seen.set(row.label, read);
+    // Pages that share a label run in separate sessions, each with its own reads.
+    const read = seen.get(row.sessionID) ?? new Map<string, [number, number][]>();
+    seen.set(row.sessionID, read);
     for (const call of row.calls) {
       const locations = reviewReadLocations(row.workspace, call.name, call.input).map(
         (location) => ({
@@ -82,6 +86,7 @@ export function classifyEvidenceTrace(
         });
       classified.push({
         label: row.label,
+        sessionID: row.sessionID,
         name: call.name,
         toolClass: call.toolClass,
         input: call.input,
@@ -93,12 +98,14 @@ export function classifyEvidenceTrace(
               : repeat
                 ? 'repeat'
                 : 'new',
-        cited: findings.some((finding) =>
-          locations.some(
-            ({ path, line, endLine }) =>
-              finding.path === path && finding.line >= line && finding.line <= endLine,
+        cited:
+          call.status === 'completed' &&
+          findings.some((finding) =>
+            locations.some(
+              ({ path, line, endLine }) =>
+                finding.path === path && finding.line >= line && finding.line <= endLine,
+            ),
           ),
-        ),
         outputBytes: Buffer.byteLength(JSON.stringify(call.output) ?? ''),
       });
       if (call.status === 'completed')
