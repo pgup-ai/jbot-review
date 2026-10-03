@@ -1,6 +1,7 @@
 import type { Finding, Severity } from './types.ts';
 import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
+import { truncateUtf8WithNotice } from './prompt.ts';
 
 /**
  * Pure review-body layout helpers. `runner.ts` wires these into the posted
@@ -24,6 +25,47 @@ export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];
   const lines = [ORPHANED_FINDINGS_HEADING, ''];
   for (const finding of orphaned) lines.push(findingLine(finding), `  ${finding.body}`);
+  return lines;
+}
+
+export function renderUnverifiedSection(
+  findings: Finding[],
+  owner: string,
+  repo: string,
+  headSha?: string,
+  diagnosticsUrl?: string,
+): string[] {
+  if (!findings.length) return [];
+  const lines = [
+    '<details>',
+    `<summary>Unverified concerns (${findings.length})</summary>`,
+    '',
+    'Unconfirmed hypotheses, not posted as inline findings. Excluded from severity counts.',
+    '',
+  ];
+  for (const finding of findings.slice(0, 10)) {
+    // Failed-verifier prefixes can contain provider errors; expose only the hypothesis.
+    const body = finding.verificationUnavailable
+      ? 'Verification did not complete.\n\n' +
+        (finding.body.split('\n\nOriginal reviewer hypothesis (unverified):\n\n')[1] ?? '')
+      : finding.body;
+    const text = `${finding.title}\n${formatFindingLocation(finding)}\n\n${body}`
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+    lines.push(`<pre>${truncateUtf8WithNotice(text, 2400, 'Concern')}</pre>`, '');
+    if (headSha) {
+      const path = finding.path.split('/').map(encodeURIComponent).join('/');
+      lines.push(
+        `[View code](https://github.com/${owner}/${repo}/blob/${headSha}/${path}${finding.line > 0 ? `#L${finding.line}` : ''})`,
+        '',
+      );
+    }
+  }
+  if (findings.length > 10) lines.push(`${findings.length - 10} more concerns omitted.`, '');
+  if (diagnosticsUrl)
+    lines.push(`[Full diagnostics](${diagnosticsUrl}) (\`unverified-findings.json\`).`, '');
+  lines.push('</details>', '');
   return lines;
 }
 

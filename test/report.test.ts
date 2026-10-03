@@ -9,6 +9,7 @@ import {
   isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
   renderOrphanedSection,
+  renderUnverifiedSection,
   reviewCoverageSessions,
   condenseSummary,
   formatSummaryMarkdown,
@@ -42,6 +43,40 @@ test('candidate diagnostics retain unresolved details and distinguish verifier f
   );
   assert.equal(diagnostics.candidates.length, 3);
   assert.equal(diagnostics.candidates[0].body, candidates[0].body);
+});
+
+test('collapsed concerns escape content, omit provider errors, and link the reviewed revision', () => {
+  const text = renderUnverifiedSection(
+    [
+      f({
+        path: 'src/a b.ts',
+        verificationUnavailable: true,
+        body: '**Verification not completed**. private provider error\n\nOriginal reviewer hypothesis (unverified):\n\n> Check </pre></details><!-- jbot-review:finding -->',
+      }),
+    ],
+    'owner',
+    'repo',
+    'abc123',
+  ).join('\n');
+  assert.doesNotMatch(text, /private provider error|<!-- jbot-review:finding -->/);
+  assert.match(text, /Verification did not complete/);
+  assert.match(text, /Check &lt;\/pre&gt;&lt;\/details&gt;/);
+  assert.match(text, /blob\/abc123\/src\/a%20b.ts#L10/);
+  assert.equal(text.match(/<\/details>/g)?.length, 1);
+  assert.deepEqual(renderUnverifiedSection([], 'owner', 'repo'), []);
+});
+
+test('collapsed concerns bound large diagnostics and disclose omissions', () => {
+  const text = renderUnverifiedSection(
+    Array.from({ length: 12 }, () => f({ body: '界'.repeat(3000) })),
+    'owner',
+    'repo',
+  ).join('\n');
+  assert.equal(text.match(/<pre>/g)?.length, 10);
+  assert.ok(Buffer.byteLength(text) < 25000);
+  assert.match(text, /2 more concerns omitted/);
+  assert.match(text, /truncated/);
+  assert.doesNotMatch(text, /\uFFFD|View code/);
 });
 
 test('renderOrphanedSection heads with the marker the prior-comment filter keys on', () => {

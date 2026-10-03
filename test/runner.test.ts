@@ -190,7 +190,7 @@ describe('buildBody', () => {
     assert.doesNotMatch(body, /low-value verification narrative/);
   });
 
-  it('withholds unresolved claims from the review body while preserving coverage provenance', () => {
+  it('collapses unresolved claims in the review body while preserving coverage provenance', () => {
     const uncertain: Finding = {
       ...finding,
       title: 'Unverified concern: Caller may be missing',
@@ -221,13 +221,13 @@ describe('buildBody', () => {
         diagnosticsUrl: 'https://github.com/owner/repo/actions/runs/123#artifacts',
       },
     );
-    assert.match(body, /1 candidate withheld from PR comments/);
+    assert.match(body, /<details>\n<summary>Unverified concerns \(1\)<\/summary>/);
+    assert.match(body, /Caller may be missing/);
+    assert.match(body, /The caller was not supplied/);
+    assert.match(body, /Long hypothesis/);
     assert.ok(body.includes('https://github.com/owner/repo/actions/runs/123#artifacts'));
     assert.match(body, /unverified-findings.json/);
-    assert.doesNotMatch(
-      body,
-      /Caller may be missing|The caller was not supplied|Long hypothesis|Speculative summary must stay private|<!-- jbot-review:finding -->/,
-    );
+    assert.doesNotMatch(body, /Speculative summary must stay private|<!-- jbot-review:finding -->/);
     assert.match(body, /\| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \|/);
     assert.match(body, /Review state:\*\* Unverified concerns remain/);
     assert.deepEqual(auxiliaryBaselines(body), [baseline]);

@@ -341,6 +341,7 @@ import {
   ADVISORY_FINDINGS_HEADING,
   reviewCoverageSessions,
   renderOrphanedSection,
+  renderUnverifiedSection,
 } from './report.ts';
 import { rulesOnlyTestFiles } from './test-tiers.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
@@ -5629,12 +5630,15 @@ export function buildBody(
     orphaned.filter((finding) => !isWithheldFinding(finding)),
   );
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
-  const unpublishedCount = all.filter(isWithheldFinding).length;
-  if (unpublishedCount > 0)
-    lines.push(
-      `**Verification limits:** ${unpublishedCount} candidate${unpublishedCount === 1 ? '' : 's'} withheld from PR comments. ${experiment?.diagnosticsUrl ? `[Inspect candidates and verification outcomes](${experiment.diagnosticsUrl}) in the run artifacts (\`unverified-findings.json\`).` : 'Details are retained in the run logs and unverified-findings.json.'}`,
-      '',
-    );
+  lines.push(
+    ...renderUnverifiedSection(
+      all.filter(isWithheldFinding),
+      owner,
+      repo,
+      headSha,
+      experiment?.diagnosticsUrl,
+    ),
+  );
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return withReviewCoverage(
