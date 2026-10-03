@@ -108,8 +108,8 @@ describe('Qoder CLI provider helpers', () => {
     }
   });
 
-  it('builds a fail-closed read-only SDK session', () => {
-    const options = buildQoderOptions(
+  it('builds a fail-closed read-only SDK session', async () => {
+    const options = await buildQoderOptions(
       '/workspace',
       'qoder/performance',
       'qoder-token',

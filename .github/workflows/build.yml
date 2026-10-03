@@ -24,6 +24,8 @@ jobs:
             suffix: ''
           - target: slim
             suffix: '-slim'
+          - target: opencode
+            suffix: '-opencode'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6

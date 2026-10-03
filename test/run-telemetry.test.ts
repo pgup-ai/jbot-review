@@ -172,6 +172,10 @@ test('attempt identity distinguishes reruns without confusing the reviewed SHA w
     workflowJob: 'review',
     imageVariant: 'slim',
   });
+  assert.deepEqual(runIdentity({ JBOT_IMAGE_VARIANT: 'opencode' }), {
+    reviewerRevision: 'unbundled',
+    imageVariant: 'opencode',
+  });
   assert.deepEqual(
     runIdentity({
       GITHUB_RUN_ID: 'https://private.example',

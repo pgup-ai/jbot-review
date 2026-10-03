@@ -2,32 +2,39 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { jobUpdateForReview, runJob } from '../src/worker/run-job.ts';
 
-test('slim workers reject unsupported main or auxiliary models before contacting GitHub', async () => {
+test('smaller images reject unsupported main or auxiliary models before contacting GitHub', async () => {
   const previous = process.env.JBOT_IMAGE_VARIANT;
-  process.env.JBOT_IMAGE_VARIANT = 'slim';
   try {
-    for (const [model, auxModel] of [
-      ['cline/test', null],
-      ['opencode/test', 'cline/test'],
-    ] as const) {
-      const logs: string[] = [];
-      const result = await runJob(
-        {
-          jobId: '1',
-          repoFullName: 'o/r',
-          prNumber: 1,
-          model,
-          auxModel,
-          apiKey: 'unused',
-          auxApiKey: null,
-          installationToken: 'unused',
-          claimToken: 'fence',
-        },
-        (message) => logs.push(message),
-      );
-      assert.equal(result.status, 'failed');
-      assert.equal(result.claimToken, 'fence');
-      assert.match(logs.join('\n'), /slim image does not include these local runtimes: cline/);
+    for (const variant of ['slim', 'opencode']) {
+      process.env.JBOT_IMAGE_VARIANT = variant;
+      for (const [model, auxModel] of [
+        ['cline/test', null],
+        ['opencode/test', 'cline/test'],
+      ] as const) {
+        const logs: string[] = [];
+        const result = await runJob(
+          {
+            jobId: '1',
+            repoFullName: 'o/r',
+            prNumber: 1,
+            model,
+            auxModel,
+            apiKey: 'unused',
+            auxApiKey: null,
+            installationToken: 'unused',
+            claimToken: 'fence',
+          },
+          (message) => logs.push(message),
+        );
+        assert.equal(result.status, 'failed');
+        assert.equal(result.claimToken, 'fence');
+        assert.match(
+          logs.join('\n'),
+          variant === 'opencode'
+            ? /opencode image supports only OpenCode Zen .* and Go .*Unsupported models: cline\/test/
+            : /slim image does not include these local runtimes: cline/,
+        );
+      }
     }
   } finally {
     if (previous === undefined) delete process.env.JBOT_IMAGE_VARIANT;

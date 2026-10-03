@@ -2,14 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import {
-  accessToken,
-  query,
-  type NonNullableUsage,
-  type Options,
-  type Query,
-  type SDKMessage,
-  type SDKResultMessage,
+import type {
+  NonNullableUsage,
+  Options,
+  Query,
+  SDKMessage,
+  SDKResultMessage,
 } from '@qoder-ai/qoder-agent-sdk';
 
 import { parseModelName } from '@symma/protocol';
@@ -92,13 +90,14 @@ export function qoderEnvForHome(home: string): NodeJS.ProcessEnv {
   return env;
 }
 
-export function buildQoderOptions(
+export async function buildQoderOptions(
   workspace: string,
   model: string,
   token: string,
   home: string,
   abortController: AbortController,
-): Options {
+): Promise<Options> {
+  const { accessToken } = await import('@qoder-ai/qoder-agent-sdk');
   return {
     abortController,
     auth: accessToken(assertQoderToken(token)),
@@ -400,9 +399,10 @@ async function runQoderPrompt(
   };
   log(`Calling ${label} prompt (agent=qoder-cli, model=${model})`);
   try {
+    const { query } = await import('@qoder-ai/qoder-agent-sdk');
     session = query({
       prompt,
-      options: buildQoderOptions(workspace, model, token ?? '', home, abortController),
+      options: await buildQoderOptions(workspace, model, token ?? '', home, abortController),
     });
     timer = setTimeout(() => {
       timedOut = true;

@@ -109,7 +109,9 @@ export function runIdentity(env: NodeJS.ProcessEnv) {
     ...(/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(env.GITHUB_JOB ?? '')
       ? { workflowJob: env.GITHUB_JOB }
       : {}),
-    ...(env.JBOT_IMAGE_VARIANT === 'full' || env.JBOT_IMAGE_VARIANT === 'slim'
+    ...(env.JBOT_IMAGE_VARIANT === 'full' ||
+    env.JBOT_IMAGE_VARIANT === 'slim' ||
+    env.JBOT_IMAGE_VARIANT === 'opencode'
       ? { imageVariant: env.JBOT_IMAGE_VARIANT }
       : {}),
   };
