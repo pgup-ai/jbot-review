@@ -33,6 +33,8 @@ import type { Finding } from './types.ts';
 const exec = promisify(execFile);
 export const JS_GLOBS = ['*.ts', '*.tsx', '*.js', '*.jsx', '*.mts', '*.cts', '*.mjs', '*.cjs'];
 export const JS_SOURCE = /\.[cm]?[jt]sx?$/i;
+// Indexing may read whole files past the prompt-facing read cap: every caller excerpts within its own byte budget.
+const INDEX_READ_BYTES = 1024 * 1024;
 type Ast = {
   type: string;
   loc?: { start: { line: number }; end: { line: number } };
@@ -488,7 +490,7 @@ export class EvidenceStore {
         // The tracked reader swallows aborts, so a deadline surfaces here as a rejection.
         signal.throwIfAborted();
         if (!source) return undefined;
-        // A file cut at the read cap cannot be parsed or cited by line; like the file cap, it goes uncollected.
+        // A file cut at the index read cap cannot be parsed or cited by line; like the file cap, it goes uncollected.
         if (source.truncated) throw new Error('context pack read cap');
         files++;
         bytes += Buffer.byteLength(source.text);
@@ -539,7 +541,11 @@ export class EvidenceStore {
   }
 
   private async read(path: string, signal: AbortSignal, tracked: Set<string>) {
-    if (!this.reuse.shared) return readTrackedSource(this.workspace, path, signal, { tracked });
+    if (!this.reuse.shared)
+      return readTrackedSource(this.workspace, path, signal, {
+        tracked,
+        maxBytes: INDEX_READ_BYTES,
+      });
     if (!tracked.has(path)) return undefined;
     if (this.prefetched.has(path)) this.reusedPrefetched.add(path);
     const old = this.sources.pending.get(path);
@@ -550,6 +556,7 @@ export class EvidenceStore {
     const pending = readTrackedSource(this.workspace, path, AbortSignal.timeout(4000), {
       tracked,
       cache: this.sources,
+      maxBytes: INDEX_READ_BYTES,
     }).finally(() => {
       this.sources.pending.delete(path);
     });
@@ -594,7 +601,7 @@ export class EvidenceStore {
       const refs = findingSourceLocations(findings).locations;
       const related: { path: string; line: number }[] = [];
       for (const path of [...new Set(refs.map((ref) => ref.path))].slice(0, 20)) {
-        const source = await this.load(path, signal, tracked, 256 * 1024);
+        const source = await this.load(path, signal, tracked, INDEX_READ_BYTES);
         if (!source) continue;
         const mentioned = findings
           .filter((f) => f.path === path)
