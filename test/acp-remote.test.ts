@@ -55,8 +55,12 @@ async function waitFor<T>(probe: () => Promise<T | undefined>, what: string): Pr
 /** A random port can be taken: an early exit retries elsewhere, and failures carry stderr. */
 async function startGateway(dataDir: string): Promise<{ gateway: ChildProcess; base: string }> {
   const failures: string[] = [];
+  const tried = new Set<number>();
   for (let attempt = 1; ; attempt++) {
-    const port = 24000 + Math.floor(Math.random() * 2000);
+    let port: number;
+    do port = 24000 + Math.floor(Math.random() * 2000);
+    while (tried.has(port));
+    tried.add(port);
     const gateway = spawn(process.execPath, ['--import', 'tsx', 'src/gateway/server.ts'], {
       env: {
         ...process.env,
