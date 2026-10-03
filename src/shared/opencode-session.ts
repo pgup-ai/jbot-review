@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { EvidenceTraceRow } from './evidence-baseline.ts';
 import { readExplorationStats } from './exploration-policy.ts';
 import type { TelemetryStopReason } from './telemetry.ts';
 import type { OpenCodeClient } from '@opencode/client';
@@ -557,6 +558,56 @@ async function exportTranscript(
   }
 }
 
+/** The evidence each turn started from and every call it made, for scripts/evidence-baseline.ts. */
+function traceTurn(
+  dir: string,
+  turn: {
+    label: string;
+    sessionID: string;
+    workspace: string;
+    prompt: string;
+    supplied?: SuppliedContext;
+    messages: AssistantMessage[];
+  },
+  log: (msg: string) => void,
+): void {
+  const { messages, supplied, ...rest } = turn;
+  const calls = messages.flatMap((message) =>
+    (message.content ?? []).flatMap((part) =>
+      part.type === 'tool'
+        ? [
+            {
+              name: part.name,
+              toolClass: classifyReadonlyTool(
+                TOOL_CLASS_ALIASES[part.name] ?? part.name,
+                part.state.input,
+              ),
+              input: part.state.input ?? {},
+              status: part.state.status,
+              output: part.state.content ?? part.state.error,
+            },
+          ]
+        : [],
+    ),
+  );
+  const row: EvidenceTraceRow = {
+    ...rest,
+    supplied: supplied && {
+      ranges: [...supplied.ranges],
+      lines: [...supplied.lines],
+      symbols: [...supplied.symbols],
+      directories: [...supplied.directories],
+    },
+    calls,
+  };
+  try {
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'evidence-trace.jsonl'), `${JSON.stringify(row)}\n`);
+  } catch (error) {
+    log(`(evidence trace failed for ${turn.label}: ${formatUnknown(error)})`);
+  }
+}
+
 export async function promptInSession(
   runtime: OpencodeRuntime,
   sessionID: string,
@@ -623,6 +674,20 @@ async function promptHoldingSlot(
           }
         }
       }
+      const supplied = runtime.suppliedContext?.(abortLabel);
+      if (runtime.transcriptDir)
+        traceTurn(
+          runtime.transcriptDir,
+          {
+            label,
+            sessionID,
+            workspace: runtime.workspace,
+            prompt: spec.text,
+            supplied,
+            messages: turn,
+          },
+          log,
+        );
       const telemetry = toolTelemetry.get(client);
       if (telemetry) {
         const current = sessionExplorationStats(runtime, sessionID);
@@ -634,7 +699,6 @@ async function promptHoldingSlot(
               value - (initialExperiment?.[key] ?? 0),
             ]),
           );
-        const supplied = runtime.suppliedContext?.(abortLabel);
         recordAssistantTools(telemetry, label, turn, {
           experiment,
           stopReason,
