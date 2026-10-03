@@ -87,6 +87,7 @@ export function classifyEvidenceTrace(
           ),
         }))
         .filter(({ line, endLine }) => endLine >= line);
+      // Per file, not per call: a read that adds an unseen file fetched new evidence.
       const repeat =
         locations.length > 0 &&
         locations.every(
