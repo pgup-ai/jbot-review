@@ -39,10 +39,24 @@ test('classifies each call against the supplied evidence and the session’s ear
       ]),
       // Another session under the same label has not read b.ts.
       turn([read('b.ts', 10, 20)], 'other'),
+      // A whole-file cat covers every line, past any read window.
+      turn(
+        [
+          {
+            name: 'shell',
+            toolClass: 'file-read',
+            input: { command: 'cat d.ts' },
+            status: 'completed',
+          },
+          read('d.ts', 3000, 10),
+        ],
+        'cat',
+      ),
     ],
     [
       { path: 'b.ts', line: 10 },
       { path: 'c.ts', line: 5 },
+      { path: 'd.ts', line: 3005 },
     ],
   );
   assert.deepEqual(
@@ -57,6 +71,8 @@ test('classifies each call against the supplied evidence and the session’s ear
       ['unlocated', false],
       ['new', true],
       ['new', true],
+      ['new', true],
+      ['repeat', true],
     ],
   );
 });

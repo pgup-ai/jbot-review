@@ -45,8 +45,20 @@ export interface ClassifiedCall {
   outputBytes: number;
 }
 
-// The read tool's default window; a whole-file cat is clamped the same way.
-const READ_WINDOW = 2000;
+/** Lines of [line, end] inside ranges; interval arithmetic keeps a whole-file cat's open end cheap. */
+function coveredLines(ranges: [number, number][], line: number, end: number): number {
+  let covered = 0;
+  let next = line;
+  for (const [start, stop] of [...ranges].sort((a, b) => a[0] - b[0])) {
+    const from = Math.max(start, next);
+    const to = Math.min(stop, end);
+    if (to >= from) {
+      covered += to - from + 1;
+      next = to + 1;
+    }
+  }
+  return covered;
+}
 
 export function classifyEvidenceTrace(
   rows: EvidenceTraceRow[],
@@ -71,20 +83,16 @@ export function classifyEvidenceTrace(
           ...location,
           endLine: Math.min(
             location.endLine,
-            location.line + READ_WINDOW - 1,
             supplied?.lines.get(location.path) ?? Number.MAX_SAFE_INTEGER,
           ),
         }))
         .filter(({ line, endLine }) => endLine >= line);
       const repeat =
         locations.length > 0 &&
-        locations.every(({ path, line, endLine }) => {
-          const ranges = read.get(path) ?? [];
-          let covered = 0;
-          for (let n = line; n <= endLine; n++)
-            if (ranges.some(([start, end]) => n >= start && n <= end)) covered++;
-          return covered * 2 >= endLine - line + 1;
-        });
+        locations.every(
+          ({ path, line, endLine }) =>
+            coveredLines(read.get(path) ?? [], line, endLine) * 2 >= endLine - line + 1,
+        );
       classified.push({
         label: row.label,
         sessionID: row.sessionID,
