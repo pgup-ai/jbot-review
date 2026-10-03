@@ -143,7 +143,8 @@ test('verification supplies distant imports and option-normalization definitions
     "import { pathToFileURL } from 'node:url';",
     ...Array(40).fill(''),
     'function normalizeOptions(input) { return { experiment: input?.experiment ?? { enabled: true } }; }',
-    ...Array(40).fill(''),
+    // Past the prompt-facing 256 KiB read cap.
+    ...Array(20000).fill('// filler line'),
     'export function run(input) {',
     '  const options = normalizeOptions(input);',
     ...Array(40).fill(''),

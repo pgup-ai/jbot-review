@@ -601,7 +601,7 @@ export class EvidenceStore {
       const refs = findingSourceLocations(findings).locations;
       const related: { path: string; line: number }[] = [];
       for (const path of [...new Set(refs.map((ref) => ref.path))].slice(0, 20)) {
-        const source = await this.load(path, signal, tracked, 256 * 1024);
+        const source = await this.load(path, signal, tracked, INDEX_READ_BYTES);
         if (!source) continue;
         const mentioned = findings
           .filter((f) => f.path === path)
