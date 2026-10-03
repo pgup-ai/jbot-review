@@ -24,6 +24,19 @@ if [ "$variant" = opencode ]; then
       throw new Error(`Unexpected SDK in opencode image: ${name}`);
     }
   '
+  timeout 30s opencode serve --hostname 127.0.0.1 --port 0 > /tmp/opencode-smoke.log 2>&1 &
+  server_pid=$!
+  trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+  for attempt in $(seq 1 30); do
+    if grep -q 'server listening on ' /tmp/opencode-smoke.log; then
+      break
+    fi
+    sleep 1
+  done
+  if ! grep -q 'server listening on ' /tmp/opencode-smoke.log; then
+    sed -E 's/server password .*/server password [redacted]/' /tmp/opencode-smoke.log >&2
+    exit 1
+  fi
 fi
 if [ "$variant" != opencode ]; then
   command-code --no-auto-update --version
