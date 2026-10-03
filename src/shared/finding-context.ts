@@ -60,9 +60,7 @@ export async function readTrackedSource(
         cache.hits++;
         return cached.source;
       }
-      const buffer = Buffer.alloc(
-        Math.min(options?.maxBytes ?? MAX_SOURCE_BYTES, Number(stat.size)),
-      );
+      const buffer = Buffer.alloc(options?.maxBytes ?? MAX_SOURCE_BYTES);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
       const text = buffer.toString('utf8', 0, bytesRead);
