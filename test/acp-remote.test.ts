@@ -52,6 +52,44 @@ async function waitFor<T>(probe: () => Promise<T | undefined>, what: string): Pr
   throw new Error(`timed out waiting for ${what}`);
 }
 
+/** A random port can be taken: an early exit retries elsewhere, and failures carry stderr. */
+async function startGateway(dataDir: string): Promise<{ gateway: ChildProcess; base: string }> {
+  for (let attempt = 1; ; attempt++) {
+    const port = 24000 + Math.floor(Math.random() * 2000);
+    const gateway = spawn(process.execPath, ['--import', 'tsx', 'src/gateway/server.ts'], {
+      env: {
+        ...process.env,
+        JBOT_GATEWAY_PORT: String(port),
+        JBOT_GATEWAY_DATA: dataDir,
+        JBOT_GATEWAY_TOKEN: 'client-tok',
+        JBOT_GATEWAY_HOST: '127.0.0.1',
+        JBOT_GATEWAY_ENDPOINTS: 'box:endpoint-tok',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    gateway.stderr?.on('data', (chunk: Buffer) => (stderr += chunk));
+    const listening = await new Promise<boolean>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        gateway.kill('SIGKILL');
+        reject(new Error(`gateway did not start: ${stderr.slice(-500)}`));
+      }, 15_000);
+      gateway.stdout?.on('data', (chunk: Buffer) => {
+        if (String(chunk).includes('listening')) {
+          clearTimeout(timer);
+          resolve(true);
+        }
+      });
+      gateway.once('exit', () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
+    if (listening) return { gateway, base: `http://127.0.0.1:${port}` };
+    if (attempt === 3) throw new Error(`gateway exited before listening: ${stderr.slice(-500)}`);
+  }
+}
+
 describe('remote acp backend', () => {
   it('uses the gateway URL as the remote-routing switch', () => {
     const saved = { ...process.env };
@@ -78,31 +116,12 @@ describe('remote acp backend', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'jbot-remote-'));
     const agentPath = join(dataDir, 'review-agent.mjs');
     writeFileSync(agentPath, REVIEW_AGENT);
-    const port = 24000 + Math.floor(Math.random() * 2000);
-    const base = `http://127.0.0.1:${port}`;
     let gateway: ChildProcess | undefined;
     let companion: ChildProcess | undefined;
     try {
-      gateway = spawn(process.execPath, ['--import', 'tsx', 'src/gateway/server.ts'], {
-        env: {
-          ...process.env,
-          JBOT_GATEWAY_PORT: String(port),
-          JBOT_GATEWAY_DATA: dataDir,
-          JBOT_GATEWAY_TOKEN: 'client-tok',
-          JBOT_GATEWAY_HOST: '127.0.0.1',
-          JBOT_GATEWAY_ENDPOINTS: 'box:endpoint-tok',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('gateway did not start')), 15_000);
-        gateway?.stdout?.on('data', (chunk: Buffer) => {
-          if (String(chunk).includes('listening')) {
-            clearTimeout(timer);
-            resolve();
-          }
-        });
-      });
+      const started = await startGateway(dataDir);
+      gateway = started.gateway;
+      const { base } = started;
       companion = spawn(process.execPath, ['--import', 'tsx', 'src/companion/index.ts'], {
         env: {
           ...process.env,
