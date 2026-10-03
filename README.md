@@ -1582,7 +1582,7 @@ CI reviews; there is no supported `AGENT` env override.
   `@opencode/cli` launcher installed with the package, then PATH); `JBOT_TRANSCRIPT_DIR`
   exports sanitized session transcripts plus an unsanitized `evidence-trace.jsonl`
   (each turn's prompt, supplied context and full tool calls) for
-  `npm run evidence:baseline`; `JBOT_RUN_STATS=1` logs run totals;
+  `npm run evidence:baseline -- --trace "$JBOT_TRANSCRIPT_DIR"`; `JBOT_RUN_STATS=1` logs run totals;
   `JBOT_VERIFY_FORK=1` forks the main review session for verification when the
   review ran as one session (sharded runs verify from a fresh session) and
   `JBOT_REVIEWER_AGENT=1` swaps opencode's coding system prompt for a review

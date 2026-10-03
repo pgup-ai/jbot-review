@@ -25,7 +25,13 @@ test('classifies each call against the supplied evidence and the session’s ear
   });
   const calls = classifyEvidenceTrace(
     [
-      turn([read('a.ts', 1, 20), read('b.ts', 1, 50), read('c.ts', 1, 10, 'error')]),
+      turn([
+        read('a.ts', 1, 20),
+        read('b.ts', 1, 50),
+        read('c.ts', 1, 10, 'error'),
+        // a.ts has 100 lines, so this read shows nothing.
+        read('a.ts', 150, 10),
+      ]),
       turn([
         read('b.ts', 10, 20),
         { name: 'grep', toolClass: 'search', input: { pattern: 'foo' }, status: 'completed' },
@@ -46,6 +52,7 @@ test('classifies each call against the supplied evidence and the session’s ear
       ['new', true],
       // A failed read showed nothing, so it is neither cited nor seen.
       ['new', false],
+      ['unlocated', false],
       ['repeat', true],
       ['unlocated', false],
       ['new', true],

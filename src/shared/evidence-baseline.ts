@@ -65,16 +65,17 @@ export function classifyEvidenceTrace(
     const read = seen.get(row.sessionID) ?? new Map<string, [number, number][]>();
     seen.set(row.sessionID, read);
     for (const call of row.calls) {
-      const locations = reviewReadLocations(row.workspace, call.name, call.input).map(
-        (location) => ({
+      // A read starting past a supplied file's end shows nothing.
+      const locations = reviewReadLocations(row.workspace, call.name, call.input)
+        .map((location) => ({
           ...location,
           endLine: Math.min(
             location.endLine,
             location.line + READ_WINDOW - 1,
             supplied?.lines.get(location.path) ?? Number.MAX_SAFE_INTEGER,
           ),
-        }),
-      );
+        }))
+        .filter(({ line, endLine }) => endLine >= line);
       const repeat =
         locations.length > 0 &&
         locations.every(({ path, line, endLine }) => {
