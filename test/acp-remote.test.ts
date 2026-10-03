@@ -106,10 +106,10 @@ describe('remote acp backend', () => {
         let stderr = '';
         child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk));
         const listening = await new Promise<boolean>((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error(`gateway did not start: ${stderr.slice(-500)}`)),
-            15_000,
-          );
+          const timer = setTimeout(() => {
+            failures.push(`attempt ${attempt} (port ${port}) timed out: ${stderr.slice(-500)}`);
+            reject(new Error(`gateway did not start:\n${failures.join('\n')}`));
+          }, 15_000);
           // Chunk boundaries are arbitrary, so match the accumulated output.
           child.stdout?.on('data', (chunk: Buffer) => {
             stdout += chunk;
