@@ -26,7 +26,7 @@ export async function readTrackedSource(
   workspace: string,
   path: string,
   signal: AbortSignal,
-  options?: { tracked: Set<string>; cache?: SourceCache },
+  options?: { tracked: Set<string>; cache?: SourceCache; maxBytes?: number },
 ): Promise<{ text: string; truncated: boolean } | undefined> {
   const root = resolveWithinWorkspace(workspace, '.');
   if (!root) return undefined;
@@ -60,7 +60,9 @@ export async function readTrackedSource(
         cache.hits++;
         return cached.source;
       }
-      const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
+      const buffer = Buffer.alloc(
+        Math.min(options?.maxBytes ?? MAX_SOURCE_BYTES, Number(stat.size)),
+      );
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
       const text = buffer.toString('utf8', 0, bytesRead);
