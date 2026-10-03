@@ -1,4 +1,14 @@
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -602,11 +612,19 @@ function traceTurn(
     calls,
   };
   try {
-    // Unsanitized prompts and tool output: owner-only.
+    // Unsanitized prompts and tool output: owner-only, including a file left by an earlier run.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    appendFileSync(join(dir, 'evidence-trace.jsonl'), `${JSON.stringify(row)}\n`, {
-      mode: 0o600,
-    });
+    const fd = openSync(
+      join(dir, 'evidence-trace.jsonl'),
+      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      fchmodSync(fd, 0o600);
+      writeSync(fd, `${JSON.stringify(row)}\n`);
+    } finally {
+      closeSync(fd);
+    }
   } catch (error) {
     log(`(evidence trace failed for ${turn.label}: ${formatUnknown(error)})`);
   }
