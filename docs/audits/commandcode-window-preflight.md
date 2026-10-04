@@ -5,7 +5,8 @@
 A review failed after preflight had already reported every key as window-limited.
 Selection still picked a key with an exhausted short window because it had weekly
 headroom. Every CommandCode session rejected it, including the retry. Private run
-identifiers and account usage are retained only in local audit records.
+identifiers and account usage are omitted here. Earlier public revisions and local
+audit records still contain them.
 
 Selection now requires monthly credits and available five-hour/weekly windows.
 Either an exceeded flag or usage at/above the cap excludes a key. If none qualify,

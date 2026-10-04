@@ -1,7 +1,8 @@
 # Selective advisory verification: live comparison
 
 One sequential run per arm on a frozen frontend pull request. Its private
-repository, PR and base/head revisions are retained only in local audit records.
+repository, PR and base/head revisions are omitted here. Earlier public revisions
+and local audit records still contain them.
 
 - Before (public J-Bot code): `5b5cfd2`.
 - After (public J-Bot code): `b048976535ce19ffe0e2b58b0e152d6c5d63c9bc`.

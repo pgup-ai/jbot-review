@@ -21,7 +21,8 @@ bytes for frontend (about 10% each).
 ## Experiment
 
 - Target: all 13 changed files of a frozen frontend pull request. Its private
-  repository and base/head revisions are retained only in local audit records.
+  repository and base/head revisions are omitted here. Earlier public revisions
+  and local audit records still contain them.
 - Control (public J-Bot code): `55acee0be119b54e3670f2b440ca0d6b871273c3`.
 - Treatment (public J-Bot code): `68cc3b0e7403991a4502d9b43f9ad0b6f6b695df`.
 - Main and aux model: `opencode/muse-spark-1.3-contributor-free` through local
