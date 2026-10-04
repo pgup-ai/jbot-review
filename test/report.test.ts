@@ -357,27 +357,27 @@ test('formatSummaryMarkdown formats code-like tokens in grouped summaries', () =
     condenseSummary([
       [
         '**Changes**',
-        '- Adds integration tests for non-draft REVENUE (INVOICE_SENT) and EXPENSE (BILL_RECEIVED) orders',
-        '- Fixes write-business-event.repository.ts to return { version } from updateStageAndEntryStatus',
-        '- Uses { entryStatus, invoiceId } for INVOICE_SENT orders',
-        '- Makes updateStageAndEntryStatus return { version: version + 1 } instead of void',
-        '- Re-enables the skipped test in business-event-object-matches.api-spec.ts',
+        '- Adds integration tests for non-draft DELIVERY (JOB_STARTED) and CLEANUP (JOB_FINISHED) jobs',
+        '- Fixes write-task.repository.ts to return { version } from updateStageAndTaskStatus',
+        '- Uses { taskStatus, jobId } for JOB_STARTED jobs',
+        '- Makes updateStageAndTaskStatus return { version: version + 1 } instead of void',
+        '- Re-enables the skipped test in task-object-matches.api-spec.ts',
       ].join('\n'),
     ]),
   );
-  assert.match(out, /`REVENUE` \(`INVOICE_SENT`\)/);
-  assert.match(out, /`EXPENSE` \(`BILL_RECEIVED`\)/);
-  assert.match(out, /`write-business-event\.repository\.ts`/);
+  assert.match(out, /`DELIVERY` \(`JOB_STARTED`\)/);
+  assert.match(out, /`CLEANUP` \(`JOB_FINISHED`\)/);
+  assert.match(out, /`write-task\.repository\.ts`/);
   assert.match(out, /`\{ version \}`/);
-  assert.match(out, /`\{ entryStatus, invoiceId \}` for `INVOICE_SENT` orders/);
+  assert.match(out, /`\{ taskStatus, jobId \}` for `JOB_STARTED` jobs/);
   assert.match(out, /`\{ version: version \+ 1 \}`/);
-  assert.match(out, /`updateStageAndEntryStatus`/);
-  assert.match(out, /`business-event-object-matches\.api-spec\.ts`/);
+  assert.match(out, /`updateStageAndTaskStatus`/);
+  assert.match(out, /`task-object-matches\.api-spec\.ts`/);
 });
 
 test('formatSummaryMarkdown does not add nested code spans inside formatted filenames', () => {
-  const out = formatSummaryMarkdown('- Updates src/FMS-123.ts for INVOICE_SENT');
-  assert.equal(out, '- Updates `src/FMS-123.ts` for `INVOICE_SENT`');
+  const out = formatSummaryMarkdown('- Updates src/TASK-123.ts for JOB_STARTED');
+  assert.equal(out, '- Updates `src/TASK-123.ts` for `JOB_STARTED`');
 });
 
 test('formatSummaryMarkdown formats dotted member expressions as a single code span', () => {
@@ -405,11 +405,11 @@ test('formatSummaryMarkdown does not code-span product and protocol proper nouns
 test('condenseSummary dedups raw and already-formatted code-like summary lines before formatting', () => {
   const out = formatSummaryMarkdown(
     condenseSummary([
-      '- Fixes write-business-event.repository.ts to return { version }',
-      '- Fixes `write-business-event.repository.ts` to return `{ version }`',
+      '- Fixes write-task.repository.ts to return { version }',
+      '- Fixes `write-task.repository.ts` to return `{ version }`',
     ]),
   );
-  assert.equal(out, '- Fixes `write-business-event.repository.ts` to return `{ version }`');
+  assert.equal(out, '- Fixes `write-task.repository.ts` to return `{ version }`');
 });
 
 test('formatSummaryMarkdown preserves existing links, bare URLs, and code spans', () => {

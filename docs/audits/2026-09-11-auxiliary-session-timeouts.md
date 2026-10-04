@@ -35,6 +35,8 @@ Cline 33/33).
 
 ## Method
 
+Attempt labels are anonymized; the identifier mapping and raw logs remain local.
+
 - Depot: `depot ci workflow list --name "J-Bot Code Review"` (100 workflows),
   `depot ci workflow show` for attempt ids, `depot ci logs --timestamps` for
   every attempt: 98 attempt logs.
@@ -111,28 +113,28 @@ Every abandonment fired at exactly 300 s after the main pass. In all
 20 cases the main pass was fast and the auxiliary route was one of three
 slow ones.
 
-| Attempt        | Main model                                    | Main s | Aux session                 | Aux route                                  | Ran for s | Job wall s |
-| -------------- | --------------------------------------------- | -----: | --------------------------- | ------------------------------------------ | --------: | ---------: |
-| msf4xsvkzn     | `commandcode/gpt-5.6-luna`                    |      9 | `review-interactions`       | `opencode-go/deepseek-flash`               |       304 |        399 |
-| 4zc0kxxd11     | `commandcode/gpt-5.6-luna`                    |     13 | `guideline-compliance`      | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
-| 4zc0kxxd11     | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
-| cs0q9wm8zk     | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `opencode-go/deepseek-flash`               |       301 |        410 |
-| vkqqp7kfln     | `opencode/muse-spark-1.3-contributor-free`    |     32 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       346 |        390 |
-| wzc4nfkx6s     | `cline/cline-free/muse-spark-1.3-contributor` |     44 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       344 |        398 |
-| qv1r88prvm     | `commandcode/deepseek/deepseek-v4-flash-fast` |     45 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       345 |        448 |
-| 34506830729 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-interactions`       | `opencode-go/deepseek-flash`               |       334 |        442 |
-| 34506830729 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-frontend`           | `opencode-go/deepseek-flash`               |       334 |        442 |
-| 34506830729 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       334 |        442 |
-| qvpwpdh6dz     | `opencode/muse-spark-1.3-contributor-free`    |     69 | `guideline-compliance`      | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
-| qvpwpdh6dz     | `opencode/muse-spark-1.3-contributor-free`    |     69 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
-| 34418701096 a1 | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `changes-since-last-review` | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
-| 34418701096 a1 | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `addressed-prior-comments`  | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
-| fzcqmjnxsc     | `commandcode/deepseek/deepseek-v4-flash-fast` |     86 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       372 |        536 |
-| dvt6b8n1m9     | `opencode-go/muse-spark-1.3-contributor`      |    110 | `review-interactions`       | `opencode-go/deepseek-flash`               |       410 |        495 |
-| rt12jhsl0z     | `opencode-go/muse-spark-1.3-contributor`      |    128 | `review-interactions`       | `opencode-go/deepseek-flash`               |       428 |        564 |
-| r4h8bfxz4h     | `opencode/muse-spark-1.3-contributor-free`    |    159 | `review-interactions`       | `opencode-go/deepseek-flash`               |       459 |        512 |
-| r4h8bfxz4h     | `opencode/muse-spark-1.3-contributor-free`    |    159 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       459 |        512 |
-| 34417502223 a1 | `opencode-go/omen-alpha`                      |    290 | `review-frontend`           | `commandcode/z-ai/glm-5.3-flash`           |       611 |        932 |
+| Attempt       | Main model                                    | Main s | Aux session                 | Aux route                                  | Ran for s | Job wall s |
+| ------------- | --------------------------------------------- | -----: | --------------------------- | ------------------------------------------ | --------: | ---------: |
+| attempt-01    | `commandcode/gpt-5.6-luna`                    |      9 | `review-interactions`       | `opencode-go/deepseek-flash`               |       304 |        399 |
+| attempt-02    | `commandcode/gpt-5.6-luna`                    |     13 | `guideline-compliance`      | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
+| attempt-02    | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       313 |        358 |
+| attempt-03    | `commandcode/gpt-5.6-luna`                    |     13 | `review-interactions`       | `opencode-go/deepseek-flash`               |       301 |        410 |
+| attempt-04    | `opencode/muse-spark-1.3-contributor-free`    |     32 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       346 |        390 |
+| attempt-05    | `cline/cline-free/muse-spark-1.3-contributor` |     44 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       344 |        398 |
+| attempt-06    | `commandcode/deepseek/deepseek-v4-flash-fast` |     45 | `review-interactions`       | `commandcode/deepseek/deepseek-v4.1-flash` |       345 |        448 |
+| attempt-07 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-interactions`       | `opencode-go/deepseek-flash`               |       334 |        442 |
+| attempt-07 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `review-frontend`           | `opencode-go/deepseek-flash`               |       334 |        442 |
+| attempt-07 a1 | `cline/cline-free/muse-spark-1.3-contributor` |     52 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       334 |        442 |
+| attempt-08    | `opencode/muse-spark-1.3-contributor-free`    |     69 | `guideline-compliance`      | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
+| attempt-08    | `opencode/muse-spark-1.3-contributor-free`    |     69 | `review-interactions`       | `commandcode/z-ai/glm-5.3-flash`           |       382 |        424 |
+| attempt-09 a1 | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `changes-since-last-review` | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
+| attempt-09 a1 | `commandcode/deepseek/deepseek-v4-flash-fast` |     74 | `addressed-prior-comments`  | `opencode/muse-spark-1.3-contributor-free` |       354 |        489 |
+| attempt-24    | `commandcode/deepseek/deepseek-v4-flash-fast` |     86 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       372 |        536 |
+| attempt-10    | `opencode-go/muse-spark-1.3-contributor`      |    110 | `review-interactions`       | `opencode-go/deepseek-flash`               |       410 |        495 |
+| attempt-11    | `opencode-go/muse-spark-1.3-contributor`      |    128 | `review-interactions`       | `opencode-go/deepseek-flash`               |       428 |        564 |
+| attempt-12    | `opencode/muse-spark-1.3-contributor-free`    |    159 | `review-interactions`       | `opencode-go/deepseek-flash`               |       459 |        512 |
+| attempt-12    | `opencode/muse-spark-1.3-contributor-free`    |    159 | `guideline-compliance`      | `opencode-go/deepseek-flash`               |       459 |        512 |
+| attempt-13 a1 | `opencode-go/omen-alpha`                      |    290 | `review-frontend`           | `commandcode/z-ai/glm-5.3-flash`           |       611 |        932 |
 
 Cost: these attempts spent 345–450 s (one 642 s) of wall time after
 the main pass, then discarded the work. Median job wall for incomplete Depot
@@ -172,7 +174,7 @@ in the current pool.
   30 auxiliary sessions from 2026-09-10 13:09 to 2026-09-11 01:41 UTC,
   every one within 5–45 s. As main it failed permanently in
   10 attempts because the fresh-session retry keeps the same model
-  (example: bdnp69mcmv: main, retry and three
+  (example: attempt-14: main, retry and three
   auxiliary sessions all exit 9 within 32 s). It is no longer in the current
   pool.
 - `commandcode/deepseek/deepseek-v4.1-flash` returned `unknown model` for
@@ -191,15 +193,15 @@ manual rerun (attempt counts up to 4).
 7 stalled on `Free usage exceeded, subscribe to Go` and one more failed on
 `Rate limit exceeded (Console)`.
 
-| Attempt        | Free route role | Attempt status | Longest retry loop s | Job wall s | Outcome                       |
-| -------------- | --------------- | -------------- | -------------------: | ---------: | ----------------------------- |
-| 34418701096 a1 | aux             | success        |                  302 |        489 | incomplete                    |
-| 67p56rsl10     | aux             | finished       |                   61 |        171 | incomplete                    |
-| 34529776672 a1 | main            | success        |                 1386 |       1556 | permanently: review timed out |
-| 34531496667 a1 | main+aux        | cancelled      |                  121 |        239 |                               |
-| k77k30fps5     | main+aux        | failed         |                 1447 |       1506 | permanently: review timed out |
-| k77k30fps5     | main+aux        | cancelled      |                  542 |        618 |                               |
-| 00sjrwxjsh     | aux             | cancelled      |                   61 |        124 |                               |
+| Attempt       | Free route role | Attempt status | Longest retry loop s | Job wall s | Outcome                       |
+| ------------- | --------------- | -------------- | -------------------: | ---------: | ----------------------------- |
+| attempt-09 a1 | aux             | success        |                  302 |        489 | incomplete                    |
+| attempt-15    | aux             | finished       |                   61 |        171 | incomplete                    |
+| attempt-16 a1 | main            | success        |                 1386 |       1556 | permanently: review timed out |
+| attempt-17 a1 | main+aux        | cancelled      |                  121 |        239 |                               |
+| attempt-18    | main+aux        | failed         |                 1447 |       1506 | permanently: review timed out |
+| attempt-18    | main+aux        | cancelled      |                  542 |        618 |                               |
+| attempt-19    | aux             | cancelled      |                   61 |        124 |                               |
 
 opencode's session status stays `retry attempt 1` for the whole window;
 `waitForAssistantMessage` in `src/shared/opencode.ts` logs it as progress and
@@ -210,12 +212,12 @@ abandons them.
 
 ## 4. The 600 s interactions cap
 
-| Attempt        | Aux route                                     | Ran for s |               Main s | Context bytes |
-| -------------- | --------------------------------------------- | --------: | -------------------: | ------------: |
-| 1p5s3s3g6g     | `commandcode/z-ai/glm-5.3-flash`              |       600 | — (main also failed) |        454990 |
-| 9jvx47rsbk     | `commandcode/deepseek/deepseek-v4.1-flash`    |       600 |                  289 |             — |
-| k77k30fps5     | `opencode/muse-spark-1.3-contributor-free`    |       588 | — (main also failed) |             — |
-| 34482201625 a3 | `commandcode/deepseek/deepseek-v4-flash-fast` |       600 |                  471 |        205575 |
+| Attempt       | Aux route                                     | Ran for s |               Main s | Context bytes |
+| ------------- | --------------------------------------------- | --------: | -------------------: | ------------: |
+| attempt-20    | `commandcode/z-ai/glm-5.3-flash`              |       600 | — (main also failed) |        454990 |
+| attempt-21    | `commandcode/deepseek/deepseek-v4.1-flash`    |       600 |                  289 |             — |
+| attempt-18    | `opencode/muse-spark-1.3-contributor-free`    |       588 | — (main also failed) |             — |
+| attempt-22 a3 | `commandcode/deepseek/deepseek-v4-flash-fast` |       600 |                  471 |        205575 |
 
 In three of four cases the grace would have expired within seconds of the cap
 anyway. Only the 471 s main case lost time the grace would still have allowed.
@@ -225,7 +227,7 @@ The cap is a minor contributor.
 
 - The frontend repository had an `Invalid API key` window on 2026-09-11 13:01–13:51 UTC:
   every OpenCode-routed session failed in 4–22 s until reruns rotated the pool
-  onto CommandCode (34602002974 took four attempts).
+  onto CommandCode (attempt-23 took four attempts).
   Auth failures are non-retryable and should not consume an attempt per pool
   entry.
 - 21 attempts were cancelled mid-review by the per-PR concurrency

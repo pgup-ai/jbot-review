@@ -82,8 +82,7 @@ used main `884fc22` plus the working changes and base `0c75310`.
 
 ## Incomplete-review reporting and Docker follow-up
 
-One review on a private production repository
-corresponds to Depot job `bw00w06sqn` in workflow `sk45z90v19`. Its log records
+One production review, identified in the local audit records, logged
 zero main findings, zero guideline findings, and no verification call.
 Interactions alone exceeded the five-minute post-main grace. No findings were
 withheld because that pass failed. An earlier review on the same PR already
@@ -273,7 +272,7 @@ cases. No new comments or abstractions were needed.
 
 ## Completed Medium run
 
-Local telemetry run `a33b5244-b8b8-44b3-a017-ee29f8fc12f3` completed in
+The local telemetry run completed in
 978,182 ms: main took 978,136 ms, interactions 382,665 ms, and guidelines
 42,695 ms. Queueing was 0–1 ms, grace wait was zero, and verification was
 disabled. This run's critical path was main execution; increasing concurrency

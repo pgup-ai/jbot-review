@@ -198,6 +198,11 @@ comparability record stays in the local results directory, tied back via
 Ship the smallest change that does the job. If a reviewer can delete a line
 without losing behavior, it should not have been written.
 
+- **Public repository.** Commit only synthetic fixtures and sanitized audit
+  summaries. Keep credentials, private repository/PR/run identifiers, raw logs,
+  account usage and internal specs in ignored local storage (`.env`,
+  `.jbot-review/`, `.research/`, `docs/superpowers/`). Review the staged diff;
+  ignore rules do not protect files already tracked by Git.
 - **Comments earn their place** by explaining the non-obvious WHY. Delete any
   comment that restates the code; one line beats three. Don't narrate the
   size/layer of a change.

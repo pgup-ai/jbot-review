@@ -254,10 +254,7 @@ const AUTO_TOOL_CHOICE_MODELS = {
   'muse-spark-1.3-contributor': { forcedToolChoice: false },
 } satisfies Record<string, ModelConfig>;
 
-/**
- * At `low` space-bunny reasons ~1k tokens a session and found 2.5 of 27 known
- * fms issues; at `high`, 6.5 (4 PRs x 2 runs, 2026-09-24), at ~3.7x wall time.
- */
+// Paired recall trials found more known defects at high effort, at greater latency.
 const DEEP_DEFAULT_MODELS = {
   'space-bunny': { defaultReasoningEffort: 'high' },
 } satisfies Record<string, ModelConfig>;

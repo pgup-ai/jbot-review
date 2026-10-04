@@ -67,7 +67,6 @@ describe('parseDiffRoutes', () => {
 
 describe('parseRuleIdDocs', () => {
   it('maps a rule-id prefix to its doc across both README phrasings', () => {
-    // Both conventions exist in the wild: fms uses `— sections of`, fms-frontend `maps to`.
     const readme = [
       '## Rule IDs',
       '- `INV-<n>` — sections of `design/INVARIANTS.md`, for example `INV-9.1`',

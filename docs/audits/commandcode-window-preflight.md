@@ -2,18 +2,17 @@
 
 ## Exhausted key selection
 
-Depot attempt `893dwdtv35`
-failed after preflight had already reported all three keys as window-limited:
-two had exhausted their weekly allowance; the third had used 14.1 of its
-14 five-hour credits. Selection fell back to that third key because it still
-had weekly headroom. Every CommandCode session rejected it, including the retry.
+A review failed after preflight had already reported every key as window-limited.
+Selection still picked a key with an exhausted short window because it had weekly
+headroom. Every CommandCode session rejected it, including the retry. Private run
+identifiers and account usage are retained only in local audit records.
 
 Selection now requires monthly credits and available five-hour/weekly windows.
 Either an exceeded flag or usage at/above the cap excludes a key. If none qualify,
 preflight stops; if all probes fail, it stops rather than guessing. Existing
 uncapped-window handling and weekly-headroom ranking remain unchanged.
 
-The local live probe reproduced the same three blocked keys and rejected them
+The local live probe reproduced the blocked-key selection and rejected it
 before launching a session. Existing tests cover mixed eligible/exhausted keys,
 the three-key failure, single-key selection, numeric caps with a false exceeded
 flag, purchased credits and unavailable probes. No model prompt changed. Other

@@ -6,102 +6,34 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgup-ai/jbot-review)
 
-An agentic PR reviewer built on OpenCode. It runs as a GitHub Action: add one
-workflow file and one secret, and every opened or updated pull request is reviewed
-on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts` +
-`github.ts`.
+J-Bot reviews pull requests on your own GitHub Actions runner. It investigates
+repository context, verifies findings, and posts diff-anchored comments. Choose
+an OpenCode-backed model or a supported CLI backend, or run the same review
+pipeline locally before pushing.
 
-## Image variants
+[Quick start](#quick-start) · [Local review](#local-review) ·
+[Providers and models](#provider-configuration-in-repo) · [Inputs](#input-reference) ·
+[Review controls](#review-quality-controls) · [Project guidelines](#project-guidelines) ·
+[Development](#development)
 
-All variants include the same reviewer code. Review prompts,
-model selection and finding policy are identical for supported routes.
-
-| Image tag          | Included local CLIs          | Action entry point                       |
-| ------------------ | ---------------------------- | ---------------------------------------- |
-| `latest` (default) | All supported CLIs           | `pgup-ai/jbot-review-action@v0`          |
-| `latest-slim`      | OpenCode, CommandCode, Devin | `pgup-ai/jbot-review-action/slim@v0`     |
-| `latest-opencode`  | OpenCode                     | `pgup-ai/jbot-review-action/opencode@v0` |
-
-Use `:<commit-sha>`, `:<commit-sha>-slim` or `:<commit-sha>-opencode` to pin a
-published revision; the `latest` tags track successful builds of main. All
-variants are published for Linux amd64. Build locally with
-`docker build --platform linux/amd64 --target opencode .` (or `--target slim`);
-a build without `--target` remains full.
-
-The OpenCode image supports all [J-Bot providers](#provider-configuration-in-repo)
-routed through OpenCode, including direct DeepSeek, for both main and auxiliary
-models. J-Bot's provider and credential configuration still applies; this does not
-expose OpenCode's entire upstream provider catalog. The image excludes other CLI
-backends, Poolside and gateway routes. It uses one amd64 baseline binary.
-
-Slim supports its included local runtimes and SDK providers. Cursor, Codex,
-Devin and Kilo can also run through a configured ACP gateway with slim.
-Unsupported models fail pool validation before selection; no candidates are
-silently removed and no CLIs are installed on demand.
-
-Direct Docker/Depot callers can select the image tag. Use the matching action
-entry point only after its image and action version are published.
+For advanced usage, see [run comparisons](#comparing-review-runs), the
+[observer gateway](#observer-gateway), the [ACP gateway](#acp-gateway), or
+[self-hosted deployment](deploy/README.md).
 
 ## In-repo workflow
 
-The review runs as a Docker container action inside the user's GitHub Actions
-runner. Users reference the thin [`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action) repo (just an `action.yml`); this repo builds the image it pulls.
-
-### How it works
-
-1. The user drops a workflow file into `.github/workflows/` and adds an API key
-   as a repo secret.
-2. On `pull_request` events, GitHub Actions checks out their repo and runs
-   the `jbot-review` Docker container action.
-3. The action pulls the pre-built image from `ghcr.io/pgup-ai/jbot-review`,
-   starts `opencode serve` inside the container, and drives a read-only `plan`
-   agent over the SDK. The agent discovers repo guidelines (`AGENTS.md`,
-   `REVIEW.md`, `.pr-governance/`, and compatible review-bot rule files) and
-   explores the full repo with its own tools.
-4. The agent receives the PR's exact base...head diff scope and returns
-   structured findings as JSON; the wrapper validates line anchors against the
-   diff, demotes low-confidence blocking findings, gates by severity, and posts
-   one review with inline comments + a deterministic verdict. Two parallel
-   read-only sessions run alongside the main review: one audits the diff
-   against discovered repository guidelines rule-by-rule, and one verifies
-   which prior jbot-review threads the branch has addressed.
-
-### For the action developer (you)
-
-This repo builds the Docker image. The separate
+Users reference the thin
 [`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action)
-repo is what users reference — it contains just the thin `action.yml` that
-pulls the image.
+repo; this repository builds the Docker image it runs.
 
-```bash
-# CI auto-builds and pushes the image on every push to main.
-# To release a new v0 version of the public action:
-# 1. Make sure ghcr.io/pgup-ai/jbot-review:latest exists and is public.
-# 2. Make sure the public action.yml matches this repo's action.yml.
-# 3. Move the v0 tag:
-cd ../jbot-review-action    # or wherever it's checked out
-git tag -f v0
-git push origin v0 --force
-```
+### Quick start
 
-The Dockerfile uses `node:24-slim` and runs the bundled JS from `dist/`.
-The `v0` action reference is a moving major-version tag; pin to an immutable
-release tag if you need fully stable action behavior.
+**Step 1 — Add a provider secret.** In your repository, open Settings → Secrets
+and variables → Actions → New repository secret. Add `OPENCODE_API_KEY` with
+your OpenCode API key. This example uses the default OpenCode model; other
+providers and their credentials are listed in [Provider configuration](#provider-configuration-in-repo).
 
-> **The Action is one of several build entrypoints.** `scripts/build.ts` also
-> bundles `src/worker/` and `src/app/` (for the separately-deployed control plane),
-> but the Action runs only `dist/workflow/index.js`, and those paths share no
-> imports — so worker/server changes can't affect Action users.
->
-> The standalone worker's mirrored control-plane payload carries models and
-> keys, but no custom base URL, so it does not support `openai-compatible` yet.
-> Native providers, including `kimi-code-plan-global`, work there unchanged.
-
-### For the user (repo owner who wants reviews)
-
-**Step 1 — Add the workflow file.** Copy the full example from the
-[`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action/blob/main/examples/jbot-review.yml)
-repo into `.github/workflows/jbot-review.yml`, or use this minimal version:
+**Step 2 — Add `.github/workflows/jbot-review.yml`.**
 
 ```yaml
 name: J-Bot Code Review
@@ -128,45 +60,42 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: pgup-ai/jbot-review-action@v0 # moving v0 tag; pin a release tag for stability
+      - uses: pgup-ai/jbot-review-action@v0
         with:
-          provider: ${{ vars.JBOT_REVIEW_PROVIDER || '' }}
-          model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
-          sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
-          opencode-proxy-url: ${{ secrets.OPENCODE_PROXY_URL }}
-          auto-approve: ${{ vars.JBOT_AUTO_APPROVE || 'false' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
-          deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
-          openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
-          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-          nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
-          zai-api-key: ${{ secrets.ZAI_API_KEY }}
-          kimi-api-key: ${{ secrets.KIMI_API_KEY }}
-          xai-api-key: ${{ secrets.XAI_API_KEY }}
-          fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
-          mimo-api-key: ${{ secrets.MIMO_API_KEY }}
-          tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
-          devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
-          commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
-          cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
-          poolside-api-key: ${{ secrets.POOLSIDE_API_KEY }}
-          qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
-          codex-auth: ${{ secrets.CODEX_AUTH_JSON }}
-          cline-auth: ${{ secrets.CLINE_AUTH_JSON }}
-          grok-auth: ${{ secrets.GROK_AUTH_JSON }}
-          kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
-          enable-context7: auto
-          context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
-The minimal version reviews every push. The full example also supports
-**one-off reviews** — comment
+The `v0` action reference is a moving major-version tag. See
+[Image variants](#image-variants) for image choices and revision pinning.
+Fork-triggered workflows do not receive provider secrets by default; see
+[GitHub's fork PR behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request).
+
+**Step 3 — Open a non-draft PR.** J-Bot reviews it automatically and runs again
+when you push commits. Findings appear as inline comments and a review summary;
+see [Review output](#review-output) for verdicts and optional auto-approval.
+
+Optionally add `AGENTS.md`, `REVIEW.md`, or another supported
+[guideline file](#project-guidelines) to customize the review. For external
+API and SDK changes, you can also add a
+[Context7 key](#context7-documentation-lookup).
+
+### How it works
+
+1. GitHub Actions checks out the repository and starts the review container.
+2. J-Bot loads repository guidelines and supplies the selected PR diff to the
+   configured backend. Full reviews cover the complete `base...head` diff;
+   eligible follow-ups may select affected files, each with its complete PR patch.
+3. Main review and enabled auxiliary passes investigate the changes. Findings
+   are deduplicated and verified; prior findings are checked for resolution.
+4. Code validates diff anchors, applies confidence and severity rules, and posts
+   the review. Uncertain candidates remain visible as described under
+   [Finding evidence](#finding-evidence) and [review experiments](#review-experiment-preset).
+
+### One-off reviews
+
+The [full workflow example](https://github.com/pgup-ai/jbot-review-action/blob/main/examples/jbot-review.yml)
+also supports **one-off reviews**. Comment
 `/jbot [--provider=<id>] [--model=<id>] [--auto-approve[=true|false]]` on a PR
 (repo owners/members/collaborators only) to re-run the review once with
 overrides, e.g. `/jbot --model=devin/glm-5.2 --auto-approve` — the model's
@@ -177,124 +106,10 @@ overrides an enabled repository default for that run. Semantics — fallbacks,
 fork policy, `workflow_dispatch` parity — are documented in
 [`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action#one-off-reviews-jbot).
 
-**Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
-and variables → Actions → New repository secret. Add the keys for the providers
-you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
-`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, `KIMI_API_KEY`,
-`XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `TOKENROUTER_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
-`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `POOLSIDE_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`, `CODEX_AUTH_JSON`,
-`CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, `ANTHROPIC_API_KEY`, or
-`JBOT_OPENAI_COMPATIBLE_API_KEY`. Configure `JBOT_OPENAI_COMPATIBLE_BASE_URL`
-as an Actions variable when using the generic `openai-compatible` provider.
-Empty provider key inputs are ignored; an auxiliary model on a different
-provider needs that provider's own key, which is never reused across providers.
-`opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`; comma-separate
-several of them and each run picks, among accounts whose 5h and weekly Go-plan
-windows are still open, the one with the most monthly allowance left. Unlike CommandCode a
-spent plan is not fatal on its own: accounts that bill overage to the credit
-balance keep serving and are preferred, while one with overage blocked is
-picked only when nothing else is left, and its requests can still fail. Ranking
-needs keys with the console's `all` permission — an inference-only key cannot
-read plan meters, and its probe degrades to "usage unavailable" rather than
-failing.
+### Thread resolution
 
-**CLI-backend credentials — where to get each one.** Unlike the model-provider keys
-above, these authenticate with a local CLI login or a dashboard key. You paste the
-**whole file** (for example, Codex, Cline, Grok Build) or the **key value** (for
-example, Cursor, Devin, Command Code) — no digging a field out of JSON.
-
-| Backend          | Get the credential                                                                                                                                                                                                | Secret (Action input)                                            |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Codex CLI**    | `codex login` (ChatGPT Plus/Pro) → paste the whole `~/.codex/auth.json`                                                                                                                                           | `CODEX_AUTH_JSON` (`codex-auth`)                                 |
-| **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                                                                            | `CLINE_AUTH_JSON` (`cline-auth`)                                 |
-| **Grok Build**   | `grok login --device-auth` → paste `~/.grok/auth.json`; alternatively create an xAI API key                                                                                                                       | `GROK_AUTH_JSON` (`grok-auth`), or `XAI_API_KEY` (`xai-api-key`) |
-| **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                                                                              | `CURSOR_API_KEY` (`cursor-api-key`)                              |
-| **Qoder CLI**    | Create a Personal Access Token under [Qoder Integrations](https://qoder.com/account/integrations)                                                                                                                 | `QODER_PERSONAL_ACCESS_TOKEN` (`qoder-token`)                    |
-| **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli))                                                           | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`)              |
-| **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it; comma-separate multiple keys for a balance-aware per-run pick | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`)              |
-| **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                                                                               | `KILO_AUTH_CONTENT` (`kilo-auth`)                                |
-
-Each CLI backend runs **read-only** (Cline by plan mode alone, below) and only
-when the main or aux model names it. Cline and Command Code write their credential into an
-isolated temporary `HOME`, Codex into a temporary `CODEX_HOME`, and Qoder carries
-its PAT through a one-time SDK auth payload while using a temporary `HOME`; each is
-removed after the run. Cursor reads its key straight from the env (no file); Devin writes
-`~/.local/share/devin/credentials.toml` under a separate temporary `HOME` per CLI
-invocation, removed after its process exits. Cline runs in the checkout in plan
-mode with every tool auto-approved, so it can read the code. Cline approves tools
-all at once, so its shell and write tools are approved too, and hooks and rules
-the checkout commits (`.cline/hooks`, `.clinerules`) load: an accepted risk on
-CI runners. It uses only the auth token — the file's `model`/`reasoning` are
-stripped — and has two billing
-modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
-subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (no
-file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
-removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
-model.
-
-Set `JBOT_CLINE_SDK_VERIFIER=true` to verify findings on a Cline aux route
-through the [Cline SDK](https://docs.cline.bot/sdk/clinecore) (full image only).
-A child process with the CLI's environment and temporary `HOME` runs the SDK's
-bare agent, never its harness, which runs a checkout's `.cline` hooks and loads
-its `.clinerules`. Its only tools are J-Bot's: read, grep, and list tracked
-files inside the checkout, never `.git`. It identifies as the SDK
-(`X-CLIENT-TYPE: cline-sdk`); a 403 leaves the findings unverified, and any
-other failure falls back to the CLI's single pass.
-
-Poolside uses its OpenAI-compatible chat-completions endpoint directly. Laguna
-S 2.1 is absent from Poolside's advertised model list, but the endpoint accepts
-`poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests stream
-directly, use Poolside's full 32,768-token completion allowance, and leave
-reasoning at Poolside's default unless `model-options.reasoningEffort` overrides
-it. This avoids the Pool CLI's coding-agent loop while preserving review,
-auxiliary, token usage, timeouts, and repair behavior.
-
-Qoder can read and search the checkout but receives no shell or write-capable tool.
-Its user/project settings, hooks, MCP servers, skills, memory, web access, and
-subagents are disabled. The complete diff is embedded with no byte ceiling, as
-for every other shell-free backend: a file dropped to fit a budget would never
-be reviewed at all, so coverage is never traded for prompt size. Auxiliary
-sessions fail open as usual.
-
-`grok` is an opt-in Grok Build CLI backend and is intentionally separate from
-`xai`: existing `provider: xai` configurations continue using `XAI_API_KEY`
-through the SDK engine unchanged. For `provider: grok`, account auth is preferred
-when both credentials are configured; the API key is passed only when account
-auth is absent, so an expired login cannot silently switch to paid API usage.
-Grok Build runs headlessly with edits, shell,
-MCP, web access, memory, and subagents disabled. It receives the budgeted review
-prompt in an empty read-only temporary workspace, so repository Grok config,
-plugins, and hooks cannot execute. To preserve full-diff coverage without checkout
-access, jbot-review embeds every changed file whole at any shard count, including
-one; an oversized PR fails at the provider rather than being reviewed in part.
-Sessions are serialized through one per-run temporary Grok home, removed after
-the run. With account auth, this lets credential rotations persist without
-concurrent writes. Whether a rotated refresh token from one ephemeral
-GitHub-hosted run can be reused from the original `GROK_AUTH_JSON` secret on the
-next run is not yet a documented xAI contract. Treat repeated hosted-run auth as
-unresolved during dogfood; jbot-review never logs or exports the rotated
-credential.
-The CLI account's availability, quota, and acceptable-use terms remain controlled
-by xAI; dogfood with `provider: grok`, `model: grok/default`, and conservative
-concurrency before wider use.
-
-Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
-framework, CLI, cloud-service, or workflow changes.
-
-**Secret exposure:** the example above passes multiple provider secrets so
-`JBOT_REVIEW_MODEL` can switch providers without another YAML edit. For a least-privilege setup, pass only the selected provider
-keys:
-
-```yaml
-with:
-  model: opencode/deepseek-v4-flash,openrouter/google/gemini-2.5-flash
-  opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
-  openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-  github-token: ${{ secrets.GITHUB_TOKEN }}
-```
-
-**Thread resolution token:** when jbot verifies a prior finding is fixed, it
-posts an addressed reply and then attempts to resolve the GitHub review thread.
+When jbot verifies a prior finding is fixed, it posts an addressed reply and
+then attempts to resolve the GitHub review thread.
 Once every finding in a review is represented by a resolved thread, the run that
 resolves the final thread (or the next run after a manual resolution) compacts
 its stale summary, keeps the original body under a disclosure, and minimizes the
@@ -305,84 +120,43 @@ GitHub's `resolveReviewThread` or `minimizeComment` mutation. If you see
 `JBOT_REVIEW_THREAD_RESOLUTION_TOKEN` with a PAT or GitHub App token that can
 manage PR reviews, then pass it through `thread-resolution-token`.
 
-**Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
-`.cursor/BUGBOT.md`, `.coderabbit.yaml`, `greptile.json`, or
-`.pr-governance/README.md` at the repo root. The agent reads these during review.
-Markdown docs referenced from those files are preloaded into the review context
-(within the guidance byte budget); anything beyond the budget is listed as an
-available path the agent can read on demand.
+### Image variants
 
-**Step 4 — Open a PR.** The review runs automatically. To re-trigger, push a
-new commit or close and reopen the PR.
+All variants include the same reviewer code. Review prompts,
+model selection and finding policy are identical for supported routes.
 
-**Migrating from `api-key`:** replace the old unified `api-key` input with the
-matching provider-specific input, such as `opencode-api-key` for
-`provider: opencode`. The unified input is not read by current `v0` builds.
+| Image tag          | Included local CLIs          | Action entry point                       |
+| ------------------ | ---------------------------- | ---------------------------------------- |
+| `latest` (default) | All supported CLIs           | `pgup-ai/jbot-review-action@v0`          |
+| `latest-slim`      | OpenCode, CommandCode, Devin | `pgup-ai/jbot-review-action/slim@v0`     |
+| `latest-opencode`  | OpenCode                     | `pgup-ai/jbot-review-action/opencode@v0` |
 
-### Testing locally before publishing
+Use `:<commit-sha>`, `:<commit-sha>-slim` or `:<commit-sha>-opencode` to pin a
+published revision; the `latest` tags track successful builds of main. All
+variants are published for Linux amd64. After `npm ci` and `npm run build`, build locally with
+`docker build --platform linux/amd64 --target opencode .` (or `--target slim`);
+a build without `--target` remains full.
 
-This repo's own `.github/workflows/jbot-review.yml` dogfoods branch-local action
-changes before they are published to `pgup-ai/jbot-review-action@v0`. It builds
-the branch image, uses the relative `./` action, and passes every provider key
-input so `JBOT_REVIEW_MODEL` can switch providers without editing the workflow.
+The OpenCode image supports all [J-Bot providers](#provider-configuration-in-repo)
+routed through OpenCode, including direct DeepSeek, for both main and auxiliary
+models. J-Bot's provider and credential configuration still applies; this does not
+expose OpenCode's entire upstream provider catalog. The image excludes other CLI
+backends, Poolside and gateway routes. It uses one amd64 baseline binary.
 
-```yaml
-- uses: actions/checkout@v7
-  with:
-    fetch-depth: 0
-    ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
-- uses: actions/setup-node@v6
-  with:
-    node-version: '24'
-- run: npm ci
-- run: npm run build
-- run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
-- uses: ./
-  with:
-    provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || '' }}
-    model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
-    sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
-    opencode-proxy-url: ${{ secrets.OPENCODE_PROXY_URL }}
-    pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
-    dry-run: ${{ inputs['dry-run'] || 'false' }}
-    auto-approve: ${{ vars.JBOT_AUTO_APPROVE || 'false' }}
-    max-findings: ${{ inputs['max-findings'] || '0' }}
-    min-severity: ${{ inputs['min-severity'] || 'nit' }}
-    include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
-    fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
-    opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
-    deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
-    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-    openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
-    openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
-    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-    nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
-    zai-api-key: ${{ secrets.ZAI_API_KEY }}
-    kimi-api-key: ${{ secrets.KIMI_API_KEY }}
-    xai-api-key: ${{ secrets.XAI_API_KEY }}
-    fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
-    mimo-api-key: ${{ secrets.MIMO_API_KEY }}
-    tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
-    devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
-    commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
-    cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
-    poolside-api-key: ${{ secrets.POOLSIDE_API_KEY }}
-    qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
-    grok-auth: ${{ secrets.GROK_AUTH_JSON }}
-    kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
-    enable-context7: auto
-    context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
-```
+Slim supports its included local runtimes and SDK providers. Cursor, Codex,
+Devin and Kilo can also run through a configured ACP gateway with slim.
+Unsupported models fail pool validation before selection; no candidates are
+silently removed and no CLIs are installed on demand.
+
+Direct Docker/Depot callers can select the image tag. Use the matching action
+entry point only after its image and action version are published.
 
 ### Review quality controls
 
-Every run reviews the complete base...head diff (never just the latest
-commit); repeats of findings already covered by prior jbot threads are
-suppressed in code before posting. Several inputs tune the recall/precision/cost
+Full reviews cover the complete `base...head` diff. Eligible incremental
+follow-ups select affected files and review each file's complete PR patch, never
+just its latest edit. Repeats of findings covered by unresolved prior jbot threads
+are suppressed in code before posting. Several inputs tune the recall/precision/cost
 balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
@@ -479,7 +253,7 @@ Tool-capable OpenCode verifiers can read and search repository evidence;
 CommandCode verifiers can investigate when `JBOT_COMMANDCODE_TOOLS=true`.
 Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
-omissions. Main reviews continue to cover the full base-to-head diff.
+omissions. Main reviews retain complete PR patches for their selected files.
 
 **Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on),
 `JBOT_CONTEXT_TRIM` (off), `JBOT_SHARED_PREFIX_PROMPT` (off) and
@@ -499,16 +273,19 @@ env:
 Only the literal `true`/`false` count; anything else, including an unset
 variable, takes the default above.
 
-**Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models with
-longer timeout headroom): set the main `model` to the heavy tier, then
+**Heavy-model recipe:** select one heavy model when every main review should
+use it. Main and auxiliary roles draw independently from a pool; list order
+does not assign roles. For a provider tier that supports concurrent sessions:
 
 ```yaml
-model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier first, then a fast tier for the aux draw
-review-shards: '0' # opt into auto-sharding on a paid concurrent tier
-max-concurrent-sessions: '6' # six concurrent sessions on a provider tier that supports it
-# defaults already active: review-shards 1 (initial group), time-budget-minutes 30,
-# model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers.
+model: ${{ vars.JBOT_REVIEW_MODEL }}
+review-shards: '0'
+max-concurrent-sessions: '6'
 ```
+
+Reasoning effort defaults to `low` for most models, with the provider-specific
+exceptions listed above. Set `model-options` explicitly when you need a higher
+supported effort.
 
 `review-shards` controls initial grouping. Complete diff pages are then fitted
 to the assembled prompt budget, so even `1` can produce several sessions.
@@ -525,6 +302,130 @@ Models.dev ID and the model IDs exposed by each supported CLI. Refresh it with
 authenticated locally. The generator uses the npm versions pinned in the
 Docker image; Cursor comes from its vendor-installed binary, while Devin has no
 enumerable catalog command and is documented as that explicit boundary.
+
+| `provider`              | Default model                                                   | Action key input                | Secret/env var                       |
+| ----------------------- | --------------------------------------------------------------- | ------------------------------- | ------------------------------------ |
+| `opencode`              | `opencode/deepseek-v4-flash`                                    | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `opencode-go`           | `opencode-go/deepseek-v4-flash`                                 | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `deepseek`              | `deepseek/deepseek-v4-flash`                                    | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
+| `openai`                | `openai/gpt-5.4-nano`                                           | `openai-api-key`                | `OPENAI_API_KEY`                     |
+| `openai-compatible`     | required                                                        | `openai-compatible-api-key`     | `JBOT_OPENAI_COMPATIBLE_API_KEY`     |
+| `anthropic`             | `anthropic/claude-sonnet-4-6`                                   | `anthropic-api-key`             | `ANTHROPIC_API_KEY`                  |
+| `google`                | `google/gemini-2.5-flash`                                       | `gemini-api-key`                | `GEMINI_API_KEY`                     |
+| `openrouter`            | `openrouter/openai/gpt-4o-mini`                                 | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
+| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                             | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
+| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                       | `zai-api-key`                   | `ZAI_API_KEY`                        |
+| `kimi-code-plan-global` | `kimi-code-plan-global/k3`                                      | `kimi-api-key`                  | `KIMI_API_KEY`                       |
+| `kimi-code-plan-cn`     | `kimi-code-plan-cn/k3`                                          | `kimi-api-key`                  | `KIMI_API_KEY`                       |
+| `xai`                   | `xai/grok-4.3`                                                  | `xai-api-key`                   | `XAI_API_KEY`                        |
+| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
+| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           | `mimo-api-key`                  | `MIMO_API_KEY`                       |
+| `tokenrouter`           | `tokenrouter/z-ai/glm-5.3-free`                                 | `tokenrouter-api-key`           | `TOKENROUTER_API_KEY`                |
+| `devin`                 | `devin/default`                                                 | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
+| `commandcode`           | `commandcode/default`                                           | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
+| `cursor`                | `cursor/default`                                                | `cursor-api-key`                | `CURSOR_API_KEY`                     |
+| `poolside`              | `poolside/laguna-s-2.1`                                         | `poolside-api-key`              | `POOLSIDE_API_KEY`                   |
+| `qoder`                 | `qoder/auto`                                                    | `qoder-token`                   | `QODER_PERSONAL_ACCESS_TOKEN`        |
+| `codex`                 | `codex/default`                                                 | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
+| `cline`                 | `cline/default`                                                 | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
+| `cline-pass`            | `cline-pass/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
+| `grok`                  | `grok/default`                                                  | `grok-auth`, then `xai-api-key` | `GROK_AUTH_JSON`, then `XAI_API_KEY` |
+| `kilo`                  | `kilo/kilo-auto/free`                                           | `kilo-auth`                     | `KILO_AUTH_CONTENT`                  |
+| `dim`                   | `dim/dimcode-api-oauth/deepseek-v4-flash`                       | `dim-auth`                      | `DIM_AUTH_BUNDLE`                    |
+
+#### Credentials and backend behavior
+
+Pass the credential for each provider in your model pool. Empty key inputs are
+ignored; each provider reads its configured credential input. For a
+single-provider setup, pass only that provider's key.
+
+`opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`; comma-separate
+several of them and each run picks, among accounts whose 5h and weekly Go-plan
+windows are still open, the one with the most monthly allowance left. Unlike CommandCode a
+spent plan is not fatal on its own: accounts that bill overage to the credit
+balance keep serving and are preferred, while one with overage blocked is
+picked only when nothing else is left, and its requests can still fail. Ranking
+needs keys with the console's `all` permission — an inference-only key cannot
+read plan meters, and its probe degrades to "usage unavailable" rather than
+failing.
+
+**CLI-backend credentials.** Use the file, key, or bundle listed for your backend:
+
+| Backend          | Get the credential                                                                                                                                                                                                | Secret (Action input)                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Codex CLI**    | `codex login` (ChatGPT Plus/Pro) → paste the whole `~/.codex/auth.json`                                                                                                                                           | `CODEX_AUTH_JSON` (`codex-auth`)                                 |
+| **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                                                                            | `CLINE_AUTH_JSON` (`cline-auth`)                                 |
+| **Grok Build**   | `grok login --device-auth` → paste `~/.grok/auth.json`; alternatively create an xAI API key                                                                                                                       | `GROK_AUTH_JSON` (`grok-auth`), or `XAI_API_KEY` (`xai-api-key`) |
+| **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                                                                              | `CURSOR_API_KEY` (`cursor-api-key`)                              |
+| **Qoder CLI**    | Create a Personal Access Token under [Qoder Integrations](https://qoder.com/account/integrations)                                                                                                                 | `QODER_PERSONAL_ACCESS_TOKEN` (`qoder-token`)                    |
+| **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli))                                                           | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`)              |
+| **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it; comma-separate multiple keys for a balance-aware per-run pick | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`)              |
+| **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                                                                               | `KILO_AUTH_CONTENT` (`kilo-auth`)                                |
+| **DimAgent**     | Run `npm run dim:bundle` from an authenticated local setup and copy the emitted bundle                                                                                                                            | `DIM_AUTH_BUNDLE` (`dim-auth`)                                   |
+
+Each CLI backend runs **read-only** (Cline by plan mode alone, below) and only
+when the main or aux model names it. Cline and Command Code write their credential into an
+isolated temporary `HOME`, Codex into a temporary `CODEX_HOME`, and Qoder carries
+its PAT through a one-time SDK auth payload while using a temporary `HOME`; each is
+removed after the run. Cursor reads its key straight from the env (no file); Devin writes
+`~/.local/share/devin/credentials.toml` under a separate temporary `HOME` per CLI
+invocation, removed after its process exits. Cline runs in the checkout in plan
+mode with every tool auto-approved, so it can read the code. Cline approves tools
+all at once, so its shell and write tools are approved too, and hooks and rules
+the checkout commits (`.cline/hooks`, `.clinerules`) load: an accepted risk on
+CI runners. It uses only the auth token — the file's `model`/`reasoning` are
+stripped — and has two billing
+modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
+subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (no
+file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
+removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
+model.
+
+Set `JBOT_CLINE_SDK_VERIFIER=true` to verify findings on a Cline aux route
+through the [Cline SDK](https://docs.cline.bot/sdk/clinecore) (full image only).
+A child process with the CLI's environment and temporary `HOME` runs the SDK's
+bare agent, never its harness, which runs a checkout's `.cline` hooks and loads
+its `.clinerules`. Its only tools are J-Bot's: read, grep, and list tracked
+files inside the checkout, never `.git`. It identifies as the SDK
+(`X-CLIENT-TYPE: cline-sdk`); a 403 leaves the findings unverified, and any
+other failure falls back to the CLI's single pass.
+
+Poolside uses its OpenAI-compatible chat-completions endpoint directly. Laguna
+S 2.1 is absent from Poolside's advertised model list, but the endpoint accepts
+`poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests stream
+directly, use Poolside's full 32,768-token completion allowance, and leave
+reasoning at Poolside's default unless `model-options.reasoningEffort` overrides
+it. This avoids the Pool CLI's coding-agent loop while preserving review,
+auxiliary, token usage, timeouts, and repair behavior.
+
+Qoder can read and search the checkout but receives no shell or write-capable tool.
+Its user/project settings, hooks, MCP servers, skills, memory, web access, and
+subagents are disabled. Every assigned diff hunk is embedded in budgeted pages;
+content that cannot fit fails explicitly instead of being silently omitted.
+Auxiliary sessions fail open as usual.
+
+`grok` is an opt-in Grok Build CLI backend and is intentionally separate from
+`xai`: existing `provider: xai` configurations continue using `XAI_API_KEY`
+through the SDK engine unchanged. For `provider: grok`, account auth is preferred
+when both credentials are configured; the API key is passed only when account
+auth is absent, so an expired login cannot silently switch to paid API usage.
+Grok Build runs headlessly with edits, shell,
+MCP, web access, memory, and subagents disabled. It receives the budgeted review
+prompt in an empty read-only temporary workspace, so repository Grok config,
+plugins, and hooks cannot execute. Each review page includes its complete
+assigned diff, preserving review coverage without checkout access.
+Sessions are serialized through one per-run temporary Grok home, removed after
+the run. With account auth, this lets credential rotations persist without
+concurrent writes. Whether a rotated refresh token from one ephemeral
+GitHub-hosted run can be reused from the original `GROK_AUTH_JSON` secret on the
+next run is not yet a documented xAI contract. Treat repeated hosted-run auth as
+unresolved during dogfood; jbot-review never logs or exports the rotated
+credential.
+The CLI account's availability, quota, and acceptable-use terms remain controlled
+by xAI; dogfood with `provider: grok`, `model: grok/default`, and conservative
+concurrency before wider use.
+
+#### Backend execution and limits
 
 **SDK engines.** Non-CLI providers other than Poolside run on the opencode
 server. The in-process pi SDK engine was removed: `sdk-engine: auto` (or
@@ -583,35 +484,6 @@ sessions may be absent from the metadata block.
 These counters are observability only: they do not identify API keys,
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
-
-| `provider`              | Default model                                                   | Action key input                | Secret/env var                       |
-| ----------------------- | --------------------------------------------------------------- | ------------------------------- | ------------------------------------ |
-| `opencode`              | `opencode/deepseek-v4-flash`                                    | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
-| `opencode-go`           | `opencode-go/deepseek-v4-flash`                                 | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
-| `deepseek`              | `deepseek/deepseek-v4-flash`                                    | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
-| `openai`                | `openai/gpt-5.4-nano`                                           | `openai-api-key`                | `OPENAI_API_KEY`                     |
-| `openai-compatible`     | required                                                        | `openai-compatible-api-key`     | `JBOT_OPENAI_COMPATIBLE_API_KEY`     |
-| `anthropic`             | `anthropic/claude-sonnet-4-6`                                   | `anthropic-api-key`             | `ANTHROPIC_API_KEY`                  |
-| `google`                | `google/gemini-2.5-flash`                                       | `gemini-api-key`                | `GEMINI_API_KEY`                     |
-| `openrouter`            | `openrouter/openai/gpt-4o-mini`                                 | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
-| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                             | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
-| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                       | `zai-api-key`                   | `ZAI_API_KEY`                        |
-| `kimi-code-plan-global` | `kimi-code-plan-global/k3`                                      | `kimi-api-key`                  | `KIMI_API_KEY`                       |
-| `kimi-code-plan-cn`     | `kimi-code-plan-cn/k3`                                          | `kimi-api-key`                  | `KIMI_API_KEY`                       |
-| `xai`                   | `xai/grok-4.3`                                                  | `xai-api-key`                   | `XAI_API_KEY`                        |
-| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
-| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           | `mimo-api-key`                  | `MIMO_API_KEY`                       |
-| `tokenrouter`           | `tokenrouter/z-ai/glm-5.3-free`                                 | `tokenrouter-api-key`           | `TOKENROUTER_API_KEY`                |
-| `devin`                 | `devin/default`                                                 | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
-| `commandcode`           | `commandcode/default`                                           | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
-| `cursor`                | `cursor/default`                                                | `cursor-api-key`                | `CURSOR_API_KEY`                     |
-| `poolside`              | `poolside/laguna-s-2.1`                                         | `poolside-api-key`              | `POOLSIDE_API_KEY`                   |
-| `qoder`                 | `qoder/auto`                                                    | `qoder-token`                   | `QODER_PERSONAL_ACCESS_TOKEN`        |
-| `codex`                 | `codex/default`                                                 | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
-| `cline`                 | `cline/default`                                                 | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
-| `cline-pass`            | `cline-pass/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
-| `grok`                  | `grok/default`                                                  | `grok-auth`, then `xai-api-key` | `GROK_AUTH_JSON`, then `XAI_API_KEY` |
-| `kilo`                  | `kilo/kilo-auto/free`                                           | `kilo-auth`                     | `KILO_AUTH_CONTENT`                  |
 
 CommandCode checks monthly plan credits and five-hour/weekly limits before selecting a key. Exhausted keys are excluded even when purchased credits remain. If no key has confirmed available limits, the run stops before launching review sessions; this includes when all usage probes fail. A key can still reach its limit after selection if other runs consume the same allowance.
 
@@ -714,61 +586,24 @@ Use `provider: qoder` with `qoder-token` /
 an isolated temporary home and the Agent SDK's streaming protocol; project/user
 settings, hooks, MCP, writes, shell, web access, and subagents are disabled.
 
-Set the `model` input to override the defaults — a fully qualified
-`provider/model` selects the provider too. For automatic PR reviews without
-editing workflow YAML on every model change, define an Actions configuration
-variable named `JBOT_REVIEW_MODEL` at the repository or organization level and
-pass it through the workflow. Leave it unset to use `opencode`'s default model
-(`openai-compatible` is the exception and requires an explicit model):
+#### Changing models
+
+Use a fully qualified `provider/model` reference. To change models without
+editing the workflow, define the Actions variable `JBOT_REVIEW_MODEL` and pass
+it as `model`. For example, a pool using OpenCode and OpenRouter needs both keys:
 
 ```yaml
 - uses: pgup-ai/jbot-review-action@v0
   with:
-    provider: ${{ vars.JBOT_REVIEW_PROVIDER || '' }}
-    model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+    model: ${{ vars.JBOT_REVIEW_MODEL || 'opencode/deepseek-v4-flash' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
-    deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
-    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-    openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
-    openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-    nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
-    zai-api-key: ${{ secrets.ZAI_API_KEY }}
-    kimi-api-key: ${{ secrets.KIMI_API_KEY }}
-    xai-api-key: ${{ secrets.XAI_API_KEY }}
-    fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
-    mimo-api-key: ${{ secrets.MIMO_API_KEY }}
-    tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
-    devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
-    commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
-    cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
-    poolside-api-key: ${{ secrets.POOLSIDE_API_KEY }}
-    qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
-    grok-auth: ${{ secrets.GROK_AUTH_JSON }}
-    enable-context7: auto
-    context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
-    thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
-The action reads the key matching each pool candidate's provider, because the
-main pass and the auxiliary sessions both draw from that one pool. A key is
-never reused across providers. CLI backends cannot reuse opencode-provider keys,
-and opencode-backed providers cannot reuse CLI backend keys such as
-`DEVIN_WINDSURF_API_KEY` or `COMMANDCODE_ACCESS_KEY`, so a pool mixing CLI and
-opencode-backed candidates must pass both keys. Future provider changes can be
-made through `JBOT_REVIEW_MODEL` alone, without editing the workflow YAML. The
-pool comes from either the `model` action input or `JBOT_REVIEW_MODEL`.
-Provider API keys can also be supplied through their standard env vars, such as
-`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
-`KIMI_API_KEY`, `POOLSIDE_API_KEY`, `JBOT_OPENAI_COMPATIBLE_API_KEY`, or `FIREWORKS_API_KEY`. The
-custom endpoint also reads `JBOT_OPENAI_COMPATIBLE_BASE_URL`. This convenience
-pattern exposes every configured provider key to the action runtime.
-When `openai-compatible` is among the pool's providers, pass its namespaced key
-and base URL. For the smallest secret surface area, keep the pool to one
-provider and pass only that key.
+Pass the matching credential whenever you add a provider to the pool. For
+`openai-compatible`, also pass its namespaced base URL. Local review and the
+webhook app use `MODEL` and the environment variables in the provider table.
 
 #### Model references select the provider
 
@@ -794,8 +629,9 @@ a failing model. Every candidate is validated before the review starts, so a
 typo fails the next run outright rather than only the runs that happen to pick
 it. The chosen model is logged and appears in the posted review's metadata block.
 
-**Candidates may name different providers.** Only one runs per PR, and each
-provider's key is resolved separately, so a pool can mix them:
+**Candidates may name different providers.** Main and auxiliary roles can
+select different providers in the same run. Each provider's key is resolved
+separately, so a pool can mix them:
 
 ```yaml
 model: opencode/deepseek-v4-flash,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
@@ -849,48 +685,58 @@ documentation lookup.
 
 ### Input reference
 
-| Input                        | Required | Default               | Description                                                                                                                                                                                                                                                  |
-| ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
-| `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `opencode`            | Only `opencode` remains; `auto` (the removed pi engine) logs and uses opencode                                                                                                                                                                               |
-| `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
-| `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
-| `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
-| `openai-api-key`             | No       | —                     | Used when the main or aux model names `openai`                                                                                                                                                                                                               |
-| `openai-compatible-api-key`  | No       | —                     | Namespaced key for `openai-compatible`                                                                                                                                                                                                                       |
-| `openai-compatible-base-url` | No       | —                     | Required endpoint URL for `openai-compatible`                                                                                                                                                                                                                |
-| `anthropic-api-key`          | No       | —                     | Used when the main or aux model names `anthropic`                                                                                                                                                                                                            |
-| `gemini-api-key`             | No       | —                     | Used when the main or aux model names `google`                                                                                                                                                                                                               |
-| `openrouter-api-key`         | No       | —                     | Used when the main or aux model names `openrouter`                                                                                                                                                                                                           |
-| `nvidia-api-key`             | No       | —                     | Used when the main or aux model names `nvidia`                                                                                                                                                                                                               |
-| `zai-api-key`                | No       | —                     | Used when the main or aux model names `zai-coding-plan`                                                                                                                                                                                                      |
-| `kimi-api-key`               | No       | —                     | Used when the main or aux model names a Kimi provider                                                                                                                                                                                                        |
-| `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                                                                                                                                                        |
-| `fireworks-api-key`          | No       | —                     | Used when the main or aux model names `fireworks-ai`                                                                                                                                                                                                         |
-| `mimo-api-key`               | No       | —                     | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                                                                                                                                                                |
-| `tokenrouter-api-key`        | No       | —                     | Used when the main or aux model names `tokenrouter`                                                                                                                                                                                                          |
-| `devin-windsurf-api-key`     | No       | —                     | Used when the main or aux model names `devin`                                                                                                                                                                                                                |
-| `commandcode-access-key`     | No       | —                     | Used when the main or aux model names `commandcode`; accepts a comma-separated list — each run logs every key's meters, then picks the key with the largest share of its weekly limit still open (exhausted keys excluded; no confirmed eligible key → stop) |
-| `cursor-api-key`             | No       | —                     | Used when the main or aux model names `cursor`                                                                                                                                                                                                               |
-| `poolside-api-key`           | No       | —                     | Used when the main or aux model names `poolside`                                                                                                                                                                                                             |
-| `qoder-token`                | No       | —                     | Used when the main or aux model names `qoder`                                                                                                                                                                                                                |
-| `codex-auth`                 | No       | —                     | Used when the main or aux model names `codex`                                                                                                                                                                                                                |
-| `cline-auth`                 | No       | —                     | Used when the main or aux model names `cline` / `cline-pass`                                                                                                                                                                                                 |
-| `grok-auth`                  | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected                                                                                                                                                                                      |
-| `kilo-auth`                  | No       | —                     | Used when the main or aux model names `kilo`                                                                                                                                                                                                                 |
-| `enable-context7`            | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`                                                                                                                                                                                   |
-| `context7-api-key`           | No       | —                     | Optional Context7 key for reliable CI docs lookup                                                                                                                                                                                                            |
-| `github-token`               | Yes      | `${{ github.token }}` | Token to read PR and post review                                                                                                                                                                                                                             |
-| `thread-resolution-token`    | No       | —                     | Optional token for resolving threads and minimizing completed reviews                                                                                                                                                                                        |
-| `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                                                                                                                                                                                             |
-| `dry-run`                    | No       | `false`               | Log review output without posting to GitHub                                                                                                                                                                                                                  |
-| `auto-approve`               | No       | `false`               | Approve an eligible exact reviewed head when no new or open jbot findings remain                                                                                                                                                                             |
-| `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                                                                                                                                                                                             |
-| `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                                                                                                                                                     |
-| `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                                                                                                                                                                                               |
-| `enable-guideline-pass`      | No       | `true`                | Check repository guidelines; may share the first auxiliary review pass or an opted-in main-session sweep                                                                                                                                                     |
-| `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                                                                                                                                                                                              |
+The table below covers setup and posting inputs. See
+[Review quality controls](#review-quality-controls) for tuning inputs and
+[`action.yml`](action.yml) for the complete action contract.
+
+**Migrating from `api-key`:** replace the old unified `api-key` input with the
+matching provider-specific input, such as `opencode-api-key` for
+`provider: opencode`. The unified input is not read by current `v0` builds.
+
+| Input                        | Required | Default                          | Description                                                                                                                                                                                                                                                  |
+| ---------------------------- | -------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`                   | No       | from `model`                     | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
+| `model`                      | No       | `opencode` default               | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
+| `sdk-engine`                 | No       | `opencode`                       | Only `opencode` remains; `auto` (the removed pi engine) logs and uses opencode                                                                                                                                                                               |
+| `opencode-proxy-url`         | No       | —                                | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
+| `opencode-api-key`           | No       | —                                | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
+| `deepseek-api-key`           | No       | —                                | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
+| `openai-api-key`             | No       | —                                | Used when the main or aux model names `openai`                                                                                                                                                                                                               |
+| `openai-compatible-api-key`  | No       | —                                | Namespaced key for `openai-compatible`                                                                                                                                                                                                                       |
+| `openai-compatible-base-url` | No       | —                                | Required endpoint URL for `openai-compatible`                                                                                                                                                                                                                |
+| `anthropic-api-key`          | No       | —                                | Used when the main or aux model names `anthropic`                                                                                                                                                                                                            |
+| `gemini-api-key`             | No       | —                                | Used when the main or aux model names `google`                                                                                                                                                                                                               |
+| `openrouter-api-key`         | No       | —                                | Used when the main or aux model names `openrouter`                                                                                                                                                                                                           |
+| `nvidia-api-key`             | No       | —                                | Used when the main or aux model names `nvidia`                                                                                                                                                                                                               |
+| `zai-api-key`                | No       | —                                | Used when the main or aux model names `zai-coding-plan`                                                                                                                                                                                                      |
+| `kimi-api-key`               | No       | —                                | Used when the main or aux model names a Kimi provider                                                                                                                                                                                                        |
+| `xai-api-key`                | No       | —                                | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                                                                                                                                                        |
+| `fireworks-api-key`          | No       | —                                | Used when the main or aux model names `fireworks-ai`                                                                                                                                                                                                         |
+| `mimo-api-key`               | No       | —                                | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                                                                                                                                                                |
+| `tokenrouter-api-key`        | No       | —                                | Used when the main or aux model names `tokenrouter`                                                                                                                                                                                                          |
+| `tokenrouter-base-url`       | No       | `https://api.tokenrouter.com/v1` | Override the TokenRouter endpoint (`JBOT_TOKENROUTER_BASE_URL`)                                                                                                                                                                                              |
+| `devin-windsurf-api-key`     | No       | —                                | Used when the main or aux model names `devin`                                                                                                                                                                                                                |
+| `commandcode-access-key`     | No       | —                                | Used when the main or aux model names `commandcode`; accepts a comma-separated list — each run logs every key's meters, then picks the key with the largest share of its weekly limit still open (exhausted keys excluded; no confirmed eligible key → stop) |
+| `cursor-api-key`             | No       | —                                | Used when the main or aux model names `cursor`                                                                                                                                                                                                               |
+| `poolside-api-key`           | No       | —                                | Used when the main or aux model names `poolside`                                                                                                                                                                                                             |
+| `qoder-token`                | No       | —                                | Used when the main or aux model names `qoder`                                                                                                                                                                                                                |
+| `codex-auth`                 | No       | —                                | Used when the main or aux model names `codex`                                                                                                                                                                                                                |
+| `cline-auth`                 | No       | —                                | Used when the main or aux model names `cline` / `cline-pass`                                                                                                                                                                                                 |
+| `grok-auth`                  | No       | —                                | Grok account auth; preferred over `xai-api-key` when `grok` is selected                                                                                                                                                                                      |
+| `kilo-auth`                  | No       | —                                | Used when the main or aux model names `kilo`                                                                                                                                                                                                                 |
+| `dim-auth`                   | No       | —                                | Used when the main or aux model names `dim`; bundle from `npm run dim:bundle`                                                                                                                                                                                |
+| `enable-context7`            | No       | `auto`                           | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`                                                                                                                                                                                   |
+| `context7-api-key`           | No       | —                                | Optional Context7 key for reliable CI docs lookup                                                                                                                                                                                                            |
+| `github-token`               | Yes      | `${{ github.token }}`            | Token to read PR and post review                                                                                                                                                                                                                             |
+| `thread-resolution-token`    | No       | —                                | Optional token for resolving threads and minimizing completed reviews                                                                                                                                                                                        |
+| `pr-number`                  | No       | —                                | PR number for manual `workflow_dispatch` reviews                                                                                                                                                                                                             |
+| `dry-run`                    | No       | `false`                          | Log review output without posting to GitHub                                                                                                                                                                                                                  |
+| `auto-approve`               | No       | `false`                          | Approve an eligible exact reviewed head when no new or open jbot findings remain                                                                                                                                                                             |
+| `max-findings`               | No       | `0`                              | Cap findings; `0` means no limit                                                                                                                                                                                                                             |
+| `min-severity`               | No       | `nit`                            | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                                                                                                                                                     |
+| `include-prior-comments`     | No       | `true`                           | Include existing PR review comments in context                                                                                                                                                                                                               |
+| `enable-guideline-pass`      | No       | `true`                           | Check repository guidelines; may share the first auxiliary review pass or an opted-in main-session sweep                                                                                                                                                     |
+| `fail-on-error`              | No       | `true`                           | Fail the workflow if the review cannot complete                                                                                                                                                                                                              |
 
 ### Review output
 
@@ -927,8 +773,22 @@ its original severity) and outside the severity counts.
 
 ## Local review
 
-Review the current branch before pushing — no PR, no GitHub token, no GitHub
-API call, no `git fetch`:
+Requires Git, Node.js **22.19 or newer**, and a provider credential. From a
+checkout of this repository, install dependencies:
+
+```bash
+npm ci
+```
+
+Add your provider configuration to the gitignored `.env` in that directory:
+
+```dotenv
+MODEL=opencode/deepseek-v4-flash
+OPENCODE_API_KEY=your-api-key
+```
+
+Then review the current branch before pushing — no PR, GitHub token, GitHub
+API call, or `git fetch`:
 
 ```bash
 npm run review:local
@@ -943,32 +803,6 @@ npm run review:local -- --workspace /path/to/repo --base origin/main
 `--workspace` accepts the worktree root or a directory inside it. Prepare the
 checkout yourself; the command does not clone, fetch, switch it, or use GitHub.
 Add `--preview` to inspect the review plan without provider credentials.
-
-### Comparing models
-
-Run the same review with several models and compare speed and findings:
-
-```bash
-npm run review:compare -- --models opencode/grok-code,zai-coding-plan/glm-5.2 --workspace /path/to/repo --base origin/main
-```
-
-Each model reviews the same diff in turn, then a table reports wall-clock,
-finding count, and severities, followed by every model's findings. A model that
-fails is reported in its row instead of ending the comparison. `--workspace` and
-`--base` are optional and mean what they do above.
-
-Name the provider in the model id (`provider/model`); the command blanks
-`PROVIDER` so a pin left in `.env` cannot swallow that prefix. To review a pull
-request, check it out first:
-
-```bash
-git -C /path/to/repo fetch origin pull/123/head:pr-123 && git -C /path/to/repo switch pr-123
-```
-
-This is an eyeball comparison, not a graded one: it reports what each model
-said and how long it took, and nothing scores those findings. Use
-`benchmark:review` (see `plan/review-quality-corpus.md`) when you need recall
-and precision against seeded defects.
 
 - **Diff scope:** merge-base of the selected checkout's `HEAD` and `origin/HEAD`
   (falls back to `origin/main`; override with `--base <ref>` or
@@ -1028,6 +862,32 @@ and precision against seeded defects.
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
+
+### Comparing models
+
+Run the same review with several models and compare speed and findings:
+
+```bash
+npm run review:compare -- --models opencode/grok-code,zai-coding-plan/glm-5.2 --workspace /path/to/repo --base origin/main
+```
+
+Each model reviews the same diff in turn, then a table reports wall-clock,
+finding count, and severities, followed by every model's findings. A model that
+fails is reported in its row instead of ending the comparison. `--workspace` and
+`--base` are optional and mean what they do above.
+
+Name the provider in the model id (`provider/model`); the command blanks
+`PROVIDER` so a pin left in `.env` cannot swallow that prefix. To review a pull
+request, check it out first:
+
+```bash
+git -C /path/to/repo fetch origin pull/123/head:pr-123 && git -C /path/to/repo switch pr-123
+```
+
+This is an eyeball comparison, not a graded one: it reports what each model
+said and how long it took, and nothing scores those findings. Use
+`benchmark:review` (see `plan/review-quality-corpus.md`) when you need recall
+and precision against seeded defects.
 
 ## Comparing review runs
 
@@ -1546,6 +1406,65 @@ reviews stay deterministic and bounded.
 The playbooks narrow attention, not scope: every selected reviewer still covers
 all assigned diff content and must report only concrete, code-grounded findings.
 
+## Development
+
+After [local setup](#local-review), run the repository checks:
+
+```bash
+npm run typecheck
+npm run lint
+npm run format:check
+npm test
+npm run build
+```
+
+The build writes gitignored bundles to `dist/`. Review-engine changes may also
+need a quality benchmark; see [AGENTS.md](AGENTS.md#review-quality-gate).
+
+This repository is public. Keep credentials in local `.env` files or GitHub
+secrets, and private fixtures, logs and internal notes in ignored local storage
+such as `.jbot-review/` or `.research/`. Commit only placeholder credentials,
+synthetic examples and sanitized audit summaries. Inspect the staged diff before
+pushing; `.gitignore` does not remove files already tracked by Git.
+
+### Testing locally before publishing
+
+Use [local review](#local-review) to exercise the pipeline without posting.
+For GitHub validation, this repository's
+[dogfood workflow](.github/workflows/jbot-review.yml) builds the branch image and
+runs the relative `./` action. This tests branch changes before publishing them
+through `pgup-ai/jbot-review-action@v0`; provider configuration and artifact
+uploads live in that workflow.
+
+### Publishing the action
+
+This repo builds the Docker image. The separate
+[`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action)
+repo is what users reference — it contains just the thin `action.yml` that
+pulls the image.
+
+```bash
+# CI auto-builds and pushes the image on every push to main.
+# To release a new v0 version of the public action:
+# 1. Make sure ghcr.io/pgup-ai/jbot-review:latest exists and is public.
+# 2. Make sure the public action.yml matches this repo's action.yml.
+# 3. Move the v0 tag:
+cd ../jbot-review-action    # or wherever it's checked out
+git tag -f v0
+git push origin v0 --force
+```
+
+The Dockerfile uses `node:24-slim` and runs the bundled JS from `dist/`.
+
+> **The Action is one of several build entrypoints.** `scripts/build.ts` also
+> bundles `src/worker/` and `src/app/` (for the separately-deployed control plane),
+> but the Action starts only `dist/workflow/index.js`. These entrypoints share
+> review code under `src/shared/`, so changes there can affect multiple runtimes.
+>
+> The standalone worker's mirrored control-plane payload carries models and
+> keys, but no custom base URL, so it does not support `openai-compatible` yet.
+> Native providers, including `kimi-code-plan-global`, work there unchanged.
+
 ## Project structure
 
 ```
@@ -1556,16 +1475,20 @@ src/
     github.ts       # list files, post review, verdict
     prompt.ts       # system prompt
     patch.ts        # diff line parser
-    filter.ts       # noise filter
+    filter.ts       # finding filters, deduplication, and verdicts
     types.ts        # shared types
   workflow/
     index.ts        # in-repo GitHub Action entry point
+  local/            # local review and model comparison support
+  worker/           # standalone control-plane worker
+  gateway/          # observer viewer, journals, and ACP relay
+  companion/        # remote agent host
   app/
     server.ts       # HTTP webhook/API server
     app.ts          # webhook handler + triggers
     auth.ts         # GitHub App JWT → installation token
     clone.ts        # git clone for the review runner
-    queue.ts        # in-memory job queue (MVP)
+    queue.ts        # in-memory job queue
 action.yml          # Docker action metadata for in-repo workflow
 Dockerfile          # container image
 .env.example        # env vars for the server
@@ -1574,18 +1497,14 @@ Dockerfile          # container image
 
 ## Why the `plan` agent
 
-`plan` is OpenCode's built-in read-only agent: it can read, grep, and glob but
-cannot edit files. Using it keeps the review safe and avoids non-interactive
-permission prompts that hang a CI job. Its shell also refuses commands that
-change the checkout (`git commit`, `git stash`, `rm`, …) or run code (`node`,
-`npx`, `python`, …), since a package that code loads comes from jbot's image,
-not the reviewed repo. Agent selection is intentionally fixed for
-CI reviews; there is no supported `AGENT` env override.
+J-Bot uses OpenCode's `plan` agent by default, with explicit permission rules,
+tool filtering, isolated configuration, and an allowlisted shell environment.
+These layers deny edits, commands that mutate the checkout or execute code,
+and interactive prompts that would stall CI. Review-specific agents use the
+same restrictions. Arbitrary `AGENT` environment overrides are not supported.
 
 ## Notes
 
-- **Fork PRs** won't have the secret (GitHub withholds secrets from fork-triggered
-  runs in Actions).
 - **OpenCode**: this repo drives OpenCode V2 (`@opencode/cli` 2.x, `@opencode/client`).
   Catalog provider keys reach the server as its documented env var and
   custom-endpoint keys ride the server-only config; every session's shell env

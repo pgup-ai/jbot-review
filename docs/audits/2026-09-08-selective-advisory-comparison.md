@@ -1,8 +1,7 @@
 # Selective advisory verification: live comparison
 
-One sequential run per arm on frozen frontend PR #2235, head
-`cba6fb487af0c95e833deb016844fb9b578a0e55`, base
-`1c16ccd08013f95c3ee683971dfdb80283cb58b4`:
+One sequential run per arm on a frozen frontend pull request. Private repository,
+PR and revision identifiers are retained only in local audit records:
 
 - Before: pre-Friday `5b5cfd2`.
 - After: `b048976535ce19ffe0e2b58b0e152d6c5d63c9bc`.

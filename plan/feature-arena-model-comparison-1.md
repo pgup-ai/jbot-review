@@ -75,7 +75,7 @@ This plan implements the J-Bot-owned foundation for arena model comparisons on a
 
 ## 4. Dependencies
 
-- **DEP-001**: Approved design at `docs/superpowers/specs/2026-08-29-arena-model-comparison-design.md`.
+- **DEP-001**: Local-only design at `docs/superpowers/specs/2026-08-29-arena-model-comparison-design.md` (not distributed; the implemented contract lives in `src/local/arena-contract.ts`).
 - **DEP-002**: Existing local review pipeline in `src/local/index.ts` and `src/shared/runner.ts`.
 - **DEP-003**: Existing full-SHA image publication in `.github/workflows/build.yml`.
 - **DEP-004**: Arena repository creation after this branch is merged and its image is published.

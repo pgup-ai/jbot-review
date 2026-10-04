@@ -89,11 +89,7 @@ route capabilities differ. Neither recall nor precision was established; the
 verifier and GitHub-specific auxiliary checks were not exercised. No success-rate,
 tail-percentile, or model-ranking claim is justified by three attempts per route.
 
-Telemetry run IDs, in table order: `fb297b69-e41c-4298-b4b3-eab0b056f2e1`,
-`b6e4ce2a-5fe3-43c6-a5a4-82d26ece9d06`, `9df1b4fe-949f-4885-8ee0-22928ad5f3ad`,
-`23d28fa0-aeb7-44cf-9f2e-0586c1c0c613`, `23b70003-249e-4976-967b-dcf28cf89cef`,
-`bcaaf20a-c39b-481f-99ca-9845e9bffaad`. Raw local artifacts are retained outside the
-repository. See [Comparing review runs](../../README.md#comparing-review-runs)
+Raw local artifacts and their run-ID mapping are retained outside the repository. See [Comparing review runs](../../README.md#comparing-review-runs)
 for the report command and interpretation.
 
 ## Decision

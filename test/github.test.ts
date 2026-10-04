@@ -1052,7 +1052,7 @@ describe('formatPriorJbotThreadsForPrompt', () => {
       url: 'https://github.com/example/repo/pull/1#discussion_r1001',
       replies: [
         {
-          author: 'jingbof',
+          author: 'reviewer',
           body: [
             'Not applied: `config` is required on `LineDto`, and the backend contract test covers it.',
           ].join('\n'),
@@ -1064,7 +1064,7 @@ describe('formatPriorJbotThreadsForPrompt', () => {
     const prompt = formatPriorJbotThreadsForPrompt([thread]);
 
     assert.match(prompt, /Thread replies:/);
-    assert.match(prompt, /jingbof:/);
+    assert.match(prompt, /reviewer:/);
     assert.match(prompt, /Not applied: `config` is required/);
     assert.match(prompt, /do not re-post it and do not mark it addressed/);
     assert.doesNotMatch(prompt, /jbot-review:finding/);

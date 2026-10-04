@@ -70,7 +70,7 @@ results do not satisfy that gate.
 
 ## Dogfood permission failure and correction
 
-Run `35631540323`, job `106438663930`, denied 14 native file reads and eight
+A dogfood run denied 14 native file reads and eight
 searches. Three of five main tasks failed; the coverage guard withheld the
 review. The actual CLI stop reason was `permission_denied`; stderr misleadingly
 led with the reasoning-effort notice and reported continuation exhaustion.
