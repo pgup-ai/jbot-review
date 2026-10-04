@@ -3,7 +3,7 @@ set -eu
 variant="$1"
 test "$JBOT_IMAGE_VARIANT" = "$variant"
 test "$(git --version)" = 'git version 2.56.0'
-test -x "$(git --exec-path)/git-remote-https"
+timeout 30s git ls-remote --exit-code https://github.com/git/git.git refs/tags/v2.56.0 >/dev/null
 (
   repo=$(mktemp -d)
   trap 'rm -rf "$repo"' EXIT
