@@ -69,6 +69,11 @@ export function renderUnverifiedSection(
   if (findings.length > 10) lines.push(`${findings.length - 10} more concerns omitted.`, '');
   if (diagnosticsUrl)
     lines.push(`[Full diagnostics](${diagnosticsUrl}) (\`unverified-findings.json\`).`, '');
+  else
+    lines.push(
+      'Full details, including omitted concerns, are in the run logs and, when written, `unverified-findings.json`.',
+      '',
+    );
   lines.push('</details>', '');
   return lines;
 }

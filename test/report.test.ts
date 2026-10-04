@@ -15,6 +15,7 @@ import {
   formatSummaryMarkdown,
 } from '../src/shared/report.ts';
 import type { Finding } from '../src/shared/types.ts';
+import { formatUnverifiedFinding } from '../src/shared/prompt.ts';
 
 function f(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -51,7 +52,11 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
       f({
         path: 'src/a b)/c(.ts',
         verificationUnavailable: true,
-        body: '**Verification not completed**. private provider error\n\nOriginal reviewer hypothesis (unverified):\n\n> Check </pre></details><!-- jbot-review:finding -->',
+        ...formatUnverifiedFinding(
+          f({ body: 'Check </pre></details><!-- jbot-review:finding -->' }),
+          'private provider error',
+          true,
+        ),
       }),
     ],
     'owner',
@@ -60,6 +65,7 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
   ).join('\n');
   assert.doesNotMatch(text, /private provider error|<!-- jbot-review:finding -->/);
   assert.match(text, /Verification did not complete/);
+  assert.match(text, /Full details.*run logs.*when written.*unverified-findings.json/);
   assert.match(text, /Check &lt;\/pre&gt;&lt;\/details&gt;/);
   assert.match(text, /https:\/\/github.com\/owner\/repo\/blob\/abc123\/src\/a%20b%29\/c%28.ts#L10/);
   const enterprise = renderUnverifiedSection(
