@@ -108,9 +108,7 @@ export function selectGuidelineSections(text: string, titles: string[]): string 
 const MAX_GLOB_LENGTH = 128;
 const MAX_GLOBS_PER_DOC = 64;
 const MAX_GLOB_VARIANTS = 64;
-// Token-work ceiling for one routing pass (~sub-second). Real FMS is ~85M;
-// beyond this, route selection fails open (unmatched routes just don't apply,
-// and whole-file discovery still supplies guidance).
+// Bound routing work; whole-file discovery still supplies guidance when this ceiling is reached.
 const MAX_ROUTE_MATCH_OPS = 300_000_000;
 
 /** Cuts an unquoted trailing `# comment` — valid YAML Cursor tolerates. */

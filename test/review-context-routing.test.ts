@@ -63,8 +63,6 @@ function buildGovernanceRepo(): string {
   return root;
 }
 
-// Minimal single-doc routed repo. README uses the `maps to` phrasing (fms-frontend's),
-// so these also exercise rule-ID resolution end-to-end for that convention.
 function writeRoutedRepo(root: string, opts: { paths?: string; rules: string; doc: string }): void {
   mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
   mkdirSync(join(root, '.pr-governance/design'), { recursive: true });

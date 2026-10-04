@@ -5,6 +5,15 @@ dist/
 # Any local copy of the env file carries the same live keys.
 .env.*
 !.env.example
+# Local credentials and signing keys; examples must use placeholders.
+*.pem
+*.key
+*.p12
+*.pfx
+auth.json
+credentials.json
+credentials.toml
+.netrc
 # Worker deploy config — real copy gitignored; commit only the .example
 deploy/jbot-review-worker.env.local
 .DS_Store
@@ -26,3 +35,4 @@ gateway-data/
 
 # Local scratch / ad-hoc research notes
 .research/
+.usage-dashboard/

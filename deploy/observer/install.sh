@@ -92,11 +92,8 @@ else
     echo "rewrote managed $CADDYFILE; previous copy at $CADDYFILE.bak"
   fi
   printf '%s\n' "$SITE" > "$CADDYFILE"
-  # Caddy is the only public door but ships on package defaults: a reboot on
-  # 2026-07-27 tripped systemd's 90s start timeout, nothing retried, and the
-  # site stayed dark for two hours with the gateway healthy on loopback.
-  # `10-` keeps an operator's own drop-in winning — systemd applies these in
-  # lexical order, and `override.conf` is `systemctl edit`'s filename, not ours.
+  # Retry Caddy startup failures; without it the healthy loopback gateway is unreachable.
+  # The `10-` prefix lets an operator's later drop-in override these defaults.
   install -d -m 755 /etc/systemd/system/caddy.service.d
   cat > /etc/systemd/system/caddy.service.d/10-jbot-observer.conf <<'UNIT'
 # managed by jbot-observer install.sh

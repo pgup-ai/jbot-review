@@ -1,11 +1,11 @@
 # Selective advisory verification: live comparison
 
-One sequential run per arm on frozen frontend PR #2235, head
-`cba6fb487af0c95e833deb016844fb9b578a0e55`, base
-`1c16ccd08013f95c3ee683971dfdb80283cb58b4`:
+One sequential run per arm on a frozen frontend pull request. Its private
+repository, PR and base/head revisions are omitted here. Earlier public revisions
+and local audit records still contain them.
 
-- Before: pre-Friday `5b5cfd2`.
-- After: `b048976535ce19ffe0e2b58b0e152d6c5d63c9bc`.
+- Before (public J-Bot code): `5b5cfd2`.
+- After (public J-Bot code): `b048976535ce19ffe0e2b58b0e152d6c5d63c9bc`.
 - Both: `opencode/muse-spark-1.3-contributor-free`, local OpenCode 1.18.26,
   identical npm dependencies, 11 changed files, three automatic main shards,
   concurrency three, two review passes, verification enabled, 30-minute budget,
