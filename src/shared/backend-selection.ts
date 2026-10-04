@@ -176,11 +176,11 @@ export function assertImageSupportsModels(pool: string[], env: NodeJS.ProcessEnv
   if (variant === 'opencode') {
     const unsupported = pool.filter((model) => {
       const { providerID } = parseModelName(model);
-      return providerID !== 'opencode' && providerID !== 'opencode-go';
+      return Boolean(cliBackendForProvider(providerID)) || isPoolsideProvider(providerID);
     });
     if (unsupported.length) {
       throw new Error(
-        `The opencode image supports only OpenCode Zen (opencode/) and Go (opencode-go/). ` +
+        `The opencode image supports only models routed through the OpenCode integration. ` +
           `Unsupported models: ${unsupported.join(', ')}. Use ghcr.io/pgup-ai/jbot-review:latest (full). No models were removed from the pool.`,
       );
     }

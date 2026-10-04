@@ -16,11 +16,11 @@ on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts
 All variants include the same reviewer code. Review prompts,
 model selection and finding policy are identical for supported routes.
 
-| Image tag          | Included local CLIs                  | Action entry point                       |
-| ------------------ | ------------------------------------ | ---------------------------------------- |
-| `latest` (default) | All supported CLIs                   | `pgup-ai/jbot-review-action@v0`          |
-| `latest-slim`      | OpenCode, CommandCode, Devin         | `pgup-ai/jbot-review-action/slim@v0`     |
-| `latest-opencode`  | OpenCode only (including Zen and Go) | `pgup-ai/jbot-review-action/opencode@v0` |
+| Image tag          | Included local CLIs          | Action entry point                       |
+| ------------------ | ---------------------------- | ---------------------------------------- |
+| `latest` (default) | All supported CLIs           | `pgup-ai/jbot-review-action@v0`          |
+| `latest-slim`      | OpenCode, CommandCode, Devin | `pgup-ai/jbot-review-action/slim@v0`     |
+| `latest-opencode`  | OpenCode                     | `pgup-ai/jbot-review-action/opencode@v0` |
 
 Use `:<commit-sha>`, `:<commit-sha>-slim` or `:<commit-sha>-opencode` to pin a
 published revision; the `latest` tags track successful builds of main. All
@@ -28,9 +28,11 @@ variants are published for Linux amd64. Build locally with
 `docker build --platform linux/amd64 --target opencode .` (or `--target slim`);
 a build without `--target` remains full.
 
-The OpenCode image accepts only Zen (`opencode/…`) and Go (`opencode-go/…`) for
-every main and auxiliary model. It contains no other provider CLI or SDK and
-does not allow gateway routes. It uses one amd64 baseline binary.
+The OpenCode image supports all [J-Bot providers](#provider-configuration-in-repo)
+routed through OpenCode, including direct DeepSeek, for both main and auxiliary
+models. J-Bot's provider and credential configuration still applies; this does not
+expose OpenCode's entire upstream provider catalog. The image excludes other CLI
+backends, Poolside and gateway routes. It uses one amd64 baseline binary.
 
 Slim supports its included local runtimes and SDK providers. Cursor, Codex,
 Devin and Kilo can also run through a configured ACP gateway with slim.
