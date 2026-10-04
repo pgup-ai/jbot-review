@@ -934,14 +934,21 @@ describe('assertImageSupportsModels', () => {
     );
   });
 
-  it('restricts the opencode image to Zen and Go even when a gateway is configured', () => {
-    const supported = ['opencode/muse', 'opencode-go/muse'];
+  it('allows OpenCode integration models but rejects other backends even with a gateway', () => {
+    const supported = [
+      'opencode/muse',
+      'opencode-go/muse',
+      'deepseek/deepseek-flash',
+      'anthropic/claude',
+      'openrouter/vendor/model',
+      'openai/gpt',
+      'google/gemini',
+      'openai-compatible/custom',
+    ];
     for (const gateway of [undefined, 'https://gateway.example']) {
       const env = { JBOT_IMAGE_VARIANT: 'opencode', JBOT_ACP_GATEWAY_URL: gateway };
       assert.doesNotThrow(() => assertImageSupportsModels(supported, env));
       for (const provider of [
-        'anthropic',
-        'openrouter',
         'poolside',
         'commandcode',
         'devin',
@@ -957,7 +964,7 @@ describe('assertImageSupportsModels', () => {
         const pool = [...supported, `${provider}/model`];
         assert.throws(
           () => assertImageSupportsModels(pool, env),
-          /opencode image supports only OpenCode Zen .* and Go .*Unsupported models:/,
+          /opencode image supports only models routed through the OpenCode integration.*Unsupported models:/,
         );
         assert.deepEqual(pool, [...supported, `${provider}/model`]);
       }

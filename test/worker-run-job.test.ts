@@ -31,7 +31,7 @@ test('smaller images reject unsupported main or auxiliary models before contacti
         assert.match(
           logs.join('\n'),
           variant === 'opencode'
-            ? /opencode image supports only OpenCode Zen .* and Go .*Unsupported models: cline\/test/
+            ? /opencode image supports only models routed through the OpenCode integration.*Unsupported models: cline\/test/
             : /slim image does not include these local runtimes: cline/,
         );
       }
