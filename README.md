@@ -1104,10 +1104,13 @@ Guidelines may share an interactions session, so reuse does not always remove a
 whole model session.
 
 Every preset withholds uncertain, investigation-only and low-confidence candidates
-from inline, file-level and review-body findings (the one exception is under
-[Finding evidence](#finding-evidence)). Their full details remain in
-run logs and local output; the PR receives only a count and a verification-limit
-notice. They still prevent automatic approval and an all-clear result. This rule
+from inline and file-level findings (the one exception is under
+[Finding evidence](#finding-evidence)). The PR review body includes a collapsed
+`Unverified concerns (N)` section showing up to 10 withheld hypotheses to anyone
+who can read the PR. Content is HTML-escaped and capped at 2,400 UTF-8 bytes per
+concern, plus a truncation notice; omitted concerns are counted. Failed-verifier
+error prefixes are excluded. Full details remain in run logs and local output.
+These candidates still prevent automatic approval and an all-clear result. This rule
 adds no model pass, repository scan or configuration flag. Concrete investigation
 candidates still enter the existing verification batches. Confirmation promotes
 one only when the verifier supplies a factual title, classification, severity,
@@ -1118,7 +1121,8 @@ remain withheld, with different diagnostic labels.
 
 The dogfood workflow uploads `unverified-findings.json` alongside telemetry. Its
 head-pinned candidates distinguish `inconclusive`, `not-completed`, and
-`not-verified`; the PR notice links to the run artifacts. Other deployments retain
+`not-verified`; the collapsed section links to the run artifacts when available,
+otherwise it points to run logs and the diagnostic file when written. Other deployments retain
 the same file beside telemetry and log the candidates. Source evidence uses the
 existing two cited locations per candidate, 20-location batch cap, 16 KiB excerpt
 budget and 1.5-second read deadline. No second verification round is added.

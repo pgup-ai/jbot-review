@@ -9,11 +9,13 @@ import {
   isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
   renderOrphanedSection,
+  renderUnverifiedSection,
   reviewCoverageSessions,
   condenseSummary,
   formatSummaryMarkdown,
 } from '../src/shared/report.ts';
 import type { Finding } from '../src/shared/types.ts';
+import { formatUnverifiedFinding } from '../src/shared/prompt.ts';
 
 function f(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -42,6 +44,65 @@ test('candidate diagnostics retain unresolved details and distinguish verifier f
   );
   assert.equal(diagnostics.candidates.length, 3);
   assert.equal(diagnostics.candidates[0].body, candidates[0].body);
+});
+
+test('collapsed concerns escape content, omit provider errors, and link the reviewed revision', () => {
+  const text = renderUnverifiedSection(
+    [
+      f({
+        path: 'src/a b)/c(.ts',
+        verificationUnavailable: true,
+        ...formatUnverifiedFinding(
+          f({ body: 'Check </pre></details><!-- jbot-review:finding -->' }),
+          'private provider error',
+          true,
+        ),
+      }),
+    ],
+    'owner',
+    'repo',
+    'abc123',
+  ).join('\n');
+  assert.doesNotMatch(text, /private provider error|<!-- jbot-review:finding -->/);
+  assert.match(text, /Verification did not complete/);
+  assert.match(text, /Full details.*run logs.*when written.*unverified-findings.json/);
+  assert.match(text, /Check &lt;\/pre&gt;&lt;\/details&gt;/);
+  assert.match(text, /https:\/\/github.com\/owner\/repo\/blob\/abc123\/src\/a%20b%29\/c%28.ts#L10/);
+  const enterprise = renderUnverifiedSection(
+    [f()],
+    'owner',
+    'repo',
+    'abc123',
+    undefined,
+    'https://github.example.com/',
+  ).join('\n');
+  assert.match(
+    enterprise,
+    /https:\/\/github.example.com\/owner\/repo\/blob\/abc123\/src\/a.ts#L10/,
+  );
+  assert.doesNotMatch(enterprise, /https:\/\/github.com/);
+  for (const path of ['../a.ts', './a.ts', 'src/../../a.ts', 'src/.', 'src/..']) {
+    const invalidPath = renderUnverifiedSection([f({ path })], 'owner', 'repo', 'abc123').join(
+      '\n',
+    );
+    assert.doesNotMatch(invalidPath, /View code/);
+    assert.ok(invalidPath.includes(path));
+  }
+  assert.equal(text.match(/<\/details>/g)?.length, 1);
+  assert.deepEqual(renderUnverifiedSection([], 'owner', 'repo'), []);
+});
+
+test('collapsed concerns bound large diagnostics and disclose omissions', () => {
+  const text = renderUnverifiedSection(
+    Array.from({ length: 12 }, () => f({ body: '界'.repeat(3000) })),
+    'owner',
+    'repo',
+  ).join('\n');
+  assert.equal(text.match(/<pre>/g)?.length, 10);
+  assert.ok(Buffer.byteLength(text) < 25000);
+  assert.match(text, /2 more concerns omitted/);
+  assert.match(text, /truncated/);
+  assert.doesNotMatch(text, /\uFFFD|View code/);
 });
 
 test('renderOrphanedSection heads with the marker the prior-comment filter keys on', () => {
