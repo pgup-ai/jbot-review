@@ -33,8 +33,8 @@ export function stateEvidenceTerms(findings: Finding[], context: string) {
       '',
     );
     const properties = [...claim.matchAll(/\b[a-z]\w*\.([a-z]\w*)\b(?![\w(])/g)].map((m) => m[1]);
-    const explicit = [...claim.matchAll(/\b([A-Z]\w*)\.([A-Z][A-Z_0-9]+)\b/g)];
-    const inferred = [...context.matchAll(/\b([A-Z]\w*)\.([A-Z][A-Z_0-9]+)\b/g)].filter((m) => {
+    const explicit = [...claim.matchAll(/\b([A-Z]\w*)\.([A-Z]\w*)\b/g)];
+    const inferred = [...context.matchAll(/\b([A-Z]\w*)\.([A-Z]\w*)\b/g)].filter((m) => {
       const suffix = m[1].match(/(State|Stage|Status|Type)$/)?.[1].toLowerCase();
       return suffix && properties.includes(suffix) && new RegExp(`\\b${m[2]}\\b`).test(claim);
     });

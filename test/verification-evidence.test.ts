@@ -105,6 +105,23 @@ test('retrieves an alternative state writer with its guard and persistence metho
     ),
     { fields: [], enums: ['AuditType'] },
   );
+  for (const member of ['ACTIVE', 'Active', 'X']) {
+    const context = `RecordStage.${member} OtherStatus.${member}`;
+    for (const state of [`RecordStage.${member}`, member]) {
+      const candidate = { ...finding, body: `The record.stage === ${state} guard misses entries.` };
+      assert.deepEqual(stateEvidenceTerms([candidate], context), {
+        fields: [],
+        enums: ['RecordStage'],
+      });
+      const source = `export function create() { return { status: RecordStage.${member} }; }`;
+      const evidence = await collectStateEvidence(
+        sources({ 'producer.ts': source }),
+        [candidate],
+        context,
+      );
+      assert.match(evidence, /producer.ts[^]*function create/);
+    }
+  }
 });
 
 function sources(files: Record<string, string>) {
