@@ -1469,7 +1469,8 @@ git tag -f v0
 git push origin v0 --force
 ```
 
-The Dockerfile uses `node:24-slim` and runs the bundled JS from `dist/`.
+The Dockerfile uses `node:24-bookworm-slim` and runs the bundled JS from `dist/`.
+Git is built from checksum-verified source with HTTPS and PCRE2 support.
 
 > **The Action is one of several build entrypoints.** `scripts/build.ts` also
 > bundles `src/worker/` and `src/app/` (for the separately-deployed control plane),
