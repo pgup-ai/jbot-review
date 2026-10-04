@@ -9,11 +9,9 @@ WORKDIR /tmp/git
 RUN curl -fsSL https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz -o git.tar.xz \
   && echo "26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3  git.tar.xz" | sha256sum -c - \
   && tar -xJf git.tar.xz --strip-components=1 \
-  && make -j"$(nproc)" prefix=/usr/local USE_LIBPCRE2=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_RUST=YesPlease \
-  && make prefix=/usr/local USE_LIBPCRE2=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_RUST=YesPlease INSTALL_STRIP=-s INSTALL_SYMLINKS=YesPlease DESTDIR=/opt/git install
+  && make -j"$(nproc)" prefix=/usr/local USE_LIBPCRE2=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_RUST=YesPlease INSTALL_STRIP=-s INSTALL_SYMLINKS=YesPlease DESTDIR=/opt/git install
 
 FROM node-base AS base
-# Keep Git's compiler and source out of every runtime variant.
 COPY --from=git-build /opt/git/usr/local/ /usr/local/
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl libexpat1 libpcre2-8-0 perl liberror-perl \
