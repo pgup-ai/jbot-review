@@ -1,10 +1,10 @@
 # Selective advisory verification: live comparison
 
-One sequential run per arm on a frozen frontend pull request. Private repository,
-PR and revision identifiers are retained only in local audit records:
+One sequential run per arm on a frozen frontend pull request. Its private
+repository, PR and base/head revisions are retained only in local audit records.
 
-- Before: pre-Friday `5b5cfd2`.
-- After: `b048976535ce19ffe0e2b58b0e152d6c5d63c9bc`.
+- Before (public J-Bot code): `5b5cfd2`.
+- After (public J-Bot code): `b048976535ce19ffe0e2b58b0e152d6c5d63c9bc`.
 - Both: `opencode/muse-spark-1.3-contributor-free`, local OpenCode 1.18.26,
   identical npm dependencies, 11 changed files, three automatic main shards,
   concurrency three, two review passes, verification enabled, 30-minute budget,

@@ -51,10 +51,10 @@ Attempt labels are anonymized; the identifier mapping and raw logs remain local.
   GitHub `success`) and exclude sessions that only failed because the run had
   already ended (main failure teardown, cancellation): 336 auxiliary
   sessions, 266 completed (79%).
-- Window: 2026-09-09 21:25 UTC to 2026-09-11 14:26 UTC. Three reviewer images
-  ran (`acc484ea…` to 09-10 16:51, `0bafc656…` to 19:35, `f5f860aa…` after;
-  the last is #214). 21 attempts were cancelled by the per-PR
-  concurrency group and are excluded from rates.
+- Window: 2026-09-09 21:25 UTC to 2026-09-11 14:26 UTC. Three reviewer image
+  versions ran; exact image references and rollout times remain local.
+  21 attempts were cancelled by the per-PR concurrency group and are excluded
+  from rates.
 
 ## How the deadlines actually work
 

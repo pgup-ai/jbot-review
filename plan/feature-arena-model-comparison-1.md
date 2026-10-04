@@ -115,6 +115,5 @@ This plan implements the J-Bot-owned foundation for arena model comparisons on a
 
 ## 8. Related Specifications / Further Reading
 
-- `docs/superpowers/specs/2026-08-29-arena-model-comparison-design.md`
 - `AGENTS.md`
 - `plan/review-quality-corpus.md`
