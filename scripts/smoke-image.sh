@@ -2,6 +2,24 @@
 set -eu
 variant="$1"
 test "$JBOT_IMAGE_VARIANT" = "$variant"
+git --version
+timeout 30s git ls-remote --exit-code https://github.com/git/git.git HEAD >/dev/null
+(
+  repo=$(mktemp -d)
+  trap 'rm -rf "$repo"' EXIT
+  git init -q "$repo/source"
+  cd "$repo/source"
+  printf 'git smoke\n' > tracked.txt
+  git add tracked.txt
+  git -c user.name=smoke -c user.email=smoke@example.invalid commit -qm initial
+  git grep -P 'git\s+smoke'
+  git clone -q --depth=1 "file://$repo/source" "$repo/clone"
+  git -C "$repo/clone" fetch -q origin
+  test "$(git -C "$repo/clone" rev-parse HEAD)" = "$(git rev-parse HEAD)"
+  git worktree add -q --detach "$repo/worktree" HEAD
+  printf 'changed\n' >> "$repo/worktree/tracked.txt"
+  git -C "$repo/worktree" diff --no-ext-diff HEAD -- tracked.txt | grep -q '^+changed$'
+)
 for entry in workflow/index.js app/server.js worker/index.js local/index.js review-retrieval.js; do
   test -s "/app/dist/$entry"
   node --check "/app/dist/$entry"
