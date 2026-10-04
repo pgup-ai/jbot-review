@@ -671,6 +671,15 @@ test('rich index records members, types, re-exports, injected services and this-
     { target: 'repo', member: 'save', line: 6 },
     { target: '', member: 'repo', line: 6 },
   ]);
+  assert.ok(
+    index.calls.some((c) => c.receiver === 'this.repo' && c.symbol === 'save' && c.line === 6),
+  );
+  assert.deepEqual(
+    indexEvidenceSource('mapping.ts', 'function f(row) { return status[row.stage]; }', {
+      rich: true,
+    }).lookups,
+    [{ symbol: 'status', line: 1 }],
+  );
   assert.deepEqual(index.callbacks, [{ start: 6, end: 6 }]);
   assert.deepEqual(index.reexports, [
     { exported: 'Repo', imported: 'LedgerRepository', from: './repo' },

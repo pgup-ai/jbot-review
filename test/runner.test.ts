@@ -2004,7 +2004,7 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
   }
 });
 
-it('gives the tool-less verification pass page packs that fit and accepts quotes only from shown packs', async () => {
+it('keeps the same deduplicated page packs for the tool-using re-check and grounds quotes per target', async () => {
   const targets: Finding[] = ['a', 'b', 'c'].map((name) => ({
     path: `${name}.ts`,
     line: 1,
@@ -2024,7 +2024,7 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
     model: 'test/model',
     prContext: 'diff',
     sourceContext: async (findings) => findings.map((f) => `source of ${f.path}`).join('\n'),
-    toolLessContextFor: (finding) => extras[finding.path],
+    verificationContextFor: (finding) => extras[finding.path],
     promptBudget: { ...reviewPromptBudget('test'), transportBytes: 40000 },
     targets,
     toolLessFirst: true,
@@ -2045,11 +2045,10 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
       },
     },
   });
-  // Shown once for the two findings on its page, never to the capped re-check; the oversized pack is left out.
   assert.equal(seen['single-shot'].split('page pack: caller(a)').length, 2);
-  assert.doesNotMatch(seen.capped, /page pack/);
+  assert.equal(seen.capped, seen['single-shot']);
   assert.doesNotMatch(seen['single-shot'], /p{1000}/);
-  assert.ok(logs.some((message) => /Tool-less context omitted from verification/.test(message)));
+  assert.ok(logs.some((message) => /Main-review context omitted from verification/.test(message)));
   assert.match(
     seen['single-shot'],
     /\[1 supporting excerpt\(s\) .* left out to fit the prompt budget/,
@@ -2063,43 +2062,43 @@ it('gives the tool-less verification pass page packs that fit and accepts quotes
   ]);
 });
 
-it('gives a checkout-blind verifier the page packs and cited rules in its only pass', async () => {
-  const modes: string[] = [];
-  let seen = '';
-  const verdicts = await requestFindingVerdicts({
-    workspace: '/unused',
-    model: 'test/model',
-    prContext: 'diff',
-    sourceContext: async () => 'source of a.ts',
-    toolLessContextFor: () => ({
-      packs: ['page pack: caller(a)'],
-      rules: ['### RULES.md §1\nNever call caller(a).'],
-    }),
-    targets: [{ path: 'a.ts', line: 1, severity: 'P2', title: 'a', body: 'claim' }],
-    toolLessOnly: true,
-    log: () => {},
-    backend: {
-      async runFindingVerification(_model, context, findings, ...rest) {
-        modes.push(String(rest.at(-1)));
-        seen = context;
-        const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
-        return findings.map((_, index) => ({
-          index,
-          verdict: 'confirmed' as const,
-          reason: 'trigger',
-          finding: { ...finding, evidence: 'caller(a)' },
-        }));
+for (const toolLessOnly of [true, false])
+  it(`gives a ${toolLessOnly ? 'checkout-blind' : 'tool-using'} verifier page packs and cited rules in its only pass`, async () => {
+    const modes: string[] = [];
+    let seen = '';
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: 'diff',
+      sourceContext: async () => 'source of a.ts',
+      verificationContextFor: () => ({
+        packs: ['page pack: caller(a)'],
+        rules: ['### RULES.md §1\nNever call caller(a).'],
+      }),
+      targets: [{ path: 'a.ts', line: 1, severity: 'P2', title: 'a', body: 'claim' }],
+      toolLessOnly,
+      log: () => {},
+      backend: {
+        async runFindingVerification(_model, context, findings, ...rest) {
+          modes.push(String(rest.at(-1)));
+          seen = context;
+          const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
+          return findings.map((_, index) => ({
+            index,
+            verdict: 'confirmed' as const,
+            reason: 'trigger',
+            finding: { ...finding, evidence: 'caller(a)' },
+          }));
+        },
       },
-    },
+    });
+    assert.deepEqual(modes, [toolLessOnly ? 'single-shot' : 'undefined']);
+    assert.match(seen, /page pack: caller\(a\)[^]*Never call caller\(a\)/);
+    assert.deepEqual(
+      verdicts.map((v) => v.verdict),
+      ['confirmed'],
+    );
   });
-  assert.deepEqual(modes, ['single-shot']);
-  assert.match(seen, /page pack: caller\(a\)[^]*Never call caller\(a\)/);
-  // The quote comes from the shown pack, so the confirmation stands.
-  assert.deepEqual(
-    verdicts.map((v) => v.verdict),
-    ['confirmed'],
-  );
-});
 
 it('packs blind-verifier context only as far as the budget wrapper allows', async () => {
   const target: Finding = { path: 'a.ts', line: 1, severity: 'P2', title: 'a', body: 'claim' };
@@ -2128,7 +2127,7 @@ it('packs blind-verifier context only as far as the budget wrapper allows', asyn
     model: 'test/model',
     prContext: 'diff',
     sourceContext: async () => 'source of a.ts',
-    toolLessContextFor: () => ({ packs: [pack], rules: [] }),
+    verificationContextFor: () => ({ packs: [pack], rules: [] }),
     promptBudget: budget,
     targets: [target],
     toolLessOnly: true,

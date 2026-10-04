@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
+import {
+  PERMISSION_DENIED_MESSAGE,
+  TOOLS_OFF_MESSAGE,
+  VERIFICATION_STEP_LIMIT_PROMPT,
+} from './prompt.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -64,6 +68,15 @@ export default {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);
       dropRepoInstructions(event.messages);
+      // Native step exhaustion asks for a prose summary, which breaks the verdict contract.
+      const last = event.messages?.at(-1);
+      if (event.agent?.startsWith('jbot-verify') && last?.role === 'assistant') {
+        const text = typeof last.content === 'string' ? last.content :
+          Array.isArray(last.content) && last.content.length === 1 && last.content[0]?.type === 'text' ? last.content[0].text : '';
+        if (text.startsWith('CRITICAL - MAXIMUM STEPS REACHED\\n')) {
+          last.content = [{ type: 'text', text: ${JSON.stringify(VERIFICATION_STEP_LIMIT_PROMPT)} }];
+        }
+      }
       const options = sessionOptions(event.sessionID);
       if (options) {
         delete options.jbotSessionLabel;

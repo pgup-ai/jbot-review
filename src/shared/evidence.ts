@@ -72,6 +72,9 @@ export type RichSourceIndex = SourceIndex & {
   injected: { owner: string; name: string; type: string }[];
   /** `this.<member>` has target '', `this.<target>.<member>` names the target. */
   memberCalls: { target: string; member: string; line: number }[];
+  lookups: { symbol: string; line: number }[];
+  calls: { receiver: string; symbol: string; line: number; end: number; valueUsed: boolean }[];
+  writes: { field: string; value: string; line: number; object?: { start: number; end: number } }[];
 };
 
 const FUNCTION_VALUE = new Set(['FunctionExpression', 'ArrowFunctionExpression']);
@@ -124,11 +127,76 @@ export function indexEvidenceSource(
     reexports: [],
     injected: [],
     memberCalls: [],
+    writes: [],
+    calls: [],
+    lookups: [],
   };
-  function indexRich(n: Ast, parent: Ast | undefined, owner: string | undefined) {
+  function indexRich(
+    n: Ast,
+    parent: Ast | undefined,
+    owner: string | undefined,
+    grandparent: Ast | undefined,
+  ) {
     if (!n.loc) return;
     const start = n.loc.start.line;
     const end = n.loc.end.line;
+    if (['CallExpression', 'OptionalCallExpression', 'NewExpression'].includes(n.type)) {
+      const callee = ast(n.callee);
+      const object = ast(callee?.object);
+      const receiver =
+        object?.type === 'ThisExpression'
+          ? 'this'
+          : object?.type === 'Identifier'
+            ? name(object)
+            : ast(object?.object)?.type === 'ThisExpression'
+              ? `this.${name(object?.property)}`
+              : '';
+      const symbol =
+        callee?.type === 'Identifier'
+          ? name(callee)
+          : !callee?.computed
+            ? keyOrPrivateName(callee?.property)
+            : '';
+      if (symbol)
+        result.calls.push({
+          receiver,
+          symbol,
+          line: start,
+          end,
+          valueUsed:
+            parent?.type !== 'ExpressionStatement' &&
+            !(parent?.type === 'AwaitExpression' && grandparent?.type === 'ExpressionStatement'),
+        });
+    }
+    if (
+      ['MemberExpression', 'OptionalMemberExpression'].includes(n.type) &&
+      n.computed &&
+      ast(n.object)?.type === 'Identifier'
+    )
+      result.lookups.push({ symbol: name(n.object), line: start });
+    const value = ast(n.type === 'AssignmentExpression' ? n.right : n.value);
+    if (n.type === 'AssignmentExpression' || n.type === 'ObjectProperty') {
+      const left = ast(n.left);
+      const field =
+        n.type === 'ObjectProperty'
+          ? keyName(n.key, n.computed)
+          : keyName(left?.property, left?.computed);
+      const object = ast(value?.object);
+      const member =
+        value?.type === 'MemberExpression' && object?.type === 'Identifier' && !value.computed
+          ? `${name(object)}.${name(value.property)}`
+          : '';
+      if (field || member)
+        result.writes.push({
+          field,
+          value: member || (value?.type === 'Identifier' ? name(value) : ''),
+          line: start,
+          ...(parent?.type === 'ObjectExpression' && parent.loc
+            ? { object: { start: parent.loc.start.line, end: parent.loc.end.line } }
+            : {}),
+        });
+    }
+
     const declare = (symbol: string, kind: DeclarationKind, memberOf?: string) => {
       if (symbol)
         result.declarations.push({
@@ -198,7 +266,7 @@ export function indexEvidenceSource(
         });
     }
   }
-  function walk(n: Ast, parent?: Ast, owner?: string) {
+  function walk(n: Ast, parent?: Ast, owner?: string, grandparent?: Ast) {
     if (n.type === 'ImportDeclaration') {
       for (const s of n.specifiers as Ast[])
         result.imports.push({
@@ -209,7 +277,7 @@ export function indexEvidenceSource(
         });
       return;
     }
-    if (options.rich) indexRich(n, parent, owner);
+    if (options.rich) indexRich(n, parent, owner, grandparent);
     const symbol = name(n.id);
     if (
       symbol &&
@@ -235,8 +303,8 @@ export function indexEvidenceSource(
       )
         continue;
       if (Array.isArray(value)) {
-        for (const child of value) if (ast(child)?.type) walk(child as Ast, n, scope);
-      } else if (ast(value)?.type) walk(value as Ast, n, scope);
+        for (const child of value) if (ast(child)?.type) walk(child as Ast, n, scope, parent);
+      } else if (ast(value)?.type) walk(value as Ast, n, scope, parent);
     }
   }
   if (JS_SOURCE.test(path)) walk(parseSource(path, text) as unknown as Ast);

@@ -10,6 +10,10 @@ export const PLAIN_AGENT = 'jbot-plain';
 /** Tool-less pass on an agentic model: Zen's free tier rejects a request that lists no tools, so the plugin denies every call instead. */
 export const CLOSED_BOOK_AGENT = 'jbot-closed-book';
 export const VERIFY_AGENT = 'jbot-verify';
+export const VERIFY_STEPS = 6;
+
+export const verificationAgent = (steps: number) =>
+  steps === VERIFY_STEPS ? VERIFY_AGENT : `${VERIFY_AGENT}-${steps}`;
 export const TOOL_LESS_AGENTS: ReadonlySet<string> = new Set([PLAIN_AGENT]);
 
 export interface PermissionRule {
@@ -245,12 +249,20 @@ export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
         description: 'jbot-review: answers from the prompt, every tool call denied',
         permissions: permissionRules(),
       },
-      [VERIFY_AGENT]: {
-        mode: 'primary',
-        description: 'jbot-review: step-capped finding verification',
-        system: input.reviewerSystem,
-        steps: 6,
-      },
+      ...Object.fromEntries(
+        Array.from({ length: VERIFY_STEPS }, (_, index) => {
+          const steps = index + 1;
+          return [
+            verificationAgent(steps),
+            {
+              mode: 'primary',
+              description: 'jbot-review: step-capped finding verification',
+              system: input.reviewerSystem,
+              steps,
+            },
+          ];
+        }),
+      ),
     },
     ...(Object.keys(providers).length ? { providers } : {}),
   };

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { reviewExperiment, toolLessAuxiliary } from '../src/shared/review-experiment.ts';
+import {
+  reviewExperiment,
+  toolLessAuxiliary,
+  type ReviewExperiment,
+} from '../src/shared/review-experiment.ts';
 import { normalizeOptions } from '../src/shared/runner.ts';
 import { runConfiguration } from '../src/shared/run-telemetry.ts';
 
@@ -37,7 +41,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   });
   for (const value of ['off', 'on', 'custom', 'linked,jev', 'secret'])
     assert.deepEqual(reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: value }), off);
-  const expected = [
+  const expected: ReviewExperiment[] = [
     { ...off, preset: 'jev', jevPrefetch: 'on' },
     {
       ...off,
@@ -61,6 +65,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       exploration: { ...off.exploration, batchDiffRecovery: true },
     },
   ];
+  expected.push({ ...expected[4], preset: 'state-proof', verificationProof: true });
   assert.deepEqual(reviewExperiment({}), expected[4]);
   assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[4]);
   const hashes = new Set<string>();
@@ -76,7 +81,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     assert.deepEqual(configuration.explorationExperiment, preset.exploration);
     hashes.add(configurationHash);
   }
-  assert.equal(hashes.size, 5);
+  assert.equal(hashes.size, 6);
   off.reuse.shared = true;
   off.exploration.readEvidence = 'linked';
   assert.equal(reviewExperiment({}).reuse.shared, false);

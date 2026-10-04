@@ -25,6 +25,7 @@ import {
   REVIEWER_AGENT,
   TOOL_LESS_AGENTS,
   WRAPUP_AGENT,
+  VERIFY_AGENT,
   permissionRules,
   sessionEnvironment,
   sessionModelOptions,
@@ -237,6 +238,7 @@ export interface PromptSpec {
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onModelSteps?: (steps: number | undefined) => void;
   /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
   abortLabel?: string;
   /** Set by callers that accept a partial answer; its presence enables the wrap-up reserve. */
@@ -691,6 +693,7 @@ async function promptHoldingSlot(
       } catch (error) {
         log(`${label} turn listing failed; using available messages: ${formatUnknown(error)}`);
       }
+      spec.onModelSteps?.(complete ? turn.length : undefined);
       if (runtime.onSourceRead && !label.includes('verification')) {
         for (const assistant of turn) {
           for (const part of assistant.content ?? []) {
@@ -753,7 +756,10 @@ async function promptHoldingSlot(
     const agent = sessionsByClient.get(client)?.get(sessionID)?.agent ?? MAIN_AGENT;
     // A wrap-up turn never wraps up again; closed-book stays in place so its tools stay denied.
     const canWrapUp =
-      agent !== WRAPUP_AGENT && !TOOL_LESS_AGENTS.has(agent) && spec.text !== WRAP_UP_PROMPT;
+      agent !== WRAPUP_AGENT &&
+      !agent.startsWith(VERIFY_AGENT) &&
+      !TOOL_LESS_AGENTS.has(agent) &&
+      spec.text !== WRAP_UP_PROMPT;
     const reserve =
       canWrapUp && spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
     let requestWrapUp: ((budgetMs: number) => void) | undefined;

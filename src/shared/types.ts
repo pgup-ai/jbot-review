@@ -118,6 +118,19 @@ export interface ReviewResult {
 
 export type VerificationVerdict = 'confirmed' | 'refuted' | 'uncertain';
 
+export interface ProofReference {
+  path: string;
+  line: number;
+  quote: string;
+}
+
+export interface VerificationProof {
+  trigger: string;
+  producer: ProofReference[];
+  guard: ProofReference[];
+  effect: ProofReference[];
+}
+
 /** One adversarial-verifier judgement, keyed by finding index. */
 export interface FindingVerdict {
   index: number;
@@ -125,4 +138,45 @@ export interface FindingVerdict {
   reason?: string;
   finding?: Pick<Finding, 'title' | 'severity' | 'kind' | 'evidence'>;
   unavailable?: boolean;
+  proof?: VerificationProof;
+}
+
+export function parseVerificationProof(value: unknown): VerificationProof | undefined {
+  const proof = value as VerificationProof | null;
+  if (
+    !proof ||
+    typeof proof.trigger !== 'string' ||
+    !proof.trigger.trim() ||
+    proof.trigger.length > 1200
+  )
+    return undefined;
+  for (const role of ['producer', 'guard', 'effect'] as const) {
+    const refs = proof[role];
+    if (!Array.isArray(refs) || refs.length < 1 || refs.length > 3) return undefined;
+    for (const ref of refs) {
+      if (
+        !ref ||
+        typeof ref.path !== 'string' ||
+        ref.path.length > 512 ||
+        ref.path.startsWith('/') ||
+        /[\p{Cc}\\]/u.test(ref.path) ||
+        ref.path.split('/').some((part) => !part || ['..', '.', '.git'].includes(part)) ||
+        !Number.isSafeInteger(ref.line) ||
+        ref.line < 1 ||
+        typeof ref.quote !== 'string' ||
+        ref.quote.trim().length < 8 ||
+        ref.quote.length > 500 ||
+        /[\r\n]/.test(ref.quote)
+      )
+        return undefined;
+    }
+  }
+  const copy = (refs: ProofReference[]) =>
+    refs.map(({ path, line, quote }) => ({ path, line, quote }));
+  return {
+    trigger: proof.trigger,
+    producer: copy(proof.producer),
+    guard: copy(proof.guard),
+    effect: copy(proof.effect),
+  };
 }

@@ -5,7 +5,13 @@ import {
   rescueAnchorByEvidence,
   unnumberedEvidence,
 } from './patch.ts';
-import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
+import {
+  parseVerificationProof,
+  type Finding,
+  type FindingConfidence,
+  type FindingVerdict,
+  type Severity,
+} from './types.ts';
 
 /** Drops noise files (lockfiles, generated, minified) before the agent sees them. */
 const NOISE_FILENAMES = new Set<string>([
@@ -307,6 +313,36 @@ export function checkConfirmationEvidence(
     index: verdict.index,
     verdict: 'uncertain',
     reason: 'The proposed confirmation did not quote evidence present in the supplied source.',
+  };
+}
+
+export function requiresVerificationProof(finding: Pick<Finding, 'kind'>): boolean {
+  return !finding.kind || ['bug', 'security', 'performance', 'investigate'].includes(finding.kind);
+}
+
+export function checkVerificationProof(
+  verdict: FindingVerdict,
+  finding: Pick<Finding, 'kind'>,
+  sources: ReadonlyMap<string, string>,
+  producers: ReadonlySet<string>,
+): FindingVerdict {
+  if (verdict.verdict !== 'confirmed' || !requiresVerificationProof(finding)) return verdict;
+  const proof = parseVerificationProof(verdict.proof);
+  if (
+    proof &&
+    proof.producer.every((ref) => producers.has(`${ref.path}:${ref.line}`)) &&
+    [proof.producer, proof.guard, proof.effect].every((refs) =>
+      refs.every(
+        (ref) => sources.get(ref.path)?.split(/\r?\n/)[ref.line - 1]?.trim() === ref.quote.trim(),
+      ),
+    )
+  )
+    return verdict;
+  return {
+    index: verdict.index,
+    verdict: 'uncertain',
+    reason:
+      'Confirmation lacks a complete trigger, producer, guard and effect proof with source-validated citations.',
   };
 }
 
