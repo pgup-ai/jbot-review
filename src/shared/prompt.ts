@@ -1940,6 +1940,12 @@ export function buildVerificationRecoveryPrompt(findingCount: number): string {
 Preserve completed judgments and their evidence. Use uncertain when investigation is unfinished, evidence is insufficient, or no judgment was reached. Never promote a tentative claim merely to complete the response. Do not omit unresolved candidates or replace them with an empty list.`;
 }
 
+export const VERIFICATION_SUPPORT_PROMPT = `## Optional verification support
+For an ordinary confirmed finding, you may also return a "support" object:
+{"explanation":"The update preserves the account link while adding a pending revision; deletion still locates that record, bypasses the latest-only guard and removes the link.","references":[{"path":"src/records.ts","line":12,"quote":"return update({ id }, { stage: PENDING });"}]}
+Use this only for useful source-established context missing from the original finding. Explain the state-producing transition, any relationship that must survive it, the applicable guard and the concrete effect; keep alternative branches separate. Do not invent missing links. Support supplements the original claim, never replaces it or changes its verdict, severity or location. Citation validation establishes source provenance, not causality.
+Limit explanation to 2400 UTF-8 bytes and references to 1–6 exact single-line quotes (8–500 characters), using repository-relative paths and positive line numbers. The complete support object must fit 8192 UTF-8 bytes; omit it rather than truncate a causal claim. Never put unresolved speculation in support. The usual reason and verdict remain required.`;
+
 export const VERIFICATION_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with the single top-level key

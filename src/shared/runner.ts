@@ -173,6 +173,7 @@ import {
   COMPLIANCE_RECHECK_NOTE,
   selectLensKeys,
   STATE_EVIDENCE_OMISSION,
+  VERIFICATION_SUPPORT_PROMPT,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
@@ -3341,6 +3342,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
+        verificationSupport: options.experiment.verificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3534,6 +3536,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
+        verificationSupport: options.experiment.verificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3563,6 +3566,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
+        verificationSupport: options.experiment.verificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -4405,6 +4409,7 @@ async function verifyFindings(params: {
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
+  verificationSupport?: boolean;
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4461,6 +4466,7 @@ export async function requestFindingVerdicts(params: {
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
+  verificationSupport?: boolean;
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4477,7 +4483,7 @@ export async function requestFindingVerdicts(params: {
 }): Promise<FindingVerdictList> {
   const session = 'finding-verification';
   const evidence =
-    params.verificationRetrieval || params.verificationProof
+    params.verificationRetrieval || params.verificationProof || params.verificationSupport
       ? new VerificationEvidence(params.workspace)
       : undefined;
   const startedAt = Date.now();
@@ -4520,7 +4526,11 @@ export async function requestFindingVerdicts(params: {
         );
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
-        context = [params.contextForTargets?.(targets) ?? params.prContext, sourceContext]
+        context = [
+          params.verificationSupport ? VERIFICATION_SUPPORT_PROMPT : '',
+          params.contextForTargets?.(targets) ?? params.prContext,
+          sourceContext,
+        ]
           .filter(Boolean)
           .join('\n\n');
         if (fits(context, false)) break;
@@ -4681,6 +4691,12 @@ export async function requestFindingVerdicts(params: {
             };
           }
         }
+        if (params.verificationSupport && target)
+          result = await evidence!.support(
+            result,
+            target,
+            suppliedOnly || params.toolLessOnly ? sourceContext : undefined,
+          );
         return result;
       };
       let batch: FindingVerdictList | undefined;

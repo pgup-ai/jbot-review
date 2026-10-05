@@ -131,6 +131,56 @@ export interface VerificationProof {
   effect: ProofReference[];
 }
 
+export interface VerificationSupport {
+  explanation: string;
+  references: ProofReference[];
+}
+
+export interface VerifiedSupport extends VerificationSupport {
+  target: string;
+  revision: string;
+  sourceHashes: Record<string, string>;
+}
+
+export function parseVerificationSupport(value: unknown): VerificationSupport | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const support = value as VerificationSupport;
+  if (
+    typeof support.explanation !== 'string' ||
+    !support.explanation.trim() ||
+    Buffer.byteLength(support.explanation) > 2400 ||
+    !Array.isArray(support.references) ||
+    support.references.length < 1 ||
+    support.references.length > 6
+  )
+    return undefined;
+  for (const ref of support.references) {
+    if (!validProofReference(ref)) return undefined;
+  }
+  const result = {
+    explanation: support.explanation.trim(),
+    references: support.references.map(({ path, line, quote }) => ({ path, line, quote })),
+  };
+  return Buffer.byteLength(JSON.stringify(result)) <= 8192 ? result : undefined;
+}
+
+function validProofReference(ref: ProofReference): boolean {
+  return (
+    !!ref &&
+    typeof ref.path === 'string' &&
+    ref.path.length <= 512 &&
+    !ref.path.startsWith('/') &&
+    !/[\p{Cc}\\]/u.test(ref.path) &&
+    !ref.path.split('/').some((part) => !part || ['..', '.', '.git'].includes(part)) &&
+    Number.isSafeInteger(ref.line) &&
+    ref.line >= 1 &&
+    typeof ref.quote === 'string' &&
+    ref.quote.trim().length >= 8 &&
+    ref.quote.length <= 500 &&
+    !/[\r\n]/.test(ref.quote)
+  );
+}
+
 /** One adversarial-verifier judgement, keyed by finding index. */
 export interface FindingVerdict {
   index: number;
@@ -139,6 +189,9 @@ export interface FindingVerdict {
   finding?: Pick<Finding, 'title' | 'severity' | 'kind' | 'evidence'>;
   unavailable?: boolean;
   proof?: VerificationProof;
+  support?: VerificationSupport;
+  /** Driver-owned source checks; never parsed from model output. */
+  verifiedSupport?: VerifiedSupport;
 }
 
 export function parseVerificationProof(value: unknown): VerificationProof | undefined {
@@ -154,21 +207,7 @@ export function parseVerificationProof(value: unknown): VerificationProof | unde
     const refs = proof[role];
     if (!Array.isArray(refs) || refs.length < 1 || refs.length > 3) return undefined;
     for (const ref of refs) {
-      if (
-        !ref ||
-        typeof ref.path !== 'string' ||
-        ref.path.length > 512 ||
-        ref.path.startsWith('/') ||
-        /[\p{Cc}\\]/u.test(ref.path) ||
-        ref.path.split('/').some((part) => !part || ['..', '.', '.git'].includes(part)) ||
-        !Number.isSafeInteger(ref.line) ||
-        ref.line < 1 ||
-        typeof ref.quote !== 'string' ||
-        ref.quote.trim().length < 8 ||
-        ref.quote.length > 500 ||
-        /[\r\n]/.test(ref.quote)
-      )
-        return undefined;
+      if (!validProofReference(ref)) return undefined;
     }
   }
   const copy = (refs: ProofReference[]) =>

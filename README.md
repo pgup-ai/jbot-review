@@ -942,6 +942,17 @@ unsupported or truncated, verification is unavailable; blocking findings follow
 the existing labeled-unverified policy. This preset is experimental and does not
 change the default. Findings in other languages keep the usual verification requirements.
 
+The opt-in `JBOT_REVIEW_EXPERIMENT=verified-support` adds support to `state-evidence`
+verification, leaving the proof gate off. Confirmed ordinary findings may carry
+an additional explanation with up to six exact source citations. The driver
+checks tracked, non-symlink source, line/quote matches and a stable checkout HEAD,
+and records the revision and source hashes in a collapsed provenance section. Valid support is appended separately
+to the original body; it never changes severity, location or verdict. Missing,
+malformed, stale or unreadable support leaves the finding unchanged. Tool-less
+support must cite source actually supplied to that pass. Citation checks establish
+provenance, not causality; explanations remain the verifier's assessment.
+This experiment does not change the default preset or six-step limit.
+
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own
 session with tools and the usage list. Finding verification starts with a

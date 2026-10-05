@@ -377,7 +377,22 @@ export function recheckReasons(verdicts: (FindingVerdict['verdict'] | undefined)
 }
 
 function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
-  if (!isUnresolvedFinding(finding)) return finding;
+  if (!isUnresolvedFinding(finding)) {
+    const support = verdict.verifiedSupport;
+    if (
+      !support ||
+      verdict.unavailable ||
+      support.target !== JSON.stringify([finding.path, finding.line, finding.title, finding.body])
+    )
+      return finding;
+    const citations = support.references
+      .map((ref) => `- ${ref.path}:${ref.line} — SHA-256: ${support.sourceHashes[ref.path]}`)
+      .join('\n');
+    return {
+      ...finding,
+      body: `${finding.body}\n\nVerification support (listed source citations checked; causal explanation is the verifier's assessment):\n\n${support.explanation}\n\n<details>\n<summary>Source provenance</summary>\n\nReviewed revision: ${support.revision}\n\n${citations}\n\n</details>`,
+    };
+  }
   const confirmed = verdict.finding;
   if (
     !confirmed ||
