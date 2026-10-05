@@ -320,7 +320,7 @@ export function requiresVerificationProof(
   finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain'>,
   correction?: FindingVerdict['finding'],
 ): boolean {
-  const kind = isUnresolvedFinding(finding) ? (correction?.kind ?? finding.kind) : finding.kind;
+  const kind = isUnresolvedFinding(finding) ? correction?.kind : finding.kind;
   return !kind || ['bug', 'security', 'performance', 'investigate'].includes(kind);
 }
 

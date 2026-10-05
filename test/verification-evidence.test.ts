@@ -619,16 +619,21 @@ test('a corrected finding keeps its retrieved evidence without borrowing another
     workspace,
     model: 'test/model',
     prContext: 'Stage.CLOSED',
-    targets: [finding, { ...finding, kind: 'docs' }],
+    targets: [
+      finding,
+      { ...finding, kind: 'docs' },
+      { ...finding, kind: 'maintainability', verificationUncertain: true },
+    ],
     sourceContext: async () => '',
     verificationRetrieval: true,
+    verificationProof: true,
     log: () => {},
     backend: {
       runFindingVerification: async () => {
         answered = true;
-        return [0, 1].map((index) => ({
+        return [0, 1, 2].map((index) => ({
+          ...confirmed,
           index,
-          verdict: 'confirmed' as const,
           finding: {
             title: finding.title,
             kind: 'bug' as const,
@@ -641,9 +646,9 @@ test('a corrected finding keeps its retrieved evidence without borrowing another
   });
   assert.deepEqual(
     verdicts.map((v) => v.verdict),
-    ['confirmed', 'uncertain'],
+    ['confirmed', 'uncertain', 'confirmed'],
   );
-  assert.equal(maxActive, 2, 'Per-target retrieval shares one deadline concurrently');
+  assert.equal(maxActive, 3, 'Per-target retrieval shares one deadline concurrently');
 });
 
 test('a full prompt still discloses omitted state evidence', async (t) => {
