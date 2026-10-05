@@ -253,6 +253,7 @@ test('retrieves registered exception handlers while excluding an unregistered cl
     'import { useGlobalFilters as register } from "./bootstrap";\nexport function setup() { register(new DomainFilter()); }',
     'export const providers = [{ provide: (APP_FILTER as ProviderToken), useClass: DomainFilter }];',
     'import { filter } from "./instance";\nexport function setup(app) { app.useGlobalFilters(filter); }',
+    'import { FirstFilter } from "./first";\nexport function setup(app) { app.useGlobalFilters(new FirstFilter()); app.useGlobalFilters(\nnew DomainFilter()); }',
   ]) {
     const files = {
       'setup.ts': `import { DomainFilter } from './filter';\n${registration}`,
@@ -260,6 +261,7 @@ test('retrieves registered exception handlers while excluding an unregistered cl
         '@Catch(DomainError)\nexport class DomainFilter { catch(error) { return typedResponse(error); } }',
       'instance.ts':
         "import { DomainFilter } from './filter';\nexport const filter = new DomainFilter();",
+      'first.ts': 'export class FirstFilter { catch(error) { return error; } }',
       'unused.ts':
         '@Catch()\nexport class EverythingFilter { catch(error) { return hide(error); } }',
       'fake.ts': 'const example = "app.useGlobalFilters(new EverythingFilter())";',

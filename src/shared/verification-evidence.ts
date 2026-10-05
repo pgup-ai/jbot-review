@@ -164,7 +164,12 @@ export async function collectStateEvidence(
       const declaration = functionAt(source, write.line);
       if (
         declaration &&
-        !candidates.some((c) => c.path === path && c.declaration.start === declaration.start)
+        !candidates.some(
+          (c) =>
+            c.path === path &&
+            c.declaration.start === declaration.start &&
+            c.declaration.end === declaration.end,
+        )
       )
         candidates.push({ path, source, declaration, line: write.line });
     }
@@ -354,7 +359,7 @@ export async function collectStateEvidence(
       queue.sort((a, b) => b.priority - a.priority);
       const { candidate, depth } = queue.shift()!;
       const { path, source, declaration: d, line } = candidate;
-      const key = `${path}:${d.start}`;
+      const key = `${path}:${d.start}-${d.end}`;
       if (seen.has(key)) continue;
       seen.add(key);
       const lines = source.lines.slice(d.start - 1, d.end);
@@ -445,7 +450,8 @@ export async function collectStateEvidence(
     incomplete = true;
   }
   omitted += queue.filter(
-    ({ candidate }) => !seen.has(`${candidate.path}:${candidate.declaration.start}`),
+    ({ candidate }) =>
+      !seen.has(`${candidate.path}:${candidate.declaration.start}-${candidate.declaration.end}`),
   ).length;
   let packet = formatStateEvidence(items, omitted, incomplete || queue.length > 0, [
     ...missing.values(),
