@@ -3342,7 +3342,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
-        verificationSupport: options.experiment.verificationSupport,
+        generateVerificationSupport: options.experiment.generateVerificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3536,7 +3536,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
-        verificationSupport: options.experiment.verificationSupport,
+        generateVerificationSupport: options.experiment.generateVerificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3566,7 +3566,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
-        verificationSupport: options.experiment.verificationSupport,
+        generateVerificationSupport: options.experiment.generateVerificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -4409,7 +4409,7 @@ async function verifyFindings(params: {
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
-  verificationSupport?: boolean;
+  generateVerificationSupport?: boolean;
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4466,7 +4466,7 @@ export async function requestFindingVerdicts(params: {
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
-  verificationSupport?: boolean;
+  generateVerificationSupport?: boolean;
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4482,8 +4482,8 @@ export async function requestFindingVerdicts(params: {
   onCoverage?: SessionCoverageRecorder;
 }): Promise<FindingVerdictList> {
   const session = 'finding-verification';
-  const evidence =
-    params.verificationRetrieval || params.verificationProof || params.verificationSupport
+  let evidence =
+    params.verificationRetrieval || params.verificationProof
       ? new VerificationEvidence(params.workspace)
       : undefined;
   const startedAt = Date.now();
@@ -4527,7 +4527,7 @@ export async function requestFindingVerdicts(params: {
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
         context = [
-          params.verificationSupport ? VERIFICATION_SUPPORT_PROMPT : '',
+          params.generateVerificationSupport ? VERIFICATION_SUPPORT_PROMPT : '',
           params.contextForTargets?.(targets) ?? params.prContext,
           sourceContext,
         ]
@@ -4691,12 +4691,14 @@ export async function requestFindingVerdicts(params: {
             };
           }
         }
-        if (params.verificationSupport && target)
-          result = await evidence!.support(
+        if (target && result.verdict === 'confirmed' && !result.unavailable && result.support) {
+          evidence ??= new VerificationEvidence(params.workspace);
+          result = await evidence.support(
             result,
             target,
             suppliedOnly || params.toolLessOnly ? sourceContext : undefined,
           );
+        }
         return result;
       };
       let batch: FindingVerdictList | undefined;

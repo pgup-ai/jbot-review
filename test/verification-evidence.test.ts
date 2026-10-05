@@ -961,7 +961,7 @@ test('runner requests support only when opted in and remaps capped re-check supp
       model: 'test/model',
       prContext: '',
       targets,
-      verificationSupport: enabled,
+      generateVerificationSupport: enabled,
       sourceContext: async () => '',
       toolLessFirst: true,
       log: () => {},
@@ -993,9 +993,54 @@ test('runner requests support only when opted in and remaps capped re-check supp
       undefined,
       'unseen source cannot back tool-less support',
     );
-    assert.equal(!!verdicts[1].verifiedSupport, enabled);
+    assert.ok(verdicts[1].verifiedSupport);
     const delivered = applyFindingVerdicts(targets, [0, 1], verdicts).findings;
     assert.equal(delivered[0].body, finding.body);
-    assert.equal(delivered[1].body.includes(support.explanation), enabled);
+    assert.ok(delivered[1].body.includes(support.explanation));
   }
+});
+
+test('ordinary verdicts keep identical prompts and model calls without support I/O', async (t) => {
+  let headReads = 0;
+  let retrievals = 0;
+  t.mock.method(VerificationEvidence.prototype, 'head', async () => {
+    headReads++;
+    return 'unused';
+  });
+  t.mock.method(VerificationEvidence.prototype, 'prepare', async () => {
+    retrievals++;
+    return '';
+  });
+  const verdicts = parseFindingVerdicts(
+    JSON.stringify({
+      verdicts: [
+        { index: 0, verdict: 'confirmed', reason: 'Existing explanation' },
+        { index: 1, verdict: 'confirmed', support: { explanation: 'Invalid without citations' } },
+        { index: 2, verdict: 'refuted' },
+        { index: 3, verdict: 'uncertain' },
+      ],
+    }),
+    4,
+    () => {},
+  )!;
+  let calls = 0;
+  const result = await requestFindingVerdicts({
+    workspace: '/unused',
+    model: 'test/model',
+    prContext: 'original context',
+    targets: Array(4).fill(finding),
+    sourceContext: async () => 'original source',
+    log: () => {},
+    backend: {
+      runFindingVerification: async (_model, context) => {
+        calls++;
+        assert.equal(context, 'original context\n\noriginal source');
+        return verdicts;
+      },
+    },
+  });
+  assert.deepEqual(result, verdicts);
+  assert.equal(calls, 1);
+  assert.equal(headReads, 0);
+  assert.equal(retrievals, 0);
 });
