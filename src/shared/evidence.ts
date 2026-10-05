@@ -149,7 +149,7 @@ export function indexEvidenceSource(
           : object?.type === 'Identifier'
             ? name(object)
             : ast(object?.object)?.type === 'ThisExpression'
-              ? `this.${name(object?.property)}`
+              ? `this.${keyOrPrivateName(object?.property)}`
               : '';
       const symbol =
         callee?.type === 'Identifier'
@@ -190,6 +190,12 @@ export function indexEvidenceSource(
           ? `${name(object)}.${name(value.property)}`
           : '';
       const query =
+        n.type === 'ObjectProperty' &&
+        ['CallExpression', 'OptionalCallExpression'].includes(grandparent?.type ?? '') &&
+        (grandparent!.arguments as unknown[])[0] === parent &&
+        /^(?:find|findOne|findMany|findAll|count|countDocuments|exists)$/.test(
+          keyOrPrivateName(ast(grandparent?.callee)?.property) || name(grandparent?.callee),
+        ) &&
         value?.type === 'ObjectExpression' &&
         (value.properties as Ast[]).some((p) => keyName(p.key, p.computed).startsWith('$'));
       if ((field || member) && !query)
@@ -237,6 +243,9 @@ export function indexEvidenceSource(
       const kind =
         member === 'property' && FUNCTION_VALUE.has(ast(n.value)?.type ?? '') ? 'method' : member;
       declare(keyName(n.key, n.computed), kind, owner);
+      const type = ast(ast(ast(n.typeAnnotation)?.typeAnnotation)?.typeName);
+      if (kind === 'property' && type?.type === 'Identifier')
+        result.injected.push({ owner, name: keyName(n.key, n.computed), type: name(type) });
     } else if (
       FUNCTION_VALUE.has(n.type) &&
       ['CallExpression', 'NewExpression'].includes(parent?.type ?? '')

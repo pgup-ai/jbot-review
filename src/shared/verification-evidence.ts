@@ -118,17 +118,22 @@ export async function collectStateEvidence(
   const searched = new Set<string>();
   try {
     for (let hop = 0; hop < 2; hop++) {
-      const paths = new Set<string>();
+      const paths = new Map<string, boolean>();
       for (const symbol of [...terms.enums, ...terms.fields]) {
         if (searched.has(symbol)) continue;
         searched.add(symbol);
         for (const ref of await provider.references(symbol))
           if (!/(?:^|\/)(?:tests?|__tests__)\/|[.-](?:test|spec)\./.test(ref.path))
-            paths.add(ref.path);
+            paths.set(ref.path, paths.get(ref.path) || terms.fields.includes(symbol));
       }
-      const ranked = [...paths]
+      const ranked = [...paths.keys()]
         .filter((path) => !loaded.has(path))
-        .sort((a, b) => proximity(b) - proximity(a) || a.localeCompare(b));
+        .sort(
+          (a, b) =>
+            Number(paths.get(b)) - Number(paths.get(a)) ||
+            proximity(b) - proximity(a) ||
+            a.localeCompare(b),
+        );
       const room = Math.max(0, 32 - loaded.size);
       incomplete ||= ranked.length > room;
       for (const path of ranked.slice(0, room)) {
@@ -239,40 +244,36 @@ export async function collectStateEvidence(
               !r.path.startsWith('apps/') ||
               [...apps].some((app) => r.path.startsWith(app))),
         );
-        for (const ref of refs.slice(0, 4)) {
-          const source = await load(ref.path);
+        const paths = [...new Set(refs.map((ref) => ref.path))];
+        for (const path of paths.slice(0, 4)) {
+          const source = await load(path);
           if (!source) {
             incomplete = true;
             continue;
           }
-          const call = source.index.calls.find(
-            (c) => c.symbol === symbol && c.line <= ref.line && ref.line <= c.end,
-          );
-          const registered =
-            symbol === 'APP_FILTER'
-              ? source.index.writes.find(
-                  (w) =>
-                    w.field === 'provide' &&
-                    w.value === symbol &&
-                    w.object &&
-                    w.object.start <= ref.line &&
-                    ref.line <= w.object.end,
-                )
-              : undefined;
-          if (!call && !registered) continue;
-          const declaration = {
+          const names = new Set([
             symbol,
-            kind: 'function' as const,
-            start: call?.line ?? registered?.object?.start ?? ref.line,
-            end: call?.end ?? registered?.object?.end ?? ref.line,
-          };
-          queue.push({
-            candidate: { path: ref.path, source, declaration, line: ref.line },
-            priority: 80,
-            depth: 0,
-          });
+            ...source.index.imports.filter((i) => i.imported === symbol).map((i) => i.local),
+          ]);
+          const registrations =
+            symbol === 'APP_FILTER'
+              ? source.index.writes.flatMap((w) =>
+                  w.field === 'provide' && names.has(w.value) && w.object ? [w.object] : [],
+                )
+              : source.index.calls
+                  .filter((c) => c.symbol === symbol)
+                  .map((c) => ({ start: c.line, end: c.end }));
+          for (const range of registrations.slice(0, 4)) {
+            const declaration = { symbol, kind: 'function' as const, ...range };
+            queue.push({
+              candidate: { path, source, declaration, line: range.start },
+              priority: 80,
+              depth: 0,
+            });
+          }
+          incomplete ||= registrations.length > 4;
         }
-        incomplete ||= refs.length > 4;
+        incomplete ||= paths.length > 4;
       }
     } catch {
       incomplete = true;
@@ -491,7 +492,7 @@ export class VerificationEvidence {
     if (
       verdict.verdict !== 'confirmed' ||
       !JS_SOURCE.test(finding.path) ||
-      !requiresVerificationProof(finding)
+      !requiresVerificationProof(verdict.finding?.kind ? verdict.finding : finding)
     )
       return verdict;
     const sources = new Map<string, string>();
@@ -503,11 +504,12 @@ export class VerificationEvidence {
       (!supplied ||
         [...proof.producer, ...proof.guard, ...proof.effect].every(
           (ref) => supplied.get(ref.path)?.get(ref.line)?.trim() === ref.quote.trim(),
-        )) &&
-      (await this.revision) &&
-      (await this.revision) === (await this.head())
+        ))
     ) {
       try {
+        const revision = await this.revision;
+        if (!revision || revision !== (await this.head()))
+          throw new Error('Review revision is unavailable or changed.');
         const signal = AbortSignal.timeout(2000);
         const { tracked } = await this.store.packProvider(signal);
         for (const ref of [...proof.producer, ...proof.guard, ...proof.effect]) {
@@ -516,6 +518,7 @@ export class VerificationEvidence {
             tracked,
             maxBytes: 1024 * 1024,
           });
+          signal.throwIfAborted();
           if (source) {
             sources.set(ref.path, source.text);
             if (JS_SOURCE.test(ref.path) && !source.truncated) {

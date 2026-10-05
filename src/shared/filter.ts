@@ -326,7 +326,11 @@ export function checkVerificationProof(
   sources: ReadonlyMap<string, string>,
   producers: ReadonlySet<string>,
 ): FindingVerdict {
-  if (verdict.verdict !== 'confirmed' || !requiresVerificationProof(finding)) return verdict;
+  if (
+    verdict.verdict !== 'confirmed' ||
+    !requiresVerificationProof(verdict.finding?.kind ? verdict.finding : finding)
+  )
+    return verdict;
   const proof = parseVerificationProof(verdict.proof);
   if (
     proof &&

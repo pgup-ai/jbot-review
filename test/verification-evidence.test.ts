@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, symlink, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -148,6 +148,31 @@ test('retrieves an alternative state writer with its guard and persistence metho
     'Stage.CLOSED',
   );
   assert.match(indirect, /record.stage = nextStage/);
+  const crowded = await collectStateEvidence(
+    sources({
+      ...Object.fromEntries(
+        Array.from({ length: 40 }, (_, i) => [
+          `a${i}.ts`,
+          'export function fail() { throw Error.InvalidState; }',
+        ]),
+      ),
+      'z.ts': 'export function revise(record, next) { record.stage = next; persist(record); }',
+    }),
+    [{ ...finding, body: 'record.stage can change without Error.InvalidState being thrown.' }],
+    '',
+  );
+  assert.match(crowded, /record.stage = next/);
+  const privateSource = await collectStateEvidence(
+    sources({
+      'producer.ts':
+        "import { Repo } from './repo';\nexport class Service {\n #repo: Repo;\n createRevision(id) { this.#assertAllowed(id); return this.#repo.update({ id, stage: Stage.REVISING }); }\n #assertAllowed(id) { if (!id) throw Error(); }\n}",
+      'repo.ts': 'export class Repo { update(data) { return db.persist(data); } }',
+    }),
+    [finding],
+    'Stage.CLOSED',
+  );
+  assert.match(privateSource, /if \(!id\) throw Error/);
+  assert.match(privateSource, /db.persist\(data\)/);
 });
 
 function sources(files: Record<string, string>) {
@@ -223,6 +248,7 @@ test('retrieves registered exception handlers while excluding an unregistered cl
     'export function setup(app) { app\n .useGlobalFilters(new DomainFilter()); }',
     'export const providers = [{ provide: APP_FILTER, useClass: DomainFilter }];',
     'export const providers = [{ provide:\n APP_FILTER, useClass: DomainFilter }];',
+    'import { APP_FILTER as FILTER_TOKEN } from "@nestjs/core";\nexport const providers = [{ provide: FILTER_TOKEN, useClass: DomainFilter }];',
   ]) {
     const files = {
       'setup.ts': `import { DomainFilter } from './filter';\n${registration}`,
@@ -488,6 +514,55 @@ test('a failed proof source check leaves other verdicts intact', async (t) => {
     ['uncertain', 'refuted'],
   );
   assert.equal(targetFailure[0].unavailable, true);
+});
+
+test('revision lookup failures preserve unavailable status instead of claiming missing proof', async (t) => {
+  const { workspace } = await fixture(t);
+  const evidence = new VerificationEvidence(workspace);
+  assert.equal((await evidence.check(confirmed, finding)).verdict, 'confirmed');
+  await rename(join(workspace, '.git'), join(workspace, 'hidden-git'));
+  for (const validator of [evidence, new VerificationEvidence(workspace)]) {
+    const verdict = await validator.check(confirmed, finding);
+    assert.equal(verdict.verdict, 'uncertain');
+    assert.equal(verdict.unavailable, true);
+    assert.match(verdict.reason!, /validation did not complete/);
+  }
+});
+
+test('a documentation candidate corrected to a bug must pass the proof gate', async (t) => {
+  const { workspace } = await fixture(t);
+  const verdict = {
+    ...confirmed,
+    proof: undefined,
+    finding: {
+      title: finding.title,
+      kind: 'bug' as const,
+      severity: 'P2' as const,
+      evidence: proof.producer[0].quote,
+    },
+  };
+  for (const kind of ['docs', 'maintainability'] as const) {
+    const target = { ...finding, kind, verificationUncertain: true };
+    const result = await requestFindingVerdicts({
+      workspace,
+      model: 'test/model',
+      prContext: '',
+      targets: [target],
+      sourceContext: async () => proof.producer[0].quote,
+      verificationProof: true,
+      log: () => {},
+      backend: { runFindingVerification: async () => [verdict] },
+    });
+    assert.equal(result[0].verdict, 'uncertain');
+    assert.equal(
+      checkVerificationProof(verdict, target, new Map(), new Set()).verdict,
+      'uncertain',
+    );
+    assert.equal(
+      (await new VerificationEvidence(workspace).check({ ...verdict, proof }, target)).verdict,
+      'confirmed',
+    );
+  }
 });
 
 test('a corrected finding keeps its retrieved evidence without borrowing another target’s packet', async (t) => {

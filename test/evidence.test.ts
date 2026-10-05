@@ -684,10 +684,10 @@ test('rich index records members, types, re-exports, injected services and this-
   assert.deepEqual(
     indexEvidenceSource(
       'write.ts',
-      'const { stage } = record;\nconst { nested: { status } } = record;\nrecord.stage = next;\nconst data = { stage: next };',
+      'const { stage } = record;\nconst { nested: { status } } = record;\nrecord.stage = next;\nconst data = { stage: next };\nrecord.payload = { $type: "metadata" };\nconst event = { payload: { $type: "metadata" } };\nrepo.find({ stage: { $ne: Stage.CLOSED } });',
       { rich: true },
     ).writes.map((write) => write.line),
-    [3, 4],
+    [3, 4, 5, 5, 6, 6, 7],
   );
   assert.deepEqual(index.reexports, [
     { exported: 'Repo', imported: 'LedgerRepository', from: './repo' },
@@ -723,6 +723,8 @@ test('rich index records members, types, re-exports, injected services and this-
     { target: 'repo', member: 'save', line: 7 },
     { target: '', member: 'repo', line: 7 },
   ]);
+  assert.equal(chained.calls[0].receiver, 'this.repo');
+  assert.deepEqual(chained.injected, [{ owner: 'Q', name: 'repo', type: 'R' }]);
   assert.equal(
     indexEvidenceSource('h.ts', 'class H { handle = () => 1; }', { rich: true }).declarations.find(
       (d) => d.symbol === 'handle',
