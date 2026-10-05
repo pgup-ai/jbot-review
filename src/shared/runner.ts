@@ -2535,12 +2535,13 @@ async function runReviewPipeline(params: {
         ? ['guideline-compliance']
         : []),
     ];
-    // PR text, the jbot build and the pool's per-head draw stay out: bots edit PR
-    // descriptions after pushes, releases ship daily, and each head draws its own member.
+    // PR text, the jbot build (so the experiment preset, not flags a release adds) and the
+    // pool's per-head draw stay out: bots edit PR descriptions after pushes, releases ship
+    // daily, and each head draws its own member.
     const auxPolicy = {
       ...auxiliaryModelPolicy(options, { model, auxModel, baseURL, auxBackend: auxBackend.name }),
       context: options.enhancedContext,
-      experiment: options.experiment,
+      experiment: options.experiment.preset,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
     const policyFor = (session: string) =>
