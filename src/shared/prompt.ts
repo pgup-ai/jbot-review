@@ -1865,7 +1865,7 @@ Refuted, uncertain, and ordinary findings still need only verdict and reason.
 
 export const VERIFICATION_PROOF_PROMPT = `## Verification proof requirement
 
-For every confirmed bug, security, performance, or investigate finding (including findings without a kind), add a proof object to its verdict. Documentation, architecture, maintainability, and test-only findings do not require this object. The trigger is a prose description. Fill each producer, guard, and effect role with 1-3 source references: repository-relative path, one-based line, and the complete text of that line (leading/trailing whitespace may be omitted; partial-line quotes are rejected). Do not quote the finding itself. These references will be checked against the checkout.
+For findings anchored in JavaScript or TypeScript files, every confirmed bug, security, performance, or investigate finding (including findings without a kind) requires a proof object. Findings in other languages, documentation, architecture, maintainability, and test-only findings use the usual verification requirements. The trigger is a prose description. Fill each producer, guard, and effect role with 1-3 source references: repository-relative path, one-based line, and the complete text of that line (leading/trailing whitespace may be omitted; partial-line quotes are rejected). Do not quote the finding itself. These references will be checked against the checkout.
 
 - trigger: the concrete input or state and sequence that produces the failure. Distinguish a reachable application state from a hypothetical combination of enum values.
 - producer: the executable code that creates that state or accepts the triggering input. A type, enum declaration, comparison, comment, or test expectation alone is insufficient. Trace update payloads into persistence when the claim depends on what a write preserves.
@@ -1924,6 +1924,9 @@ export function formatStateEvidence(
             .map((item) =>
               `- ${item.path}:${item.line} ${item.symbol} (${reasons[item.reason]})`.slice(0, 600),
             ),
+          ...(missing.length > 8
+            ? [`${missing.length - 8} further unresolved dependencies omitted.`]
+            : []),
         ]
       : []),
     `Omitted candidates: ${omitted}.${incomplete ? ' Retrieval was incomplete; additional producers or guards may exist.' : ''}`,
@@ -2099,7 +2102,7 @@ export const PERMISSION_DENIED_MESSAGE =
   'jbot-review runs headless; nothing can answer a permission prompt.';
 
 export const verifierOmissionNote = (count: number) =>
-  `[${count} supporting excerpt(s) (page context or cited rule sections) left out to fit the prompt budget; their absence is not evidence.]`;
+  `[${count} supporting excerpt(s) (prepared evidence, page context or cited rule sections) left out to fit the prompt budget; their absence is not evidence.]`;
 
 export const STATE_EVIDENCE_OMISSION =
   '[State-producing source candidates omitted to fit the prompt budget; their absence is not evidence.]';

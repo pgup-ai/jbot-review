@@ -924,15 +924,18 @@ The opt-in `JBOT_REVIEW_EXPERIMENT=state-evidence` adds source retrieval to
 `context-pack` verification. It follows JavaScript/TypeScript state writes into
 preparation guards, imported lookup tables and related methods, and retrieves
 registered exception filters for error-handling concerns. It supplies at most
-16 KiB with explicit omissions; ambiguous receiver matches remain search leads.
+16 KiB per finding within the assembled prompt budget, with explicit omissions;
+ambiguous receiver matches remain search leads. Validation reuses each finding's
+delivered packet without repeating retrieval after the model answers.
 Deduplication and enum naming support apply whenever retrieval runs. This preset
 keeps the existing confirmation requirements.
 
 The opt-in `JBOT_REVIEW_EXPERIMENT=state-proof` adds the same retrieval plus a
-proof requirement. Consequential confirmations must include a trigger description and producer, guard, and effect citations;
+proof requirement for findings anchored in JavaScript/TypeScript. Consequential confirmations must include a trigger description and producer, guard, and effect citations;
 missing or stale citations leave the candidate uncertain. Citation checks do not
 prove the causal argument. This preset is experimental and does not change the
-default. Other source languages cannot yet establish a producer through this gate.
+default. Findings in other languages keep the usual verification requirements;
+the experimental producer check supports JavaScript/TypeScript only.
 
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own

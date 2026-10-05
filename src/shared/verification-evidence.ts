@@ -488,7 +488,12 @@ export class VerificationEvidence {
     }
   }
   async check(verdict: FindingVerdict, finding: Finding, suppliedSource?: string) {
-    if (verdict.verdict !== 'confirmed' || !requiresVerificationProof(finding)) return verdict;
+    if (
+      verdict.verdict !== 'confirmed' ||
+      !JS_SOURCE.test(finding.path) ||
+      !requiresVerificationProof(finding)
+    )
+      return verdict;
     const sources = new Map<string, string>();
     const producers = new Set<string>();
     const proof = parseVerificationProof(verdict.proof);

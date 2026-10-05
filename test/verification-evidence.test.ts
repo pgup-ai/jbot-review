@@ -17,7 +17,9 @@ import { requestFindingVerdicts } from '../src/shared/runner.ts';
 import {
   assembleFindingVerificationPrompt,
   formatContextPackItem,
+  formatStateEvidence,
   STATE_EVIDENCE_OMISSION,
+  verifierOmissionNote,
 } from '../src/shared/prompt.ts';
 import { reviewPromptBudget } from '../src/shared/review-plan.ts';
 
@@ -290,11 +292,26 @@ test('retains partial retrieval with explicit omissions under provider failures 
   assert.match(packet, /stage: Stage.REVISING/);
   assert.match(packet, /Retrieval was incomplete/);
   assert.match(packet, /Omitted candidates: [1-9]/);
+  const gaps = Array.from({ length: 12 }, (_, i) => ({
+    path: `source${i}.ts`,
+    line: 1,
+    symbol: 'missing',
+    reason: 'missing' as const,
+  }));
+  const omitted = formatStateEvidence([], 0, false, gaps);
+  assert.match(omitted, /source7.ts/);
+  assert.doesNotMatch(omitted, /source8.ts/);
+  assert.match(omitted, /4 further unresolved dependencies omitted/);
 });
 
 test('requires complete source-valid proof and rejects enum-only producers, stale quotes, path escapes and malformed proof', async (t) => {
   const { workspace, files } = await fixture(t);
   const evidence = new VerificationEvidence(workspace);
+  for (const path of ['delete.py', 'delete.go', 'delete.rs'])
+    assert.equal(
+      (await evidence.check({ ...confirmed, proof: undefined }, { ...finding, path })).verdict,
+      'confirmed',
+    );
   assert.equal((await evidence.check(confirmed, finding)).verdict, 'confirmed');
   const supplied =
     `### producer.ts:6\n6: ${proof.producer[0].quote}\n` +
@@ -441,10 +458,46 @@ test('a failed proof source check leaves other verdicts intact', async (t) => {
   );
   assert.equal(verdicts[0].unavailable, true);
   assert.equal(verdicts[1].reason, 'counterexample');
+  const targetFailure = await requestFindingVerdicts({
+    workspace,
+    model: 'test/model',
+    prContext: '',
+    targets: [finding, { ...finding, path: 'other.ts' }],
+    sourceContext: async (targets) => {
+      if (targets.length === 1 && targets[0] === finding) throw Error('source unavailable');
+      return proof.producer[0].quote;
+    },
+    log: () => {},
+    backend: {
+      runFindingVerification: async () => [
+        {
+          ...confirmed,
+          finding: {
+            title: finding.title,
+            kind: 'bug',
+            severity: 'P2',
+            evidence: proof.producer[0].quote,
+          },
+        },
+        { index: 1, verdict: 'refuted', reason: 'counterexample' },
+      ],
+    },
+  });
+  assert.deepEqual(
+    targetFailure.map((v) => v.verdict),
+    ['uncertain', 'refuted'],
+  );
+  assert.equal(targetFailure[0].unavailable, true);
 });
 
 test('a corrected finding keeps its retrieved evidence without borrowing another target’s packet', async (t) => {
   const { workspace } = await fixture(t);
+  let answered = false;
+  const prepare = VerificationEvidence.prototype.prepare;
+  t.mock.method(VerificationEvidence.prototype, 'prepare', function (...args) {
+    assert.equal(answered, false, 'Validate against delivered evidence, without another retrieval');
+    return prepare.apply(this, args);
+  });
   const verdicts = await requestFindingVerdicts({
     workspace,
     model: 'test/model',
@@ -454,8 +507,9 @@ test('a corrected finding keeps its retrieved evidence without borrowing another
     verificationRetrieval: true,
     log: () => {},
     backend: {
-      runFindingVerification: async () =>
-        [0, 1].map((index) => ({
+      runFindingVerification: async () => {
+        answered = true;
+        return [0, 1].map((index) => ({
           index,
           verdict: 'confirmed' as const,
           finding: {
@@ -464,7 +518,8 @@ test('a corrected finding keeps its retrieved evidence without borrowing another
             severity: 'P2' as const,
             evidence: proof.producer[0].quote,
           },
-        })),
+        }));
+      },
     },
   });
   assert.deepEqual(
@@ -478,7 +533,10 @@ test('a full prompt still discloses omitted state evidence', async (t) => {
   const prContext = 'Stage.CLOSED';
   const targets = [finding];
   const transportBytes = Buffer.byteLength(
-    assembleFindingVerificationPrompt(prContext + '\n\n' + STATE_EVIDENCE_OMISSION, targets),
+    assembleFindingVerificationPrompt(
+      [prContext, verifierOmissionNote(1), STATE_EVIDENCE_OMISSION].join('\n\n'),
+      targets,
+    ),
   );
   let called = false;
   const verdicts = await requestFindingVerdicts({
@@ -495,6 +553,7 @@ test('a full prompt still discloses omitted state evidence', async (t) => {
       runFindingVerification: async (_model, context, findings) => {
         called = true;
         assert.match(context, /State-producing source candidates omitted/);
+        assert.match(context, /1 supporting excerpt/);
         assert.doesNotMatch(context, /OPTIONAL_PACK|### producer.ts/);
         assert.ok(
           Buffer.byteLength(assembleFindingVerificationPrompt(context, findings)) <= transportBytes,

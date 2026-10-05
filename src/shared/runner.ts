@@ -4377,7 +4377,6 @@ export async function requestFindingVerdicts(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  /** Main-review packs and cited rules per target; each item goes in while it fits. */
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
@@ -4410,19 +4409,31 @@ export async function requestFindingVerdicts(params: {
       let context: string;
       let sourceContext: string;
       const preparedSources = new Map<Finding, string>();
+      let extras: { packs: string[]; rules: string[] }[];
+      let optionalCount = 0;
       // Reserve the omission notice before optional context consumes the remaining room.
       const fits = (candidate: string, reserveOmission = true) =>
         !params.promptBudget ||
         measureReviewPrompt(
           assembleFindingVerificationPrompt(
-            params.verificationRetrieval && reserveOmission
-              ? joinContext(candidate, STATE_EVIDENCE_OMISSION)
+            reserveOmission
+              ? joinContext(
+                  candidate,
+                  optionalCount ? verifierOmissionNote(optionalCount) : '',
+                  params.verificationRetrieval ? STATE_EVIDENCE_OMISSION : '',
+                )
               : candidate,
             targets,
           ),
           params.promptBudget,
         ).fits;
       for (;;) {
+        extras = targets.map(
+          (target) => params.verificationContextFor?.(target) ?? { packs: [], rules: [] },
+        );
+        optionalCount =
+          new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules])).size +
+          (params.prepareEvidence ? targets.length : 0);
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
         context = [
@@ -4441,6 +4452,7 @@ export async function requestFindingVerdicts(params: {
       const evidenceTimeoutMs = computeEvidenceTimeoutMs(
         params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
       );
+      let omitted = 0;
       if (params.prepareEvidence && evidenceTimeoutMs > 0) {
         const prepared = await Promise.allSettled(
           targets.map((target) => params.prepareEvidence!([target], evidenceTimeoutMs)),
@@ -4457,6 +4469,7 @@ export async function requestFindingVerdicts(params: {
             sourceContext = joinContext(sourceContext, result.value);
             preparedSources.set(targets[index], result.value);
           } else {
+            omitted++;
             params.log('Optional verification evidence omitted: assembled prompt exceeds budget.');
           }
         }
@@ -4464,10 +4477,6 @@ export async function requestFindingVerdicts(params: {
         params.log('Skipping optional evidence preparation to preserve verification time.');
       }
       const packed = new Set<string>();
-      let omitted = 0;
-      const extras = targets.map(
-        (target) => params.verificationContextFor?.(target) ?? { packs: [], rules: [] },
-      );
       const rules = new Set(extras.flatMap((extra) => extra.rules));
       for (const item of new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules]))) {
         const enriched = joinContext(context, item);
@@ -4483,25 +4492,43 @@ export async function requestFindingVerdicts(params: {
         if (!rules.has(item)) sourceContext = joinContext(sourceContext, item);
         packed.add(item);
       }
-      if (omitted) {
-        const noted = joinContext(context, verifierOmissionNote(omitted));
-        if (fits(noted)) context = noted;
-      }
+      if (omitted) context = joinContext(context, verifierOmissionNote(omitted));
+      const targetSources = new Map<Finding, Promise<string>>();
+      const sourceFor = (target: Finding) => {
+        if (!targetSources.has(target))
+          targetSources.set(
+            target,
+            (async () =>
+              joinContext(
+                await (params.sourceContext?.([target]) ??
+                  buildFindingSourceContext(params.workspace, [target])),
+                preparedSources.get(target) ?? '',
+                ...extras[targets.indexOf(target)].packs.filter((item) => packed.has(item)),
+              ))(),
+          );
+        return targetSources.get(target)!;
+      };
       if (params.verificationRetrieval) {
-        const packet = await evidence!.prepare(
-          targets,
-          context,
-          computeEvidenceTimeoutMs(
-            params.timeoutMs === undefined
-              ? undefined
-              : params.timeoutMs - (Date.now() - startedAt),
-          ),
-        );
-        const enriched = joinContext(context, packet);
-        if (fits(enriched, false)) {
-          context = enriched;
-          sourceContext = joinContext(sourceContext, packet);
-        } else {
+        let omittedState = false;
+        for (const target of targets) {
+          const supplied = await sourceFor(target).catch(() => '');
+          const packet = await evidence!.prepare(
+            [target],
+            joinContext(params.contextForTargets?.([target]) ?? params.prContext, supplied),
+            computeEvidenceTimeoutMs(
+              params.timeoutMs === undefined
+                ? undefined
+                : params.timeoutMs - (Date.now() - startedAt),
+            ),
+          );
+          const enriched = joinContext(context, packet);
+          if (fits(joinContext(enriched, STATE_EVIDENCE_OMISSION), false)) {
+            context = enriched;
+            sourceContext = joinContext(sourceContext, packet);
+            targetSources.set(target, Promise.resolve(joinContext(supplied, packet)));
+          } else omittedState = true;
+        }
+        if (omittedState) {
           context = joinContext(context, STATE_EVIDENCE_OMISSION);
           params.log('State-producing source omitted: assembled prompt exceeds budget.');
         }
@@ -4528,24 +4555,16 @@ export async function requestFindingVerdicts(params: {
         if (params.verificationProof)
           result = await evidence!.check(result, target, suppliedOnly ? sourceContext : undefined);
         if (result.verdict === 'confirmed' && result.finding && target) {
-          let targetSource = joinContext(
-            await (params.sourceContext?.([target]) ??
-              buildFindingSourceContext(params.workspace, [target])),
-            preparedSources.get(target) ?? '',
-            ...(params.verificationContextFor?.(target).packs ?? []).filter((item) =>
-              packed.has(item),
-            ),
-          );
-          if (params.verificationRetrieval && !targetSource.includes(result.finding.evidence!))
-            targetSource = joinContext(
-              targetSource,
-              await evidence!.prepare(
-                [target],
-                targetSource,
-                computeEvidenceTimeoutMs(remaining()),
-              ),
-            );
-          result = checkConfirmationEvidence(result, targetSource);
+          try {
+            result = checkConfirmationEvidence(result, await sourceFor(target));
+          } catch {
+            result = {
+              index: verdict.index,
+              verdict: 'uncertain',
+              unavailable: true,
+              reason: 'Target source validation did not complete.',
+            };
+          }
         }
         return result;
       };
