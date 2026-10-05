@@ -4526,11 +4526,7 @@ export async function requestFindingVerdicts(params: {
         );
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
-        context = [
-          params.generateVerificationSupport ? VERIFICATION_SUPPORT_PROMPT : '',
-          params.contextForTargets?.(targets) ?? params.prContext,
-          sourceContext,
-        ]
+        context = [params.contextForTargets?.(targets) ?? params.prContext, sourceContext]
           .filter(Boolean)
           .join('\n\n');
         if (fits(context, false)) break;
@@ -4655,6 +4651,11 @@ export async function requestFindingVerdicts(params: {
         throw new Error(
           'Finding verification context and required omission notices exceed the prompt budget.',
         );
+      }
+      if (params.generateVerificationSupport) {
+        const enriched = joinContext(VERIFICATION_SUPPORT_PROMPT, context);
+        if (fits(enriched, false)) context = enriched;
+        else params.log('Optional verification support instructions omitted: prompt budget full.');
       }
       batchSize = size;
       const remaining = () =>

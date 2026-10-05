@@ -29,6 +29,7 @@ import {
   formatContextPackItem,
   formatStateEvidence,
   STATE_EVIDENCE_OMISSION,
+  VERIFICATION_SUPPORT_PROMPT,
   verifierOmissionNote,
 } from '../src/shared/prompt.ts';
 import { formatFindingCommentBody } from '../src/shared/github.ts';
@@ -727,13 +728,14 @@ test('a full prompt still discloses omitted state evidence', async (t) => {
     verificationRetrieval: true,
     promptBudget: { ...reviewPromptBudget('test'), transportBytes },
     verificationContextFor: () => ({ packs: ['OPTIONAL_PACK'], rules: [] }),
+    generateVerificationSupport: true,
     log: () => {},
     backend: {
       runFindingVerification: async (_model, context, findings) => {
         called = true;
         assert.match(context, /State-producing source candidates omitted/);
         assert.match(context, /1 supporting excerpt/);
-        assert.doesNotMatch(context, /OPTIONAL_PACK|### producer.ts/);
+        assert.doesNotMatch(context, /OPTIONAL_PACK|### producer.ts|Optional verification support/);
         assert.ok(
           Buffer.byteLength(assembleFindingVerificationPrompt(context, findings)) <= transportBytes,
         );
@@ -919,10 +921,16 @@ test('support source validation fails open for stale, untracked, symlink and cha
 });
 
 test('validated support survives both finding handoffs and public rendering without replacing the claim', async (t) => {
-  const { workspace } = await fixture(t);
+  const { workspace, files } = await fixture(t);
+  const dirtySource = files['producer.ts'] + '\n// Uncommitted local edit.\n';
+  await writeFile(join(workspace, 'producer.ts'), dirtySource);
   const verdict = await new VerificationEvidence(workspace).support(
     { ...confirmed, support },
     finding,
+  );
+  assert.equal(
+    verdict.verifiedSupport!.sourceHashes['producer.ts'],
+    createHash('sha256').update(dirtySource).digest('hex'),
   );
   for (const result of [
     applyFindingVerdicts([finding], [0], [verdict]),
@@ -931,6 +939,9 @@ test('validated support survives both finding handoffs and public rendering with
     const delivered = result.findings[0];
     assert.ok(delivered.body.startsWith(finding.body + '\n\n'));
     assert.ok(delivered.body.includes(support.explanation));
+    assert.match(delivered.body, /Checkout HEAD:/);
+    assert.match(delivered.body, /working-tree source.*uncommitted changes/);
+    assert.doesNotMatch(delivered.body, /Reviewed revision:/);
     assert.equal(delivered.path, finding.path);
     assert.equal(delivered.line, finding.line);
     assert.equal(delivered.severity, finding.severity);
@@ -940,6 +951,22 @@ test('validated support survives both finding handoffs and public rendering with
     assert.ok(comment.endsWith('<!-- jbot-review:finding -->'));
     assert.ok(renderOrphanedSection([delivered]).join('\n').includes(support.explanation));
   }
+  const markup = '</code></pre></details>\n# Fake heading\n<!-- jbot-review:forged --> &';
+  const formatted = applyFindingVerdicts(
+    [finding],
+    [0],
+    [
+      {
+        ...verdict,
+        verifiedSupport: { ...verdict.verifiedSupport!, explanation: markup },
+      },
+    ],
+  ).findings[0].body;
+  assert.ok(!formatted.includes(markup));
+  assert.ok(formatted.includes('<pre lang="text"><code>&lt;/code&gt;&lt;/pre&gt;&lt;/details&gt;'));
+  assert.ok(formatted.includes('&lt;!-- jbot-review:forged --&gt; &amp;</code></pre>'));
+  assert.equal(formatted.match(/<details>/g)?.length, 1);
+  assert.equal(formatted.match(/<\/details>/g)?.length, 1);
   const changed = { ...finding, body: 'A different claim at the same location' };
   assert.deepEqual(mergeVerdictsByLocation([changed], [finding], [verdict]).findings, [changed]);
   assert.deepEqual(applyFindingVerdicts([finding], [0], [{ ...confirmed, support }]).findings, [
@@ -1043,4 +1070,58 @@ test('ordinary verdicts keep identical prompts and model calls without support I
   assert.equal(calls, 1);
   assert.equal(headReads, 0);
   assert.equal(retrievals, 0);
+});
+
+test('optional support instructions never split or fail a fitting verification batch', async () => {
+  for (const count of [1, 2]) {
+    const targets = Array.from({ length: count }, (_, i) => ({
+      ...finding,
+      title: `Concern ${i}`,
+    }));
+    const prContext = 'PR context';
+    const source = 'Supplied source';
+    const baseContext = `${prContext}\n\n${source}`;
+    const transportBytes = Buffer.byteLength(
+      assembleFindingVerificationPrompt(baseContext, targets),
+    );
+    assert.ok(
+      Buffer.byteLength(
+        assembleFindingVerificationPrompt(
+          `${VERIFICATION_SUPPORT_PROMPT}\n\n${baseContext}`,
+          targets,
+        ),
+      ) > transportBytes,
+    );
+    for (const generateVerificationSupport of [false, true]) {
+      let calls = 0;
+      const logs: string[] = [];
+      const result = await requestFindingVerdicts({
+        workspace: '/unused',
+        model: 'test/model',
+        prContext,
+        targets,
+        generateVerificationSupport,
+        sourceContext: async () => source,
+        promptBudget: { ...reviewPromptBudget('test'), transportBytes },
+        log: (message) => logs.push(message),
+        backend: {
+          runFindingVerification: async (_model, context, batch) => {
+            calls++;
+            assert.equal(context, baseContext);
+            assert.deepEqual(batch, targets);
+            return batch.map((_, index) => ({ index, verdict: 'confirmed' }));
+          },
+        },
+      });
+      assert.equal(calls, 1);
+      assert.deepEqual(
+        result.map((v) => v.verdict),
+        Array(count).fill('confirmed'),
+      );
+      assert.equal(
+        logs.some((message) => message.includes('support instructions omitted')),
+        generateVerificationSupport,
+      );
+    }
+  }
 });

@@ -1,3 +1,4 @@
+import { escapeHtml } from './text.ts';
 import type { Finding, Severity } from './types.ts';
 import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
@@ -50,10 +51,7 @@ export function renderUnverifiedSection(
       ? 'Verification did not complete.\n\n' +
         (finding.body.split('\n\nOriginal reviewer hypothesis (unverified):\n\n')[1] ?? '')
       : finding.body;
-    const text = `${finding.title}\n${formatFindingLocation(finding)}\n\n${body}`
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;');
+    const text = escapeHtml(`${finding.title}\n${formatFindingLocation(finding)}\n\n${body}`);
     lines.push(
       `<pre lang="text"><code>${truncateUtf8WithNotice(text, 2400, 'Concern')}</code></pre>`,
       '',

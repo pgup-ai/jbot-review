@@ -1,3 +1,4 @@
+import { escapeHtml } from './text.ts';
 import { formatUnverifiedFinding } from './prompt.ts';
 import {
   anchorByEvidenceSnippet,
@@ -390,7 +391,7 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
       .join('\n');
     return {
       ...finding,
-      body: `${finding.body}\n\nVerification support (listed source citations checked; causal explanation is the verifier's assessment):\n\n${support.explanation}\n\n<details>\n<summary>Source provenance</summary>\n\nReviewed revision: ${support.revision}\n\n${citations}\n\n</details>`,
+      body: `${finding.body}\n\nVerification support (listed source citations checked; causal explanation is the verifier's assessment):\n\n<pre lang="text"><code>${escapeHtml(support.explanation)}</code></pre>\n\n<details>\n<summary>Source provenance</summary>\n\nCheckout HEAD: ${support.revision}\n\nHashes identify the working-tree source read during validation, which may include uncommitted changes.\n\n<pre lang="text"><code>${escapeHtml(citations)}</code></pre>\n\n</details>`,
     };
   }
   const confirmed = verdict.finding;

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { evidenceHash } from './evidence-cache.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -520,7 +520,7 @@ export class VerificationEvidence {
           const source = await readTrackedSource(this.workspace, ref.path, signal);
           if (!source || source.truncated) return verdict;
           sources.set(ref.path, source.text);
-          sourceHashes[ref.path] = createHash('sha256').update(source.text).digest('hex');
+          sourceHashes[ref.path] = evidenceHash(source.text);
         }
         if (sources.get(ref.path)!.split(/\r?\n/)[ref.line - 1]?.trim() !== ref.quote.trim())
           return verdict;

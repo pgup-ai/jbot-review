@@ -945,7 +945,8 @@ change the default. Findings in other languages keep the usual verification requ
 Verification support delivery is automatic when a confirmed ordinary finding
 already includes structured support. The driver checks tracked, non-symlink
 source, line/quote matches and a stable checkout HEAD, then appends the explanation
-and collapsed revision/source-hash provenance to the original body. Missing,
+and collapsed checkout-HEAD/source-hash provenance to the original body. Hashes
+identify the working-tree source read during validation, including uncommitted edits. Missing,
 malformed, stale or unreadable support leaves the finding unchanged. Ordinary
 verdicts without support add no validation I/O or model calls. Tool-less support
 must cite source actually supplied to that pass. Citation checks establish
@@ -953,7 +954,9 @@ provenance, not causality; explanations remain the verifier's assessment.
 
 The opt-in `JBOT_REVIEW_EXPERIMENT=verified-support` asks the verifier to generate
 this support and enables `state-evidence` retrieval, leaving the proof gate off.
-Generation and extra retrieval remain experimental. Default prompts, retrieval,
+Support instructions use only room remaining after evidence and omission notices;
+when they do not fit, verification proceeds without them. Generation and extra
+retrieval remain experimental. Default prompts, retrieval,
 model calls and the six-step limit are unchanged.
 
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
