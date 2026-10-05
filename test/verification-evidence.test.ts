@@ -707,3 +707,49 @@ test('retrieval and proof enforcement are independent and only proof enforcement
     }
   }
 });
+
+test('validates accepted tool-less proofs once while checking remaining targets', async (t) => {
+  const { workspace } = await fixture(t);
+  const check = t.mock.method(VerificationEvidence.prototype, 'check');
+  const modes: string[] = [];
+  const verdicts = await requestFindingVerdicts({
+    workspace,
+    model: 'test/model',
+    prContext: 'Stage.CLOSED',
+    targets: [finding, { ...finding, title: 'Another concern' }],
+    verificationRetrieval: true,
+    verificationProof: true,
+    toolLessFirst: true,
+    log: () => {},
+    backend: {
+      runFindingVerification: async (_model, _context, targets, ...args) => {
+        const mode = String(args[4]);
+        modes.push(mode);
+        assert.equal(targets.length, mode === 'single-shot' ? 2 : 1);
+        return mode === 'single-shot'
+          ? [confirmed, { index: 1, verdict: 'uncertain' }]
+          : [confirmed];
+      },
+    },
+  });
+  assert.deepEqual(modes, ['single-shot', 'capped']);
+  assert.deepEqual(
+    verdicts.map((v) => [v.index, v.verdict]),
+    [
+      [0, 'confirmed'],
+      [1, 'confirmed'],
+    ],
+  );
+  assert.deepEqual(
+    check.mock.calls.map(({ arguments: [verdict, , supplied] }) => [
+      verdict.index,
+      verdict.verdict,
+      supplied !== undefined,
+    ]),
+    [
+      [0, 'confirmed', true],
+      [1, 'uncertain', true],
+      [1, 'confirmed', false],
+    ],
+  );
+});

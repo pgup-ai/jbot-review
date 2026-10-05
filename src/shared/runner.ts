@@ -4714,20 +4714,18 @@ export async function requestFindingVerdicts(params: {
           : [];
         batch = [
           ...confirmed,
-          ...(capped ?? []).map((verdict) => ({
-            ...verdict,
-            index: targets.indexOf(rest[verdict.index]),
-          })),
+          ...(await Promise.all(
+            (capped ?? []).map((verdict) =>
+              check({ ...verdict, index: targets.indexOf(rest[verdict.index]) }),
+            ),
+          )),
         ];
-      } else batch = await verify(targets, params.toolLessOnly ? 'single-shot' : undefined);
+      } else {
+        const result = await verify(targets, params.toolLessOnly ? 'single-shot' : undefined);
+        batch = result && (await Promise.all(result.map((v) => check(v, params.toolLessOnly))));
+      }
       if (!batch) throw new Error('Finding verification output unusable.');
-      const checked = await Promise.all(
-        batch.map(async (verdict) => ({
-          ...(await check(verdict, params.toolLessOnly)),
-          index: verdict.index + offset,
-        })),
-      );
-      verdicts.push(...checked);
+      verdicts.push(...batch.map((verdict) => ({ ...verdict, index: verdict.index + offset })));
       if (batch.length < targets.length)
         failure ??= new Error('Finding verification returned incomplete verdicts.');
     } catch (error) {
