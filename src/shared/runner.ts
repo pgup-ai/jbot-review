@@ -27,6 +27,7 @@ import { buildContextPack } from './context-pack.ts';
 import { mergeSuppliedContexts, type SuppliedContext } from './review-read-locations.ts';
 import { reviewExperiment, toolLessAuxiliary, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2535,12 +2536,18 @@ async function runReviewPipeline(params: {
         ? ['guideline-compliance']
         : []),
     ];
-    // PR text, the jbot build and the pool's per-head draw stay out: bots edit PR
-    // descriptions after pushes, releases ship daily, and each head draws its own member.
+    // PR text, the jbot build (so a stock preset, not flags a release adds) and the pool's
+    // per-head draw stay out: bots edit PR descriptions after pushes, releases ship daily,
+    // and each head draws its own member. Customized experiments hash every flag.
     const auxPolicy = {
       ...auxiliaryModelPolicy(options, { model, auxModel, baseURL, auxBackend: auxBackend.name }),
       context: options.enhancedContext,
-      experiment: options.experiment,
+      experiment: isDeepStrictEqual(
+        options.experiment,
+        reviewExperiment({ JBOT_REVIEW_EXPERIMENT: options.experiment.preset }),
+      )
+        ? options.experiment.preset
+        : options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
     const policyFor = (session: string) =>
