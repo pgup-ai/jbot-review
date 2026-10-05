@@ -10,7 +10,7 @@ import {
   stateEvidenceTerms,
   VerificationEvidence,
 } from '../src/shared/verification-evidence.ts';
-import { checkVerificationProof } from '../src/shared/filter.ts';
+import { applyFindingVerdicts, checkVerificationProof } from '../src/shared/filter.ts';
 import { parseFindingVerdicts } from '../src/shared/opencode.ts';
 import { parseVerificationProof, type Finding, type FindingVerdict } from '../src/shared/types.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
@@ -557,20 +557,27 @@ test('revision lookup failures preserve unavailable status instead of claiming m
   }
 });
 
-test('a documentation candidate corrected to a bug must pass the proof gate', async (t) => {
+test('the proof gate follows the kind retained by verdict application', async (t) => {
   const { workspace } = await fixture(t);
-  const verdict = {
-    ...confirmed,
-    proof: undefined,
-    finding: {
-      title: finding.title,
-      kind: 'bug' as const,
-      severity: 'P2' as const,
-      evidence: proof.producer[0].quote,
-    },
-  };
-  for (const kind of ['docs', 'maintainability'] as const) {
-    const target = { ...finding, kind, verificationUncertain: true };
+  for (const [kind, correctedKind, unresolved, expected] of [
+    ['docs', 'bug', true, 'uncertain'],
+    ['maintainability', 'bug', true, 'uncertain'],
+    ['docs', 'bug', false, 'confirmed'],
+    ['bug', 'docs', false, 'uncertain'],
+    ['security', 'maintainability', false, 'uncertain'],
+    ['bug', 'docs', true, 'confirmed'],
+  ] as const) {
+    const target = { ...finding, kind, verificationUncertain: unresolved };
+    const verdict: FindingVerdict = {
+      ...confirmed,
+      proof: undefined,
+      finding: {
+        title: finding.title,
+        kind: correctedKind,
+        severity: 'P2',
+        evidence: proof.producer[0].quote,
+      },
+    };
     const result = await requestFindingVerdicts({
       workspace,
       model: 'test/model',
@@ -581,11 +588,11 @@ test('a documentation candidate corrected to a bug must pass the proof gate', as
       log: () => {},
       backend: { runFindingVerification: async () => [verdict] },
     });
-    assert.equal(result[0].verdict, 'uncertain');
-    assert.equal(
-      checkVerificationProof(verdict, target, new Map(), new Set()).verdict,
-      'uncertain',
-    );
+    assert.equal(result[0].verdict, expected, `${kind} -> ${correctedKind}, ${unresolved}`);
+    assert.equal(checkVerificationProof(verdict, target, new Map(), new Set()).verdict, expected);
+    const applied = applyFindingVerdicts([target], [0], result).findings[0];
+    assert.equal(applied.verificationUncertain === true, expected === 'uncertain');
+    if (expected === 'confirmed') assert.equal(applied.kind, unresolved ? correctedKind : kind);
     assert.equal(
       (await new VerificationEvidence(workspace).check({ ...verdict, proof }, target)).verdict,
       'confirmed',

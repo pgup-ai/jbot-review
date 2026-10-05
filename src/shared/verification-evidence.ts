@@ -30,7 +30,7 @@ type Candidate = {
 export function stateEvidenceTerms(findings: Finding[], context: string) {
   const fields = new Set<string>();
   const enums = new Set<string>();
-  for (const finding of findings.filter(requiresVerificationProof)) {
+  for (const finding of findings.filter((finding) => requiresVerificationProof(finding))) {
     const claim = `${finding.title}\n${finding.body}`.replace(
       /\b[\w./-]+\.[cm]?[jt]sx?(?::\d+)?\b/g,
       '',
@@ -107,15 +107,17 @@ export async function collectStateEvidence(
   const proximity = (path: string) =>
     Math.max(
       0,
-      ...findings.filter(requiresVerificationProof).map((finding) => {
-        const parts = finding.path.split('/');
-        let common = 0;
-        for (const part of path.split('/')) {
-          if (part !== parts[common]) break;
-          common++;
-        }
-        return common;
-      }),
+      ...findings
+        .filter((finding) => requiresVerificationProof(finding))
+        .map((finding) => {
+          const parts = finding.path.split('/');
+          let common = 0;
+          for (const part of path.split('/')) {
+            if (part !== parts[common]) break;
+            common++;
+          }
+          return common;
+        }),
     );
   const searched = new Set<string>();
   try {
@@ -494,7 +496,7 @@ export class VerificationEvidence {
     if (
       verdict.verdict !== 'confirmed' ||
       !JS_SOURCE.test(finding.path) ||
-      !requiresVerificationProof(verdict.finding?.kind ? verdict.finding : finding)
+      !requiresVerificationProof(finding, verdict.finding)
     )
       return verdict;
     const sources = new Map<string, string>();

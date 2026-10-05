@@ -316,20 +316,21 @@ export function checkConfirmationEvidence(
   };
 }
 
-export function requiresVerificationProof(finding: Pick<Finding, 'kind'>): boolean {
-  return !finding.kind || ['bug', 'security', 'performance', 'investigate'].includes(finding.kind);
+export function requiresVerificationProof(
+  finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain'>,
+  correction?: FindingVerdict['finding'],
+): boolean {
+  const kind = isUnresolvedFinding(finding) ? (correction?.kind ?? finding.kind) : finding.kind;
+  return !kind || ['bug', 'security', 'performance', 'investigate'].includes(kind);
 }
 
 export function checkVerificationProof(
   verdict: FindingVerdict,
-  finding: Pick<Finding, 'kind'>,
+  finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain'>,
   sources: ReadonlyMap<string, string>,
   producers: ReadonlySet<string>,
 ): FindingVerdict {
-  if (
-    verdict.verdict !== 'confirmed' ||
-    !requiresVerificationProof(verdict.finding?.kind ? verdict.finding : finding)
-  )
+  if (verdict.verdict !== 'confirmed' || !requiresVerificationProof(finding, verdict.finding))
     return verdict;
   const proof = parseVerificationProof(verdict.proof);
   if (
