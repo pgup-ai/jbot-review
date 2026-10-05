@@ -117,21 +117,6 @@ export async function collectStateEvidence(
         return common;
       }),
     );
-  const anchors: Candidate[] = [];
-  for (const finding of findings.filter(requiresVerificationProof)) {
-    if (!JS_SOURCE.test(finding.path) || !provider.tracked.has(finding.path)) continue;
-    const source = await load(finding.path);
-    const declaration = source && functionAt(source, finding.line);
-    if (source && declaration)
-      anchors.push({
-        path: finding.path,
-        source,
-        declaration,
-        line: finding.line,
-        from: `finding at ${finding.path}:${finding.line}`,
-      });
-    else incomplete = true;
-  }
   const searched = new Set<string>();
   try {
     for (let hop = 0; hop < 2; hop++) {
@@ -239,11 +224,10 @@ export async function collectStateEvidence(
   };
   const seen = new Set<string>();
   const items: StateEvidenceSource[] = [];
-  const queue = [
-    ...anchors.map((candidate) => ({ candidate, priority: 120, depth: 0 })),
-    ...candidates.slice(0, 4).map((candidate, i) => ({ candidate, priority: 4 - i, depth: 0 })),
-  ];
-  let omitted = Math.max(0, candidates.length - 4);
+  const queue = candidates
+    .slice(0, 4)
+    .map((candidate, i) => ({ candidate, priority: 4 - i, depth: 0 }));
+  let omitted = Math.max(0, candidates.length - queue.length);
   // Error normalization may be registered outside the writer's dependency graph.
   if (
     findings.some(

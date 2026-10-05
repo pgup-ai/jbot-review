@@ -921,8 +921,8 @@ changes. A changed JS/TS file the pack could not read or index still sends the
 page back to caller evidence.
 
 The opt-in `JBOT_REVIEW_EXPERIMENT=state-evidence` adds source retrieval to
-`context-pack` verification. It follows the finding's enclosing function and
-JavaScript/TypeScript state writes into guards, imported lookup tables and related methods, and retrieves
+`context-pack` verification. It follows JavaScript/TypeScript state writes into
+preparation guards, imported lookup tables and related methods, and retrieves
 registered NestJS exception filters for error-handling concerns. Each finding
 gets up to 16 KiB of additional source within the total prompt budget, excluding
 excerpts already supplied and listing omissions. Validation reuses that delivered
