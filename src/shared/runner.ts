@@ -4483,8 +4483,9 @@ export async function requestFindingVerdicts(params: {
   const startedAt = Date.now();
   const verdicts: FindingVerdictList = [];
   let failure: Error | undefined;
+  let batchSize = VERIFICATION_BATCH_SIZE;
   for (let offset = 0; offset < params.targets.length;) {
-    let size = Math.min(VERIFICATION_BATCH_SIZE, params.targets.length - offset);
+    let size = Math.min(batchSize, params.targets.length - offset);
     let targets = params.targets.slice(offset, offset + size);
     try {
       let context: string;
@@ -4636,10 +4637,15 @@ export async function requestFindingVerdicts(params: {
           params.log('State-producing source omitted: assembled prompt exceeds budget.');
         }
       }
-      if (!fits(context, false))
+      if (!fits(context, false)) {
+        if (size > 1) {
+          batchSize = Math.ceil(size / 2);
+          continue;
+        }
         throw new Error(
           'Finding verification context and required omission notices exceed the prompt budget.',
         );
+      }
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4738,6 +4744,7 @@ export async function requestFindingVerdicts(params: {
       if (params.timeoutMs !== undefined && Date.now() - startedAt >= params.timeoutMs) break;
     }
     offset += size;
+    batchSize = VERIFICATION_BATCH_SIZE;
   }
   params.onCoverage?.({
     session,

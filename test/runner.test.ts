@@ -1960,6 +1960,50 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
     assert.equal(calls, 1);
     assert.equal(verdicts[0].verdict, 'confirmed');
   }
+  for (const verificationRetrieval of [false, true]) {
+    const findings = targets.slice(0, 2);
+    const tightBudget = {
+      ...budget,
+      transportBytes: Buffer.byteLength(
+        assembleFindingVerificationPrompt('c'.repeat(2000), findings),
+      ),
+    };
+    const invoked: Finding[][] = [];
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: '',
+      contextForTargets: (batch) => 'c'.repeat(1000 * batch.length),
+      sourceContext: async () => '',
+      verificationContextFor: () => ({ packs: ['p'.repeat(100000)], rules: [] }),
+      verificationRetrieval,
+      targets: findings,
+      promptBudget: tightBudget,
+      log: () => {},
+      backend: {
+        runFindingVerification: async (_model, context, batch) => {
+          assert.ok(
+            measureReviewPrompt(assembleFindingVerificationPrompt(context, batch), tightBudget)
+              .fits,
+          );
+          assert.match(context, /supporting excerpt\(s\).*left out/);
+          invoked.push(batch);
+          return batch.map((_, index) => ({ index, verdict: 'confirmed' as const }));
+        },
+      },
+    });
+    assert.deepEqual(
+      invoked,
+      findings.map((finding) => [finding]),
+    );
+    assert.deepEqual(
+      verdicts.map((v) => [v.index, v.verdict]),
+      [
+        [0, 'confirmed'],
+        [1, 'confirmed'],
+      ],
+    );
+  }
 });
 
 it('keeps tool-less confirmations and re-checks the rest within capped tool turns', async () => {
