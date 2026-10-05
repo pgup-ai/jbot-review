@@ -252,11 +252,14 @@ test('retrieves registered exception handlers while excluding an unregistered cl
     'import { APP_FILTER as FILTER_TOKEN } from "@nestjs/core";\nexport const providers = [{ provide: FILTER_TOKEN, useClass: DomainFilter }];',
     'import { useGlobalFilters as register } from "./bootstrap";\nexport function setup() { register(new DomainFilter()); }',
     'export const providers = [{ provide: (APP_FILTER as ProviderToken), useClass: DomainFilter }];',
+    'import { filter } from "./instance";\nexport function setup(app) { app.useGlobalFilters(filter); }',
   ]) {
     const files = {
       'setup.ts': `import { DomainFilter } from './filter';\n${registration}`,
       'filter.ts':
         '@Catch(DomainError)\nexport class DomainFilter { catch(error) { return typedResponse(error); } }',
+      'instance.ts':
+        "import { DomainFilter } from './filter';\nexport const filter = new DomainFilter();",
       'unused.ts':
         '@Catch()\nexport class EverythingFilter { catch(error) { return hide(error); } }',
       'fake.ts': 'const example = "app.useGlobalFilters(new EverythingFilter())";',

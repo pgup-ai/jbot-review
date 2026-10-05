@@ -4646,6 +4646,7 @@ export async function requestFindingVerdicts(params: {
           'Finding verification context and required omission notices exceed the prompt budget.',
         );
       }
+      batchSize = size;
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4744,7 +4745,6 @@ export async function requestFindingVerdicts(params: {
       if (params.timeoutMs !== undefined && Date.now() - startedAt >= params.timeoutMs) break;
     }
     offset += size;
-    batchSize = VERIFICATION_BATCH_SIZE;
   }
   params.onCoverage?.({
     session,

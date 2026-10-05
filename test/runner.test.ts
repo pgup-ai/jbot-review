@@ -1961,20 +1961,25 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
     assert.equal(verdicts[0].verdict, 'confirmed');
   }
   for (const verificationRetrieval of [false, true]) {
-    const findings = targets.slice(0, 2);
+    const findings = targets.slice(0, 4);
     const tightBudget = {
       ...budget,
       transportBytes: Buffer.byteLength(
-        assembleFindingVerificationPrompt('c'.repeat(2000), findings),
+        assembleFindingVerificationPrompt('c'.repeat(2000), findings.slice(0, 2)),
       ),
     };
     const invoked: Finding[][] = [];
+    const prepared: Finding[] = [];
     const verdicts = await requestFindingVerdicts({
       workspace: '/unused',
       model: 'test/model',
       prContext: '',
       contextForTargets: (batch) => 'c'.repeat(1000 * batch.length),
       sourceContext: async () => '',
+      prepareEvidence: async (batch) => {
+        prepared.push(...batch);
+        return '';
+      },
       verificationContextFor: () => ({ packs: ['p'.repeat(100000)], rules: [] }),
       verificationRetrieval,
       targets: findings,
@@ -1996,11 +2001,14 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
       invoked,
       findings.map((finding) => [finding]),
     );
+    assert.equal(prepared.filter((finding) => finding === findings[2]).length, 1);
     assert.deepEqual(
       verdicts.map((v) => [v.index, v.verdict]),
       [
         [0, 'confirmed'],
         [1, 'confirmed'],
+        [2, 'confirmed'],
+        [3, 'confirmed'],
       ],
     );
   }

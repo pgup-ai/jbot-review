@@ -24,6 +24,7 @@ type Candidate = {
   line: number;
   from?: string;
   unverifiedReceiver?: boolean;
+  registered?: boolean;
 };
 
 export function stateEvidenceTerms(findings: Finding[], context: string) {
@@ -267,7 +268,7 @@ export async function collectStateEvidence(
           for (const range of registrations.slice(0, 4)) {
             const declaration = { symbol, kind: 'function' as const, ...range };
             queue.push({
-              candidate: { path, source, declaration, line: range.start },
+              candidate: { path, source, declaration, line: range.start, registered: true },
               priority: 80,
               depth: 0,
             });
@@ -288,11 +289,7 @@ export async function collectStateEvidence(
     depth: number,
   ) => {
     if (!found || found.declaration.kind === 'type') return;
-    if (
-      found.declaration.kind === 'class' &&
-      !NEST_FILTER_REGISTRATIONS.includes(parent.declaration.symbol)
-    )
-      return;
+    if (found.declaration.kind === 'class' && !parent.registered) return;
     if (
       found.path === parent.path &&
       parent.declaration.start < found.declaration.start &&
@@ -300,7 +297,11 @@ export async function collectStateEvidence(
     )
       return;
     queue.push({
-      candidate: { ...found, from: `${parent.path}:${parent.line} ${parent.declaration.symbol}` },
+      candidate: {
+        ...found,
+        from: `${parent.path}:${parent.line} ${parent.declaration.symbol}`,
+        registered: parent.registered,
+      },
       priority,
       depth,
     });
@@ -386,7 +387,7 @@ export async function collectStateEvidence(
         continue;
       }
       const used = new Set(
-        (NEST_FILTER_REGISTRATIONS.includes(d.symbol) ? source.index.uses : source.index.lookups)
+        (candidate.registered ? source.index.uses : source.index.lookups)
           .filter((u) => u.line >= d.start && u.line <= d.end)
           .map((u) => u.symbol),
       );
@@ -404,7 +405,7 @@ export async function collectStateEvidence(
           });
         if (found?.declaration.kind === 'variable')
           enqueue(found, { ...candidate, line }, 100, depth + 1);
-        if (found?.declaration.kind === 'class' && NEST_FILTER_REGISTRATIONS.includes(d.symbol))
+        if (found?.declaration.kind === 'class' && candidate.registered)
           enqueue(found, { ...candidate, line }, 80, depth + 1);
       }
       for (const call of source.index.calls.filter((c) => c.line >= d.start && c.line <= d.end)) {
