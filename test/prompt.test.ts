@@ -628,9 +628,7 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(tentative, /"finding": \{/);
     assert.ok(tentative.endsWith(VERIFICATION_OUTPUT_REMINDER));
     const proof = assembleFindingVerificationPrompt('PR_CONTEXT_SENTINEL', findings, false, true);
-    assert.ok(
-      proof.indexOf('Verification proof requirement') < proof.indexOf('PR_CONTEXT_SENTINEL'),
-    );
+    assert.match(proof, /Verification proof requirement[^]*PR_CONTEXT_SENTINEL/);
     assert.ok(proof.endsWith(VERIFICATION_OUTPUT_REMINDER));
     assert.doesNotMatch(prompt, /Verification proof requirement/);
   });

@@ -204,10 +204,8 @@ jobs:
           context: .
           load: true # put :latest in the local daemon for `uses: ./`
           tags: ghcr.io/pgup-ai/jbot-review:latest
-          # Reuse caches without delaying review on a cache upload.
-          cache-from: |
-            type=gha,scope=jbot-review
-            type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
+          # Reuse main's cache without delaying review on a cache upload.
+          cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
       # issue_comment and workflow_dispatch carry no pull_request payload, so
       # resolve both values before any secret reaches the PR-built image.
       - id: pr
