@@ -11,10 +11,12 @@ export interface ReviewExperiment {
     | 'context-pack'
     | 'state-evidence'
     | 'state-proof'
+    | 'verified-support'
     | 'custom';
   contextPack: boolean;
   verificationRetrieval: boolean;
   verificationProof: boolean;
+  generateVerificationSupport: boolean;
   jevPrefetch: JevPrefetchMode;
   explorationEvidence: JevPrefetchMode;
   verificationEvidence: JevPrefetchMode;
@@ -47,15 +49,22 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
     value === 'adaptive' ||
     value === 'context-pack' ||
     value === 'state-evidence' ||
-    value === 'state-proof'
+    value === 'state-proof' ||
+    value === 'verified-support'
       ? value
       : 'off';
-  const contextPack = ['context-pack', 'state-evidence', 'state-proof'].includes(preset);
+  const contextPack = [
+    'context-pack',
+    'state-evidence',
+    'state-proof',
+    'verified-support',
+  ].includes(preset);
   return {
     preset,
     contextPack,
-    verificationRetrieval: preset === 'state-evidence' || preset === 'state-proof',
+    verificationRetrieval: ['state-evidence', 'state-proof', 'verified-support'].includes(preset),
     verificationProof: preset === 'state-proof',
+    generateVerificationSupport: preset === 'verified-support',
     jevPrefetch: preset === 'jev' ? 'on' : 'off',
     explorationEvidence: 'off',
     verificationEvidence: 'off',

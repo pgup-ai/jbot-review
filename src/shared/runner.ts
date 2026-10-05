@@ -173,6 +173,7 @@ import {
   COMPLIANCE_RECHECK_NOTE,
   selectLensKeys,
   STATE_EVIDENCE_OMISSION,
+  VERIFICATION_SUPPORT_PROMPT,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
@@ -3341,6 +3342,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
+        generateVerificationSupport: options.experiment.generateVerificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3534,6 +3536,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
+        generateVerificationSupport: options.experiment.generateVerificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3563,6 +3566,7 @@ async function runReviewPipeline(params: {
         verificationContextFor,
         verificationRetrieval: options.experiment.verificationRetrieval,
         verificationProof: options.experiment.verificationProof,
+        generateVerificationSupport: options.experiment.generateVerificationSupport,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -4405,6 +4409,7 @@ async function verifyFindings(params: {
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
+  generateVerificationSupport?: boolean;
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4461,6 +4466,7 @@ export async function requestFindingVerdicts(params: {
   verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
   verificationRetrieval?: boolean;
   verificationProof?: boolean;
+  generateVerificationSupport?: boolean;
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4476,7 +4482,7 @@ export async function requestFindingVerdicts(params: {
   onCoverage?: SessionCoverageRecorder;
 }): Promise<FindingVerdictList> {
   const session = 'finding-verification';
-  const evidence =
+  let evidence =
     params.verificationRetrieval || params.verificationProof
       ? new VerificationEvidence(params.workspace)
       : undefined;
@@ -4646,6 +4652,11 @@ export async function requestFindingVerdicts(params: {
           'Finding verification context and required omission notices exceed the prompt budget.',
         );
       }
+      if (params.generateVerificationSupport) {
+        const enriched = joinContext(VERIFICATION_SUPPORT_PROMPT, context);
+        if (fits(enriched, false)) context = enriched;
+        else params.log('Optional verification support instructions omitted: prompt budget full.');
+      }
       batchSize = size;
       const remaining = () =>
         params.timeoutMs === undefined
@@ -4680,6 +4691,14 @@ export async function requestFindingVerdicts(params: {
               reason: 'Target source validation did not complete.',
             };
           }
+        }
+        if (target && result.verdict === 'confirmed' && !result.unavailable && result.support) {
+          evidence ??= new VerificationEvidence(params.workspace);
+          result = await evidence.support(
+            result,
+            target,
+            suppliedOnly || params.toolLessOnly ? sourceContext : undefined,
+          );
         }
         return result;
       };

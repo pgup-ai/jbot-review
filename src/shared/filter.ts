@@ -1,3 +1,4 @@
+import { escapeHtml } from './text.ts';
 import { formatUnverifiedFinding } from './prompt.ts';
 import {
   anchorByEvidenceSnippet,
@@ -377,7 +378,22 @@ export function recheckReasons(verdicts: (FindingVerdict['verdict'] | undefined)
 }
 
 function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
-  if (!isUnresolvedFinding(finding)) return finding;
+  if (!isUnresolvedFinding(finding)) {
+    const support = verdict.verifiedSupport;
+    if (
+      !support ||
+      verdict.unavailable ||
+      support.target !== JSON.stringify([finding.path, finding.line, finding.title, finding.body])
+    )
+      return finding;
+    const citations = support.references
+      .map((ref) => `- ${ref.path}:${ref.line} — SHA-256: ${support.sourceHashes[ref.path]}`)
+      .join('\n');
+    return {
+      ...finding,
+      body: `${finding.body}\n\nVerification support (listed source citations checked; causal explanation is the verifier's assessment):\n\n<pre lang="text"><code>${escapeHtml(support.explanation)}</code></pre>\n\n<details>\n<summary>Source provenance</summary>\n\nCheckout HEAD: ${support.revision}\n\nHashes identify the working-tree source read during validation, which may include uncommitted changes.\n\n<pre lang="text"><code>${escapeHtml(citations)}</code></pre>\n\n</details>`,
+    };
+  }
   const confirmed = verdict.finding;
   if (
     !confirmed ||

@@ -1,3 +1,4 @@
+import { evidenceHash } from './evidence-cache.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -6,11 +7,16 @@ import {
   JS_SOURCE,
   resolveEvidenceImport,
 } from './evidence.ts';
-import { readTrackedSource, findingSourceLocations } from './finding-context.ts';
+import { readTrackedSource, findingSourceLocations, SOURCE_FILE } from './finding-context.ts';
 import { checkVerificationProof, requiresVerificationProof } from './filter.ts';
 import { formatStateEvidence, type StateEvidenceSource, type StateEvidenceGap } from './prompt.ts';
 import type { PackSource, PackSourceProvider } from './context-pack.ts';
-import { parseVerificationProof, type Finding, type FindingVerdict } from './types.ts';
+import {
+  parseVerificationProof,
+  parseVerificationSupport,
+  type Finding,
+  type FindingVerdict,
+} from './types.ts';
 import { newSideLines } from './patch.ts';
 
 const exec = promisify(execFile);
@@ -490,6 +496,47 @@ export class VerificationEvidence {
       );
     } catch {
       return formatStateEvidence([], 0, true);
+    }
+  }
+  async support(
+    verdict: FindingVerdict,
+    finding: Finding,
+    suppliedSource?: string,
+  ): Promise<FindingVerdict> {
+    const support = parseVerificationSupport(verdict.support);
+    if (verdict.verdict !== 'confirmed' || verdict.unavailable || !support) return verdict;
+    const supplied = suppliedSource === undefined ? undefined : suppliedSourceLines(suppliedSource);
+    try {
+      const revision = await this.revision;
+      if (!revision || revision !== (await this.head())) return verdict;
+      const signal = AbortSignal.timeout(2000);
+      const sources = new Map<string, string>();
+      const sourceHashes: Record<string, string> = {};
+      for (const ref of support.references) {
+        if (!SOURCE_FILE.test(ref.path)) return verdict;
+        if (supplied && supplied.get(ref.path)?.get(ref.line)?.trim() !== ref.quote.trim())
+          return verdict;
+        if (!sources.has(ref.path)) {
+          const source = await readTrackedSource(this.workspace, ref.path, signal);
+          if (!source || source.truncated) return verdict;
+          sources.set(ref.path, source.text);
+          sourceHashes[ref.path] = evidenceHash(source.text);
+        }
+        if (sources.get(ref.path)!.split(/\r?\n/)[ref.line - 1]?.trim() !== ref.quote.trim())
+          return verdict;
+      }
+      if (revision !== (await this.head())) return verdict;
+      return {
+        ...verdict,
+        verifiedSupport: {
+          ...support,
+          target: JSON.stringify([finding.path, finding.line, finding.title, finding.body]),
+          revision,
+          sourceHashes,
+        },
+      };
+    } catch {
+      return verdict;
     }
   }
   async check(verdict: FindingVerdict, finding: Finding, suppliedSource?: string) {

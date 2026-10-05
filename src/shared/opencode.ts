@@ -36,6 +36,7 @@ import {
   VALID_FINDING_KINDS,
   EVIDENCE_MAX_CHARS,
   parseVerificationProof,
+  parseVerificationSupport,
   type AddressedPriorComment,
   type Finding,
   type FindingVerdict,
@@ -795,8 +796,10 @@ export function parseFindingVerdicts(
             }
           : undefined;
       const proof = parseVerificationProof(v.proof);
+      const support = parseVerificationSupport(v.support);
       verdicts.push({
         ...(proof ? { proof } : {}),
+        ...(v.verdict === 'confirmed' && support ? { support } : {}),
         index: v.index,
         verdict: v.verdict as FindingVerdict['verdict'],
         reason: typeof v.reason === 'string' ? v.reason : undefined,

@@ -30,6 +30,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     contextPack: false,
     verificationRetrieval: false,
     verificationProof: false,
+    generateVerificationSupport: false,
     jevPrefetch: 'off',
     explorationEvidence: 'off',
     verificationEvidence: 'off',
@@ -69,6 +70,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   ];
   expected.push({ ...expected[4], preset: 'state-evidence', verificationRetrieval: true });
   expected.push({ ...expected[5], preset: 'state-proof', verificationProof: true });
+  expected.push({ ...expected[5], preset: 'verified-support', generateVerificationSupport: true });
   assert.deepEqual(reviewExperiment({}), expected[4]);
   assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[4]);
   const hashes = new Set<string>();
@@ -84,7 +86,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     assert.deepEqual(configuration.explorationExperiment, preset.exploration);
     hashes.add(configurationHash);
   }
-  assert.equal(hashes.size, 7);
+  assert.equal(hashes.size, 8);
   off.reuse.shared = true;
   off.exploration.readEvidence = 'linked';
   assert.equal(reviewExperiment({}).reuse.shared, false);
