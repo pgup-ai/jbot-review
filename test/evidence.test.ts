@@ -681,6 +681,14 @@ test('rich index records members, types, re-exports, injected services and this-
     [{ symbol: 'status', line: 1 }],
   );
   assert.deepEqual(index.callbacks, [{ start: 6, end: 6 }]);
+  assert.deepEqual(
+    indexEvidenceSource(
+      'write.ts',
+      'const { stage } = record;\nconst { nested: { status } } = record;\nrecord.stage = next;\nconst data = { stage: next };',
+      { rich: true },
+    ).writes.map((write) => write.line),
+    [3, 4],
+  );
   assert.deepEqual(index.reexports, [
     { exported: 'Repo', imported: 'LedgerRepository', from: './repo' },
     { exported: '*', imported: '*', from: './types' },

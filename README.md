@@ -920,12 +920,16 @@ it collected and lists the rest, even when the file past the limit is one the pa
 changes. A changed JS/TS file the pack could not read or index still sends the
 page back to caller evidence.
 
-The opt-in `JBOT_REVIEW_EXPERIMENT=state-proof` adds source retrieval to
+The opt-in `JBOT_REVIEW_EXPERIMENT=state-evidence` adds source retrieval to
 `context-pack` verification. It follows JavaScript/TypeScript state writes into
 preparation guards, imported lookup tables and related methods, and retrieves
 registered exception filters for error-handling concerns. It supplies at most
 16 KiB with explicit omissions; ambiguous receiver matches remain search leads.
-Consequential confirmations must include a trigger and producer, guard, and effect citations;
+Deduplication and enum naming support apply whenever retrieval runs. This preset
+keeps the existing confirmation requirements.
+
+The opt-in `JBOT_REVIEW_EXPERIMENT=state-proof` adds the same retrieval plus a
+proof requirement. Consequential confirmations must include a trigger description and producer, guard, and effect citations;
 missing or stale citations leave the candidate uncertain. Citation checks do not
 prove the causal argument. This preset is experimental and does not change the
 default. Other source languages cannot yet establish a producer through this gate.

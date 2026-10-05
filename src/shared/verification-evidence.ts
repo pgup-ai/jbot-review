@@ -11,6 +11,7 @@ import { checkVerificationProof, requiresVerificationProof } from './filter.ts';
 import { formatStateEvidence, type StateEvidenceSource, type StateEvidenceGap } from './prompt.ts';
 import type { PackSource, PackSourceProvider } from './context-pack.ts';
 import { parseVerificationProof, type Finding, type FindingVerdict } from './types.ts';
+import { newSideLines } from './patch.ts';
 
 const exec = promisify(execFile);
 const MAX_BYTES = 16 * 1024;
@@ -34,14 +35,22 @@ export function stateEvidenceTerms(findings: Finding[], context: string) {
     );
     const properties = [...claim.matchAll(/\b[a-z]\w*\.([a-z]\w*)\b(?![\w(])/g)].map((m) => m[1]);
     const explicit = [...claim.matchAll(/\b([A-Z]\w*)\.([A-Z]\w*)\b/g)];
+    const explicitFields = new Set(
+      explicit.map((m) => m[1].match(/(State|Stage|Status|Type)$/)?.[1].toLowerCase()),
+    );
     const inferred = [...context.matchAll(/\b([A-Z]\w*)\.([A-Z]\w*)\b/g)].filter((m) => {
       const suffix = m[1].match(/(State|Stage|Status|Type)$/)?.[1].toLowerCase();
-      return suffix && properties.includes(suffix) && new RegExp(`\\b${m[2]}\\b`).test(claim);
+      return (
+        suffix &&
+        !explicitFields.has(suffix) &&
+        properties.includes(suffix) &&
+        new RegExp(`\\b${m[2]}\\b`).test(claim)
+      );
     });
-    const owners = explicit.length ? explicit : inferred;
+    const owners = [...explicit, ...inferred];
+    properties.forEach((field) => fields.add(field));
     if (owners.length) owners.forEach((m) => enums.add(m[1]));
     else {
-      properties.forEach((field) => fields.add(field));
       for (const match of claim.matchAll(/`([a-z]\w*)`/g)) fields.add(match[1]);
     }
   }
@@ -50,6 +59,11 @@ export function stateEvidenceTerms(findings: Finding[], context: string) {
 
 function suppliedSourceLines(context: string) {
   const supplied = new Map<string, Map<number, string>>();
+  for (const match of context.matchAll(/^#### ([^\n]+)\n```diff\n([^]*?)\n```/gm)) {
+    const lines = supplied.get(match[1]) ?? new Map<number, string>();
+    for (const row of newSideLines(match[2])) lines.set(row.line, row.content);
+    supplied.set(match[1], lines);
+  }
   let path = '';
   for (const line of context.split('\n')) {
     const heading = line.match(/^#{3,4} ([^\n]+?):\d+(?:-|\s|$)/);
@@ -73,7 +87,14 @@ export async function collectStateEvidence(
   const loaded = new Map<string, PackSource | undefined>();
   let incomplete = false;
   const load = async (path: string) => {
-    if (!loaded.has(path)) loaded.set(path, await provider.load(path));
+    if (!loaded.has(path))
+      loaded.set(
+        path,
+        await provider.load(path).catch(() => {
+          incomplete = true;
+          return undefined;
+        }),
+      );
     return loaded.get(path);
   };
   const candidates: Candidate[] = [];
@@ -224,11 +245,18 @@ export async function collectStateEvidence(
             incomplete = true;
             continue;
           }
-          const call = source.index.calls.find((c) => c.symbol === symbol && c.line === ref.line);
+          const call = source.index.calls.find(
+            (c) => c.symbol === symbol && c.line <= ref.line && ref.line <= c.end,
+          );
           const registered =
             symbol === 'APP_FILTER'
               ? source.index.writes.find(
-                  (w) => w.line === ref.line && w.field === 'provide' && w.value === symbol,
+                  (w) =>
+                    w.field === 'provide' &&
+                    w.value === symbol &&
+                    w.object &&
+                    w.object.start <= ref.line &&
+                    ref.line <= w.object.end,
                 )
               : undefined;
           if (!call && !registered) continue;
@@ -474,28 +502,38 @@ export class VerificationEvidence {
       (await this.revision) &&
       (await this.revision) === (await this.head())
     ) {
-      const signal = AbortSignal.timeout(2000);
-      const { tracked } = await this.store.packProvider(signal);
-      for (const ref of [...proof.producer, ...proof.guard, ...proof.effect]) {
-        if (sources.has(ref.path)) continue;
-        const source = await readTrackedSource(this.workspace, ref.path, signal, {
-          tracked,
-          maxBytes: 1024 * 1024,
-        });
-        if (source) {
-          sources.set(ref.path, source.text);
-          if (JS_SOURCE.test(ref.path) && !source.truncated) {
-            try {
-              const index = indexEvidenceSource(ref.path, source.text, { rich: true });
-              for (const write of index.writes) producers.add(`${ref.path}:${write.line}`);
-              for (const declaration of index.declarations)
-                if (['function', 'method'].includes(declaration.kind))
-                  producers.add(`${ref.path}:${declaration.start}`);
-            } catch {
-              /* Unsupported syntax cannot establish a producer. */
+      try {
+        const signal = AbortSignal.timeout(2000);
+        const { tracked } = await this.store.packProvider(signal);
+        for (const ref of [...proof.producer, ...proof.guard, ...proof.effect]) {
+          if (sources.has(ref.path)) continue;
+          const source = await readTrackedSource(this.workspace, ref.path, signal, {
+            tracked,
+            maxBytes: 1024 * 1024,
+          });
+          if (source) {
+            sources.set(ref.path, source.text);
+            if (JS_SOURCE.test(ref.path) && !source.truncated) {
+              try {
+                const index = indexEvidenceSource(ref.path, source.text, { rich: true });
+                for (const write of index.writes) producers.add(`${ref.path}:${write.line}`);
+                for (const call of index.calls) producers.add(`${ref.path}:${call.line}`);
+                for (const declaration of index.declarations)
+                  if (['function', 'method'].includes(declaration.kind))
+                    producers.add(`${ref.path}:${declaration.start}`);
+              } catch {
+                /* Unsupported syntax cannot establish a producer. */
+              }
             }
           }
         }
+      } catch {
+        return {
+          index: verdict.index,
+          verdict: 'uncertain' as const,
+          unavailable: true,
+          reason: 'Proof source validation did not complete.',
+        };
       }
     }
     return checkVerificationProof(verdict, finding, sources, producers);

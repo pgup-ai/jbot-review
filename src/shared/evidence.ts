@@ -175,7 +175,10 @@ export function indexEvidenceSource(
     )
       result.lookups.push({ symbol: name(n.object), line: start });
     const value = ast(n.type === 'AssignmentExpression' ? n.right : n.value);
-    if (n.type === 'AssignmentExpression' || n.type === 'ObjectProperty') {
+    if (
+      n.type === 'AssignmentExpression' ||
+      (n.type === 'ObjectProperty' && parent?.type === 'ObjectExpression')
+    ) {
       const left = ast(n.left);
       const field =
         n.type === 'ObjectProperty'
@@ -186,7 +189,10 @@ export function indexEvidenceSource(
         value?.type === 'MemberExpression' && object?.type === 'Identifier' && !value.computed
           ? `${name(object)}.${name(value.property)}`
           : '';
-      if (field || member)
+      const query =
+        value?.type === 'ObjectExpression' &&
+        (value.properties as Ast[]).some((p) => keyName(p.key, p.computed).startsWith('$'));
+      if ((field || member) && !query)
         result.writes.push({
           field,
           value: member || (value?.type === 'Identifier' ? name(value) : ''),

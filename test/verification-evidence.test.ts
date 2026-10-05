@@ -14,6 +14,12 @@ import { checkVerificationProof } from '../src/shared/filter.ts';
 import { parseFindingVerdicts } from '../src/shared/opencode.ts';
 import { parseVerificationProof, type Finding, type FindingVerdict } from '../src/shared/types.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
+import {
+  assembleFindingVerificationPrompt,
+  formatContextPackItem,
+  STATE_EVIDENCE_OMISSION,
+} from '../src/shared/prompt.ts';
+import { reviewPromptBudget } from '../src/shared/review-plan.ts';
 
 const finding: Finding = {
   path: 'delete.ts',
@@ -41,6 +47,8 @@ async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
       'export function updateStatusQuery() { return repo.find({ status: { $ne: Stage.CLOSED } }); }',
     'comment.ts':
       '// pretend producer: stage: Stage.REVISING\nconst label = "stage: Stage.REVISING";\n',
+    'read.ts': 'export function inspect(record) {\n  const { stage } = record;\n  return stage;\n}',
+    'call.ts': 'export function create(record) {\n  return persist(record);\n}',
   };
   for (const [path, text] of Object.entries(files)) await writeFile(join(workspace, path), text);
   execFileSync('git', ['init', '-q', workspace]);
@@ -96,21 +104,21 @@ test('retrieves an alternative state writer with its guard and persistence metho
       [{ ...finding, body: '`src/delete.service.ts` checks record.stage === CLOSED.' }],
       'RecordStage.CLOSED OtherStatus.CLOSED HttpStatus.OK',
     ),
-    { fields: [], enums: ['RecordStage'] },
+    { fields: ['stage'], enums: ['RecordStage'] },
   );
   assert.deepEqual(
     stateEvidenceTerms(
       [{ ...finding, body: 'order.type is recorded as AuditType.ORDER.' }],
       'OrderType.EXPENSE UnrelatedType.ORDER',
     ),
-    { fields: [], enums: ['AuditType'] },
+    { fields: ['type'], enums: ['AuditType'] },
   );
   for (const member of ['ACTIVE', 'Active', 'X']) {
     const context = `RecordStage.${member} OtherStatus.${member}`;
     for (const state of [`RecordStage.${member}`, member]) {
       const candidate = { ...finding, body: `The record.stage === ${state} guard misses entries.` };
       assert.deepEqual(stateEvidenceTerms([candidate], context), {
-        fields: [],
+        fields: ['stage'],
         enums: ['RecordStage'],
       });
       const source = `export function create() { return { status: RecordStage.${member} }; }`;
@@ -122,6 +130,22 @@ test('retrieves an alternative state writer with its guard and persistence metho
       assert.match(evidence, /producer.ts[^]*function create/);
     }
   }
+  assert.deepEqual(
+    stateEvidenceTerms(
+      [{ ...finding, body: 'record.stage === CLOSED returns HttpStatus.OK.' }],
+      'Stage.CLOSED',
+    ),
+    { fields: ['stage'], enums: ['HttpStatus', 'Stage'] },
+  );
+  const indirect = await collectStateEvidence(
+    sources({
+      'writer.ts':
+        'export function update(record, nextStage) {\n record.stage = nextStage;\n persist(record);\n}',
+    }),
+    [finding],
+    'Stage.CLOSED',
+  );
+  assert.match(indirect, /record.stage = nextStage/);
 });
 
 function sources(files: Record<string, string>) {
@@ -194,7 +218,9 @@ test('follows preparation guards, returned-object methods and aliased lookup def
 test('retrieves registered exception handlers while excluding an unregistered class and a fake registration string', async () => {
   for (const registration of [
     'export function setup(app) { app.useGlobalFilters(new DomainFilter()); }',
+    'export function setup(app) { app\n .useGlobalFilters(new DomainFilter()); }',
     'export const providers = [{ provide: APP_FILTER, useClass: DomainFilter }];',
+    'export const providers = [{ provide:\n APP_FILTER, useClass: DomainFilter }];',
   ]) {
     const files = {
       'setup.ts': `import { DomainFilter } from './filter';\n${registration}`,
@@ -253,7 +279,7 @@ test('retains partial retrieval with explicit omissions under provider failures 
       aliases: [],
       references: async () => paths.map((path) => ({ path, line: 2 })),
       load: async (path) => {
-        if (path === 'a20.ts') throw Error('deadline');
+        if (path === 'a00.ts') throw Error('unreadable file');
         return source;
       },
     },
@@ -274,6 +300,41 @@ test('requires complete source-valid proof and rejects enum-only producers, stal
     `### producer.ts:6\n6: ${proof.producer[0].quote}\n` +
     `### delete.ts:2-3\n2: ${proof.guard[0].quote}\n3: ${proof.effect[0].quote}`;
   assert.equal((await evidence.check(confirmed, finding, supplied)).verdict, 'confirmed');
+  assert.equal(
+    (
+      await evidence.check(
+        {
+          ...confirmed,
+          proof: {
+            ...proof,
+            producer: [{ path: 'call.ts', line: 2, quote: 'return persist(record);' }],
+          },
+        },
+        finding,
+      )
+    ).verdict,
+    'confirmed',
+  );
+  const diff = formatContextPackItem({
+    path: 'producer.ts',
+    rows: [],
+    diff: `@@ -6 +6 @@\n-oldProducer();\n+${proof.producer[0].quote}`,
+  });
+  const diffSource = diff + '\n' + supplied.slice(supplied.indexOf('### delete.ts'));
+  assert.equal((await evidence.check(confirmed, finding, diffSource)).verdict, 'confirmed');
+  assert.equal(
+    (
+      await evidence.check(
+        confirmed,
+        finding,
+        diffSource.replace(
+          `-oldProducer();\n+${proof.producer[0].quote}`,
+          `-${proof.producer[0].quote}\n+otherProducer();`,
+        ),
+      )
+    ).verdict,
+    'uncertain',
+  );
   for (const context of [
     '',
     'No supplied source',
@@ -283,6 +344,13 @@ test('requires complete source-valid proof and rejects enum-only producers, stal
     assert.equal((await evidence.check(confirmed, finding, context)).verdict, 'uncertain');
   for (const candidate of [
     { ...confirmed, proof: undefined },
+    {
+      ...confirmed,
+      proof: {
+        ...proof,
+        producer: [{ path: 'read.ts', line: 2, quote: 'const { stage } = record;' }],
+      },
+    },
     {
       ...confirmed,
       proof: { ...proof, producer: [{ path: 'state.ts', line: 1, quote: files['state.ts'] }] },
@@ -346,27 +414,125 @@ test('requires complete source-valid proof and rejects enum-only producers, stal
   );
 });
 
-test('the opt-in pipeline sends producer evidence and rechecks a proofless confirmation without publishing it', async (t) => {
+test('a failed proof source check leaves other verdicts intact', async (t) => {
   const { workspace } = await fixture(t);
-  const seen: string[] = [];
+  t.mock.method(EvidenceStore.prototype, 'packProvider', async () => {
+    throw Error('inventory unavailable');
+  });
+  const verdicts = await requestFindingVerdicts({
+    workspace,
+    model: 'test/model',
+    prContext: '',
+    targets: [finding, finding, { ...finding, kind: 'docs' }],
+    sourceContext: async () => '',
+    verificationProof: true,
+    log: () => {},
+    backend: {
+      runFindingVerification: async () => [
+        confirmed,
+        { index: 1, verdict: 'refuted', reason: 'counterexample' },
+        { index: 2, verdict: 'confirmed', reason: 'documented behavior' },
+      ],
+    },
+  });
+  assert.deepEqual(
+    verdicts.map((v) => v.verdict),
+    ['uncertain', 'refuted', 'confirmed'],
+  );
+  assert.equal(verdicts[0].unavailable, true);
+  assert.equal(verdicts[1].reason, 'counterexample');
+});
+
+test('a corrected finding keeps its retrieved evidence without borrowing another target’s packet', async (t) => {
+  const { workspace } = await fixture(t);
   const verdicts = await requestFindingVerdicts({
     workspace,
     model: 'test/model',
     prContext: 'Stage.CLOSED',
-    targets: [finding],
-    verificationProof: true,
-    toolLessFirst: true,
-    timeoutMs: 300000,
+    targets: [finding, { ...finding, kind: 'docs' }],
+    sourceContext: async () => '',
+    verificationRetrieval: true,
     log: () => {},
     backend: {
-      runFindingVerification: async (_model, context, _targets, ...args) => {
-        seen.push(String(args.at(-1)));
-        assert.match(context, /Verification proof requirement/);
-        assert.match(context, /createRevision/);
-        return [{ index: 0, verdict: 'confirmed', reason: 'unsupported assurance' }];
+      runFindingVerification: async () =>
+        [0, 1].map((index) => ({
+          index,
+          verdict: 'confirmed' as const,
+          finding: {
+            title: finding.title,
+            kind: 'bug' as const,
+            severity: 'P2' as const,
+            evidence: proof.producer[0].quote,
+          },
+        })),
+    },
+  });
+  assert.deepEqual(
+    verdicts.map((v) => v.verdict),
+    ['confirmed', 'uncertain'],
+  );
+});
+
+test('a full prompt still discloses omitted state evidence', async (t) => {
+  const { workspace } = await fixture(t);
+  const prContext = 'Stage.CLOSED';
+  const targets = [finding];
+  const transportBytes = Buffer.byteLength(
+    assembleFindingVerificationPrompt(prContext + '\n\n' + STATE_EVIDENCE_OMISSION, targets),
+  );
+  let called = false;
+  const verdicts = await requestFindingVerdicts({
+    workspace,
+    model: 'test/model',
+    prContext,
+    targets,
+    sourceContext: async () => '',
+    verificationRetrieval: true,
+    promptBudget: { ...reviewPromptBudget('test'), transportBytes },
+    verificationContextFor: () => ({ packs: ['OPTIONAL_PACK'], rules: [] }),
+    log: () => {},
+    backend: {
+      runFindingVerification: async (_model, context, findings) => {
+        called = true;
+        assert.match(context, /State-producing source candidates omitted/);
+        assert.doesNotMatch(context, /OPTIONAL_PACK|### producer.ts/);
+        assert.ok(
+          Buffer.byteLength(assembleFindingVerificationPrompt(context, findings)) <= transportBytes,
+        );
+        return [{ index: 0, verdict: 'uncertain' }];
       },
     },
   });
-  assert.deepEqual(seen, ['single-shot', 'capped']);
+  assert.equal(called, true);
   assert.equal(verdicts[0].verdict, 'uncertain');
+});
+
+test('retrieval and proof enforcement are independent and only proof enforcement rechecks a proofless confirmation', async (t) => {
+  const { workspace } = await fixture(t);
+  for (const verificationRetrieval of [false, true]) {
+    for (const verificationProof of [false, true]) {
+      const seen: string[] = [];
+      const verdicts = await requestFindingVerdicts({
+        workspace,
+        model: 'test/model',
+        prContext: 'Stage.CLOSED',
+        targets: [finding],
+        verificationRetrieval,
+        verificationProof,
+        toolLessFirst: true,
+        timeoutMs: 300000,
+        log: () => {},
+        backend: {
+          runFindingVerification: async (_model, context, _targets, ...args) => {
+            seen.push(String(args.at(-1)));
+            assert.equal(context.includes('Verification proof requirement'), verificationProof);
+            assert.equal(context.includes('createRevision'), verificationRetrieval);
+            return [{ index: 0, verdict: 'confirmed', reason: 'unsupported assurance' }];
+          },
+        },
+      });
+      assert.deepEqual(seen, verificationProof ? ['single-shot', 'capped'] : ['single-shot']);
+      assert.equal(verdicts[0].verdict, verificationProof ? 'uncertain' : 'confirmed');
+    }
+  }
 });

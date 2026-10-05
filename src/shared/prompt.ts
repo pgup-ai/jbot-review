@@ -1865,7 +1865,7 @@ Refuted, uncertain, and ordinary findings still need only verdict and reason.
 
 export const VERIFICATION_PROOF_PROMPT = `## Verification proof requirement
 
-For every confirmed bug, security, performance, or investigate finding (including findings without a kind), add a proof object to its verdict. Documentation, architecture, maintainability, and test-only findings do not require this object. Fill each role with 1-3 source references: repository-relative path, one-based line, and a verbatim single-line quote. Do not quote the finding itself. These references will be checked against the checkout.
+For every confirmed bug, security, performance, or investigate finding (including findings without a kind), add a proof object to its verdict. Documentation, architecture, maintainability, and test-only findings do not require this object. The trigger is a prose description. Fill each producer, guard, and effect role with 1-3 source references: repository-relative path, one-based line, and the complete text of that line (leading/trailing whitespace may be omitted; partial-line quotes are rejected). Do not quote the finding itself. These references will be checked against the checkout.
 
 - trigger: the concrete input or state and sequence that produces the failure. Distinguish a reachable application state from a hypothetical combination of enum values.
 - producer: the executable code that creates that state or accepts the triggering input. A type, enum declaration, comparison, comment, or test expectation alone is insufficient. Trace update payloads into persistence when the claim depends on what a write preserves.
@@ -2100,6 +2100,9 @@ export const PERMISSION_DENIED_MESSAGE =
 
 export const verifierOmissionNote = (count: number) =>
   `[${count} supporting excerpt(s) (page context or cited rule sections) left out to fit the prompt budget; their absence is not evidence.]`;
+
+export const STATE_EVIDENCE_OMISSION =
+  '[State-producing source candidates omitted to fit the prompt budget; their absence is not evidence.]';
 
 export const TOOLS_OFF_MESSAGE =
   'Tools are off for this pass; answer from the evidence in the prompt.';

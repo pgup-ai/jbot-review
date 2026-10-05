@@ -134,6 +134,15 @@ describe('jbot opencode plugin', () => {
         );
       }
     }
+    for (const last of [
+      { role: 'assistant', content: 'Ordinary verifier output' },
+      { role: 'user', content: native },
+      { role: 'tool', content: native },
+    ]) {
+      const event = { agent: 'jbot-verify', tools: tools(), messages: [structuredClone(last)] };
+      context(event);
+      assert.deepEqual(event.messages, [last]);
+    }
   });
 
   it('drops the nested AGENTS.md instructions opencode injects after a read', async () => {

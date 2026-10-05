@@ -9,9 +9,11 @@ export interface ReviewExperiment {
     | 'jev'
     | 'adaptive'
     | 'context-pack'
+    | 'state-evidence'
     | 'state-proof'
     | 'custom';
   contextPack: boolean;
+  verificationRetrieval?: boolean;
   verificationProof?: boolean;
   jevPrefetch: JevPrefetchMode;
   explorationEvidence: JevPrefetchMode;
@@ -44,12 +46,14 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
     value === 'jev' ||
     value === 'adaptive' ||
     value === 'context-pack' ||
+    value === 'state-evidence' ||
     value === 'state-proof'
       ? value
       : 'off';
   return {
     preset,
-    contextPack: preset === 'context-pack' || preset === 'state-proof',
+    contextPack: ['context-pack', 'state-evidence', 'state-proof'].includes(preset),
+    ...(['state-evidence', 'state-proof'].includes(preset) ? { verificationRetrieval: true } : {}),
     ...(preset === 'state-proof' ? { verificationProof: true } : {}),
     jevPrefetch: preset === 'jev' ? 'on' : 'off',
     explorationEvidence: 'off',
@@ -63,6 +67,7 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
         preset === 'diff-batches' ||
         preset === 'adaptive' ||
         preset === 'context-pack' ||
+        preset === 'state-evidence' ||
         preset === 'state-proof',
     },
   };
