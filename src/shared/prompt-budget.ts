@@ -43,7 +43,7 @@ export function budgetReviewBackend(
       return backend.runGuidelineComplianceCheck(model, context, guidelines, ...rest);
     },
     async runFindingVerification(model, context, findings, ...rest) {
-      check(assembleFindingVerificationPrompt(context, findings));
+      check(assembleFindingVerificationPrompt(context, findings, false, rest[5]));
       return backend.runFindingVerification(model, context, findings, ...rest);
     },
     async runAddressedPriorCommentsCheck(model, context, ...rest) {

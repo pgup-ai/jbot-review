@@ -386,11 +386,12 @@ export async function runClineFindingVerification(
   timeoutMs: number | undefined,
   onTokenUsage: TokenUsageRecorder | undefined,
   runtime: ClineRuntime,
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   void onTokenUsage;
   const raw = await runClinePrompt(
     model,
-    assembleFindingVerificationPrompt(prContext, findings),
+    assembleFindingVerificationPrompt(prContext, findings, false, proof),
     'finding-verification',
     log,
     runtime,
@@ -496,6 +497,7 @@ export async function runClineSdkFindingVerification(
   log: (msg: string) => void,
   runtime: ClineRuntime,
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
+  proof = false,
 ): Promise<FindingVerdict[]> {
   // The CLI resolves `default` itself; the SDK needs a concrete model id.
   if (parseModelName(model).modelID === 'default')
@@ -518,7 +520,7 @@ export async function runClineSdkFindingVerification(
       input: JSON.stringify({
         providerId: parseModelName(model).providerID,
         modelId: clineModelId(model),
-        prompt: assembleFindingVerificationPrompt(prContext, findings),
+        prompt: assembleFindingVerificationPrompt(prContext, findings, false, proof),
         workspace: runtime.workspace,
         timeoutMs,
       }),

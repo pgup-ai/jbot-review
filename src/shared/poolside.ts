@@ -207,13 +207,14 @@ export async function runPoolsideFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   const label = 'finding-verification';
   const raw = await runPoolsidePrompt({
     apiKey,
     reasoningEffort,
     model,
-    prompt: assembleFindingVerificationPrompt(prContext, findings, true),
+    prompt: assembleFindingVerificationPrompt(prContext, findings, true, proof),
     label,
     log,
     timeoutMs,

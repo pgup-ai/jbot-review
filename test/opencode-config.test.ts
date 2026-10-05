@@ -8,6 +8,8 @@ import {
   PLAIN_AGENT,
   REVIEWER_AGENT,
   VERIFY_AGENT,
+  VERIFY_STEPS,
+  verificationAgent,
   WRAPUP_AGENT,
   buildConfig,
   modelOptionsByModel,
@@ -49,7 +51,13 @@ describe('buildConfig', () => {
     assert.equal(config.$schema, 'https://opencode.ai/config.json');
     assert.deepEqual(
       Object.keys(config.agents).sort(),
-      [CLOSED_BOOK_AGENT, PLAIN_AGENT, REVIEWER_AGENT, VERIFY_AGENT, WRAPUP_AGENT].sort(),
+      [
+        CLOSED_BOOK_AGENT,
+        PLAIN_AGENT,
+        REVIEWER_AGENT,
+        WRAPUP_AGENT,
+        ...Array.from({ length: VERIFY_STEPS }, (_, i) => verificationAgent(i + 1)),
+      ].sort(),
     );
     // Closed-book keeps the tool list a gateway checks for; the plugin denies each call.
     for (const agent of [WRAPUP_AGENT, CLOSED_BOOK_AGENT])
@@ -58,6 +66,8 @@ describe('buildConfig', () => {
       { action: '*', resource: '*', effect: 'deny' },
     ]);
     assert.equal(config.agents[REVIEWER_AGENT].system, 'Review only.');
+    for (let steps = 1; steps <= VERIFY_STEPS; steps++)
+      assert.equal(config.agents[verificationAgent(steps)].steps, steps);
     assert.deepEqual(
       [config.agents[VERIFY_AGENT].system, config.agents[VERIFY_AGENT].steps],
       ['Review only.', 6],

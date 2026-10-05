@@ -306,11 +306,14 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       log,
       timeoutMs,
       onTokenUsage,
+      _options,
+      _mode,
+      proof,
     ): Promise<FindingVerdict[] | undefined> {
       void onTokenUsage;
       return promptWithRecovery(
         model,
-        assembleFindingVerificationPrompt(prContext, findings),
+        assembleFindingVerificationPrompt(prContext, findings, false, proof),
         'finding-verification',
         log,
         timeoutMs,

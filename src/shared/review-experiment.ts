@@ -2,8 +2,19 @@ import type { EvidenceReuseOptions } from './evidence.ts';
 import type { JevPrefetchMode } from './jev-prefetch.ts';
 
 export interface ReviewExperiment {
-  preset: 'off' | 'diff-batches' | 'linked' | 'jev' | 'adaptive' | 'context-pack' | 'custom';
+  preset:
+    | 'off'
+    | 'diff-batches'
+    | 'linked'
+    | 'jev'
+    | 'adaptive'
+    | 'context-pack'
+    | 'state-evidence'
+    | 'state-proof'
+    | 'custom';
   contextPack: boolean;
+  verificationRetrieval: boolean;
+  verificationProof: boolean;
   jevPrefetch: JevPrefetchMode;
   explorationEvidence: JevPrefetchMode;
   verificationEvidence: JevPrefetchMode;
@@ -34,12 +45,17 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
     value === 'linked' ||
     value === 'jev' ||
     value === 'adaptive' ||
-    value === 'context-pack'
+    value === 'context-pack' ||
+    value === 'state-evidence' ||
+    value === 'state-proof'
       ? value
       : 'off';
+  const contextPack = ['context-pack', 'state-evidence', 'state-proof'].includes(preset);
   return {
     preset,
-    contextPack: preset === 'context-pack',
+    contextPack,
+    verificationRetrieval: preset === 'state-evidence' || preset === 'state-proof',
+    verificationProof: preset === 'state-proof',
     jevPrefetch: preset === 'jev' ? 'on' : 'off',
     explorationEvidence: 'off',
     verificationEvidence: 'off',
@@ -48,8 +64,7 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
       checkpoints: false,
       readEvidence: preset === 'linked' ? 'linked' : false,
       readEvidencePhase: preset === 'linked' ? 'review' : 'all',
-      batchDiffRecovery:
-        preset === 'diff-batches' || preset === 'adaptive' || preset === 'context-pack',
+      batchDiffRecovery: preset === 'diff-batches' || preset === 'adaptive' || contextPack,
     },
   };
 }

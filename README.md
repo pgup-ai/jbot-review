@@ -920,13 +920,32 @@ it collected and lists the rest, even when the file past the limit is one the pa
 changes. A changed JS/TS file the pack could not read or index still sends the
 page back to caller evidence.
 
+The opt-in `JBOT_REVIEW_EXPERIMENT=state-evidence` adds source retrieval to
+`context-pack` verification. It follows JavaScript/TypeScript state writes into
+preparation guards, imported lookup tables and related methods, and retrieves
+registered NestJS exception filters for error-handling concerns. Each finding
+gets up to 16 KiB of additional source within the total prompt budget, excluding
+excerpts already supplied and listing omissions. Validation reuses that delivered
+source. Confirmation requirements stay unchanged.
+
+The opt-in `JBOT_REVIEW_EXPERIMENT=state-proof` adds the same retrieval plus a
+proof requirement for findings anchored in JavaScript/TypeScript. Consequential
+confirmations must include a trigger description and producer, guard, and effect citations;
+missing or stale citations leave the candidate uncertain. Citation checks do not
+prove the causal argument. When all citations match but producer indexing is
+unsupported or truncated, verification is unavailable; blocking findings follow
+the existing labeled-unverified policy. This preset is experimental and does not
+change the default. Findings in other languages keep the usual verification requirements.
+
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own
 session with tools and the usage list. Finding verification starts with a
-tool-less pass that also gets the main-page packs of the findings' files and the
-loaded guideline sections a finding cites as `FILE.md §N`, while they fit its
-budget. Its evidence-backed confirmations are final; the other findings get a
-re-check capped at six tool turns.
+tool-less pass. Both this pass and its tool-using re-check get the main-page packs
+of the findings' files and the loaded guideline sections a finding cites as
+`FILE.md §N`, while they fit the prompt budget. Evidence-backed confirmations are
+final; other findings get a re-check capped at six model steps, including recovery
+and the final verdict turn. A step can include multiple tool calls. Step exhaustion
+preserves the JSON verdict schema, and unfinished investigations remain uncertain.
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
 compares historical benefits, quality failures and sample limits. The

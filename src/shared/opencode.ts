@@ -2,7 +2,12 @@ import { parseModelName } from '@symma/protocol';
 import { modelAcceptsForcedToolChoice, modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
-import { VERIFY_AGENT, type OptionTier } from './opencode-config.ts';
+import {
+  VERIFY_AGENT,
+  VERIFY_STEPS,
+  verificationAgent,
+  type OptionTier,
+} from './opencode-config.ts';
 import { wrapUpReserveMs } from './time-budget.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import {
@@ -30,6 +35,7 @@ import {
   VALID_SEVERITIES,
   VALID_FINDING_KINDS,
   EVIDENCE_MAX_CHARS,
+  parseVerificationProof,
   type AddressedPriorComment,
   type Finding,
   type FindingVerdict,
@@ -446,6 +452,7 @@ export async function runFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
   mode?: 'single-shot' | 'capped',
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   const singleShot = isSingleShotModel(model) || mode === 'single-shot';
   const { providerID, modelID } = parseModelName(model);
@@ -460,7 +467,7 @@ export async function runFindingVerification(
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, singleShot);
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, singleShot, proof);
   const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
   log('Creating finding-verification session');
   const sessionID = await createReviewSession(runtime, {
@@ -475,6 +482,7 @@ export async function runFindingVerification(
   const reserve = deadline === undefined ? 0 : wrapUpReserveMs(deadline - Date.now());
   let verdicts: FindingVerdict[] | undefined;
   let failure: unknown;
+  let stepsUsed: number | undefined;
   try {
     const remaining = deadline === undefined ? undefined : deadline - Date.now() - reserve;
     if (remaining !== undefined && remaining <= 0)
@@ -486,6 +494,9 @@ export async function runFindingVerification(
       log,
       timeoutMs: remaining,
       onTokenUsage,
+      onModelSteps: (steps) => {
+        stepsUsed = steps;
+      },
     });
     verdicts = parseFindingVerdicts(raw, findings.length, log);
     if (verdicts?.length === findings.length) return verdicts;
@@ -498,6 +509,14 @@ export async function runFindingVerification(
     )
       throw error;
     failure = error;
+  }
+  const stepsLeft = VERIFY_STEPS - (stepsUsed ?? VERIFY_STEPS);
+  if (agent === VERIFY_AGENT && stepsLeft <= 0) {
+    log(
+      'Finding verification recovery skipped: step budget exhausted or unavailable; preserving existing verdicts.',
+    );
+    if (failure) throw failure;
+    return verdicts;
   }
   if (deadline === undefined || deadline - Date.now() < 1000) {
     if (failure) throw failure;
@@ -513,7 +532,7 @@ export async function runFindingVerification(
       model,
       label: 'finding-verification-recovery',
       tier: modelOptions ? 'verify' : 'main',
-      agent,
+      agent: agent === VERIFY_AGENT ? verificationAgent(stepsLeft) : agent,
       deadline: recoveryDeadline,
       forkFrom: sessionID,
     });
@@ -775,7 +794,9 @@ export function parseFindingVerdicts(
               evidence: correction.evidence.trim().slice(0, EVIDENCE_MAX_CHARS),
             }
           : undefined;
+      const proof = parseVerificationProof(v.proof);
       verdicts.push({
+        ...(proof ? { proof } : {}),
         index: v.index,
         verdict: v.verdict as FindingVerdict['verdict'],
         reason: typeof v.reason === 'string' ? v.reason : undefined,

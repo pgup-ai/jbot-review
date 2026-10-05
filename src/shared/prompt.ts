@@ -1725,7 +1725,9 @@ that each finding is WRONG. Your job is to try to refute it.
 - ${BATCHED_READS_RULE}
 - Reproduce the claimed trigger path concretely: what input or state reaches
   this code, and does the claimed wrong result actually occur? Check guards,
-  callers, types, and defaults that might prevent it.
+  callers, types, and defaults that might prevent it. Trace the writers or
+  transitions that produce the claimed state; different guard predicates alone
+  do not establish that the state is reachable.
 - Identify each finding's load-bearing premise. If correctness depends on how a
   third-party library/framework behaves internally (e.g. whether an ORM method
   applies global filters), the cited app code cannot prove it — do not confirm
@@ -1861,6 +1863,78 @@ Refuted, uncertain, and ordinary findings still need only verdict and reason.
   ]
 }`;
 
+export const VERIFICATION_PROOF_PROMPT = `## Verification proof requirement
+
+For findings anchored in JavaScript or TypeScript files, every confirmed bug, security, performance, or investigate finding (including findings without a kind) requires a proof object. Findings in other languages, documentation, architecture, maintainability, and test-only findings use the usual verification requirements. The trigger is a prose description. Fill each producer, guard, and effect role with 1-3 source references: repository-relative path, one-based line, and the complete text of that line (leading/trailing whitespace may be omitted; partial-line quotes are rejected). Do not quote the finding itself. These references will be checked against the checkout.
+
+- trigger: the concrete input or state and sequence that produces the failure. Distinguish a reachable application state from a hypothetical combination of enum values.
+- producer: the executable code that creates that state or accepts the triggering input. A type, enum declaration, comparison, comment, or test expectation alone is insufficient. Trace update payloads into persistence when the claim depends on what a write preserves.
+- guard: the relevant validation/branch and why it permits the trigger. If no guard exists, cite the entry point or operation whose missing validation matters.
+- effect: the code producing the claimed wrong result. Explain the causal connection in the verdict reason; references alone do not establish it.
+
+Example of the additional verdict field:
+"proof": {
+  "trigger": "A partially refunded invoice keeps a positive paid balance, then refund() charges that balance again.",
+  "producer": [{ "path": "src/invoice.ts", "line": 20, "quote": "invoice.refunded += amount;" }],
+  "guard": [{ "path": "src/refund.ts", "line": 31, "quote": "if (invoice.paid > 0) {" }],
+  "effect": [{ "path": "src/refund.ts", "line": 32, "quote": "charge(invoice.paid);" }]
+}
+
+Use the supplied producer candidates as search leads, not as proof of reachability. Reuse supplied excerpts and investigate the missing links with tools when available. If the producer or causal link remains unestablished, return uncertain with the specific missing premise. Never confirm just because the cited guards differ. Keep every finding in the verdict list.`;
+
+export interface StateEvidenceSource {
+  path: string;
+  start: number;
+  end: number;
+  line: number;
+  lines: string[];
+  symbol: string;
+  from?: string;
+  unverifiedReceiver?: boolean;
+}
+export interface StateEvidenceGap {
+  path: string;
+  line: number;
+  symbol: string;
+  reason: 'ambiguous' | 'missing' | 'budget';
+}
+export function formatStateEvidence(
+  items: StateEvidenceSource[],
+  omitted: number,
+  incomplete: boolean,
+  missing: StateEvidenceGap[] = [],
+): string {
+  const reasons = {
+    ambiguous: 'ambiguous receiver',
+    missing: 'definition unavailable',
+    budget: 'byte budget',
+  };
+  return [
+    '## State-producing source candidates',
+    'Candidate writes, referenced definitions and error-handler registrations. Arrows show the lookup origin, not an established failure path. An unverified receiver is only an import-linked name match; check its type before relying on it. Reuse already supplied code. Numbered gaps and omitted dependencies remain uninvestigated.',
+    ...items.map(
+      (item) =>
+        `### ${item.path}:${item.start}-${item.end} (${item.symbol}${item.from ? ` ← ${item.from}` : ''}${item.unverifiedReceiver ? '; unverified receiver' : ''})\n${formatSourceExcerpt(item.lines, item.start, item.line, 3200)}`,
+    ),
+    ...(missing.length
+      ? [
+          'Unresolved source dependencies:',
+          ...missing
+            .slice(0, 8)
+            .map((item) =>
+              `- ${item.path}:${item.line} ${item.symbol} (${reasons[item.reason]})`.slice(0, 600),
+            ),
+          ...(missing.length > 8
+            ? [`${missing.length - 8} further unresolved dependencies omitted.`]
+            : []),
+        ]
+      : []),
+    `Omitted candidates: ${omitted}.${incomplete ? ' Retrieval was incomplete; additional producers or guards may exist.' : ''}`,
+  ].join('\n\n');
+}
+
+export const VERIFICATION_STEP_LIMIT_PROMPT = `The verification step budget is exhausted. Do not call tools. Finish from the evidence already collected. Return only the original verdicts JSON schema, with exactly one verdict per listed finding. Use uncertain for unfinished investigation or insufficient evidence; do not invent a trigger or promote a tentative claim. Preserve completed judgments and their evidence.`;
+
 export function buildVerificationRecoveryPrompt(findingCount: number): string {
   return `Finish the verification from evidence already collected in this conversation. Reuse prior reads; use native read-only tools only to answer a concrete unresolved question needed for a verdict. Do not restart broad exploration. Return only the original verdicts JSON schema, with exactly one verdict for each index from 0 to ${findingCount - 1}.
 Preserve completed judgments and their evidence. Use uncertain when investigation is unfinished, evidence is insufficient, or no judgment was reached. Never promote a tentative claim merely to complete the response. Do not omit unresolved candidates or replace them with an empty list.`;
@@ -1982,9 +2056,11 @@ export function assembleFindingVerificationPrompt(
   prContext: string,
   findings: VerifiableFinding[],
   singleShot = false,
+  proof = false,
 ): string {
   return [
     singleShot ? FINDING_VERIFICATION_SINGLE_SHOT_PROMPT : FINDING_VERIFICATION_PROMPT,
+    ...(proof ? [VERIFICATION_PROOF_PROMPT] : []),
     prContext,
     formatFindingsForVerification(findings),
     ...(findings.some((finding) => finding.kind === 'investigate' || finding.confidence === 'low')
@@ -2028,7 +2104,10 @@ export const PERMISSION_DENIED_MESSAGE =
   'jbot-review runs headless; nothing can answer a permission prompt.';
 
 export const verifierOmissionNote = (count: number) =>
-  `[${count} supporting excerpt(s) (page context or cited rule sections) left out to fit the prompt budget; their absence is not evidence.]`;
+  `[${count} supporting excerpt(s) (prepared evidence, page context or cited rule sections) left out to fit the prompt budget; their absence is not evidence.]`;
+
+export const STATE_EVIDENCE_OMISSION =
+  '[State-producing source candidates omitted to fit the prompt budget; their absence is not evidence.]';
 
 export const TOOLS_OFF_MESSAGE =
   'Tools are off for this pass; answer from the evidence in the prompt.';

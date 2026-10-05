@@ -13,7 +13,7 @@ import {
   runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
-import { permissionRules } from '../src/shared/opencode-config.ts';
+import { permissionRules, verificationAgent, VERIFY_STEPS } from '../src/shared/opencode-config.ts';
 import {
   CONTINUATION_NUDGE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
@@ -289,6 +289,10 @@ describe('runFindingVerification on V2', () => {
         [finding, finding],
         log,
         300_000,
+        undefined,
+        undefined,
+        undefined,
+        true,
       );
       assert.deepEqual(
         result?.map((v) => v.verdict),
@@ -300,8 +304,100 @@ describe('runFindingVerification on V2', () => {
       assert.deepEqual(repair.permissions, permissionRules());
       assert.deepEqual(repair.model, main.model);
       assert.equal(fake.prompts.length, 2);
+      assert.match(fake.prompts[0].body.text, /Verification proof requirement[^]*\n\nctx\n\n/);
       assert.match(fake.prompts[1].body.text, /Use uncertain/);
     }
+  });
+
+  it('shares the native step allowance across verification and recovery, excluding inherited review messages', async () => {
+    for (const steps of [1, 3, 5, 6]) {
+      const fake = fakeOpencodeServer((session) =>
+        session.agent === 'plan'
+          ? { text: '{"findings":[]}', steps: 12 }
+          : session.agent === 'jbot-verify'
+            ? { text: '{"verdicts":[{"index":0,"verdict":"refuted","reason":"checked"}]}', steps }
+            : {
+                text: '{"verdicts":[{"index":0,"verdict":"uncertain"},{"index":1,"verdict":"uncertain"}]}',
+                steps: VERIFY_STEPS - steps,
+              },
+      );
+      const rt = runtime(fake, { verifyFork: true });
+      await runReview(rt, 'openai/gpt-5', 'ctx', '', log);
+      const result = await runFindingVerification(
+        rt,
+        'openai/gpt-5',
+        'ctx',
+        [finding, finding],
+        log,
+        300_000,
+        undefined,
+        undefined,
+        'capped',
+      );
+      assert.deepEqual(
+        result?.map((v) => v.verdict),
+        steps === VERIFY_STEPS ? ['refuted'] : ['refuted', 'uncertain'],
+      );
+      assert.equal(fake.prompts.length, steps === VERIFY_STEPS ? 2 : 3);
+      if (steps < VERIFY_STEPS) {
+        const sessions = [...fake.sessions.values()];
+        assert.equal(sessions.at(-1)?.agent, verificationAgent(VERIFY_STEPS - steps));
+        assert.equal(sessions.at(-1)?.forkedFrom, sessions[1].id);
+        assert.deepEqual(sessions.at(-1)?.permissions, permissionRules());
+      }
+    }
+  });
+
+  it('does not switch a capped verifier to an uncapped wrap-up agent', async () => {
+    const fake = fakeOpencodeServer(() => ({ text: verdicts, delayMs: 25 }));
+    const rt = runtime(fake);
+    const pending = runFindingVerification(
+      rt,
+      'openai/gpt-5',
+      'ctx',
+      [finding],
+      log,
+      60_000,
+      undefined,
+      undefined,
+      'capped',
+    );
+    while (!fake.calls.some((call) => call.endsWith('/wait')))
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(rt.client, 'finding-verification', log, 30_000),
+      0,
+    );
+    assert.equal((await pending)?.[0].verdict, 'confirmed');
+    assert.equal(fake.prompts.length, 1);
+    assert.equal([...fake.sessions.values()][0].agent, 'jbot-verify');
+  });
+
+  it('preserves partial verdicts without resetting the cap when step accounting is unavailable', async (t) => {
+    const fake = fakeOpencodeServer(() => ({
+      text: '{"verdicts":[{"index":0,"verdict":"refuted"}]}',
+    }));
+    const list = fake.client.message.list.bind(fake.client.message);
+    t.mock.method(fake.client.message, 'list', (...args) => {
+      if (args[0]?.limit === 200) throw new Error('listing failed');
+      return list(...args);
+    });
+    const result = await runFindingVerification(
+      runtime(fake),
+      'openai/gpt-5',
+      'ctx',
+      [finding, finding],
+      log,
+      300_000,
+      undefined,
+      undefined,
+      'capped',
+    );
+    assert.equal(fake.prompts.length, 1);
+    assert.deepEqual(
+      result?.map((v) => v.verdict),
+      ['refuted'],
+    );
   });
 
   it('interrupts an incomplete verifier before recovering its collected evidence', async (t) => {

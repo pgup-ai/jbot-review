@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { hermeticOpencodeConfigHome } from '../src/shared/opencode-plugin.ts';
-import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from '../src/shared/prompt.ts';
+import {
+  PERMISSION_DENIED_MESSAGE,
+  TOOLS_OFF_MESSAGE,
+  VERIFICATION_STEP_LIMIT_PROMPT,
+} from '../src/shared/prompt.ts';
 
 type Hook = (event: unknown) => unknown;
 
@@ -101,6 +105,43 @@ describe('jbot opencode plugin', () => {
       assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
       assert.deepEqual(event.tools.shell.input.properties.timeout, { type: 'integer', minimum: 1 });
       assert.deepEqual(event.tools.shell.input.properties.limit, { type: 'integer', minimum: 1 });
+    }
+  });
+
+  it('replaces only the verifier final-step prose instruction and preserves reasoning, tool results and schemas', async () => {
+    const { context } = await loadPlugin();
+    const native =
+      'CRITICAL - MAXIMUM STEPS REACHED\nTools are disabled. MUST provide a text response summarizing work done so far.';
+    for (const agent of ['jbot-verify', 'jbot-verify-1', 'plan']) {
+      for (const content of [native, [{ type: 'text', text: native }]]) {
+        const history = [
+          { role: 'assistant', content: [{ type: 'reasoning', text: 'reasoned source' }] },
+          { role: 'tool', content: native },
+        ];
+        const event = {
+          agent,
+          tools: tools(),
+          messages: [...history, { role: 'assistant', content }],
+          toolChoice: 'none',
+        };
+        context(event);
+        assert.deepEqual(event.messages.slice(0, -1), history);
+        assert.equal(event.toolChoice, 'none');
+        assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
+        assert.deepEqual(
+          event.messages.at(-1)?.content,
+          agent === 'plan' ? content : [{ type: 'text', text: VERIFICATION_STEP_LIMIT_PROMPT }],
+        );
+      }
+    }
+    for (const last of [
+      { role: 'assistant', content: 'Ordinary verifier output' },
+      { role: 'user', content: native },
+      { role: 'tool', content: native },
+    ]) {
+      const event = { agent: 'jbot-verify', tools: tools(), messages: [structuredClone(last)] };
+      context(event);
+      assert.deepEqual(event.messages, [last]);
     }
   });
 

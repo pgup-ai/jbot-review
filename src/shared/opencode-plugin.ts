@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
+import { VERIFY_AGENT } from './opencode-config.ts';
+import {
+  PERMISSION_DENIED_MESSAGE,
+  TOOLS_OFF_MESSAGE,
+  VERIFICATION_STEP_LIMIT_PROMPT,
+} from './prompt.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -15,7 +20,9 @@ import { PERMISSION_DENIED_MESSAGE, TOOLS_OFF_MESSAGE } from './prompt.ts';
  * because V2 ignores config model overrides on catalog providers. Plain object
  * export: V2's `Plugin.define` is the identity.
  */
-const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
+// Format after configuration imports finish initializing.
+const pluginSource =
+  () => `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
 import { readFileSync } from 'node:fs';
 const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute']);
 const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
@@ -64,6 +71,15 @@ export default {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);
       dropRepoInstructions(event.messages);
+      // OpenCode 2.0.22 asks for prose at step exhaustion; preserve the verdict contract on upgrades.
+      const last = event.messages?.at(-1);
+      if (event.agent?.startsWith(${JSON.stringify(VERIFY_AGENT)}) && last?.role === 'assistant') {
+        const text = typeof last.content === 'string' ? last.content :
+          Array.isArray(last.content) && last.content.length === 1 && last.content[0]?.type === 'text' ? last.content[0].text : '';
+        if (text.startsWith('CRITICAL - MAXIMUM STEPS REACHED\\n')) {
+          last.content = [{ type: 'text', text: ${JSON.stringify(VERIFICATION_STEP_LIMIT_PROMPT)} }];
+        }
+      }
       const options = sessionOptions(event.sessionID);
       if (options) {
         delete options.jbotSessionLabel;
@@ -105,7 +121,7 @@ export function hermeticOpencodeConfigHome(): string {
       : new URL('./review-retrieval.ts', import.meta.url);
     writeFileSync(
       join(configHome, 'opencode', 'plugins', 'jbot-review.js'),
-      PLUGIN_SOURCE.replace('RETRIEVAL_MODULE', JSON.stringify(module.href)),
+      pluginSource().replace('RETRIEVAL_MODULE', JSON.stringify(module.href)),
     );
   }
   return configHome;

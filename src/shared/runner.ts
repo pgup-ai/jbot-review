@@ -1,3 +1,4 @@
+import { VerificationEvidence } from './verification-evidence.ts';
 import {
   planIncrementalReview,
   withReviewBaseline,
@@ -171,6 +172,7 @@ import {
   COMPLIANCE_PACK_NOTE,
   COMPLIANCE_RECHECK_NOTE,
   selectLensKeys,
+  STATE_EVIDENCE_OMISSION,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
@@ -401,6 +403,7 @@ function createOpencodeBackend(
       onTokenUsage,
       modelOptions,
       mode,
+      proof,
     ) =>
       runOpencodeFindingVerification(
         runtime,
@@ -412,6 +415,7 @@ function createOpencodeBackend(
         onTokenUsage,
         modelOptions,
         mode,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
@@ -450,7 +454,17 @@ function createPoolsideBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       runPoolsideFindingVerification(
         key,
         reasoningEffort,
@@ -460,6 +474,7 @@ function createPoolsideBackend(
         log,
         timeoutMs,
         onTokenUsage,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPoolsideChangesSinceLastReview(
@@ -538,6 +553,8 @@ function createCommandCodeBackend(
       timeoutMs,
       onTokenUsage,
       modelOptions,
+      _mode,
+      proof,
     ) =>
       processes.run('finding-verification', () =>
         runCommandCodeFindingVerification(
@@ -550,6 +567,7 @@ function createCommandCodeBackend(
           onTokenUsage,
           runtime,
           effortFor(model, modelOptions),
+          proof,
         ),
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
@@ -607,13 +625,33 @@ function createClineBackend(
           runtime,
         ),
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       processes.run('finding-verification', () => {
         const cli = (ms?: number) =>
-          runClineFindingVerification(model, prContext, findings, log, ms, onTokenUsage, runtime);
+          runClineFindingVerification(
+            model,
+            prContext,
+            findings,
+            log,
+            ms,
+            onTokenUsage,
+            runtime,
+            proof,
+          );
         return sdkVerifier
           ? withClineSdkFallback(
-              (ms) => runClineSdkFindingVerification(model, prContext, findings, log, runtime, ms),
+              (ms) =>
+                runClineSdkFindingVerification(model, prContext, findings, log, runtime, ms, proof),
               cli,
               timeoutMs,
               log,
@@ -648,8 +686,27 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
         onTokenUsage,
         runtime,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runGrokFindingVerification(model, prContext, findings, log, timeoutMs, onTokenUsage, runtime),
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
+      runGrokFindingVerification(
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        runtime,
+        proof,
+      ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runGrokChangesSinceLastReview(model, deltaContext, log, timeoutMs, onTokenUsage, runtime),
   };
@@ -687,7 +744,17 @@ function createDimBackend(
         onTokenUsage,
         runtime,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       runDimFindingVerification(
         workspace,
         model,
@@ -697,6 +764,7 @@ function createDimBackend(
         timeoutMs,
         onTokenUsage,
         runtime,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runDimChangesSinceLastReview(
@@ -748,7 +816,17 @@ function createQoderBackend(
         token,
         toolTelemetry,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       runQoderFindingVerification(
         workspace,
         model,
@@ -759,6 +837,7 @@ function createQoderBackend(
         onTokenUsage,
         token,
         toolTelemetry,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runQoderChangesSinceLastReview(
@@ -1656,10 +1735,9 @@ async function runReviewPipeline(params: {
     options.experiment.reuse,
   );
   const packSupplied = new Map<string, SuppliedContext>();
-  // Served main-page packs by changed file, so tool-less verification sees what the finders saw.
+  // Served main-page packs by changed file, so verification sees what the finders saw.
   const verifierPacks = new Map<string, string[]>();
-  // The tool-less verifier also gets the rule sections a finding cites; it cannot open them itself.
-  const toolLessContextFor = (finding: Finding) => ({
+  const verificationContextFor = (finding: Finding) => ({
     packs: verifierPacks.get(finding.path) ?? [],
     rules: citedGuidelineSections(
       [finding.title, finding.body, finding.evidence ?? ''].join('\n'),
@@ -2723,7 +2801,12 @@ async function runReviewPipeline(params: {
 
     const verifierContextForTargets = (targets: Finding[]) => {
       const fits = measureReviewPrompt(
-        assembleFindingVerificationPrompt(verifierPrContext, targets),
+        assembleFindingVerificationPrompt(
+          verifierPrContext,
+          targets,
+          false,
+          options.experiment.verificationProof,
+        ),
         auxPromptBudget,
         REVIEW_EVIDENCE_BYTES,
       ).fits;
@@ -3255,7 +3338,9 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
-        toolLessContextFor,
+        verificationContextFor,
+        verificationRetrieval: options.experiment.verificationRetrieval,
+        verificationProof: options.experiment.verificationProof,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3446,7 +3531,9 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
-        toolLessContextFor,
+        verificationContextFor,
+        verificationRetrieval: options.experiment.verificationRetrieval,
+        verificationProof: options.experiment.verificationProof,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3473,7 +3560,9 @@ async function runReviewPipeline(params: {
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
-        toolLessContextFor,
+        verificationContextFor,
+        verificationRetrieval: options.experiment.verificationRetrieval,
+        verificationProof: options.experiment.verificationProof,
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -4313,7 +4402,9 @@ async function verifyFindings(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  toolLessContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
+  verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
+  verificationRetrieval?: boolean;
+  verificationProof?: boolean;
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -4367,8 +4458,9 @@ export async function requestFindingVerdicts(params: {
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
-  /** Context the tool-less pass gets per target; each item goes in while it fits. */
-  toolLessContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
+  verificationContextFor?: (finding: Finding) => { packs: string[]; rules: string[] };
+  verificationRetrieval?: boolean;
+  verificationProof?: boolean;
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
@@ -4384,30 +4476,54 @@ export async function requestFindingVerdicts(params: {
   onCoverage?: SessionCoverageRecorder;
 }): Promise<FindingVerdictList> {
   const session = 'finding-verification';
+  const evidence =
+    params.verificationRetrieval || params.verificationProof
+      ? new VerificationEvidence(params.workspace)
+      : undefined;
   const startedAt = Date.now();
   const verdicts: FindingVerdictList = [];
   let failure: Error | undefined;
+  let batchSize = VERIFICATION_BATCH_SIZE;
   for (let offset = 0; offset < params.targets.length;) {
-    let size = Math.min(VERIFICATION_BATCH_SIZE, params.targets.length - offset);
+    let size = Math.min(batchSize, params.targets.length - offset);
     let targets = params.targets.slice(offset, offset + size);
     try {
       let context: string;
       let sourceContext: string;
       const preparedSources = new Map<Finding, string>();
+      let extras: { packs: string[]; rules: string[] }[];
+      let optionalCount = 0;
+      let reserveSupportingOmission = true;
+      // Reserve the omission notice before optional context consumes the remaining room.
+      const fits = (candidate: string, reserveOmission = true) =>
+        !params.promptBudget ||
+        measureReviewPrompt(
+          assembleFindingVerificationPrompt(
+            reserveOmission
+              ? joinContext(
+                  candidate,
+                  optionalCount && reserveSupportingOmission
+                    ? verifierOmissionNote(optionalCount)
+                    : '',
+                  params.verificationRetrieval ? STATE_EVIDENCE_OMISSION : '',
+                )
+              : candidate,
+            targets,
+            false,
+            params.verificationProof,
+          ),
+          params.promptBudget,
+        ).fits;
       for (;;) {
+        extras = targets.map(
+          (target) => params.verificationContextFor?.(target) ?? { packs: [], rules: [] },
+        );
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
         context = [params.contextForTargets?.(targets) ?? params.prContext, sourceContext]
           .filter(Boolean)
           .join('\n\n');
-        if (
-          !params.promptBudget ||
-          measureReviewPrompt(
-            assembleFindingVerificationPrompt(context, targets),
-            params.promptBudget,
-          ).fits
-        )
-          break;
+        if (fits(context, false)) break;
         if (size === 1)
           throw new Error('Finding verification singleton exceeds the assembled prompt budget.');
         size = Math.ceil(size / 2);
@@ -4416,10 +4532,29 @@ export async function requestFindingVerdicts(params: {
       const evidenceTimeoutMs = computeEvidenceTimeoutMs(
         params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
       );
-      if (params.prepareEvidence && evidenceTimeoutMs > 0) {
-        const prepared = await Promise.allSettled(
-          targets.map((target) => params.prepareEvidence!([target], evidenceTimeoutMs)),
-        );
+      let omitted = 0;
+      const prepared =
+        params.prepareEvidence && evidenceTimeoutMs > 0
+          ? await Promise.allSettled(
+              targets.map((target) => params.prepareEvidence!([target], evidenceTimeoutMs)),
+            )
+          : [];
+      const optional = [
+        ...prepared.flatMap((result) =>
+          result.status === 'fulfilled' && result.value ? [result.value] : [],
+        ),
+        ...new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules])),
+      ];
+      optionalCount = optional.length;
+      reserveSupportingOmission = !fits(
+        joinContext(
+          context,
+          ...optional,
+          params.verificationRetrieval ? STATE_EVIDENCE_OMISSION : '',
+        ),
+        false,
+      );
+      if (prepared.length) {
         for (const [index, result] of prepared.entries()) {
           if (result.status === 'rejected') {
             params.log('Verification evidence unavailable; continuing with cited source.');
@@ -4427,58 +4562,91 @@ export async function requestFindingVerdicts(params: {
           }
           if (!result.value) continue;
           const enriched = joinContext(context, result.value);
-          if (
-            !params.promptBudget ||
-            measureReviewPrompt(
-              assembleFindingVerificationPrompt(enriched, targets),
-              params.promptBudget,
-            ).fits
-          ) {
+          if (fits(enriched)) {
             context = enriched;
             sourceContext = joinContext(sourceContext, result.value);
             preparedSources.set(targets[index], result.value);
           } else {
+            omitted++;
             params.log('Optional verification evidence omitted: assembled prompt exceeds budget.');
           }
         }
       } else if (params.prepareEvidence) {
         params.log('Skipping optional evidence preparation to preserve verification time.');
       }
-      // Only the tool-less pass gets this context; the capped re-check reads what it needs.
-      let toolLessContext = context;
       const packed = new Set<string>();
-      // Measured as budgetReviewBackend does: the tool-using prompt is the longer one.
-      const fits = (candidate: string) =>
-        !params.promptBudget ||
-        measureReviewPrompt(
-          assembleFindingVerificationPrompt(candidate, targets),
-          params.promptBudget,
-        ).fits;
-      let omitted = 0;
-      if (params.toolLessFirst || params.toolLessOnly) {
-        const extras = targets.map(
-          (target) => params.toolLessContextFor?.(target) ?? { packs: [], rules: [] },
-        );
-        const rules = new Set(extras.flatMap((extra) => extra.rules));
-        for (const item of new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules]))) {
-          const enriched = joinContext(toolLessContext, item);
-          if (!fits(enriched)) {
-            params.log(
-              'Tool-less context omitted from verification: assembled prompt exceeds budget.',
+      const rules = new Set(extras.flatMap((extra) => extra.rules));
+      for (const item of new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules]))) {
+        const enriched = joinContext(context, item);
+        if (!fits(enriched)) {
+          params.log(
+            'Main-review context omitted from verification: assembled prompt exceeds budget.',
+          );
+          omitted++;
+          continue;
+        }
+        context = enriched;
+        // A quoted rule shows the rule exists, not that the code breaks it.
+        if (!rules.has(item)) sourceContext = joinContext(sourceContext, item);
+        packed.add(item);
+      }
+      if (omitted) context = joinContext(context, verifierOmissionNote(omitted));
+      const targetSources = new Map<Finding, Promise<string>>();
+      const sourceFor = (target: Finding) => {
+        if (!targetSources.has(target))
+          targetSources.set(
+            target,
+            (async () =>
+              joinContext(
+                await (params.sourceContext?.([target]) ??
+                  buildFindingSourceContext(params.workspace, [target])),
+                preparedSources.get(target) ?? '',
+                ...extras[targets.indexOf(target)].packs.filter((item) => packed.has(item)),
+              ))(),
+          );
+        return targetSources.get(target)!;
+      };
+      if (params.verificationRetrieval) {
+        let omittedState = false;
+        const packets = await Promise.all(
+          targets.map(async (target) => {
+            const supplied = await sourceFor(target).catch(() => undefined);
+            const packet = await evidence!.prepare(
+              [target],
+              joinContext(params.contextForTargets?.([target]) ?? params.prContext, supplied ?? ''),
+              computeEvidenceTimeoutMs(
+                params.timeoutMs === undefined
+                  ? undefined
+                  : params.timeoutMs - (Date.now() - startedAt),
+              ),
             );
-            omitted++;
-            continue;
-          }
-          toolLessContext = enriched;
-          // A quoted rule shows the rule exists, not that the code breaks it.
-          if (!rules.has(item)) sourceContext = joinContext(sourceContext, item);
-          packed.add(item);
+            return { target, supplied, packet };
+          }),
+        );
+        for (const { target, supplied, packet } of packets) {
+          const enriched = joinContext(context, packet);
+          if (fits(joinContext(enriched, STATE_EVIDENCE_OMISSION), false)) {
+            context = enriched;
+            sourceContext = joinContext(sourceContext, packet);
+            if (supplied !== undefined)
+              targetSources.set(target, Promise.resolve(joinContext(supplied, packet)));
+          } else omittedState = true;
+        }
+        if (omittedState) {
+          context = joinContext(context, STATE_EVIDENCE_OMISSION);
+          params.log('State-producing source omitted: assembled prompt exceeds budget.');
         }
       }
-      if (omitted) {
-        const noted = joinContext(toolLessContext, verifierOmissionNote(omitted));
-        if (fits(noted)) toolLessContext = noted;
+      if (!fits(context, false)) {
+        if (size > 1) {
+          batchSize = Math.ceil(size / 2);
+          continue;
+        }
+        throw new Error(
+          'Finding verification context and required omission notices exceed the prompt budget.',
+        );
       }
+      batchSize = size;
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4487,29 +4655,31 @@ export async function requestFindingVerdicts(params: {
       const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') =>
         params.backend.runFindingVerification(
           params.model,
-          mode === 'single-shot' ? toolLessContext : context,
+          context,
           findings,
           params.log,
           remaining(),
           params.onTokenUsage,
           params.modelOptions,
           mode,
+          params.verificationProof,
         );
-      const check = async (verdict: FindingVerdictList[number]) => {
+      const check = async (verdict: FindingVerdictList[number], suppliedOnly = false) => {
         let result = checkConfirmationEvidence(verdict, sourceContext);
         const target = targets[verdict.index];
+        if (params.verificationProof)
+          result = await evidence!.check(result, target, suppliedOnly ? sourceContext : undefined);
         if (result.verdict === 'confirmed' && result.finding && target) {
-          result = checkConfirmationEvidence(
-            result,
-            joinContext(
-              await (params.sourceContext?.([target]) ??
-                buildFindingSourceContext(params.workspace, [target])),
-              preparedSources.get(target) ?? '',
-              ...(params.toolLessContextFor?.(target).packs ?? []).filter((item) =>
-                packed.has(item),
-              ),
-            ),
-          );
+          try {
+            result = checkConfirmationEvidence(result, await sourceFor(target));
+          } catch {
+            result = {
+              index: verdict.index,
+              verdict: 'uncertain',
+              unavailable: true,
+              reason: 'Target source validation did not complete.',
+            };
+          }
         }
         return result;
       };
@@ -4522,7 +4692,9 @@ export async function requestFindingVerdicts(params: {
           return undefined;
         });
         // Only an accepted tool-less confirmation is final: a refutation without a lookup could drop a real bug.
-        const confirmed = (await Promise.all((first ?? []).map(check))).filter(
+        const confirmed = (
+          await Promise.all((first ?? []).map((verdict) => check(verdict, true)))
+        ).filter(
           (verdict) =>
             verdict.verdict === 'confirmed' && resolvesFinding(targets[verdict.index], verdict),
         );
@@ -4542,20 +4714,18 @@ export async function requestFindingVerdicts(params: {
           : [];
         batch = [
           ...confirmed,
-          ...(capped ?? []).map((verdict) => ({
-            ...verdict,
-            index: targets.indexOf(rest[verdict.index]),
-          })),
+          ...(await Promise.all(
+            (capped ?? []).map((verdict) =>
+              check({ ...verdict, index: targets.indexOf(rest[verdict.index]) }),
+            ),
+          )),
         ];
-      } else batch = await verify(targets, params.toolLessOnly ? 'single-shot' : undefined);
+      } else {
+        const result = await verify(targets, params.toolLessOnly ? 'single-shot' : undefined);
+        batch = result && (await Promise.all(result.map((v) => check(v, params.toolLessOnly))));
+      }
       if (!batch) throw new Error('Finding verification output unusable.');
-      const checked = await Promise.all(
-        batch.map(async (verdict) => ({
-          ...(await check(verdict)),
-          index: verdict.index + offset,
-        })),
-      );
-      verdicts.push(...checked);
+      verdicts.push(...batch.map((verdict) => ({ ...verdict, index: verdict.index + offset })));
       if (batch.length < targets.length)
         failure ??= new Error('Finding verification returned incomplete verdicts.');
     } catch (error) {
