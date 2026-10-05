@@ -329,20 +329,31 @@ export function checkVerificationProof(
   finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain'>,
   sources: ReadonlyMap<string, string>,
   producers: ReadonlySet<string>,
+  unindexedSources?: ReadonlySet<string>,
 ): FindingVerdict {
   if (verdict.verdict !== 'confirmed' || !requiresVerificationProof(finding, verdict.finding))
     return verdict;
   const proof = parseVerificationProof(verdict.proof);
   if (
     proof &&
-    proof.producer.every((ref) => producers.has(`${ref.path}:${ref.line}`)) &&
+    proof.producer.every(
+      (ref) => producers.has(`${ref.path}:${ref.line}`) || unindexedSources?.has(ref.path),
+    ) &&
     [proof.producer, proof.guard, proof.effect].every((refs) =>
       refs.every(
         (ref) => sources.get(ref.path)?.split(/\r?\n/)[ref.line - 1]?.trim() === ref.quote.trim(),
       ),
     )
-  )
+  ) {
+    if (proof.producer.some((ref) => unindexedSources?.has(ref.path)))
+      return {
+        index: verdict.index,
+        verdict: 'uncertain',
+        unavailable: true,
+        reason: 'Producer validation is unavailable for unsupported or truncated source.',
+      };
     return verdict;
+  }
   return {
     index: verdict.index,
     verdict: 'uncertain',

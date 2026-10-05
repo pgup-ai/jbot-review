@@ -501,6 +501,7 @@ export class VerificationEvidence {
       return verdict;
     const sources = new Map<string, string>();
     const producers = new Set<string>();
+    const unindexedSources = new Set<string>();
     const proof = parseVerificationProof(verdict.proof);
     const supplied = suppliedSource === undefined ? undefined : suppliedSourceLines(suppliedSource);
     if (
@@ -534,9 +535,9 @@ export class VerificationEvidence {
                   if (['function', 'method'].includes(declaration.kind))
                     producers.add(`${ref.path}:${declaration.start}`);
               } catch {
-                /* Unsupported syntax cannot establish a producer. */
+                unindexedSources.add(ref.path);
               }
-            }
+            } else unindexedSources.add(ref.path);
           }
         }
       } catch {
@@ -548,6 +549,6 @@ export class VerificationEvidence {
         };
       }
     }
-    return checkVerificationProof(verdict, finding, sources, producers);
+    return checkVerificationProof(verdict, finding, sources, producers, unindexedSources);
   }
 }

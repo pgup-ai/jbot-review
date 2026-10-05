@@ -932,8 +932,10 @@ The opt-in `JBOT_REVIEW_EXPERIMENT=state-proof` adds the same retrieval plus a
 proof requirement for findings anchored in JavaScript/TypeScript. Consequential
 confirmations must include a trigger description and producer, guard, and effect citations;
 missing or stale citations leave the candidate uncertain. Citation checks do not
-prove the causal argument. This preset is experimental and does not change the
-default. Findings in other languages keep the usual verification requirements.
+prove the causal argument. When all citations match but producer indexing is
+unsupported or truncated, verification is unavailable; blocking findings follow
+the existing labeled-unverified policy. This preset is experimental and does not
+change the default. Findings in other languages keep the usual verification requirements.
 
 On OpenCode, `context-pack` also runs lens passes with tools off, so they answer
 from the pack and the numbered diff, and guideline compliance keeps its own

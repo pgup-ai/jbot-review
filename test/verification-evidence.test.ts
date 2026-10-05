@@ -557,6 +557,50 @@ test('revision lookup failures preserve unavailable status instead of claiming m
   }
 });
 
+test('distinguishes unsupported producer indexing from invalid source proof', async (t) => {
+  const { workspace } = await fixture(t);
+  const files = {
+    'migration.sql': "UPDATE events SET stage = 'revising';",
+    'state.json': '{ "stage": "revising" }',
+    'large.ts': 'record.stage = Stage.REVISING;\n' + '// padding\n'.repeat(100_000),
+    'unsupported.ts': 'record.stage = Stage.REVISING;\nunsupported syntax @@@',
+  };
+  for (const [path, source] of Object.entries(files))
+    await writeFile(join(workspace, path), source);
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const evidence = new VerificationEvidence(workspace);
+  for (const [path, source] of Object.entries(files)) {
+    const producer = { path, line: 1, quote: source.split('\n')[0] };
+    const candidate = { ...confirmed, proof: { ...proof, producer: [producer] } };
+    const supplied = [producer, ...proof.guard, ...proof.effect]
+      .map((ref) => formatContextPackItem({ path: ref.path, rows: [[ref.line, ref.quote]] }))
+      .join('\n');
+    const verdict = await evidence.check(candidate, finding, supplied);
+    assert.equal(verdict.verdict, 'uncertain', path);
+    assert.equal(verdict.unavailable, true, path);
+    const applied = applyFindingVerdicts([finding], [0], [verdict]).findings[0];
+    assert.equal(applied.verificationUnavailable, true);
+    assert.equal(applied.publishUnverified, 'P2');
+    for (const invalid of [
+      {
+        ...candidate,
+        proof: { ...candidate.proof, guard: [{ ...proof.guard[0], quote: 'stale' }] },
+      },
+      {
+        ...candidate,
+        proof: {
+          ...candidate.proof,
+          producer: [producer, { path: 'read.ts', line: 2, quote: 'const { stage } = record;' }],
+        },
+      },
+    ]) {
+      const rejected = await evidence.check(invalid, finding);
+      assert.equal(rejected.verdict, 'uncertain');
+      assert.notEqual(rejected.unavailable, true);
+    }
+  }
+});
+
 test('the proof gate follows the kind retained by verdict application', async (t) => {
   const { workspace } = await fixture(t);
   for (const [kind, correctedKind, unresolved, expected] of [
