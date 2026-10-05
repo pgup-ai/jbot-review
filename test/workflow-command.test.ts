@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { runInNewContext } from 'node:vm';
 
 const workflow = readFileSync(
   new URL('../.github/workflows/jbot-review.yml', import.meta.url),
@@ -81,4 +82,55 @@ describe('/jbot command', () => {
     assert.notEqual(result.status, 0);
     assert.match(result.log, /--auto-approve expects true or false/);
   });
+});
+
+it('cancels only the closed PR group and keeps reviews cancellable across entry points', () => {
+  assert.match(workflow, /types: \[[^\]\n]*\bclosed\b[^\]\n]*\]/);
+  const closeJob = workflow.split('\n  cancel-closed:\n')[1]?.split('\n  command:\n')[0];
+  const reviewJob = workflow.split('\n  review:\n')[1];
+  assert.ok(closeJob && reviewJob);
+  assert.match(closeJob, /permissions: \{\}/);
+  assert.doesNotMatch(closeJob, /uses:|secrets\./);
+  const closeIf = closeJob.match(/^    if: (.+)/m)![1];
+  const reviewIf = reviewJob.match(/\n    if: >-\n([\s\S]*?)\n    # One review/)![1];
+  const closeGroup = closeJob.match(/group: (.+)/)![1];
+  const reviewGroup = reviewJob.match(/group: (.+)/)![1];
+  for (const job of [closeJob, reviewJob]) assert.match(job, /cancel-in-progress: true/);
+
+  for (const number of [12, 34]) {
+    for (const eventName of ['pull_request', 'issue_comment', 'workflow_dispatch']) {
+      for (const closed of [false, true]) {
+        const context = {
+          github: {
+            event_name: eventName,
+            event: {
+              action: closed ? 'closed' : 'synchronize',
+              pull_request:
+                eventName === 'pull_request'
+                  ? { number, draft: false, user: { login: 'author' } }
+                  : {},
+              issue: eventName === 'issue_comment' ? { number } : {},
+            },
+          },
+          inputs: eventName === 'workflow_dispatch' ? { 'pr-number': String(number) } : {},
+          needs: { command: { outputs: { proceed: 'true' } } },
+          cancelled: () => false,
+        };
+        const isClose = eventName === 'pull_request' && closed;
+        assert.equal(runInNewContext(closeIf, context), isClose);
+        assert.equal(runInNewContext(reviewIf, context), !isClose);
+        const group = (source: string) =>
+          source.replace(/\$\{\{(.+?)\}\}/g, (_, expression: string) =>
+            String(runInNewContext(expression, context)),
+          );
+        assert.equal(group(reviewGroup), `jbot-review-${number}`);
+        if (isClose) assert.equal(group(closeGroup), group(reviewGroup));
+        assert.equal(runInNewContext(reviewIf, { ...context, cancelled: () => true }), false);
+        if (eventName === 'issue_comment') {
+          context.needs.command.outputs.proceed = '';
+          assert.equal(runInNewContext(reviewIf, context), false);
+        }
+      }
+    }
+  }
 });

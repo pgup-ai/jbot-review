@@ -1,7 +1,7 @@
 name: J-Bot Code Review
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize, closed]
   issue_comment: # one-off reviews: "/jbot [--provider=<id>] [--model=<id>] [--auto-approve[=true|false]]"
     types: [created]
   workflow_dispatch:
@@ -50,6 +50,16 @@ permissions:
   checks: read
 
 jobs:
+  cancel-closed:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    permissions: {}
+    concurrency:
+      group: jbot-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'PR closed; cancelled its queued or running review.'
+
   # /jbot one-off reviews. Separate job so a rejected command never queues into
   # the review concurrency group — queueing there would evict a live review.
   command:
@@ -68,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # proceed comes from its own step AFTER the guard: outputs of earlier
-      # steps survive a failed job, and review's always() would honor them.
+      # steps survive a failed job, and review's !cancelled() would honor them.
       proceed: ${{ steps.ok.outputs.proceed }}
       provider: ${{ steps.cmd.outputs.provider }}
       model: ${{ steps.cmd.outputs.model }}
@@ -157,15 +167,16 @@ jobs:
 
   review:
     needs: [command]
-    # always(): command is skipped on pull_request/dispatch events and must not
-    # auto-skip this job; the conditions below re-gate every event.
+    # !cancelled(): a skipped command must not skip auto/dispatch reviews,
+    # but cancellation must still stop an active review.
     # Dependabot PRs are excluded from AUTO review only — a lockfile bump is not
     # worth a review pass. /jbot on one still works.
     if: >-
-      always() && (
+      !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
         (
           github.event_name == 'pull_request' &&
+          github.event.action != 'closed' &&
           github.event.pull_request.draft == false &&
           github.event.pull_request.user.login != 'dependabot[bot]'
         ) ||

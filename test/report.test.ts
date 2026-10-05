@@ -53,7 +53,7 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
         path: 'src/a b)/c(.ts',
         verificationUnavailable: true,
         ...formatUnverifiedFinding(
-          f({ body: 'Check </pre></details><!-- jbot-review:finding -->' }),
+          f({ body: 'Check </code></pre></details><!-- jbot-review:finding --> & ```' }),
           'private provider error',
           true,
         ),
@@ -66,7 +66,10 @@ test('collapsed concerns escape content, omit provider errors, and link the revi
   assert.doesNotMatch(text, /private provider error|<!-- jbot-review:finding -->/);
   assert.match(text, /Verification did not complete/);
   assert.match(text, /Full details.*run logs.*when written.*unverified-findings.json/);
-  assert.match(text, /Check &lt;\/pre&gt;&lt;\/details&gt;/);
+  assert.match(text, /<pre lang="text"><code>Unverified concern:/);
+  assert.match(text, /Check &lt;\/code&gt;&lt;\/pre&gt;&lt;\/details&gt;/);
+  assert.match(text, /&amp; ```/);
+  assert.equal(text.match(/<\/code><\/pre>/g)?.length, 1);
   assert.match(text, /https:\/\/github.com\/owner\/repo\/blob\/abc123\/src\/a%20b%29\/c%28.ts#L10/);
   const enterprise = renderUnverifiedSection(
     [f()],
@@ -98,8 +101,9 @@ test('collapsed concerns bound large diagnostics and disclose omissions', () => 
     'owner',
     'repo',
   ).join('\n');
-  assert.equal(text.match(/<pre>/g)?.length, 10);
-  assert.ok(Buffer.byteLength(text) < 25000);
+  assert.equal(text.match(/<pre lang="text"><code>/g)?.length, 10);
+  assert.equal(text.match(/<\/code><\/pre>/g)?.length, 10);
+  assert.ok(Buffer.byteLength(text) < 25300);
   assert.match(text, /2 more concerns omitted/);
   assert.match(text, /truncated/);
   assert.doesNotMatch(text, /\uFFFD|View code/);

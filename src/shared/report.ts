@@ -54,7 +54,10 @@ export function renderUnverifiedSection(
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
-    lines.push(`<pre>${truncateUtf8WithNotice(text, 2400, 'Concern')}</pre>`, '');
+    lines.push(
+      `<pre lang="text"><code>${truncateUtf8WithNotice(text, 2400, 'Concern')}</code></pre>`,
+      '',
+    );
     if (headSha && !/(^|\/)\.{1,2}(\/|$)/.test(finding.path)) {
       const path = finding.path
         .split('/')

@@ -270,7 +270,7 @@ describe('auxiliary runners on V2', () => {
 });
 
 describe('runFindingVerification on V2', () => {
-  it('recovers unusable output once in a native read-only fork without replacing completed judgments', async () => {
+  it('recovers uncapped verification once in a native read-only fork without replacing completed judgments', async () => {
     for (const first of [
       '',
       '{}',
@@ -299,6 +299,7 @@ describe('runFindingVerification on V2', () => {
         [first === '' || first === '{}' ? 'uncertain' : 'refuted', 'uncertain'],
       );
       const [main, repair] = [...fake.sessions.values()];
+      assert.equal(main.agent, 'plan');
       assert.equal(repair.forkedFrom, main.id);
       assert.equal(repair.agent, main.agent);
       assert.deepEqual(repair.permissions, permissionRules());
