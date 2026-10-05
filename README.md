@@ -39,7 +39,7 @@ providers and their credentials are listed in [Provider configuration](#provider
 name: J-Bot Code Review
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize, closed]
 
 concurrency:
   group: jbot-review-${{ github.event.pull_request.number }}
@@ -54,7 +54,7 @@ permissions:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: github.event.action != 'closed' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -74,6 +74,11 @@ Fork-triggered workflows do not receive provider secrets by default; see
 **Step 3 — Open a non-draft PR.** J-Bot reviews it automatically and runs again
 when you push commits. Findings appear as inline comments and a review summary;
 see [Review output](#review-output) for verdicts and optional auto-approval.
+Merging or closing the PR cancels its queued or running review through the
+workflow's concurrency group. Existing installations need the `closed` trigger
+and review-job exclusion shown above. Workflows with job-level concurrency also
+need a separate close-event job in the same PR group; see
+[this repository's workflow](.github/workflows/jbot-review.yml).
 
 Optionally add `AGENTS.md`, `REVIEW.md`, or another supported
 [guideline file](#project-guidelines) to customize the review. For external
@@ -993,7 +998,8 @@ from inline and file-level findings (the one exception is under
 `Unverified concerns (N)` section showing up to 10 withheld hypotheses to anyone
 who can read the PR. Content is HTML-escaped and capped at 2,400 UTF-8 bytes per
 concern, plus a truncation notice; omitted concerns are counted. Failed-verifier
-error prefixes are excluded. Full details remain in run logs and local output.
+error prefixes are excluded. Each concern has GitHub's native code-copy button,
+which copies the displayed excerpt. Full details remain in run logs and local output.
 These candidates still prevent automatic approval and an all-clear result. This rule
 adds no model pass, repository scan or configuration flag. Concrete investigation
 candidates still enter the existing verification batches. Confirmation promotes
