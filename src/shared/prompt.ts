@@ -2056,9 +2056,11 @@ export function assembleFindingVerificationPrompt(
   prContext: string,
   findings: VerifiableFinding[],
   singleShot = false,
+  proof = false,
 ): string {
   return [
     singleShot ? FINDING_VERIFICATION_SINGLE_SHOT_PROMPT : FINDING_VERIFICATION_PROMPT,
+    ...(proof ? [VERIFICATION_PROOF_PROMPT] : []),
     prContext,
     formatFindingsForVerification(findings),
     ...(findings.some((finding) => finding.kind === 'investigate' || finding.confidence === 'low')

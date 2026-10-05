@@ -297,11 +297,12 @@ export async function runQoderFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   token?: string,
   toolTelemetry?: ToolTelemetryAccumulator,
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runQoderPrompt(
     workspace,
     model,
-    assembleFindingVerificationPrompt(prContext, findings),
+    assembleFindingVerificationPrompt(prContext, findings, false, proof),
     'finding-verification',
     log,
     token,

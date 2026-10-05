@@ -1932,6 +1932,34 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
     assert.equal(verdicts.find((v) => v.index === 6)?.unavailable, true);
     assert.ok(logs.some((message) => /Optional verification evidence omitted/.test(message)));
   }
+  for (const packs of [[], ['support']]) {
+    const context = ['required', ...packs].join('\n\n');
+    const findings = targets.slice(0, 1);
+    let calls = 0;
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: 'required',
+      targets: findings,
+      sourceContext: async () => '',
+      prepareEvidence: async () => '',
+      verificationContextFor: () => ({ packs, rules: [] }),
+      promptBudget: {
+        ...budget,
+        transportBytes: Buffer.byteLength(assembleFindingVerificationPrompt(context, findings)),
+      },
+      log: () => {},
+      backend: {
+        runFindingVerification: async (_model, supplied) => {
+          calls++;
+          assert.equal(supplied, context);
+          return [{ index: 0, verdict: 'confirmed' }];
+        },
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(verdicts[0].verdict, 'confirmed');
+  }
 });
 
 it('keeps tool-less confirmations and re-checks the rest within capped tool turns', async () => {
@@ -1958,7 +1986,7 @@ it('keeps tool-less confirmations and re-checks the rest within capped tool turn
       onCoverage: (row) => coverage.push(row.state),
       backend: {
         async runFindingVerification(_model, _context, findings, ...rest) {
-          const mode = rest.at(-1);
+          const mode = rest[4];
           calls.push(`${mode}:${findings.map((finding) => finding.title).join('')}`);
           if (mode === 'capped') {
             if (run === 're-check fails') throw new Error('provider unavailable');
@@ -2031,7 +2059,7 @@ it('keeps the same deduplicated page packs for the tool-using re-check and groun
     log: (message) => logs.push(message),
     backend: {
       async runFindingVerification(_model, context, findings, ...rest) {
-        const mode = String(rest.at(-1));
+        const mode = String(rest[4]);
         seen[mode] = context;
         if (mode === 'capped')
           return findings.map((_, index) => ({ index, verdict: 'refuted' as const }));
@@ -2080,7 +2108,7 @@ for (const toolLessOnly of [true, false])
       log: () => {},
       backend: {
         async runFindingVerification(_model, context, findings, ...rest) {
-          modes.push(String(rest.at(-1)));
+          modes.push(String(rest[4]));
           seen = context;
           const finding = { title: 't', severity: 'P2' as const, kind: 'bug' as const };
           return findings.map((_, index) => ({

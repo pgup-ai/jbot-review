@@ -70,6 +70,7 @@ export interface ReviewBackend {
     modelOptions?: Record<string, unknown>,
     /** `single-shot` runs tools off, `capped` a few tool turns; other backends ignore it. */
     mode?: 'single-shot' | 'capped',
+    proof?: boolean,
   ): Promise<FindingVerdict[] | undefined>;
   runChangesSinceLastReview(
     model: string,

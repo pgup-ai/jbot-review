@@ -15,6 +15,7 @@ import { newSideLines } from './patch.ts';
 
 const exec = promisify(execFile);
 const MAX_BYTES = 16 * 1024;
+const NEST_FILTER_REGISTRATIONS = ['useGlobalFilters', 'APP_FILTER'];
 type Declaration = PackSource['index']['declarations'][number];
 type Candidate = {
   path: string;
@@ -236,7 +237,7 @@ export async function collectStateEvidence(
           return app ? [app] : [];
         }),
       );
-      for (const symbol of ['useGlobalFilters', 'APP_FILTER']) {
+      for (const symbol of NEST_FILTER_REGISTRATIONS) {
         const refs = (await provider.references(symbol)).filter(
           (r) =>
             !/[.-](?:test|spec)\./.test(r.path) &&
@@ -261,7 +262,7 @@ export async function collectStateEvidence(
                   w.field === 'provide' && names.has(w.value) && w.object ? [w.object] : [],
                 )
               : source.index.calls
-                  .filter((c) => c.symbol === symbol)
+                  .filter((c) => names.has(c.symbol))
                   .map((c) => ({ start: c.line, end: c.end }));
           for (const range of registrations.slice(0, 4)) {
             const declaration = { symbol, kind: 'function' as const, ...range };
@@ -385,10 +386,7 @@ export async function collectStateEvidence(
         continue;
       }
       const used = new Set(
-        (['useGlobalFilters', 'APP_FILTER'].includes(d.symbol)
-          ? source.index.uses
-          : source.index.lookups
-        )
+        (NEST_FILTER_REGISTRATIONS.includes(d.symbol) ? source.index.uses : source.index.lookups)
           .filter((u) => u.line >= d.start && u.line <= d.end)
           .map((u) => u.symbol),
       );
@@ -406,10 +404,7 @@ export async function collectStateEvidence(
           });
         if (found?.declaration.kind === 'variable')
           enqueue(found, { ...candidate, line }, 100, depth + 1);
-        if (
-          found?.declaration.kind === 'class' &&
-          ['useGlobalFilters', 'APP_FILTER'].includes(d.symbol)
-        )
+        if (found?.declaration.kind === 'class' && NEST_FILTER_REGISTRATIONS.includes(d.symbol))
           enqueue(found, { ...candidate, line }, 80, depth + 1);
       }
       for (const call of source.index.calls.filter((c) => c.line >= d.start && c.line <= d.end)) {

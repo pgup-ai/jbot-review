@@ -627,6 +627,12 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(tentative, /"finding" is REQUIRED/);
     assert.match(tentative, /"finding": \{/);
     assert.ok(tentative.endsWith(VERIFICATION_OUTPUT_REMINDER));
+    const proof = assembleFindingVerificationPrompt('PR_CONTEXT_SENTINEL', findings, false, true);
+    assert.ok(
+      proof.indexOf('Verification proof requirement') < proof.indexOf('PR_CONTEXT_SENTINEL'),
+    );
+    assert.ok(proof.endsWith(VERIFICATION_OUTPUT_REMINDER));
+    assert.doesNotMatch(prompt, /Verification proof requirement/);
   });
 
   it('renders line-0 findings as file-level locations', () => {

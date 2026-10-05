@@ -289,6 +289,10 @@ describe('runFindingVerification on V2', () => {
         [finding, finding],
         log,
         300_000,
+        undefined,
+        undefined,
+        undefined,
+        true,
       );
       assert.deepEqual(
         result?.map((v) => v.verdict),
@@ -300,6 +304,10 @@ describe('runFindingVerification on V2', () => {
       assert.deepEqual(repair.permissions, permissionRules());
       assert.deepEqual(repair.model, main.model);
       assert.equal(fake.prompts.length, 2);
+      assert.ok(
+        fake.prompts[0].body.text.indexOf('Verification proof requirement') <
+          fake.prompts[0].body.text.indexOf('\n\nctx\n\n'),
+      );
       assert.match(fake.prompts[1].body.text, /Use uncertain/);
     }
   });

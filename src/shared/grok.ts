@@ -305,11 +305,12 @@ export async function runGrokFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   runtime?: GrokRuntime,
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   void onTokenUsage;
   const raw = await runGrokPrompt(
     model,
-    assembleFindingVerificationPrompt(prContext, findings, true),
+    assembleFindingVerificationPrompt(prContext, findings, true, proof),
     'finding-verification',
     log,
     runtime,

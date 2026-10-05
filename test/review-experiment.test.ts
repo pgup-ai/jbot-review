@@ -28,6 +28,8 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   assert.deepEqual(off, {
     preset: 'off',
     contextPack: false,
+    verificationRetrieval: false,
+    verificationProof: false,
     jevPrefetch: 'off',
     explorationEvidence: 'off',
     verificationEvidence: 'off',

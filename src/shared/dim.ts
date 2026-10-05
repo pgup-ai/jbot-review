@@ -435,11 +435,12 @@ export async function runDimFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   runtime?: DimRuntime,
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runDimPrompt(
     workspace,
     model,
-    assembleFindingVerificationPrompt(prContext, findings),
+    assembleFindingVerificationPrompt(prContext, findings, false, proof),
     'finding-verification',
     log,
     { timeoutMs, onTokenUsage, runtime },

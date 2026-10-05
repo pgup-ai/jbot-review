@@ -14,6 +14,7 @@ import { checkVerificationProof } from '../src/shared/filter.ts';
 import { parseFindingVerdicts } from '../src/shared/opencode.ts';
 import { parseVerificationProof, type Finding, type FindingVerdict } from '../src/shared/types.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
+import { buildFindingSourceContext } from '../src/shared/finding-context.ts';
 import {
   assembleFindingVerificationPrompt,
   formatContextPackItem,
@@ -249,6 +250,8 @@ test('retrieves registered exception handlers while excluding an unregistered cl
     'export const providers = [{ provide: APP_FILTER, useClass: DomainFilter }];',
     'export const providers = [{ provide:\n APP_FILTER, useClass: DomainFilter }];',
     'import { APP_FILTER as FILTER_TOKEN } from "@nestjs/core";\nexport const providers = [{ provide: FILTER_TOKEN, useClass: DomainFilter }];',
+    'import { useGlobalFilters as register } from "./bootstrap";\nexport function setup() { register(new DomainFilter()); }',
+    'export const providers = [{ provide: (APP_FILTER as ProviderToken), useClass: DomainFilter }];',
   ]) {
     const files = {
       'setup.ts': `import { DomainFilter } from './filter';\n${registration}`,
@@ -365,6 +368,23 @@ test('requires complete source-valid proof and rejects enum-only producers, stal
   });
   const diffSource = diff + '\n' + supplied.slice(supplied.indexOf('### delete.ts'));
   assert.equal((await evidence.check(confirmed, finding, diffSource)).verdict, 'confirmed');
+  const sourceContext = await buildFindingSourceContext(workspace, [
+    { ...finding, body: 'The producer is at `producer.ts:6`.' },
+  ]);
+  const pack =
+    formatContextPackItem({
+      path: 'producer.ts',
+      rows: [[6, proof.producer[0].quote]],
+    }) +
+    '\n' +
+    supplied.slice(supplied.indexOf('### delete.ts'));
+  const state = await evidence.prepare([finding], '', 4000);
+  for (const context of [
+    sourceContext,
+    pack,
+    state + '\n' + supplied.slice(supplied.indexOf('### delete.ts')),
+  ])
+    assert.equal((await evidence.check(confirmed, finding, context)).verdict, 'confirmed');
   assert.equal(
     (
       await evidence.check(
@@ -484,36 +504,39 @@ test('a failed proof source check leaves other verdicts intact', async (t) => {
   );
   assert.equal(verdicts[0].unavailable, true);
   assert.equal(verdicts[1].reason, 'counterexample');
-  const targetFailure = await requestFindingVerdicts({
-    workspace,
-    model: 'test/model',
-    prContext: '',
-    targets: [finding, { ...finding, path: 'other.ts' }],
-    sourceContext: async (targets) => {
-      if (targets.length === 1 && targets[0] === finding) throw Error('source unavailable');
-      return proof.producer[0].quote;
-    },
-    log: () => {},
-    backend: {
-      runFindingVerification: async () => [
-        {
-          ...confirmed,
-          finding: {
-            title: finding.title,
-            kind: 'bug',
-            severity: 'P2',
-            evidence: proof.producer[0].quote,
+  for (const verificationRetrieval of [false, true]) {
+    const targetFailure = await requestFindingVerdicts({
+      verificationRetrieval,
+      workspace,
+      model: 'test/model',
+      prContext: '',
+      targets: [finding, { ...finding, path: 'other.ts' }],
+      sourceContext: async (targets) => {
+        if (targets.length === 1 && targets[0] === finding) throw Error('source unavailable');
+        return proof.producer[0].quote;
+      },
+      log: () => {},
+      backend: {
+        runFindingVerification: async () => [
+          {
+            ...confirmed,
+            finding: {
+              title: finding.title,
+              kind: 'bug',
+              severity: 'P2',
+              evidence: proof.producer[0].quote,
+            },
           },
-        },
-        { index: 1, verdict: 'refuted', reason: 'counterexample' },
-      ],
-    },
-  });
-  assert.deepEqual(
-    targetFailure.map((v) => v.verdict),
-    ['uncertain', 'refuted'],
-  );
-  assert.equal(targetFailure[0].unavailable, true);
+          { index: 1, verdict: 'refuted', reason: 'counterexample' },
+        ],
+      },
+    });
+    assert.deepEqual(
+      targetFailure.map((v) => v.verdict),
+      ['uncertain', 'refuted'],
+    );
+    assert.equal(targetFailure[0].unavailable, true);
+  }
 });
 
 test('revision lookup failures preserve unavailable status instead of claiming missing proof', async (t) => {
@@ -568,10 +591,17 @@ test('a documentation candidate corrected to a bug must pass the proof gate', as
 test('a corrected finding keeps its retrieved evidence without borrowing another target’s packet', async (t) => {
   const { workspace } = await fixture(t);
   let answered = false;
+  let active = 0;
+  let maxActive = 0;
   const prepare = VerificationEvidence.prototype.prepare;
-  t.mock.method(VerificationEvidence.prototype, 'prepare', function (...args) {
+  t.mock.method(VerificationEvidence.prototype, 'prepare', async function (...args) {
     assert.equal(answered, false, 'Validate against delivered evidence, without another retrieval');
-    return prepare.apply(this, args);
+    maxActive = Math.max(maxActive, ++active);
+    try {
+      return await prepare.apply(this, args);
+    } finally {
+      active--;
+    }
   });
   const verdicts = await requestFindingVerdicts({
     workspace,
@@ -601,6 +631,7 @@ test('a corrected finding keeps its retrieved evidence without borrowing another
     verdicts.map((v) => v.verdict),
     ['confirmed', 'uncertain'],
   );
+  assert.equal(maxActive, 2, 'Per-target retrieval shares one deadline concurrently');
 });
 
 test('a full prompt still discloses omitted state evidence', async (t) => {
@@ -658,8 +689,9 @@ test('retrieval and proof enforcement are independent and only proof enforcement
         log: () => {},
         backend: {
           runFindingVerification: async (_model, context, _targets, ...args) => {
-            seen.push(String(args.at(-1)));
-            assert.equal(context.includes('Verification proof requirement'), verificationProof);
+            seen.push(String(args[4]));
+            assert.equal(args[5], verificationProof);
+            assert.doesNotMatch(context, /Verification proof requirement/);
             assert.equal(context.includes('createRevision'), verificationRetrieval);
             return [{ index: 0, verdict: 'confirmed', reason: 'unsupported assurance' }];
           },

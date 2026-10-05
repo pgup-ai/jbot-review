@@ -483,6 +483,7 @@ export async function runCommandCodeFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   runtime?: CommandCodeRuntime,
   effort?: string,
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   const started = Date.now();
   // Reserve 30 seconds for verification after the 1.5-second optional preparation.
@@ -492,7 +493,7 @@ export async function runCommandCodeFindingVerification(
       const enriched = packet ? `${prContext}\n\n${packet}` : prContext;
       const fits = measureReviewPrompt(
         withCommandCodeToolsDirective(
-          assembleFindingVerificationPrompt(enriched, findings),
+          assembleFindingVerificationPrompt(enriched, findings, false, proof),
           workspace,
         ),
         reviewPromptBudget(
@@ -520,7 +521,7 @@ export async function runCommandCodeFindingVerification(
   const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
-    assembleFindingVerificationPrompt(prContext, findings, !runtime?.tools),
+    assembleFindingVerificationPrompt(prContext, findings, !runtime?.tools, proof),
     'finding-verification',
     log,
     timeoutMs,

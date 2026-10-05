@@ -172,7 +172,6 @@ import {
   COMPLIANCE_PACK_NOTE,
   COMPLIANCE_RECHECK_NOTE,
   selectLensKeys,
-  VERIFICATION_PROOF_PROMPT,
   STATE_EVIDENCE_OMISSION,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
@@ -404,6 +403,7 @@ function createOpencodeBackend(
       onTokenUsage,
       modelOptions,
       mode,
+      proof,
     ) =>
       runOpencodeFindingVerification(
         runtime,
@@ -415,6 +415,7 @@ function createOpencodeBackend(
         onTokenUsage,
         modelOptions,
         mode,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
@@ -453,7 +454,17 @@ function createPoolsideBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       runPoolsideFindingVerification(
         key,
         reasoningEffort,
@@ -463,6 +474,7 @@ function createPoolsideBackend(
         log,
         timeoutMs,
         onTokenUsage,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPoolsideChangesSinceLastReview(
@@ -541,6 +553,8 @@ function createCommandCodeBackend(
       timeoutMs,
       onTokenUsage,
       modelOptions,
+      _mode,
+      proof,
     ) =>
       processes.run('finding-verification', () =>
         runCommandCodeFindingVerification(
@@ -553,6 +567,7 @@ function createCommandCodeBackend(
           onTokenUsage,
           runtime,
           effortFor(model, modelOptions),
+          proof,
         ),
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
@@ -610,13 +625,33 @@ function createClineBackend(
           runtime,
         ),
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       processes.run('finding-verification', () => {
         const cli = (ms?: number) =>
-          runClineFindingVerification(model, prContext, findings, log, ms, onTokenUsage, runtime);
+          runClineFindingVerification(
+            model,
+            prContext,
+            findings,
+            log,
+            ms,
+            onTokenUsage,
+            runtime,
+            proof,
+          );
         return sdkVerifier
           ? withClineSdkFallback(
-              (ms) => runClineSdkFindingVerification(model, prContext, findings, log, runtime, ms),
+              (ms) =>
+                runClineSdkFindingVerification(model, prContext, findings, log, runtime, ms, proof),
               cli,
               timeoutMs,
               log,
@@ -651,8 +686,27 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
         onTokenUsage,
         runtime,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runGrokFindingVerification(model, prContext, findings, log, timeoutMs, onTokenUsage, runtime),
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
+      runGrokFindingVerification(
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        runtime,
+        proof,
+      ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runGrokChangesSinceLastReview(model, deltaContext, log, timeoutMs, onTokenUsage, runtime),
   };
@@ -690,7 +744,17 @@ function createDimBackend(
         onTokenUsage,
         runtime,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       runDimFindingVerification(
         workspace,
         model,
@@ -700,6 +764,7 @@ function createDimBackend(
         timeoutMs,
         onTokenUsage,
         runtime,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runDimChangesSinceLastReview(
@@ -751,7 +816,17 @@ function createQoderBackend(
         token,
         toolTelemetry,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      _options,
+      _mode,
+      proof,
+    ) =>
       runQoderFindingVerification(
         workspace,
         model,
@@ -762,6 +837,7 @@ function createQoderBackend(
         onTokenUsage,
         token,
         toolTelemetry,
+        proof,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runQoderChangesSinceLastReview(
@@ -2725,7 +2801,12 @@ async function runReviewPipeline(params: {
 
     const verifierContextForTargets = (targets: Finding[]) => {
       const fits = measureReviewPrompt(
-        assembleFindingVerificationPrompt(verifierPrContext, targets),
+        assembleFindingVerificationPrompt(
+          verifierPrContext,
+          targets,
+          false,
+          options.experiment.verificationProof,
+        ),
         auxPromptBudget,
         REVIEW_EVIDENCE_BYTES,
       ).fits;
@@ -4411,6 +4492,7 @@ export async function requestFindingVerdicts(params: {
       const preparedSources = new Map<Finding, string>();
       let extras: { packs: string[]; rules: string[] }[];
       let optionalCount = 0;
+      let reserveSupportingOmission = true;
       // Reserve the omission notice before optional context consumes the remaining room.
       const fits = (candidate: string, reserveOmission = true) =>
         !params.promptBudget ||
@@ -4419,11 +4501,15 @@ export async function requestFindingVerdicts(params: {
             reserveOmission
               ? joinContext(
                   candidate,
-                  optionalCount ? verifierOmissionNote(optionalCount) : '',
+                  optionalCount && reserveSupportingOmission
+                    ? verifierOmissionNote(optionalCount)
+                    : '',
                   params.verificationRetrieval ? STATE_EVIDENCE_OMISSION : '',
                 )
               : candidate,
             targets,
+            false,
+            params.verificationProof,
           ),
           params.promptBudget,
         ).fits;
@@ -4431,19 +4517,12 @@ export async function requestFindingVerdicts(params: {
         extras = targets.map(
           (target) => params.verificationContextFor?.(target) ?? { packs: [], rules: [] },
         );
-        optionalCount =
-          new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules])).size +
-          (params.prepareEvidence ? targets.length : 0);
         sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
-        context = [
-          params.contextForTargets?.(targets) ?? params.prContext,
-          sourceContext,
-          params.verificationProof ? VERIFICATION_PROOF_PROMPT : '',
-        ]
+        context = [params.contextForTargets?.(targets) ?? params.prContext, sourceContext]
           .filter(Boolean)
           .join('\n\n');
-        if (fits(context)) break;
+        if (fits(context, false)) break;
         if (size === 1)
           throw new Error('Finding verification singleton exceeds the assembled prompt budget.');
         size = Math.ceil(size / 2);
@@ -4453,10 +4532,28 @@ export async function requestFindingVerdicts(params: {
         params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
       );
       let omitted = 0;
-      if (params.prepareEvidence && evidenceTimeoutMs > 0) {
-        const prepared = await Promise.allSettled(
-          targets.map((target) => params.prepareEvidence!([target], evidenceTimeoutMs)),
-        );
+      const prepared =
+        params.prepareEvidence && evidenceTimeoutMs > 0
+          ? await Promise.allSettled(
+              targets.map((target) => params.prepareEvidence!([target], evidenceTimeoutMs)),
+            )
+          : [];
+      const optional = [
+        ...prepared.flatMap((result) =>
+          result.status === 'fulfilled' && result.value ? [result.value] : [],
+        ),
+        ...new Set(extras.flatMap((extra) => [...extra.packs, ...extra.rules])),
+      ];
+      optionalCount = optional.length;
+      reserveSupportingOmission = !fits(
+        joinContext(
+          context,
+          ...optional,
+          params.verificationRetrieval ? STATE_EVIDENCE_OMISSION : '',
+        ),
+        false,
+      );
+      if (prepared.length) {
         for (const [index, result] of prepared.entries()) {
           if (result.status === 'rejected') {
             params.log('Verification evidence unavailable; continuing with cited source.');
@@ -4510,22 +4607,28 @@ export async function requestFindingVerdicts(params: {
       };
       if (params.verificationRetrieval) {
         let omittedState = false;
-        for (const target of targets) {
-          const supplied = await sourceFor(target).catch(() => '');
-          const packet = await evidence!.prepare(
-            [target],
-            joinContext(params.contextForTargets?.([target]) ?? params.prContext, supplied),
-            computeEvidenceTimeoutMs(
-              params.timeoutMs === undefined
-                ? undefined
-                : params.timeoutMs - (Date.now() - startedAt),
-            ),
-          );
+        const packets = await Promise.all(
+          targets.map(async (target) => {
+            const supplied = await sourceFor(target).catch(() => undefined);
+            const packet = await evidence!.prepare(
+              [target],
+              joinContext(params.contextForTargets?.([target]) ?? params.prContext, supplied ?? ''),
+              computeEvidenceTimeoutMs(
+                params.timeoutMs === undefined
+                  ? undefined
+                  : params.timeoutMs - (Date.now() - startedAt),
+              ),
+            );
+            return { target, supplied, packet };
+          }),
+        );
+        for (const { target, supplied, packet } of packets) {
           const enriched = joinContext(context, packet);
           if (fits(joinContext(enriched, STATE_EVIDENCE_OMISSION), false)) {
             context = enriched;
             sourceContext = joinContext(sourceContext, packet);
-            targetSources.set(target, Promise.resolve(joinContext(supplied, packet)));
+            if (supplied !== undefined)
+              targetSources.set(target, Promise.resolve(joinContext(supplied, packet)));
           } else omittedState = true;
         }
         if (omittedState) {
@@ -4533,6 +4636,10 @@ export async function requestFindingVerdicts(params: {
           params.log('State-producing source omitted: assembled prompt exceeds budget.');
         }
       }
+      if (!fits(context, false))
+        throw new Error(
+          'Finding verification context and required omission notices exceed the prompt budget.',
+        );
       const remaining = () =>
         params.timeoutMs === undefined
           ? undefined
@@ -4548,6 +4655,7 @@ export async function requestFindingVerdicts(params: {
           params.onTokenUsage,
           params.modelOptions,
           mode,
+          params.verificationProof,
         );
       const check = async (verdict: FindingVerdictList[number], suppliedOnly = false) => {
         let result = checkConfirmationEvidence(verdict, sourceContext);

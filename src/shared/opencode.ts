@@ -452,6 +452,7 @@ export async function runFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
   mode?: 'single-shot' | 'capped',
+  proof = false,
 ): Promise<FindingVerdict[] | undefined> {
   const singleShot = isSingleShotModel(model) || mode === 'single-shot';
   const { providerID, modelID } = parseModelName(model);
@@ -466,7 +467,7 @@ export async function runFindingVerification(
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, singleShot);
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, singleShot, proof);
   const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
   log('Creating finding-verification session');
   const sessionID = await createReviewSession(runtime, {

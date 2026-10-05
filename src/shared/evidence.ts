@@ -174,7 +174,17 @@ export function indexEvidenceSource(
       ast(n.object)?.type === 'Identifier'
     )
       result.lookups.push({ symbol: name(n.object), line: start });
-    const value = ast(n.type === 'AssignmentExpression' ? n.right : n.value);
+    let value = ast(n.type === 'AssignmentExpression' ? n.right : n.value);
+    while (
+      value &&
+      [
+        'TSAsExpression',
+        'TSSatisfiesExpression',
+        'TSTypeAssertion',
+        'TSNonNullExpression',
+      ].includes(value.type)
+    )
+      value = ast(value.expression);
     if (
       n.type === 'AssignmentExpression' ||
       (n.type === 'ObjectProperty' && parent?.type === 'ObjectExpression')

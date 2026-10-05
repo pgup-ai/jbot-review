@@ -446,13 +446,23 @@ export function createDevinCliBackend(
         ),
       );
     },
-    async runFindingVerification(model, prContext, findings, log, timeoutMs) {
+    async runFindingVerification(
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      _usage,
+      _options,
+      _mode,
+      proof,
+    ) {
       return processes.run('finding-verification', () =>
         promptWithRecovery(
           workspace,
           home,
           model,
-          assembleFindingVerificationPrompt(prContext, findings),
+          assembleFindingVerificationPrompt(prContext, findings, false, proof),
           'finding-verification',
           log,
           deadline(timeoutMs),
