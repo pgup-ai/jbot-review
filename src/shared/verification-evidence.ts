@@ -290,7 +290,7 @@ export async function collectStateEvidence(
     if (!found || found.declaration.kind === 'type') return;
     if (
       found.declaration.kind === 'class' &&
-      !['useGlobalFilters', 'APP_FILTER'].includes(parent.declaration.symbol)
+      !NEST_FILTER_REGISTRATIONS.includes(parent.declaration.symbol)
     )
       return;
     if (
