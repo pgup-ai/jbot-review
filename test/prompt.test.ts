@@ -15,6 +15,7 @@ import {
   CONTEXT_PACK_REVIEW_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
+  FINDING_VERIFICATION_SINGLE_SHOT_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
@@ -567,8 +568,17 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
   });
 
   it('keeps uncertain verdicts in diagnostics and out of PR comments', () => {
-    assert.match(FINDING_VERIFICATION_PROMPT, /withheld from PR comments/);
-    assert.match(FINDING_VERIFICATION_PROMPT, /quote the decisive source expression/);
+    for (const prompt of [FINDING_VERIFICATION_PROMPT, FINDING_VERIFICATION_SINGLE_SHOT_PROMPT]) {
+      assert.match(prompt, /withheld from PR comments/);
+      assert.match(prompt, /quote the decisive source expression/);
+      assert.match(prompt, /compact causal chain per finding/);
+      assert.match(prompt, /without production records/);
+      assert.match(prompt, /both reachable operations/);
+      assert.match(
+        prompt,
+        /Unknown library semantics or external invariants still require evidence/,
+      );
+    }
   });
 
   it('abstains on unverifiable third-party framework-internal premises', () => {

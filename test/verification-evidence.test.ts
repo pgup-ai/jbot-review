@@ -196,6 +196,35 @@ function sources(files: Record<string, string>) {
   };
 }
 
+test('follows the finding guard and effect even when its enclosing function is already supplied', async () => {
+  const entry = [
+    "import { assertOpen } from './guard';",
+    "import { removeLink } from './store';",
+    'export function remove(record) {',
+    '  assertOpen(record);',
+    '  return removeLink(record.id);',
+    '}',
+  ];
+  const packet = await collectStateEvidence(
+    sources({
+      'entry.ts': entry.join('\n'),
+      'guard.ts': 'export function assertOpen(record) { if (record.locked) throw Error(); }',
+      'store.ts': 'export function removeLink(id) { return db.links.delete({ id }); }',
+    }),
+    [{ ...finding, path: 'entry.ts', line: 5 }],
+    formatContextPackItem({
+      path: 'entry.ts',
+      rows: entry.map((line, i) => [i + 1, line]),
+    }),
+  );
+  assert.doesNotMatch(packet, /### entry.ts:/);
+  assert.match(packet, /guard.ts[^]*record.locked/);
+  assert.match(packet, /store.ts[^]*db.links.delete/);
+  assert.match(packet, /← entry.ts:4 remove/);
+  assert.match(packet, /← entry.ts:5 remove/);
+  assert.ok(Buffer.byteLength(packet) <= 16 * 1024);
+});
+
 test('follows preparation guards, returned-object methods and aliased lookup definitions before unrelated calls', async () => {
   const files = {
     'flow.ts': [

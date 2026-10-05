@@ -1710,7 +1710,15 @@ const VERIFICATION_CLAIM_CHECK = `- Compare the finding's claimed identifiers, o
   descriptions; do not repair them into a different bug.
 - To confirm, give a concrete input or state, quote the decisive source expression
   verbatim, and explain the incorrect result. A request to check whether a premise
-  holds is not confirmation.`;
+  holds is not confirmation.
+- Build one compact causal chain per finding: accepted input or state-producing
+  operation → relevant guard → downstream effect. Check counterevidence along
+  that path and name any missing link. A source-supported sequence can establish
+  a reachable failure without production records showing it already happened.
+- For a race, identify both reachable operations and an allowed ordering of their
+  reads and writes, then check locks, transactions, constraints and error handlers.
+  Timing dependence alone does not make a demonstrated interleaving uncertain.
+  Unknown library semantics or external invariants still require evidence.`;
 
 export const FINDING_VERIFICATION_PROMPT = `You are a skeptical staff engineer double-checking proposed code-review
 findings before they are posted to a pull request. Your default position is
@@ -1747,8 +1755,8 @@ ${VERIFICATION_CLAIM_CHECK}
   refutes it. Refuted findings are dropped.
 - "confirmed": you traced the trigger path and the issue is real. Restate the
   trigger in one sentence.
-- "uncertain": confirming requires facts you cannot get from this repo's own
-  code — environment- or data-dependent state, OR how a third-party
+- "uncertain": a necessary premise remains unestablished — an external state or
+  invariant not derivable from this repo's code, OR how a third-party
   library/framework behaves internally (e.g. whether an ORM method applies the
   global soft-delete filter). A call site or type shows USAGE, not the library's
   internal semantics, so do not "confirm" such a finding from priors; verify it
@@ -1814,7 +1822,7 @@ ${VERIFICATION_CLAIM_CHECK}
 - "confirmed": the supplied code shows the trigger path and the issue is real. Restate
   the trigger in one sentence.
 - "uncertain": confirming or refuting needs facts not present in the provided
-  context — environment- or data-dependent state, unchanged code the excerpts do not
+  context — an external state or invariant, unchanged code the excerpts do not
   show, or how a third-party library/framework behaves internally. A diff shows
   a CHANGE, not the whole system, so do not "confirm" such a finding from
   priors. Uncertain findings remain in run diagnostics, withheld from PR comments.
@@ -1911,7 +1919,7 @@ export function formatStateEvidence(
   };
   return [
     '## State-producing source candidates',
-    'Candidate writes, referenced definitions and error-handler registrations. Arrows show the lookup origin, not an established failure path. An unverified receiver is only an import-linked name match; check its type before relying on it. Reuse already supplied code. Numbered gaps and omitted dependencies remain uninvestigated.',
+    'Finding-enclosing functions, candidate writes, referenced definitions and error-handler registrations. Arrows show the lookup origin, not an established failure path. An unverified receiver is only an import-linked name match; check its type before relying on it. Reuse already supplied code. Numbered gaps and omitted dependencies remain uninvestigated.',
     ...items.map(
       (item) =>
         `### ${item.path}:${item.start}-${item.end} (${item.symbol}${item.from ? ` ← ${item.from}` : ''}${item.unverifiedReceiver ? '; unverified receiver' : ''})\n${formatSourceExcerpt(item.lines, item.start, item.line, 3200)}`,
