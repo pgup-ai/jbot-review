@@ -420,6 +420,10 @@ describe('startProgressLogger', () => {
     });
     fake.emit({
       type: 'session.tool.called',
+      data: { sessionID: id, input: { include: '*.ts', path: 'src', pattern: 'runPrReview' } },
+    });
+    fake.emit({
+      type: 'session.tool.called',
       data: { sessionID: 'ses_unknown', input: { filePath: 'x' } },
     });
     fake.emit({
@@ -430,6 +434,7 @@ describe('startProgressLogger', () => {
     stop();
     assert.deepEqual(lines, [
       'review tool: command=git diff --stat',
+      'review tool: pattern=runPrReview',
       'review execution failed: quota',
     ]);
   });

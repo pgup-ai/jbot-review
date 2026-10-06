@@ -1,4 +1,6 @@
 import { createHmac } from 'node:crypto';
+import { relative, resolve } from 'node:path';
+import { reviewReadLocations, SHELL_TOOLS, shellSearchPattern } from './review-read-locations.ts';
 
 import type {
   BackendTelemetryCapability,
@@ -267,10 +269,7 @@ export function createToolTelemetryAccumulator(
 export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemetryClass {
   const normalized = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
   const command =
-    (normalized === 'bash' || normalized === 'exec') &&
-    input &&
-    typeof input === 'object' &&
-    !Array.isArray(input)
+    SHELL_TOOLS.includes(normalized) && input && typeof input === 'object' && !Array.isArray(input)
       ? (input as Record<string, unknown>).command
       : undefined;
   if (
@@ -280,6 +279,10 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     return 'diff-recovery';
   }
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
+  if (typeof command === 'string') {
+    if (shellReadPath(input as Record<string, unknown>)) return 'file-read';
+    if (shellSearchPattern(command)) return 'search';
+  }
   if (
     normalized.includes('web') ||
     normalized.includes('context7') ||
@@ -325,6 +328,7 @@ export function serializedBytes(value: unknown): number {
 export function toolIdentity(
   toolClass: ToolTelemetryClass,
   input: unknown,
+  workspace = '/',
 ): { identity?: string; identityKind?: 'path' | 'query' | 'scope' } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return toolClass === 'diff-recovery' ? { identity: 'whole-diff', identityKind: 'scope' } : {};
@@ -335,7 +339,10 @@ export function toolIdentity(
     return undefined;
   };
   if (toolClass === 'file-read' || toolClass === 'diff-recovery') {
-    const path = firstString('path', 'file', 'filePath', 'directory');
+    // A diff's scope comes only from its own path; a chained shell read is not one.
+    const path =
+      pathIdentity(firstString('path', 'file', 'filePath', 'directory'), workspace) ??
+      (toolClass === 'file-read' ? shellReadPath(value, workspace) : undefined);
     return path
       ? { identity: path, identityKind: 'path' }
       : toolClass === 'diff-recovery'
@@ -343,16 +350,28 @@ export function toolIdentity(
         : {};
   }
   if (toolClass === 'list') {
-    const path = firstString('path', 'file', 'filePath', 'directory');
+    const path = pathIdentity(firstString('path', 'file', 'filePath', 'directory'), workspace);
     if (path) return { identity: path, identityKind: 'path' };
     const pattern = firstString('pattern');
     return pattern ? { identity: pattern, identityKind: 'query' } : {};
   }
   if (toolClass === 'search' || toolClass === 'external-docs') {
-    const query = firstString('query', 'pattern', 'search', 'text');
+    const query =
+      firstString('query', 'pattern', 'search', 'text') ??
+      (typeof value.command === 'string' ? shellSearchPattern(value.command) : undefined);
     return query ? { identity: query, identityKind: 'query' } : {};
   }
   return {};
+}
+
+/** Workspace-relative, so absolute, relative and cd-prefixed reads of one file match. */
+function pathIdentity(path: string | undefined, workspace: string): string | undefined {
+  return path ? relative(workspace, resolve(workspace, path)) || '.' : undefined;
+}
+
+/** A chained shell read is identified by its first file. */
+function shellReadPath(input: Record<string, unknown>, workspace = '/'): string | undefined {
+  return reviewReadLocations(workspace, 'shell', input)[0]?.path;
 }
 
 function normalizeIdentity(value: string, kind: 'path' | 'query' | 'scope' | undefined): string {

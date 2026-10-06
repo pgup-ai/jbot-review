@@ -43,6 +43,8 @@ export interface DiffScope {
    * last commit and would hide the very edits under review on a dirty tree.
    */
   worktree?: boolean;
+  /** Sessions embed their diff hunks, so the command is only for what they omit. */
+  embedded?: boolean;
 }
 
 /** Relevance tiers for finder-pass guideline ranking; higher = kept first. */
@@ -592,20 +594,25 @@ export function formatDiffScope(scope: DiffScope): string {
   if (scope.headSha) lines.push(`Head: ${scope.headSha}`);
 
   const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
+  // An imperative "run" made models re-fetch hunks their prompt already embeds.
+  const run = (what: string) =>
+    scope.embedded
+      ? `Your assigned hunks are embedded in this prompt; run this only for changed code they omit. It shows ${what}:`
+      : `To see exactly ${what}, run:`;
   if (base && scope.worktree) {
     // Two-dot against the working tree: matches the merge-base→worktree diff the
     // local run was built from, uncommitted changes included. Reuse the canonical
     // safe argv so model-run diffs match the embedded hunks without invoking
     // external diff or textconv drivers.
     lines.push(
-      'To see exactly what this review covers (merge-base → working tree, includes uncommitted changes), run:',
+      run('what this review covers (merge-base → working tree, includes uncommitted changes)'),
       `    ${GIT_DIFF_COMMAND} ${base}`,
       'Only review changes within this diff.',
     );
   } else if (base) {
     const head = scope.headSha ?? 'HEAD';
     lines.push(
-      'To see exactly what this PR changes, run:',
+      run('what this PR changes'),
       `    ${GIT_DIFF_COMMAND} ${base}...${head}`,
       'Only review changes within this diff.',
     );

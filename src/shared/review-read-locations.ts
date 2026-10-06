@@ -1,6 +1,6 @@
 import { relative, resolve } from 'node:path';
 
-const SHELL_TOOLS = ['shell', 'bash', 'execute', 'exec'];
+export const SHELL_TOOLS = ['shell', 'bash', 'execute', 'exec'];
 
 export function reviewReadLocations(
   workspace: string,
@@ -38,40 +38,64 @@ export function reviewReadLocations(
   if (!SHELL_TOOLS.includes(tool)) return [];
   const command = input.command;
   // Observe a tiny literal grammar; never evaluate shell syntax or replay its output.
+  // Quoted text is literal unless a double-quoted string could expand.
   if (
     typeof command !== 'string' ||
     command.length > 8192 ||
-    /[\\\n\r`$;|<>()[\]*?{}!]/.test(command)
+    /[\\\n\r`$<>()[\]*?{}!]|\|\|/.test(command.replace(/'[^']*'|"[^"$`]*"/g, "''"))
   )
     return [];
-  const tokens: string[] = [];
+  // `next` is the operator after a segment: what runs next can depend on its success.
+  const segments: { args: string[]; next?: string }[] = [{ args: [] }];
   let rest = command.trim();
   while (rest) {
-    const match = /^(?:'([^']*)'|"([^"]*)"|(&&)|([^\s'"&]+))(?:\s*|$)/.exec(rest);
+    const match = /^(?:'([^']*)'|"([^"]*)"|(&&|;|\|)|([^\s'"&;|]+))(?:\s*|$)/.exec(rest);
     if (!match) return [];
-    tokens.push(match[1] ?? match[2] ?? match[3] ?? match[4]);
     rest = rest.slice(match[0].length);
+    const current = segments.at(-1)!;
+    if (match[3] === undefined) {
+      current.args.push(match[1] ?? match[2] ?? match[4]);
+      continue;
+    }
+    if (!current.args.length) return [];
+    current.next = match[3];
+    segments.push({ args: [] });
+  }
+  // A trailing `;` ends the last command; a trailing `&&` or `|` leaves it incomplete.
+  if (!segments.at(-1)!.args.length) {
+    if (segments.at(-2)?.next !== ';') return [];
+    segments.pop();
   }
   if (input.cwd !== undefined || input.workdir !== undefined) {
     const directory = input.cwd ?? input.workdir;
     if (typeof directory !== 'string') return [];
     cwd = resolve(workspace, directory);
   }
-  for (let offset = 0; offset < tokens.length;) {
-    const end = tokens.indexOf('&&', offset);
-    const args = tokens.slice(offset, end < 0 ? undefined : end);
-    if (offset === 0 && args.length === 2 && args[0] === 'cd') cwd = resolve(cwd, args[1]);
-    else if (args.length > 1 && args[0] === 'cat' && args.slice(1).every((p) => !p.startsWith('-')))
+  for (const [index, { args, next }] of segments.entries()) {
+    // A piped read shows only what its filter kept, and a filter reads no file.
+    const piped = next === '|' || segments[index - 1]?.next === '|';
+    let known = false;
+    if (args[0] === 'cd') {
+      // A later cd leaves the directory of every following read unknown.
+      if (index > 0 || args.length !== 2) break;
+      cwd = resolve(cwd, args[1]);
+      known = true;
+    } else if (
+      !piped &&
+      args.length > 1 &&
+      args[0] === 'cat' &&
+      args.slice(1).every((p) => !p.startsWith('-'))
+    ) {
       for (const path of args.slice(1)) add(path, 1);
-    else if (args.length === 4 && args[0] === 'sed' && args[1] === '-n') {
+      known = true;
+    } else if (!piped && args.length === 4 && args[0] === 'sed' && args[1] === '-n') {
       const range = /^([1-9]\d*),([1-9]\d*)p$/.exec(args[2]);
-      if (!range || Number(range[2]) < Number(range[1]) || !Number.isSafeInteger(Number(range[2])))
-        return [];
-      add(args[3], Number(range[1]), Number(range[2]));
-    } else return [];
-    if (end < 0) break;
-    offset = end + 1;
-    if (offset === tokens.length) return [];
+      known =
+        !!range && Number(range[2]) >= Number(range[1]) && Number.isSafeInteger(Number(range[2]));
+      if (known) add(args[3], Number(range![1]), Number(range![2]));
+    }
+    // A command that may fail stops the && chain behind it.
+    if (!known && next === '&&') break;
   }
   return locations.slice(0, 64);
 }
@@ -104,7 +128,7 @@ export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedCont
 }
 
 /** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
-function shellSearchPattern(command: string): string | undefined {
+export function shellSearchPattern(command: string): string | undefined {
   const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(
     (m) => m[1] ?? m[2] ?? m[3],
   );

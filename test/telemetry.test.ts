@@ -171,6 +171,31 @@ describe('phase and tool telemetry', () => {
     );
     assert.equal(countDiffFileHeaders('diff --git a/a b/a'), 1);
     assert.equal(classifyReadonlyTool('bash', { command: 'git status --short' }), 'other-readonly');
+    const read = { command: 'sed -n 1,80p src/a.ts; echo ===; cat src/b.ts' };
+    assert.equal(classifyReadonlyTool('bash', read), 'file-read');
+    assert.deepEqual(toolIdentity('file-read', read), {
+      identity: 'src/a.ts',
+      identityKind: 'path',
+    });
+    for (const input of [
+      { filePath: '/w/src/a.ts' },
+      { command: 'sed -n 1,9p src/a.ts' },
+      { command: 'cd /w && cat src/a.ts' },
+    ])
+      assert.deepEqual(toolIdentity('file-read', input, '/w'), {
+        identity: 'src/a.ts',
+        identityKind: 'path',
+      });
+    assert.deepEqual(toolIdentity('diff-recovery', { command: 'cat a.ts; git diff --stat' }), {
+      identity: 'whole-diff',
+      identityKind: 'scope',
+    });
+    const search = { command: 'grep -rn "formatDiffScope" src | head -20' };
+    assert.equal(classifyReadonlyTool('shell', search), 'search');
+    assert.deepEqual(toolIdentity('search', search), {
+      identity: 'formatDiffScope',
+      identityKind: 'query',
+    });
     assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }), {
       identity: 'src/**/*.ts',
       identityKind: 'query',
