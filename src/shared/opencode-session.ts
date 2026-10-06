@@ -955,13 +955,21 @@ export function abortOpencodeSessionsByLabel(
   return count;
 }
 
-/** V2's tool events carry the call input but no tool name; the first string argument identifies it. */
+/** V2's tool events carry the call input but no tool name; its identifying string argument stands in. */
 function describeToolCall(props: Record<string, unknown>): string {
   const input = props.input as Record<string, unknown> | undefined;
-  const arg = input && Object.entries(input).find(([, value]) => typeof value === 'string');
-  if (!arg) return '?';
-  const value = String(arg[1]).replace(/\s+/g, ' ');
-  return `${arg[0]}=${value.length > 120 ? `${value.slice(0, 120)}…` : value}`;
+  const strings = new Map(
+    Object.entries(input ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+  // Argument order is the model's: a grep can open with `include`, hiding its pattern.
+  const key =
+    ['pattern', 'command', 'filePath', 'path'].find((name) => strings.has(name)) ??
+    strings.keys().next().value;
+  if (key === undefined) return '?';
+  const value = strings.get(key)!.replace(/\s+/g, ' ');
+  return `${key}=${value.length > 120 ? `${value.slice(0, 120)}…` : value}`;
 }
 
 /**

@@ -777,6 +777,15 @@ describe('formatDiffScope', () => {
     assert.match(text, /Only review changes within this diff\./);
   });
 
+  it('keeps the command but only for omitted code when sessions embed their hunks', () => {
+    const baseSha = 'a'.repeat(40);
+    const text = formatDiffScope({ baseSha, headSha: 'b'.repeat(40), embedded: true });
+
+    assert.ok(text.includes(`${GIT_DIFF_COMMAND} ${baseSha}...${'b'.repeat(40)}`));
+    assert.match(text, /run this only for changed code they omit/);
+    assert.doesNotMatch(text, /To see exactly/);
+  });
+
   it('falls back to origin/<baseRef>...HEAD when SHAs are missing', () => {
     const text = formatDiffScope({ baseRef: 'main' });
 

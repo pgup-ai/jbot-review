@@ -1802,7 +1802,13 @@ async function runReviewPipeline(params: {
       )
     : '';
 
-  const diffScope = { baseRef, baseSha, headSha, worktree: !!localDiff };
+  const diffScope = {
+    baseRef,
+    baseSha,
+    headSha,
+    worktree: !!localDiff,
+    embedded: options.embeddedFirstPrompt,
+  };
 
   // The diff hunks deliberately stay OUT of the core context: each main
   // review shard appends its own slice, and the lens/aux sessions append the
