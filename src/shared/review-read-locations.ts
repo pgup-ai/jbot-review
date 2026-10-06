@@ -75,8 +75,9 @@ export function reviewReadLocations(
   let skipping = false;
   for (const [index, { args, next }] of segments.entries()) {
     const leadingCd = index === 0 && args[0] === 'cd' && args.length === 2;
+    const program = args.find((arg) => !['command', 'builtin'].includes(arg) && !/^\w+=/.test(arg));
     // Any other directory change, wrapped or skipped, leaves later read paths unknown.
-    if (!leadingCd && args.some((arg) => ['cd', 'pushd', 'popd'].includes(arg))) break;
+    if (!leadingCd && ['cd', 'pushd', 'popd'].includes(program ?? '')) break;
     if (skipping && segments[index - 1]?.next !== ';') continue;
     skipping = false;
     // A piped read shows only what its filter kept, and a filter reads no file.

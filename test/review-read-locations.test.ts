@@ -76,6 +76,11 @@ test('literal shell reads preserve their directory and range without evaluating 
   ]);
   for (const command of ['grep -n x a.ts && cd src; cat c.ts', 'command cd src; cat c.ts'])
     assert.deepEqual(reads(command), [], command);
+  // Only the command position changes directory; a file named cd is a read.
+  assert.deepEqual(reads('cat cd; cat c.ts'), [
+    { path: 'cd', line: 1, endLine: Number.MAX_SAFE_INTEGER },
+    { path: 'c.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
+  ]);
 });
 
 test('supplied overlap separates re-reads and searches of context-pack content', () => {
