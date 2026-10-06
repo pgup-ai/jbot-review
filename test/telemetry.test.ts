@@ -177,6 +177,15 @@ describe('phase and tool telemetry', () => {
       identity: 'src/a.ts',
       identityKind: 'path',
     });
+    for (const input of [
+      { filePath: '/w/src/a.ts' },
+      { command: 'sed -n 1,9p src/a.ts' },
+      { command: 'cd /w && cat src/a.ts' },
+    ])
+      assert.deepEqual(toolIdentity('file-read', input, '/w'), {
+        identity: 'src/a.ts',
+        identityKind: 'path',
+      });
     const search = { command: 'grep -rn "formatDiffScope" src | head -20' };
     assert.equal(classifyReadonlyTool('shell', search), 'search');
     assert.deepEqual(toolIdentity('search', search), {

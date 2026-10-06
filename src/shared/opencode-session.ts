@@ -404,6 +404,7 @@ export function recordAssistantTools(
     experiment?: ReturnType<typeof readExplorationStats>;
     stopReason?: TelemetryStopReason;
     supplied?: { context: SuppliedContext; workspace: string };
+    workspace?: string;
   } = {},
 ): void {
   for (const message of messages) {
@@ -418,7 +419,7 @@ export function recordAssistantTools(
         TOOL_CLASS_ALIASES[part.name] ?? part.name,
         part.state.input,
       );
-      const identity = toolIdentity(toolClass, part.state.input);
+      const identity = toolIdentity(toolClass, part.state.input, options.workspace);
       const finish = telemetry.startTool({
         session,
         backend: 'opencode',
@@ -743,6 +744,7 @@ async function promptHoldingSlot(
           experiment,
           stopReason,
           supplied: supplied && { context: supplied, workspace: runtime.workspace },
+          workspace: runtime.workspace,
         });
       }
       const turnUsage = sumUsage(turn);

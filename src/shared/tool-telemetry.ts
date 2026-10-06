@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { relative, resolve } from 'node:path';
 import { reviewReadLocations, SHELL_TOOLS, shellSearchPattern } from './review-read-locations.ts';
 
 import type {
@@ -327,6 +328,7 @@ export function serializedBytes(value: unknown): number {
 export function toolIdentity(
   toolClass: ToolTelemetryClass,
   input: unknown,
+  workspace = '/',
 ): { identity?: string; identityKind?: 'path' | 'query' | 'scope' } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return toolClass === 'diff-recovery' ? { identity: 'whole-diff', identityKind: 'scope' } : {};
@@ -337,7 +339,9 @@ export function toolIdentity(
     return undefined;
   };
   if (toolClass === 'file-read' || toolClass === 'diff-recovery') {
-    const path = firstString('path', 'file', 'filePath', 'directory') ?? shellReadPath(value);
+    const path =
+      pathIdentity(firstString('path', 'file', 'filePath', 'directory'), workspace) ??
+      shellReadPath(value, workspace);
     return path
       ? { identity: path, identityKind: 'path' }
       : toolClass === 'diff-recovery'
@@ -345,7 +349,7 @@ export function toolIdentity(
         : {};
   }
   if (toolClass === 'list') {
-    const path = firstString('path', 'file', 'filePath', 'directory');
+    const path = pathIdentity(firstString('path', 'file', 'filePath', 'directory'), workspace);
     if (path) return { identity: path, identityKind: 'path' };
     const pattern = firstString('pattern');
     return pattern ? { identity: pattern, identityKind: 'query' } : {};
@@ -359,9 +363,14 @@ export function toolIdentity(
   return {};
 }
 
+/** Workspace-relative, so absolute, relative and cd-prefixed reads of one file match. */
+function pathIdentity(path: string | undefined, workspace: string): string | undefined {
+  return path ? relative(workspace, resolve(workspace, path)) || '.' : undefined;
+}
+
 /** A chained shell read is identified by its first file. */
-function shellReadPath(input: Record<string, unknown>): string | undefined {
-  return reviewReadLocations('/', 'shell', input)[0]?.path;
+function shellReadPath(input: Record<string, unknown>, workspace = '/'): string | undefined {
+  return reviewReadLocations(workspace, 'shell', input)[0]?.path;
 }
 
 function normalizeIdentity(value: string, kind: 'path' | 'query' | 'scope' | undefined): string {

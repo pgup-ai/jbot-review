@@ -47,11 +47,14 @@ test('literal shell reads preserve their directory and range without evaluating 
     'cat a.ts > out',
     "cat 'unterminated",
     'cat a.ts &&',
+    // cat runs only if the search matched.
+    'grep -n absent a.ts && cat b.ts',
+    'cat a.ts | head && cat b.ts',
   ])
     assert.deepEqual(reads(command), [], command);
   // Chains as models write them: echo separators, piped searches, a quoted alternation.
   assert.deepEqual(
-    reads('sed -n 10,20p a.ts; echo ===; grep -n "x\\|y" b.ts | head -5 && cat c.ts && git diff'),
+    reads('sed -n 10,20p a.ts; echo ===; grep -n "x\\|y" b.ts | head -5; cat c.ts && git diff'),
     [
       { path: 'a.ts', line: 10, endLine: 20 },
       { path: 'c.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },

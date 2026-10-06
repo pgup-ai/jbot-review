@@ -45,8 +45,8 @@ export function reviewReadLocations(
     /[\\\n\r`$<>()[\]*?{}!]|\|\|/.test(command.replace(/'[^']*'|"[^"$`]*"/g, "''"))
   )
     return [];
-  // A piped read shows only what its filter kept, and a filter reads no file.
-  const segments = [{ args: [] as string[], filter: false, filtered: false }];
+  // `next` is the operator after a segment: what runs next can depend on its success.
+  const segments: { args: string[]; next?: string }[] = [{ args: [] }];
   let rest = command.trim();
   while (rest) {
     const match = /^(?:'([^']*)'|"([^"]*)"|(&&|;|\|)|([^\s'"&;|]+))(?:\s*|$)/.exec(rest);
@@ -58,8 +58,8 @@ export function reviewReadLocations(
       continue;
     }
     if (!current.args.length) return [];
-    current.filtered = match[3] === '|';
-    segments.push({ args: [], filter: current.filtered, filtered: false });
+    current.next = match[3];
+    segments.push({ args: [] });
   }
   if (!segments.at(-1)!.args.length) return [];
   if (input.cwd !== undefined || input.workdir !== undefined) {
@@ -67,19 +67,31 @@ export function reviewReadLocations(
     if (typeof directory !== 'string') return [];
     cwd = resolve(workspace, directory);
   }
-  for (const [index, { args, filter, filtered }] of segments.entries()) {
+  for (const [index, { args, next }] of segments.entries()) {
+    // A piped read shows only what its filter kept, and a filter reads no file.
+    const piped = next === '|' || segments[index - 1]?.next === '|';
+    let known = false;
     if (args[0] === 'cd') {
       // A later cd leaves the directory of every following read unknown.
       if (index > 0 || args.length !== 2) break;
       cwd = resolve(cwd, args[1]);
-    } else if (filter || filtered) continue;
-    else if (args.length > 1 && args[0] === 'cat' && args.slice(1).every((p) => !p.startsWith('-')))
+      known = true;
+    } else if (
+      !piped &&
+      args.length > 1 &&
+      args[0] === 'cat' &&
+      args.slice(1).every((p) => !p.startsWith('-'))
+    ) {
       for (const path of args.slice(1)) add(path, 1);
-    else if (args.length === 4 && args[0] === 'sed' && args[1] === '-n') {
+      known = true;
+    } else if (!piped && args.length === 4 && args[0] === 'sed' && args[1] === '-n') {
       const range = /^([1-9]\d*),([1-9]\d*)p$/.exec(args[2]);
-      if (range && Number(range[2]) >= Number(range[1]) && Number.isSafeInteger(Number(range[2])))
-        add(args[3], Number(range[1]), Number(range[2]));
+      known =
+        !!range && Number(range[2]) >= Number(range[1]) && Number.isSafeInteger(Number(range[2]));
+      if (known) add(args[3], Number(range![1]), Number(range![2]));
     }
+    // A command that may fail stops the && chain behind it.
+    if (!known && next === '&&') break;
   }
   return locations.slice(0, 64);
 }
