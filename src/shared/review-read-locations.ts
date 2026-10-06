@@ -74,18 +74,15 @@ export function reviewReadLocations(
   // Set while an && chain is cut short; `;` binds looser, so the chain ends there.
   let skipping = false;
   for (const [index, { args, next }] of segments.entries()) {
-    if (skipping && segments[index - 1]?.next !== ';') {
-      // A cd that may or may not have run leaves the directory unknown.
-      if (args[0] === 'cd') break;
-      continue;
-    }
+    const leadingCd = index === 0 && args[0] === 'cd' && args.length === 2;
+    // Any other directory change, wrapped or skipped, leaves later read paths unknown.
+    if (!leadingCd && args.some((arg) => ['cd', 'pushd', 'popd'].includes(arg))) break;
+    if (skipping && segments[index - 1]?.next !== ';') continue;
     skipping = false;
     // A piped read shows only what its filter kept, and a filter reads no file.
     const piped = next === '|' || segments[index - 1]?.next === '|';
     let known = false;
-    if (args[0] === 'cd') {
-      // A later cd leaves the directory of every following read unknown.
-      if (index > 0 || args.length !== 2) break;
+    if (leadingCd) {
       cwd = resolve(cwd, args[1]);
       known = true;
     } else if (
