@@ -67,6 +67,11 @@ test('literal shell reads preserve their directory and range without evaluating 
   assert.deepEqual(reads('cat a.ts && cd src && cat b.ts'), [
     { path: 'a.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
   ]);
+  // A cut-short && chain ends at the next `;`, which runs whatever came before.
+  assert.deepEqual(reads('grep -n x a.ts && cat b.ts && cat d.ts; cat c.ts'), [
+    { path: 'c.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
+  ]);
+  assert.deepEqual(reads('grep -n x a.ts && cd src; cat c.ts'), []);
 });
 
 test('supplied overlap separates re-reads and searches of context-pack content', () => {

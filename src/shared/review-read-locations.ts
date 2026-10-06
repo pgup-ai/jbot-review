@@ -71,7 +71,15 @@ export function reviewReadLocations(
     if (typeof directory !== 'string') return [];
     cwd = resolve(workspace, directory);
   }
+  // Set while an && chain is cut short; `;` binds looser, so the chain ends there.
+  let skipping = false;
   for (const [index, { args, next }] of segments.entries()) {
+    if (skipping && segments[index - 1]?.next !== ';') {
+      // A cd that may or may not have run leaves the directory unknown.
+      if (args[0] === 'cd') break;
+      continue;
+    }
+    skipping = false;
     // A piped read shows only what its filter kept, and a filter reads no file.
     const piped = next === '|' || segments[index - 1]?.next === '|';
     let known = false;
@@ -94,8 +102,8 @@ export function reviewReadLocations(
         !!range && Number(range[2]) >= Number(range[1]) && Number.isSafeInteger(Number(range[2]));
       if (known) add(args[3], Number(range![1]), Number(range![2]));
     }
-    // A command that may fail stops the && chain behind it.
-    if (!known && next === '&&') break;
+    // A command that may fail skips the rest of its && chain.
+    if (!known && next === '&&') skipping = true;
   }
   return locations.slice(0, 64);
 }
