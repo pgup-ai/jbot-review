@@ -61,7 +61,11 @@ export function reviewReadLocations(
     current.next = match[3];
     segments.push({ args: [] });
   }
-  if (!segments.at(-1)!.args.length) return [];
+  // A trailing `;` ends the last command; a trailing `&&` or `|` leaves it incomplete.
+  if (!segments.at(-1)!.args.length) {
+    if (segments.at(-2)?.next !== ';') return [];
+    segments.pop();
+  }
   if (input.cwd !== undefined || input.workdir !== undefined) {
     const directory = input.cwd ?? input.workdir;
     if (typeof directory !== 'string') return [];

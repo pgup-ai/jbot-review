@@ -339,9 +339,10 @@ export function toolIdentity(
     return undefined;
   };
   if (toolClass === 'file-read' || toolClass === 'diff-recovery') {
+    // A diff's scope comes only from its own path; a chained shell read is not one.
     const path =
       pathIdentity(firstString('path', 'file', 'filePath', 'directory'), workspace) ??
-      shellReadPath(value, workspace);
+      (toolClass === 'file-read' ? shellReadPath(value, workspace) : undefined);
     return path
       ? { identity: path, identityKind: 'path' }
       : toolClass === 'diff-recovery'

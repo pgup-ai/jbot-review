@@ -60,6 +60,10 @@ test('literal shell reads preserve their directory and range without evaluating 
       { path: 'c.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
     ],
   );
+  assert.deepEqual(reads('cat a.ts;'), [
+    { path: 'a.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
+  ]);
+  assert.deepEqual(reads('cat a.ts |'), []);
   assert.deepEqual(reads('cat a.ts && cd src && cat b.ts'), [
     { path: 'a.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
   ]);

@@ -186,6 +186,10 @@ describe('phase and tool telemetry', () => {
         identity: 'src/a.ts',
         identityKind: 'path',
       });
+    assert.deepEqual(toolIdentity('diff-recovery', { command: 'cat a.ts; git diff --stat' }), {
+      identity: 'whole-diff',
+      identityKind: 'scope',
+    });
     const search = { command: 'grep -rn "formatDiffScope" src | head -20' };
     assert.equal(classifyReadonlyTool('shell', search), 'search');
     assert.deepEqual(toolIdentity('search', search), {
