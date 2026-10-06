@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { VERIFY_AGENT } from './opencode-config.ts';
 import {
   PERMISSION_DENIED_MESSAGE,
-  SOFT_DEADLINE_NOTE,
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from './prompt.ts';
@@ -18,9 +17,8 @@ import {
  * every tool for the tool-less agents; rewrites `exclusiveMinimum: 0` → `minimum: 1` because
  * Gemini-backed proxies 400 on it; drops the nested AGENTS.md instructions
  * opencode's read tool injects; applies the per-session options file
- * because V2 ignores config model overrides on catalog providers, and adds the
- * soft-deadline note it flags. Plain object export: V2's `Plugin.define` is the
- * identity.
+ * because V2 ignores config model overrides on catalog providers. Plain object
+ * export: V2's `Plugin.define` is the identity.
  */
 // Format after configuration imports finish initializing.
 const pluginSource =
@@ -84,9 +82,7 @@ export default {
       }
       const options = sessionOptions(event.sessionID);
       if (options) {
-        if (options.jbotFinishSoon) event.system.push({ type: 'text', text: ${JSON.stringify(SOFT_DEADLINE_NOTE)} });
         delete options.jbotSessionLabel;
-        delete options.jbotFinishSoon;
         Object.assign(event.options, options);
       }
     });

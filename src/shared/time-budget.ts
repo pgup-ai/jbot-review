@@ -65,12 +65,6 @@ export function wrapUpReserveMs(budgetMs: number): number {
   const reserve = Math.min(90_000, Math.floor(budgetMs / 5));
   return reserve - WRAP_UP_MARGIN_MS >= 45_000 ? reserve : 0;
 }
-
-/**
- * Share of the time before the wrap-up cut after which a session is asked to
- * finish: a turn it ends itself is complete, while a cut-off one is partial.
- */
-export const SOFT_DEADLINE_SHARE = 0.8;
 export function computeAuxiliaryGraceMs(
   timeBudgetMinutes: number,
   elapsedMs: number,

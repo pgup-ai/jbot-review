@@ -27,8 +27,6 @@ export interface ReviewExperiment {
     readEvidence: boolean | 'linked';
     readEvidencePhase: 'all' | 'review' | 'verification';
     batchDiffRecovery: boolean;
-    /** Ask a session nearing its cut-off to finish its own turn (opt-in: JBOT_SOFT_DEADLINE). */
-    softDeadline: boolean;
   };
 }
 
@@ -76,7 +74,6 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
       readEvidence: preset === 'linked' ? 'linked' : false,
       readEvidencePhase: preset === 'linked' ? 'review' : 'all',
       batchDiffRecovery: preset === 'diff-batches' || preset === 'adaptive' || contextPack,
-      softDeadline: env.JBOT_SOFT_DEADLINE === 'true',
     },
   };
 }

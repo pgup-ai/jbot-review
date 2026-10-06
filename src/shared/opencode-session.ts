@@ -35,7 +35,7 @@ import type { OpencodeRuntime } from './opencode-server.ts';
 import { WRAP_UP_PROMPT } from './prompt.ts';
 import { rateLimitStall, type ProviderRetry } from './retry-policy.ts';
 import { suppliedOverlap, type SuppliedContext } from './review-read-locations.ts';
-import { SOFT_DEADLINE_SHARE, WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
+import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import {
   extractPromptTokenUsage,
   type TokenUsageInfo,
@@ -329,19 +329,8 @@ function registerSessionOptions(
   const experiment = runtime.explorationExperiment;
   const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
   if (!options && !label) return;
-  writeSessionOptions(runtime, sessionID, {
-    ...options,
-    ...(label ? { jbotSessionLabel: spec.label } : {}),
-  });
-}
-
-function writeSessionOptions(
-  runtime: OpencodeRuntime,
-  sessionID: string,
-  options: Record<string, unknown>,
-): void {
   const map = sessionOptionsByRuntime.get(runtime) ?? {};
-  map[sessionID] = { ...map[sessionID], ...options };
+  map[sessionID] = { ...options, ...(label ? { jbotSessionLabel: spec.label } : {}) };
   sessionOptionsByRuntime.set(runtime, map);
   const tmp = `${runtime.sessionOptionsFile}.tmp`;
   writeFileSync(tmp, JSON.stringify(map));
@@ -784,16 +773,6 @@ async function promptHoldingSlot(
       : () => undefined;
     const reserveTimer =
       reserve > 0 ? setTimeout(() => requestWrapUp!(reserve), timeoutMs - reserve) : undefined;
-    const softTimer =
-      reserve > 0 && runtime.explorationExperiment.softDeadline
-        ? setTimeout(
-            () => {
-              log(`${label} prompt nearing its cut-off; asking the session to finish`);
-              writeSessionOptions(runtime, sessionID, { jbotFinishSoon: true });
-            },
-            (timeoutMs - reserve) * SOFT_DEADLINE_SHARE,
-          )
-        : undefined;
     let message: AssistantMessage;
     try {
       const settled = await Promise.race([
@@ -834,7 +813,6 @@ async function promptHoldingSlot(
       throw error;
     } finally {
       clearTimeout(reserveTimer);
-      clearTimeout(softTimer);
       unregister();
     }
 
