@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { hermeticOpencodeConfigHome } from '../src/shared/opencode-plugin.ts';
 import {
   PERMISSION_DENIED_MESSAGE,
+  SOFT_DEADLINE_NOTE,
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from '../src/shared/prompt.ts';
@@ -200,6 +201,14 @@ describe('jbot opencode plugin', () => {
       const unknown = { agent: 'plan', tools: tools(), sessionID: 'ses_2', options: {} };
       context(unknown);
       assert.deepEqual(unknown.options, {});
+      writeFileSync(
+        file,
+        JSON.stringify({ ses_1: { reasoningEffort: 'low', jbotFinishSoon: true } }),
+      );
+      const late = { ...known, options: {}, system: [] as unknown[] };
+      context(late);
+      assert.deepEqual(late.options, { reasoningEffort: 'low' });
+      assert.deepEqual(late.system, [{ type: 'text', text: SOFT_DEADLINE_NOTE }]);
     } finally {
       delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
     }

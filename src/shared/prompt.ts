@@ -2102,6 +2102,9 @@ export function isNoAttemptReply(raw: string): boolean {
 /** In-session wrap-up when a turn is cut off at its deadline: no tools, report only what is already established. */
 export const WRAP_UP_PROMPT = `Time is up. Do no further investigation and call no tools. Output ONLY the JSON object the original instructions specify, using only what you have already established in this conversation; omit anything you have not confirmed. If you have nothing to report, output that JSON object with empty lists.`;
 
+/** System note added once a session nears its cut-off, so it can still finish on its own turn. */
+export const SOFT_DEADLINE_NOTE = `Time check: most of this review's time budget is used. Finish the investigation already in progress without starting new lines of exploration, then output the JSON object the original instructions specify, covering everything you have established.`;
+
 /** In-session continuation for an announced-then-stopped turn (multi-turn engines). */
 export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you described and finish the task now, in this turn. Do not reply with a plan or preamble again. When done, output ONLY the JSON object the original instructions specify.`;
 

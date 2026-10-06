@@ -367,6 +367,30 @@ describe('promptInSession', () => {
   });
 });
 
+describe('soft deadline', () => {
+  it('flags a session nearing its cut-off so it can still finish its own turn', async () => {
+    const fake = fakeOpencodeServer(() => ({ text: '{"findings":[]}', delayMs: 900 }));
+    const rt = runtime(fake);
+    rt.explorationExperiment.softDeadline = true;
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    const lines: string[] = [];
+    const outcome = { wrappedUp: false };
+    const text = await promptInSession(rt, id, {
+      model: 'openai/gpt-5',
+      text: 'x',
+      label: 'review',
+      timeoutMs: 2000,
+      wrapUpReserveMs: 1000,
+      outcome,
+      log: (line) => lines.push(line),
+    });
+    assert.equal(text, '{"findings":[]}');
+    assert.equal(outcome.wrappedUp, false);
+    assert.ok(lines.includes('review prompt nearing its cut-off; asking the session to finish'));
+    assert.equal(JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'))[id].jbotFinishSoon, true);
+  });
+});
+
 describe('wrap-up capability', () => {
   it('follows the agent: review turns can be finalized, a tool-less one never reserves', async () => {
     const fake = fakeOpencodeServer((session) =>

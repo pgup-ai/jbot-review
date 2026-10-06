@@ -1304,7 +1304,10 @@ This repository's dogfood workflow runs guideline checking and interactions in
 independent sessions alongside main review. It sets `JBOT_GUIDELINE_SWEEP=false`
 and `JBOT_VERIFY_OVERLAP_GRACE=true`: main findings enter fresh verification as
 soon as main review returns; new auxiliary findings receive a later verification
-batch. Other consumers can select the same environment settings.
+batch. It also sets `JBOT_SOFT_DEADLINE=true`: a session that reaches 80% of
+the time before its wrap-up cut is asked to finish the investigation in
+progress and answer, so it can complete on its own turn instead of being cut off
+with a partial result. Other consumers can select the same environment settings.
 
 `review-interactions` investigates cross-file regressions and inconsistent
 contracts across the selected scope and relevant callers. `addressed-prior-comments` separately checks

@@ -311,6 +311,7 @@ try {
         readEvidence: arm.readEvidence ?? false,
         readEvidencePhase: arm.readEvidencePhase ?? 'all',
         batchDiffRecovery: !!arm.batchDiffRecovery,
+        softDeadline: false,
       },
     };
     const experimentPath = resolve(dir, 'experiment.json');

@@ -281,6 +281,7 @@ jobs:
           JBOT_COMMANDCODE_TOOLS: ${{ vars.JBOT_COMMANDCODE_TOOLS }}
           JBOT_GUIDELINE_SWEEP: 'false'
           JBOT_VERIFY_OVERLAP_GRACE: 'true'
+          JBOT_SOFT_DEADLINE: 'true'
           # Unset arrives empty and takes each arm's default: trim off, embedded-first on,
           # the context-pack preset.
           JBOT_REVIEW_EXPERIMENT: ${{ vars.JBOT_REVIEW_EXPERIMENT }}

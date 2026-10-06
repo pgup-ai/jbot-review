@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { reviewReadLocations, SHELL_TOOLS, shellSearchPattern } from './review-read-locations.ts';
 
 import type {
   BackendTelemetryCapability,
@@ -267,10 +268,7 @@ export function createToolTelemetryAccumulator(
 export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemetryClass {
   const normalized = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
   const command =
-    (normalized === 'bash' || normalized === 'exec') &&
-    input &&
-    typeof input === 'object' &&
-    !Array.isArray(input)
+    SHELL_TOOLS.includes(normalized) && input && typeof input === 'object' && !Array.isArray(input)
       ? (input as Record<string, unknown>).command
       : undefined;
   if (
@@ -280,6 +278,10 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     return 'diff-recovery';
   }
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
+  if (typeof command === 'string') {
+    if (shellReadPath(input as Record<string, unknown>)) return 'file-read';
+    if (shellSearchPattern(command)) return 'search';
+  }
   if (
     normalized.includes('web') ||
     normalized.includes('context7') ||
@@ -335,7 +337,7 @@ export function toolIdentity(
     return undefined;
   };
   if (toolClass === 'file-read' || toolClass === 'diff-recovery') {
-    const path = firstString('path', 'file', 'filePath', 'directory');
+    const path = firstString('path', 'file', 'filePath', 'directory') ?? shellReadPath(value);
     return path
       ? { identity: path, identityKind: 'path' }
       : toolClass === 'diff-recovery'
@@ -349,10 +351,17 @@ export function toolIdentity(
     return pattern ? { identity: pattern, identityKind: 'query' } : {};
   }
   if (toolClass === 'search' || toolClass === 'external-docs') {
-    const query = firstString('query', 'pattern', 'search', 'text');
+    const query =
+      firstString('query', 'pattern', 'search', 'text') ??
+      (typeof value.command === 'string' ? shellSearchPattern(value.command) : undefined);
     return query ? { identity: query, identityKind: 'query' } : {};
   }
   return {};
+}
+
+/** A chained shell read is identified by its first file. */
+function shellReadPath(input: Record<string, unknown>): string | undefined {
+  return reviewReadLocations('/', 'shell', input)[0]?.path;
 }
 
 function normalizeIdentity(value: string, kind: 'path' | 'query' | 'scope' | undefined): string {

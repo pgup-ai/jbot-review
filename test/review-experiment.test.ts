@@ -40,6 +40,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       readEvidence: false,
       readEvidencePhase: 'all',
       batchDiffRecovery: false,
+      softDeadline: false,
     },
   });
   for (const value of ['off', 'on', 'custom', 'linked,jev', 'secret'])
@@ -73,6 +74,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
   expected.push({ ...expected[5], preset: 'verified-support', generateVerificationSupport: true });
   assert.deepEqual(reviewExperiment({}), expected[4]);
   assert.deepEqual(reviewExperiment({ JBOT_REVIEW_EXPERIMENT: '' }), expected[4]);
+  assert.equal(reviewExperiment({ JBOT_SOFT_DEADLINE: 'true' }).exploration.softDeadline, true);
   const hashes = new Set<string>();
   for (const preset of expected) {
     const experiment = reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: preset.preset });
