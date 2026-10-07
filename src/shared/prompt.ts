@@ -1696,6 +1696,73 @@ export function assembleGuidelineSweepPrompt(guidelines: string): string {
   );
 }
 
+/** `npm run rules:compile`: written rules → candidate line checks, reviewed by a maintainer before commit. */
+export const RULE_CHECK_COMPILER_PROMPT = `You turn a repository's written engineering rules into deterministic
+line checks that a code reviewer runs on every pull request.
+
+## What qualifies
+
+- Only a rule whose violation shows on ONE added line and that a JavaScript
+  regular expression recognises reliably, such as a banned call, import,
+  assertion or literal.
+- Skip rules that need meaning, control flow, other lines or other files to
+  judge. A skipped rule costs nothing; a check that fires on compliant code
+  costs every review.
+- One check per rule. Never invent or paraphrase a rule.
+
+## Each check
+
+- "id": lowercase words joined by hyphens.
+- "rule": the rule's file, its section when it has one, and the rule quoted
+  verbatim in double quotes.
+- "severity": "P2" for a clear violation of a written standard, "P3" for a
+  deviation from a recommendation.
+- "title": a short finding title.
+- "files": globs the rule covers; a glob without "/" matches the file name.
+- "pattern": the JavaScript RegExp source matched against each added line.
+- "unless": optional RegExp source; an added line that also matches it complies.
+- "mode": always "shadow".`;
+
+export const RULE_CHECK_COMPILER_OUTPUT_REMINDER = `## Final output reminder
+
+Respond with one raw JSON object and nothing else, no markdown fences:
+
+{
+  "checks": [
+    {
+      "id": "no-focused-tests",
+      "rule": "\`TESTING.md\` §3: \\"Never commit focused tests (\`.only\`).\\"",
+      "severity": "P2",
+      "title": "Focused test committed",
+      "files": ["*.spec.ts", "*.test.ts"],
+      "pattern": "\\\\b(?:it|describe|test)\\\\.only\\\\(",
+      "mode": "shadow"
+    }
+  ]
+}
+
+Return {"checks": []} when no rule qualifies.`;
+
+export function assembleRuleCheckCompilerPrompt(guidelines: string): string {
+  return [
+    RULE_CHECK_COMPILER_PROMPT,
+    '## Repository rules\n',
+    guidelines,
+    RULE_CHECK_COMPILER_OUTPUT_REMINDER,
+  ].join('\n\n');
+}
+
+/** Compliance guidelines: rules the repository enforces with deterministic checks stay out of the audit. */
+export function withEnforcedRuleChecks(guidelines: string, checks: { rule: string }[]): string {
+  if (!guidelines || !checks.length) return guidelines;
+  return [
+    guidelines,
+    '## Rules checked in code',
+    'jbot checks these rules deterministically and reports their violations itself. Do not audit or report them:',
+    ...checks.map((check) => `- ${check.rule}`),
+  ].join('\n\n');
+}
+
 export const REPORT_FINDING_TOOL_DESCRIPTION =
   'Record one confirmed guideline violation the moment you confirm it, so it can survive if the audit is cut short. Recording is best-effort: your final JSON is the only guaranteed copy and must still list it. Use the same fields as a finding there.';
 
