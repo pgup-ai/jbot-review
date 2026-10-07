@@ -319,16 +319,29 @@ test('rule docs count as changed between heads only when their content moved', a
   try {
     git('init', '-q');
     write('AGENTS.md', 'Use LoadedModel.\n');
+    write('docs/EXEMPTIONS.md', 'Tests may build fixtures by hand.\n');
     write('src/a.ts', 'export const a = 1;\n');
     const reviewed = commit();
     write('src/a.ts', 'export const a = 2;\n');
     const codeOnly = commit();
     write('AGENTS.md', 'Use LoadedModel for populated relations.\n');
     const ruleEdit = commit();
-    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], reviewed, codeOnly), false);
-    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], reviewed, ruleEdit), true);
-    assert.equal(await ruleDocsChanged(workspace, [], reviewed, ruleEdit), false);
-    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], 'f'.repeat(40), ruleEdit), true);
+    const none = new Set<string>();
+    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], none, reviewed, codeOnly), false);
+    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], none, reviewed, ruleEdit), true);
+    assert.equal(await ruleDocsChanged(workspace, [], none, reviewed, ruleEdit), false);
+    assert.equal(
+      await ruleDocsChanged(workspace, ['AGENTS.md'], none, 'f'.repeat(40), ruleEdit),
+      true,
+    );
+    // A deleted doc is not in today's discovery; only the PR's own deletions are left out.
+    rmSync(join(workspace, 'docs/EXEMPTIONS.md'));
+    const deletion = commit();
+    assert.equal(await ruleDocsChanged(workspace, [], none, ruleEdit, deletion), true);
+    assert.equal(
+      await ruleDocsChanged(workspace, [], new Set(['docs/EXEMPTIONS.md']), ruleEdit, deletion),
+      false,
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

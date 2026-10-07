@@ -1597,7 +1597,10 @@ async function runReviewPipeline(params: {
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {
     if (!ruleChanges.has(reviewed))
-      ruleChanges.set(reviewed, ruleDocsChanged(workspace, rulePaths, reviewed, headSha ?? 'HEAD'));
+      ruleChanges.set(
+        reviewed,
+        ruleDocsChanged(workspace, rulePaths, prPaths, reviewed, headSha ?? 'HEAD'),
+      );
     return ruleChanges.get(reviewed)!;
   };
 

@@ -352,23 +352,49 @@ export async function planIncrementalReview(input: {
 }
 
 /**
- * Whether a rule doc changed between two heads. Callers pass only docs the PR does not edit
+ * Whether the rules changed between two heads. Callers pass only docs the PR does not edit
  * (those are reviewed as changed files); history git cannot read counts as a change.
  */
 export async function ruleDocsChanged(
   workspace: string,
   paths: string[],
+  prPaths: ReadonlySet<string>,
   from: string,
   to: string,
 ): Promise<boolean> {
-  if (!paths.length) return false;
+  const git = async (...args: string[]) =>
+    (await exec('git', args, { cwd: workspace, timeout: 5000, maxBuffer: 1024 * 1024 })).stdout;
   try {
-    const { stdout } = await exec(
-      'git',
-      ['--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', from, to, '--', ...paths],
-      { cwd: workspace, timeout: 5000, maxBuffer: 1024 * 1024 },
+    if (
+      paths.length &&
+      (
+        await git(
+          '--literal-pathspecs',
+          'diff',
+          '--no-ext-diff',
+          '--name-only',
+          from,
+          to,
+          '--',
+          ...paths,
+        )
+      ).trim()
+    )
+      return true;
+    // Today's discovery cannot list a doc the base deleted, and removing one (an exemption) can add obligations.
+    const deleted = await git(
+      'diff',
+      '--no-ext-diff',
+      '--name-only',
+      '--diff-filter=D',
+      '-z',
+      from,
+      to,
+      '--',
+      '*.md',
+      '*.mdc',
     );
-    return stdout.trim() !== '';
+    return deleted.split('\0').some((path) => path && !prPaths.has(path));
   } catch {
     return true;
   }
