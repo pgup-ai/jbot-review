@@ -1329,7 +1329,7 @@ guideline finding within three lines, and how many guideline findings in
 files a check covers no hit explains. Agreement is by location, so confirm that a
 nearby finding cites the check's rule. Switch a check to `enforce` once those
 agree. Its hits then post as compliance findings, and the guideline pass is
-told to leave that rule alone.
+told to leave that rule alone in the files the check covers.
 
 Matching is time-boxed. When the checks outrun the budget (a pattern that
 backtracks catastrophically), the review logs it, posts no check hits and

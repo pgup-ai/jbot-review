@@ -7,6 +7,7 @@ import {
   runRuleChecks,
   validateCompiledChecks,
 } from '../src/shared/rule-checks.ts';
+import { withEnforcedRuleChecks } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const check = {
@@ -159,4 +160,16 @@ test('validateCompiledChecks keeps verbatim, example-consistent checks in shadow
       { id: 'too-broad', kept: false, reason: 'disagrees-with-examples', existingHits: 1 },
     ],
   );
+});
+
+test('withEnforcedRuleChecks scopes each rule to its files and keeps rules past the budget audited', () => {
+  const rule = (i: number) => ({ rule: `rule ${i} ${'x'.repeat(1000)}`, files: ['*.spec.ts'] });
+  const block = withEnforcedRuleChecks(
+    'guidelines',
+    Array.from({ length: 10 }, (_, i) => rule(i)),
+  );
+  assert.match(block, /- rule 0 x+ \(files matching `\*\.spec\.ts`\)/);
+  assert.match(block, /audit them as usual in any other file/);
+  assert.match(block, /3 more rule\(s\) checked in code did not fit here/);
+  assert.equal(withEnforcedRuleChecks('guidelines', []), 'guidelines');
 });

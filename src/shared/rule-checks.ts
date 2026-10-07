@@ -38,6 +38,9 @@ interface RuleCheckHit {
 // Repo-controlled regexes run on PR-controlled lines: bound the checks and the time spent matching.
 const MAX_CHECKS = 200;
 const MAX_PATTERN_LENGTH = 500;
+// Rule and title reach prompts and posted findings.
+const MAX_RULE_LENGTH = 1000;
+const MAX_TITLE_LENGTH = 200;
 const MATCH_TIMEOUT_MS = 2000;
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SEVERITIES = new Set(['P1', 'P2', 'P3']);
@@ -71,6 +74,8 @@ function parseCheck(row: unknown): RuleCheck | undefined {
   >;
   const text = (value: unknown) => typeof value === 'string' && value.trim() !== '';
   if (typeof id !== 'string' || !ID.test(id) || !text(rule) || !text(title)) return undefined;
+  if ((rule as string).length > MAX_RULE_LENGTH || (title as string).length > MAX_TITLE_LENGTH)
+    return undefined;
   if (typeof severity !== 'string' || !SEVERITIES.has(severity)) return undefined;
   if (mode !== 'shadow' && mode !== 'enforce') return undefined;
   if (!Array.isArray(files) || !files.length || !files.every((glob) => text(glob)))

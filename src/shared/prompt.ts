@@ -1752,14 +1752,35 @@ export function assembleRuleCheckCompilerPrompt(guidelines: string): string {
   ].join('\n\n');
 }
 
-/** Compliance guidelines: rules the repository enforces with deterministic checks stay out of the audit. */
-export function withEnforcedRuleChecks(guidelines: string, checks: { rule: string }[]): string {
+const ENFORCED_RULES_BUDGET = 8 * 1024;
+
+/**
+ * Compliance guidelines: rules the repository enforces with deterministic checks stay out of the
+ * audit, only in the files each check covers. Rules past the byte budget stay in the audit.
+ */
+export function withEnforcedRuleChecks(
+  guidelines: string,
+  checks: { rule: string; files: string[] }[],
+): string {
   if (!guidelines || !checks.length) return guidelines;
+  const listed: string[] = [];
+  let bytes = 0;
+  for (const check of checks) {
+    const line = `- ${check.rule} (files matching ${check.files.map((glob) => `\`${glob}\``).join(', ')})`;
+    bytes += Buffer.byteLength(line) + 1;
+    if (bytes > ENFORCED_RULES_BUDGET) break;
+    listed.push(line);
+  }
+  const omitted = checks.length - listed.length;
+  if (!listed.length) return guidelines;
   return [
     guidelines,
     '## Rules checked in code',
-    'jbot checks these rules deterministically and reports their violations itself. Do not audit or report them:',
-    ...checks.map((check) => `- ${check.rule}`),
+    'jbot checks these rules deterministically in the files listed with each and reports their violations itself. Do not audit or report them in those files; audit them as usual in any other file:',
+    listed.join('\n'),
+    ...(omitted
+      ? [`${omitted} more rule(s) checked in code did not fit here; audit those as usual.`]
+      : []),
   ].join('\n\n');
 }
 

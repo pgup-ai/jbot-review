@@ -80,6 +80,14 @@ const { checks, report } = validateCompiledChecks(json, {
   repoFiles,
   examples,
 });
+// A mistyped label would otherwise leave its check unvalidated and kept.
+const unmatched = [
+  ...new Set(
+    examples.map((example) => example.check).filter((id) => !report.some((row) => row.id === id)),
+  ),
+];
+if (unmatched.length)
+  throw new Error(`--examples name no compiled check: ${unmatched.join(', ')}. Nothing written.`);
 for (const row of report)
   console.log(
     `${row.kept ? 'kept    ' : 'rejected'} ${row.id}  existing hits ${row.existingHits}${
