@@ -58,6 +58,7 @@ export async function planComplianceRecheck(input: {
   files: PrFile[];
   /** The base...head patches a completed pass audited. */
   audited: (base: string, head: string) => Promise<PrFile[]>;
+  rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<{ reason: string; baseline?: AuxiliaryBaseline; files?: string[] }> {
   const baseline = auxiliaryBaselines(input.priorBody).find(
     (row) => row.session === 'guideline-compliance',
@@ -65,6 +66,8 @@ export async function planComplianceRecheck(input: {
   if (!baseline) return { reason: 'no-completed-baseline' };
   if (baseline.policy !== input.policy) return { reason: 'policy-changed', baseline };
   if (baseline.head === input.head) return { reason: 'same-head-rerun', baseline };
+  if (await input.rulesChangedSince(baseline.head))
+    return { reason: 'guidelines-changed', baseline };
   // The compare API lists at most 300 files; PRs that large always check every file.
   if (input.files.length >= COMPARE_FILES_CAP) return { reason: 'large-pr', baseline };
   // The audited diff, not today's base: a retargeted PR must not carry over files it never had.
@@ -106,6 +109,7 @@ export async function planAuxiliaryReuse(input: {
   sessions: string[];
   priorBodies: string[];
   guidelineFollowup?: { baseline: string; coveredByMain: boolean };
+  rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<Array<{ session: string; reason: string; baseline?: AuxiliaryBaseline }>> {
   const latest = input.priorBodies.at(-1) ?? '';
   const prior = auxiliaryBaselines(latest);
@@ -119,6 +123,7 @@ export async function planAuxiliaryReuse(input: {
       else if (baseline.policy !== input.policyFor(session)) reason = 'policy-changed';
       else if (!input.head || baseline.head === input.head || input.reviewedHead === input.head)
         reason = 'explicit-rerun';
+      else if (await input.rulesChangedSince(baseline.head)) reason = 'guidelines-changed';
       else if (session === 'guideline-compliance' && input.guidelineFollowup) {
         reason =
           baseline.head !== input.guidelineFollowup.baseline

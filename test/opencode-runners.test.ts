@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
   abortOpencodeSessionsByLabel,
@@ -19,7 +20,7 @@ import {
   NO_TOOLS_REVIEW_DIRECTIVE,
   WRAP_UP_PROMPT,
 } from '../src/shared/prompt.ts';
-import type { Finding } from '../src/shared/types.ts';
+import { IncompleteReviewError, type Finding } from '../src/shared/types.ts';
 import {
   fakeOpencodeServer,
   fakeRuntime as runtime,
@@ -574,10 +575,94 @@ describe('runFindingVerification on V2', () => {
       low,
     );
     await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log);
-    assert.deepEqual(Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))), [
-      low,
-      { reasoningEffort: 'high' },
-    ]);
+    const options = Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))).map(
+      ({ jbotReportFindings, ...rest }: Record<string, unknown>) => (
+        assert.equal(jbotReportFindings, true),
+        rest
+      ),
+    );
+    assert.deepEqual(options, [low, { reasoningEffort: 'high' }]);
+  });
+
+  it('logs a compliance page under its own label and keeps it abortable as guideline-compliance', async () => {
+    let n = 0;
+    const fake = fakeOpencodeServer(() => (++n === 1 ? { text: 'not json' } : { hang: true }));
+    const lines: string[] = [];
+    const rt = runtime(fake);
+    const pending = runGuidelineComplianceCheck(
+      rt,
+      'openai/gpt-5',
+      'ctx',
+      'guides',
+      (line) => lines.push(line),
+      5_000,
+      undefined,
+      undefined,
+      'guideline-compliance-page-2',
+    ).catch((error: unknown) => error);
+    for (const deadline = Date.now() + 2000; fake.prompts.length < 2 && Date.now() < deadline;)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(fake.prompts.length, 2);
+    assert.equal(abortOpencodeSessionsByLabel(rt.client, 'guideline-compliance', log), 1);
+    await pending;
+    assert.ok(lines.includes('Creating guideline-compliance-page-2 session'));
+  });
+
+  it('keeps the findings a compliance page reported before it failed', async () => {
+    const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Hand-rolled id', body: 'R.' };
+    let options: Record<string, { jbotReportFindings?: boolean }> = {};
+    const fake = fakeOpencodeServer((session) => {
+      options = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
+      const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+      writeFileSync(
+        join(dirname(rt.sessionOptionsFile), name),
+        `${JSON.stringify(reported)}\n{"path":"b.ts"}\n{"path":"c.ts","li`,
+      );
+      return { rejectPrompt: true };
+    });
+    const rt = runtime(fake);
+    const error = await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log).catch(
+      (caught: unknown) => caught,
+    );
+    assert.equal(Object.values(options)[0]?.jbotReportFindings, true);
+    assert.ok(error instanceof IncompleteReviewError);
+    assert.deepEqual(
+      error.findings.map(({ path, line, title }) => ({ path, line, title })),
+      [{ path: 'a.ts', line: 3, title: 'Hand-rolled id' }],
+    );
+  });
+
+  it('keeps reported findings without a repair turn when a page answers with nothing', async () => {
+    const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Hand-rolled id', body: 'R.' };
+    const fake = fakeOpencodeServer((session) => {
+      const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+      writeFileSync(join(dirname(rt.sessionOptionsFile), name), `${JSON.stringify(reported)}\n`);
+      return { text: '' };
+    });
+    const rt = runtime(fake);
+    const error = await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log).catch(
+      (caught: unknown) => caught,
+    );
+    assert.ok(error instanceof IncompleteReviewError);
+    assert.deepEqual(
+      error.findings.map(({ path }) => path),
+      ['a.ts'],
+    );
+    assert.equal(fake.prompts.length, 1);
+  });
+
+  it('keeps the original page error when its findings journal cannot be read', async () => {
+    const fake = fakeOpencodeServer((session) => {
+      const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+      mkdirSync(join(dirname(rt.sessionOptionsFile), name));
+      return { rejectPrompt: true };
+    });
+    const rt = runtime(fake);
+    const error = await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log).catch(
+      (caught: unknown) => caught,
+    );
+    assert.ok(error instanceof Error && !(error instanceof IncompleteReviewError));
+    assert.match(error.message, /UnexpectedStatus: 500/);
   });
 
   it('forks the main review session, not a lens pass, when JBOT_VERIFY_FORK is on', async () => {

@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { VERIFY_AGENT } from './opencode-config.ts';
 import {
   PERMISSION_DENIED_MESSAGE,
+  REPORT_FINDING_TOOL_DESCRIPTION,
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from './prompt.ts';
+import { VALID_CONFIDENCES, VALID_FINDING_KINDS } from './types.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -23,9 +25,13 @@ import {
 // Format after configuration imports finish initializing.
 const pluginSource =
   () => `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
 const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute']);
 const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
+// A runaway or prompt-injected page must not grow its journal without bound.
+const REPORTED_FINDINGS_MAX_BYTES = 1024 * 1024;
 
 function stripTools(tools, agent) {
   const all = TOOL_LESS_AGENTS.has(agent);
@@ -81,8 +87,10 @@ export default {
         }
       }
       const options = sessionOptions(event.sessionID);
+      if (!options?.jbotReportFindings) delete event.tools.report_finding;
       if (options) {
         delete options.jbotSessionLabel;
+        delete options.jbotReportFindings;
         Object.assign(event.options, options);
       }
     });
@@ -95,6 +103,53 @@ export default {
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }
     });
+    // Compliance pages record each confirmed violation here, so a cut-off keeps what they found.
+    try {
+      // The hook first: a tool whose calls are never persisted would only claim to record.
+      await ctx.tool.hook('execute.after', (event) => {
+        if (event.tool !== 'report_finding' || event.status !== 'completed') return;
+        const file = process.env.JBOT_OPENCODE_SESSION_OPTIONS;
+        if (!file) return;
+        const name = 'reported-' + createHash('sha256').update(event.sessionID).digest('hex') + '.jsonl';
+        const journal = join(dirname(file), name);
+        try {
+          const row = JSON.stringify(event.input) + '\\n';
+          const size = existsSync(journal) ? statSync(journal).size : 0;
+          if (size + Buffer.byteLength(row) > REPORTED_FINDINGS_MAX_BYTES) return;
+          appendFileSync(journal, row, { mode: 0o600 });
+        } catch {
+          console.warn('[jbot-review] report_finding could not record a finding; the final JSON still lists it.');
+        }
+      });
+      await ctx.tool.transform((editor) => {
+        editor.add({
+          name: 'report_finding',
+          // A code-mode tool is reachable only through \`execute\`, which the read-only layer strips.
+          options: { codemode: false },
+          description: ${JSON.stringify(REPORT_FINDING_TOOL_DESCRIPTION)},
+          input: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              line: { type: 'integer', minimum: 0 },
+              severity: { type: 'string', enum: ['P1', 'P2', 'P3'] },
+              kind: { type: 'string', enum: ${JSON.stringify([...VALID_FINDING_KINDS])} },
+              confidence: { type: 'string', enum: ${JSON.stringify([...VALID_CONFIDENCES])} },
+              title: { type: 'string' },
+              body: { type: 'string' },
+              evidence: { type: 'string' },
+            },
+            required: ['path', 'line', 'severity', 'title', 'body'],
+            additionalProperties: false,
+          },
+          async execute() {
+            return { content: 'Noted (best-effort). Keep auditing, and list it in your final JSON.' };
+          },
+        });
+      });
+    } catch {
+      console.warn('[jbot-review] report_finding setup failed; compliance pages keep only their final JSON.');
+    }
     try {
       const experiment = JSON.parse(process.env.JBOT_EXPLORATION_CONFIG || '{}');
       if (experiment.checkpoints || experiment.readEvidence) {

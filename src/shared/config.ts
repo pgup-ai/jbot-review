@@ -570,6 +570,13 @@ export function modelSupportsAgenticTools(providerID: string, modelID: string): 
   return !/gemini|gpt-5/i.test(modelID);
 }
 
+/** Whether a compliance page is offered report_finding (and told to use it): OpenCode, agentic models. */
+export function complianceReportsFindings(backendName: string, model: string): boolean {
+  if (backendName !== 'opencode') return false;
+  const { providerID, modelID } = parseModelName(model);
+  return modelSupportsAgenticTools(providerID, modelID);
+}
+
 // Provider-managed values (poolside's 'default') stay outside this order.
 const REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 

@@ -14,6 +14,7 @@ import {
   impactedReviewFiles,
   planIncrementalReview,
   reviewBaseline,
+  ruleDocsChanged,
   withReviewBaseline,
 } from '../src/shared/incremental-review.ts';
 import { buildIncrementalReviewContext } from '../src/shared/prompt.ts';
@@ -171,6 +172,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       priorBodies: [body(reviewed, base), 'A later review with an unverified finding.'],
       // An open finding on a file this follow-up leaves alone keeps it incremental.
       openThreadPaths: new Set(['other/label.ts']),
+      rulesChangedSince: async () => false,
     };
     const result = await planIncrementalReview(input);
     assert.equal(result.mode, 'incremental');
@@ -184,6 +186,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ base: undefined }, 'base-changed'],
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
+      [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: base }, 'history-or-impact-unavailable'],
       [{ openThreadPaths: new Set(['core/limit.ts']) }, 'open-finding-file-changed'],
       [
@@ -311,6 +314,94 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
   }
 });
 
+test('rule docs count as changed between heads only when their content moved', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-rules-');
+  try {
+    git('init', '-q');
+    write('AGENTS.md', 'Use LoadedModel.\n');
+    write('docs/EXEMPTIONS.md', 'Tests may build fixtures by hand.\n');
+    write('.cursorrules', 'Prefer named exports.\n');
+    write('src/notes.txt', 'not guidance\n');
+    write('src/a.ts', 'export const a = 1;\n');
+    const reviewed = commit();
+    write('src/a.ts', 'export const a = 2;\n');
+    const codeOnly = commit();
+    write('AGENTS.md', 'Use LoadedModel for populated relations.\n');
+    const ruleEdit = commit();
+    const none = new Set<string>();
+    const changed = (paths: string[], from: string, to: string, prPaths = none) =>
+      ruleDocsChanged(workspace, { paths, prEdited: [], prPaths, complete: true }, from, to);
+    assert.equal(await changed(['AGENTS.md'], reviewed, codeOnly), false);
+    assert.equal(await changed(['AGENTS.md'], reviewed, ruleEdit), true);
+    assert.equal(await changed([], reviewed, ruleEdit), false);
+    assert.equal(await changed(['AGENTS.md'], 'f'.repeat(40), ruleEdit), true);
+    // A deleted doc is not in today's discovery; only the PR's own deletions are left out.
+    rmSync(join(workspace, 'docs/EXEMPTIONS.md'));
+    const deletion = commit();
+    assert.equal(await changed([], ruleEdit, deletion), true);
+    assert.equal(await changed([], ruleEdit, deletion, new Set(['docs/EXEMPTIONS.md'])), false);
+    rmSync(join(workspace, '.cursorrules'));
+    const cursorRules = commit();
+    assert.equal(await changed([], deletion, cursorRules), true);
+    rmSync(join(workspace, 'src/notes.txt'));
+    const unrelated = commit();
+    assert.equal(await changed([], cursorRules, unrelated), false);
+    // Rename detection must not hide a guideline file moved to a non-guideline name.
+    git('mv', 'AGENTS.md', 'NOTES.txt');
+    assert.equal(await changed([], unrelated, commit()), true);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a base edit to a rule doc the PR also edits counts; edits by the PR itself do not', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-rules-base-');
+  try {
+    git('init', '-q', '-b', 'main');
+    write('AGENTS.md', 'Intro.\n\n\n\n\nRules.\n');
+    write('src/a.ts', 'export const a = 1;\n');
+    commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('AGENTS.md', 'Intro, edited by the PR.\n\n\n\n\nRules.\n');
+    const reviewed = commit();
+    git('checkout', '-q', 'main');
+    write('AGENTS.md', 'Intro.\n\n\n\n\nRules, now mandatory.\n');
+    const main = commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    const merged = git('rev-parse', 'HEAD');
+    write('AGENTS.md', 'Intro, edited again by the PR.\n\n\n\n\nRules, now mandatory.\n');
+    const ownEdit = commit();
+    const rules = {
+      paths: [],
+      prEdited: ['AGENTS.md'],
+      prPaths: new Set(['AGENTS.md']),
+      base: main,
+      complete: true,
+    };
+    assert.equal(await ruleDocsChanged(workspace, rules, reviewed, merged), true);
+    assert.equal(await ruleDocsChanged(workspace, rules, merged, ownEdit), false);
+    // Discovery out of budget: any guidance a later base merge brings in counts, still not the PR's edits.
+    git('checkout', '-q', 'main');
+    write('docs/unlisted.md', 'A rule discovery never reached.\n');
+    const mainDoc = commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    const mergedDoc = git('rev-parse', 'HEAD');
+    const partial = { paths: [], prEdited: [], prPaths: new Set<string>(), base: mainDoc };
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...partial, complete: false }, ownEdit, mergedDoc),
+      true,
+    );
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...partial, complete: true }, ownEdit, mergedDoc),
+      false,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('a merge from the base branch re-reviews only the PR files it or the author touched', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-merge-');
   const mergeMain = (path: string, text: string) => {
@@ -370,6 +461,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         base: mainTip,
         policy,
         priorBodies: [body(prior, priorBase)],
+        rulesChangedSince: async () => false,
       });
       return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
     };

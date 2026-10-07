@@ -1,6 +1,7 @@
 import { VerificationEvidence } from './verification-evidence.ts';
 import {
   planIncrementalReview,
+  ruleDocsChanged,
   withReviewBaseline,
   type ReviewBaseline,
 } from './incremental-review.ts';
@@ -141,6 +142,7 @@ import {
 import {
   auxModelOptionsFor,
   complianceModelOptions,
+  complianceReportsFindings,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
@@ -270,6 +272,7 @@ import {
   buildReviewContext,
   buildReviewScopeContext,
   discoverGuidelineDocs,
+  GUIDELINE_CONTROL_FILES,
   applicableGuidelines,
   canCheckGlobalGuidelinesInMain,
   citedGuidelineSections,
@@ -385,6 +388,7 @@ function createOpencodeBackend(
       timeoutMs,
       onTokenUsage,
       modelOptions,
+      label,
     ) =>
       runOpencodeGuidelineComplianceCheck(
         runtime,
@@ -395,6 +399,7 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
         modelOptions,
+        label,
       ),
     runFindingVerification: (
       model,
@@ -1403,6 +1408,35 @@ async function runReviewPipeline(params: {
     return;
   }
 
+  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
+  log(
+    `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
+  );
+  // Discovery follows the diff, so policies leave rule text out; a rule doc the PR does not
+  // edit changing since the baseline (a base-branch merge) is checked on its own.
+  // Every PR file, noise and patchless ones included: the PR's own edits and deletions are not base changes.
+  const prPaths = new Set(rawFiles.map((file) => file.filename));
+  const ruleSources = [
+    ...new Set([
+      ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
+      ...GUIDELINE_CONTROL_FILES,
+    ]),
+  ];
+  const rules = {
+    paths: ruleSources.filter((path) => !prPaths.has(path)),
+    prEdited: ruleSources.filter((path) => prPaths.has(path)),
+    prPaths,
+    base: baseSha,
+    complete: !loadedGuidelines.budgetExhausted,
+  };
+  const ruleChanges = new Map<string, Promise<boolean>>();
+  const rulesChangedSince = (reviewed: string) => {
+    if (!ruleChanges.has(reviewed))
+      ruleChanges.set(reviewed, ruleDocsChanged(workspace, rules, reviewed, headSha ?? 'HEAD'));
+    return ruleChanges.get(reviewed)!;
+  };
+
   // Unchanged-diff gate (contract on `skipUnchanged`): nothing new for the
   // model at this exact content, so skip before any server boot or LLM session.
   // Auto-approve runs never skip: approval must re-attest the latest pushed
@@ -1428,7 +1462,12 @@ async function runReviewPipeline(params: {
         );
         return null;
       });
-      if (priorFiles !== null && samePatchSet(rawFiles, priorFiles)) {
+      // Identical patches still need a review when the base changed the rules they answer to.
+      if (
+        priorFiles !== null &&
+        samePatchSet(rawFiles, priorFiles) &&
+        !(await rulesChangedSince(reviewedHead))
+      ) {
         log(
           `Diff unchanged since the last posted review (head ${reviewedHead.slice(0, 7)}); skipping the full review.`,
         );
@@ -1576,19 +1615,10 @@ async function runReviewPipeline(params: {
     commandCodeEffortContext,
   );
 
-  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
-  const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
-  log(
-    `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
-  );
-  // Reuse and incremental policies hash every applicable rule, not this diff's ranked render.
-  const policyGuidelines = JSON.stringify(applicable);
-
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
     ...modelPolicy(options, { model, auxModel, baseURL }),
-    guidelines: policyGuidelines,
     reviewer: runIdentity(process.env).reviewerRevision,
   });
   const openThreadPaths = new Set(
@@ -1617,6 +1647,7 @@ async function runReviewPipeline(params: {
           )),
     openThreadPaths,
     worktree: !!localDiff,
+    rulesChangedSince,
   });
   const scopeStats = {
     mode: reviewScope.mode,
@@ -2556,15 +2587,17 @@ async function runReviewPipeline(params: {
         : options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
+    // Hashed into the compliance policy and used to size pages: the prompt actually sent.
+    const complianceReportTool = complianceReportsFindings(auxBackend.name, auxModel);
     const policyFor = (session: string) =>
       auxiliaryPolicy({
         ...auxPolicy,
         prompt:
           session === 'guideline-compliance'
-            ? assembleGuidelineCompliancePrompt('', policyGuidelines)
+            ? assembleGuidelineCompliancePrompt('', '', complianceReportTool)
             : assembleReviewPrompt(
                 '',
-                policyGuidelines,
+                '',
                 REVIEW_LENSES[session.slice(7)],
                 options.evidenceQuotes,
                 options.embeddedFirstPrompt,
@@ -2598,6 +2631,7 @@ async function runReviewPipeline(params: {
                   },
                 }
               : {}),
+            rulesChangedSince,
           })
         : [];
     const reusedAux = new Map(
@@ -2659,6 +2693,7 @@ async function runReviewPipeline(params: {
             head: headSha,
             files,
             audited: (base, head) => compareCommitFiles(octokit, owner, repo, base, head),
+            rulesChangedSince,
           })
         : undefined;
     const recheckFiles = complianceRecheck?.files;
@@ -3135,7 +3170,7 @@ async function runReviewPipeline(params: {
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
-          : assembleGuidelineCompliancePrompt(context, rules);
+          : assembleGuidelineCompliancePrompt(context, rules, complianceReportTool);
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
       // The pack's callers replace the usage list; pages it cannot serve get it back as a trailer.
       const usageTrailer = lens && packPages ? blastRadiusBlock : '';
@@ -5518,6 +5553,10 @@ export function startGuidelineComplianceCheck(params: {
               params.timeoutMs,
               params.onTokenUsage,
               params.modelOptions,
+              // Only OpenCode keys its own rows by page; elsewhere a page label would split them.
+              plans.length > 1 && params.backend.name === 'opencode'
+                ? `${session}-page-${page + 1}`
+                : undefined,
             );
             const kept = clampFindingsToFiles(findings, plan.assignedFiles, changed);
             params.onFindings?.(kept);

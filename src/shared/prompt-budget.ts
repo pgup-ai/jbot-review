@@ -1,3 +1,4 @@
+import { complianceReportsFindings } from './config.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 import { measureReviewPrompt, type ReviewPromptBudget } from './review-plan.ts';
 import {
@@ -39,7 +40,13 @@ export function budgetReviewBackend(
       return backend.runReview(model, context, guidelines, log, options);
     },
     async runGuidelineComplianceCheck(model, context, guidelines, ...rest) {
-      check(assembleGuidelineCompliancePrompt(context, guidelines));
+      check(
+        assembleGuidelineCompliancePrompt(
+          context,
+          guidelines,
+          complianceReportsFindings(backend.name, model),
+        ),
+      );
       return backend.runGuidelineComplianceCheck(model, context, guidelines, ...rest);
     },
     async runFindingVerification(model, context, findings, ...rest) {

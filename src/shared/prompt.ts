@@ -1696,12 +1696,28 @@ export function assembleGuidelineSweepPrompt(guidelines: string): string {
   );
 }
 
-export function assembleGuidelineCompliancePrompt(prContext: string, guidelines: string): string {
+export const REPORT_FINDING_TOOL_DESCRIPTION =
+  'Record one confirmed guideline violation the moment you confirm it, so it can survive if the audit is cut short. Recording is best-effort: your final JSON is the only guaranteed copy and must still list it. Use the same fields as a finding there.';
+
+/** Only opencode offers report_finding; other backends' compliance prompts omit this. */
+export const REPORT_FINDING_DIRECTIVE = `## Record findings as you confirm them
+
+- Each time you confirm a violation, call the \`report_finding\` tool with it
+  right away, then keep auditing. Do not batch them up for the end.
+- Your final JSON must still list every finding, including the reported ones.`;
+
+export function assembleGuidelineCompliancePrompt(
+  prContext: string,
+  guidelines: string,
+  reportTool = false,
+): string {
   const parts = [GUIDELINE_COMPLIANCE_PROMPT];
   if (guidelines) {
     parts.push('## Repository review guidelines\n', guidelines);
   }
-  parts.push(prContext, GUIDELINE_COMPLIANCE_OUTPUT_REMINDER);
+  parts.push(prContext);
+  if (reportTool) parts.push(REPORT_FINDING_DIRECTIVE);
+  parts.push(GUIDELINE_COMPLIANCE_OUTPUT_REMINDER);
   return parts.join('\n\n');
 }
 

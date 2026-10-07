@@ -873,6 +873,16 @@ const SCOPED_GUIDELINE_FILES = [
 ];
 
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
+
+/** Whether discovery could load this path as guidance: a known guideline file or any rule doc. */
+export function isGuidelineSource(path: string): boolean {
+  return (
+    ROOT_GUIDELINE_FILES.includes(path) ||
+    GUIDELINE_CONTROL_FILES.includes(path) ||
+    SCOPED_GUIDELINE_FILES.some((name) => path.endsWith(`/${name}`)) ||
+    /\.mdc?$/.test(path)
+  );
+}
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.
 const MAX_GUIDELINE_FILE_BYTES = 128 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
@@ -936,6 +946,13 @@ async function readWholeBounded(realPath: string): Promise<{ text: string; trunc
 function isGeneratedReviewReport(path: string): boolean {
   return /(^|\/)\.jbot-review\/last-run\.md$/.test(path.replaceAll('\\', '/'));
 }
+
+const GOVERNANCE_ROUTING = 'review/rules-for-diff.yaml';
+const GOVERNANCE_INDEX = 'README.md';
+/** Governance files that steer discovery (which docs and sections load) without being docs themselves. */
+export const GUIDELINE_CONTROL_FILES = [GOVERNANCE_ROUTING, GOVERNANCE_INDEX].map(
+  (path) => `.pr-governance/${path}`,
+);
 
 export async function discoverGuidelineDocs(
   cwd: string,
@@ -1296,7 +1313,7 @@ export async function discoverGuidelineDocs(
   // the generic files below (see review-routing.ts). Absent or malformed → that
   // whole-file discovery is the fallback.
   {
-    const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
+    const routingText = await readGovernanceFile(GOVERNANCE_ROUTING);
     const routes = routingText ? parseDiffRoutes(routingText) : [];
     if (routes.length > 0) {
       // Route globs are PR-controlled; bound them like `.mdc` globs, compile each
@@ -1321,7 +1338,7 @@ export async function discoverGuidelineDocs(
       // (whole-file discovery below still supplies guidance) rather than silently
       // dropping whichever routes happened to be scanned last.
       if (matchOps > MAX_ROUTE_MATCH_OPS) matched = { docs: [], ruleIds: [] };
-      const readmeText = await readGovernanceFile('README.md');
+      const readmeText = await readGovernanceFile(GOVERNANCE_INDEX);
       const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
       const wholeDocRealPaths = new Set<string>();
       const routedDocs = new Set<string>();

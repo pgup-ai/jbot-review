@@ -30,6 +30,7 @@ import {
   MAX_LINKED_ISSUES_BYTES,
   MAX_PR_BODY_BYTES,
   MAX_PRIOR_COMMENTS_BYTES,
+  isGuidelineSource,
 } from '../src/shared/review-context.ts';
 
 const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
@@ -1294,4 +1295,21 @@ it('keeps dedicated guideline checking unless complete global rules fit in main'
     { docs: [{ ...scoped, globs: ['!(ui)/**'] }] },
   ])
     assert.equal(canCheckGlobalGuidelinesInMain({ ...discovered, ...override }), false);
+});
+
+describe('isGuidelineSource', () => {
+  it('recognises every file discovery can load or route by, and nothing else', () => {
+    for (const path of [
+      'AGENTS.md',
+      'pkg/CLAUDE.md',
+      '.cursorrules',
+      'greptile.json',
+      'docs/agents/testing.md',
+      '.cursor/rules/style.mdc',
+      '.pr-governance/review/rules-for-diff.yaml',
+    ])
+      assert.equal(isGuidelineSource(path), true, path);
+    for (const path of ['src/a.ts', 'pkg/greptile.json', 'notes.txt'])
+      assert.equal(isGuidelineSource(path), false, path);
+  });
 });

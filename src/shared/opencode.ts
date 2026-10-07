@@ -1,5 +1,9 @@
 import { parseModelName } from '@symma/protocol';
-import { modelAcceptsForcedToolChoice, modelSupportsAgenticTools } from './config.ts';
+import {
+  complianceReportsFindings,
+  modelAcceptsForcedToolChoice,
+  modelSupportsAgenticTools,
+} from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import {
@@ -14,6 +18,7 @@ import {
   agentForModel,
   createReviewSession,
   promptInSession,
+  reportedFindingRows,
   type PromptOutcome,
 } from './opencode-session.ts';
 import {
@@ -31,6 +36,7 @@ import {
 } from './prompt.ts';
 import type { TokenUsageRecorder } from './token-usage.ts';
 import {
+  IncompleteReviewError,
   sanitizeFinding,
   VALID_SEVERITIES,
   VALID_FINDING_KINDS,
@@ -290,6 +296,7 @@ async function repromptForJson(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  abortLabel = label,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
   if (isNoAttemptReply(raw)) {
@@ -303,7 +310,7 @@ async function repromptForJson(
       log,
       timeoutMs,
       onTokenUsage,
-      label,
+      abortLabel,
     );
   }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
@@ -316,7 +323,7 @@ async function repromptForJson(
     log,
     timeoutMs,
     onTokenUsage,
-    label,
+    abortLabel,
   );
 }
 
@@ -328,13 +335,15 @@ async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorC
     sessionID: string;
     raw: string;
     label: string;
+    abortLabel?: string;
     log: (msg: string) => void;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   },
   field: K,
 ): Promise<ReviewResult[K]> {
-  const { runtime, model, sessionID, raw, label, log, timeoutMs, onTokenUsage } = session;
+  const { runtime, model, sessionID, raw, label, abortLabel, log, timeoutMs, onTokenUsage } =
+    session;
   try {
     return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
@@ -348,6 +357,7 @@ async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorC
       log,
       timeoutMs,
       onTokenUsage,
+      abortLabel,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
   }
@@ -395,23 +405,61 @@ export async function runGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
+  label = 'guideline-compliance',
 ): Promise<Finding[]> {
-  const prompt = promptForModel(model, assembleGuidelineCompliancePrompt(prContext, guidelines));
-  const { raw, sessionID } = await promptPlanAgent(
-    runtime,
+  const reportTool = complianceReportsFindings('opencode', model);
+  const prompt = promptForModel(
     model,
-    prompt,
-    'guideline-compliance',
-    log,
-    timeoutMs,
-    onTokenUsage,
-    undefined,
-    { modelOptions },
+    assembleGuidelineCompliancePrompt(prContext, guidelines, reportTool),
   );
-  return parseAuxSessionWithRepair(
-    { runtime, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
-    'findings',
-  );
+  // Pages log under their own label; abort and wrap-up still address every page at once.
+  const abortLabel = 'guideline-compliance';
+  let sessionID: string | undefined;
+  try {
+    const turn = await promptPlanAgent(
+      runtime,
+      model,
+      prompt,
+      label,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      undefined,
+      {
+        modelOptions,
+        abortLabel,
+        reportFindings: reportTool,
+        onSession: (id) => (sessionID = id),
+      },
+    );
+    // A cut-off page whose wrap-up said nothing keeps what it reported now; a full-length
+    // repair turn could outlast the settle grace and lose those findings too.
+    if (!turn.raw.trim() && reportedFindingRows(runtime, turn.sessionID).length)
+      throw new Error(`${label} returned no answer`);
+    return await parseAuxSessionWithRepair(
+      {
+        runtime,
+        model,
+        sessionID: turn.sessionID,
+        raw: turn.raw,
+        label,
+        abortLabel,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      },
+      'findings',
+    );
+  } catch (error) {
+    const rows = sessionID ? reportedFindingRows(runtime, sessionID) : [];
+    if (!rows.length) throw error;
+    const { findings } = parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new IncompleteReviewError(
+      `${message}; kept ${findings.length} finding(s) the session reported before it stopped`,
+      findings,
+    );
+  }
 }
 
 export async function runChangesSinceLastReview(
@@ -610,6 +658,9 @@ async function promptPlanAgent(
     modelOptions?: Record<string, unknown>;
     forkFrom?: string;
     toolLess?: boolean;
+    abortLabel?: string;
+    reportFindings?: boolean;
+    onSession?: (sessionID: string) => void;
   } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
@@ -620,7 +671,9 @@ async function promptPlanAgent(
     modelOptions: session.modelOptions,
     forkFrom: session.forkFrom,
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent, session.toolLess),
+    reportFindings: session.reportFindings,
   });
+  session.onSession?.(sessionID);
   log(`${label} session created: ${sessionID}`);
   const text = await promptInSession(runtime, sessionID, {
     model,
@@ -630,6 +683,7 @@ async function promptPlanAgent(
     log,
     onTokenUsage,
     outcome,
+    abortLabel: session.abortLabel,
   });
   return { raw: text, sessionID };
 }

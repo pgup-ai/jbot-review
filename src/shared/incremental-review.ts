@@ -11,6 +11,7 @@ import {
 } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
+import { isGuidelineSource } from './review-context.ts';
 
 const exec = promisify(execFile);
 const MARKER = /\n<!-- jbot-review:baseline:(\{[^\n]*\}) -->\n/;
@@ -140,6 +141,7 @@ export async function planIncrementalReview(input: {
   forceFull?: boolean;
   openThreadPaths?: ReadonlySet<string>;
   worktree?: boolean;
+  rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
   const full = (reason: string): IncrementalReviewPlan => ({
     mode: 'full',
@@ -154,6 +156,7 @@ export async function planIncrementalReview(input: {
   if (!input.base) return full('base-changed');
   if (baseline.policy !== input.policy) return full('policy-changed');
   if (!input.head || input.head === baseline.head) return full('same-head-rerun');
+  if (await input.rulesChangedSince(baseline.head)) return full('guidelines-changed');
   const deadline = Date.now() + 5000;
   const git = async (...args: string[]) => {
     const timeout = deadline - Date.now();
@@ -346,5 +349,75 @@ export async function planIncrementalReview(input: {
     };
   } catch {
     return full('history-or-impact-unavailable');
+  }
+}
+
+/**
+ * Whether the rules changed between two heads. Callers pass only docs the PR does not edit
+ * (those are reviewed as changed files); history git cannot read counts as a change.
+ */
+export async function ruleDocsChanged(
+  workspace: string,
+  rules: {
+    /** Rule sources the PR does not edit. */
+    paths: string[];
+    /** Rule sources the PR edits: only their base-side versions count. */
+    prEdited: string[];
+    prPaths: ReadonlySet<string>;
+    base?: string;
+    /** False when discovery ran out of budget, so some rule sources went unlisted. */
+    complete: boolean;
+  },
+  from: string,
+  to: string,
+): Promise<boolean> {
+  const git = async (...args: string[]) =>
+    (await exec('git', args, { cwd: workspace, timeout: 5000, maxBuffer: 1024 * 1024 })).stdout;
+  const changed = async (a: string, b: string, paths: string[]) =>
+    paths.length > 0 &&
+    (
+      await git('--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', a, b, '--', ...paths)
+    ).trim() !== '';
+  try {
+    if (await changed(from, to, rules.paths)) return true;
+    // What a base merge brought in shows between the two heads' fork points, without the PR's edits.
+    if (rules.prEdited.length || !rules.complete) {
+      if (!rules.base) return true;
+      const [oldFork, newFork] = await Promise.all(
+        [from, to].map(async (head) => (await git('merge-base', head, rules.base!)).trim()),
+      );
+      if (oldFork !== newFork) {
+        if (await changed(oldFork, newFork, rules.prEdited)) return true;
+        // Discovery that ran out of budget did not list every rule source: any guidance the base changed counts.
+        if (!rules.complete) {
+          const merged = await git(
+            'diff',
+            '--no-ext-diff',
+            '--no-renames',
+            '--name-only',
+            '-z',
+            oldFork,
+            newFork,
+          );
+          if (merged.split('\0').some((path) => path && isGuidelineSource(path))) return true;
+        }
+      }
+    }
+    // Today's discovery cannot list a doc the base deleted, and removing one (an exemption) can add obligations.
+    const deleted = await git(
+      'diff',
+      '--no-ext-diff',
+      '--no-renames',
+      '--name-only',
+      '--diff-filter=D',
+      '-z',
+      from,
+      to,
+    );
+    return deleted
+      .split('\0')
+      .some((path) => path && isGuidelineSource(path) && !rules.prPaths.has(path));
+  } catch {
+    return true;
   }
 }

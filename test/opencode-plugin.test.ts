@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -7,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { hermeticOpencodeConfigHome } from '../src/shared/opencode-plugin.ts';
 import {
   PERMISSION_DENIED_MESSAGE,
+  REPORT_FINDING_TOOL_DESCRIPTION,
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from '../src/shared/prompt.ts';
@@ -75,6 +77,7 @@ describe('jbot opencode plugin', () => {
     });
     const warnings = t.mock.method(console, 'warn', () => {});
     const tool = {
+      transform: t.mock.fn(async () => {}),
       hook: t.mock.fn(async () => {
         throw new Error('retrieval registration failed');
       }),
@@ -89,8 +92,11 @@ describe('jbot opencode plugin', () => {
       evaluate(permission);
       assert.equal(permission.effect, 'deny');
     }
-    assert.equal(warnings.mock.callCount(), 2);
-    assert.equal(tool.hook.mock.callCount(), 1);
+    // Each load warns once for report_finding and once for retrieval; with no
+    // persistence hook the tool is never offered.
+    assert.equal(warnings.mock.callCount(), 4);
+    assert.equal(tool.hook.mock.callCount(), 3);
+    assert.equal(tool.transform.mock.callCount(), 0);
     assert.doesNotMatch(
       JSON.stringify(warnings.mock.calls.map((c) => c.arguments)),
       /invalid JSON|TypeError/,
@@ -200,6 +206,88 @@ describe('jbot opencode plugin', () => {
       const unknown = { agent: 'plan', tools: tools(), sessionID: 'ses_2', options: {} };
       context(unknown);
       assert.deepEqual(unknown.options, {});
+    } finally {
+      delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
+    }
+  });
+
+  it('offers report_finding only to flagged sessions and records each call for that session', async (t) => {
+    let tool:
+      | {
+          name: string;
+          options?: unknown;
+          description?: string;
+          input?: { properties: object; required: string[] };
+        }
+      | undefined;
+    let afterExecute: Hook | undefined;
+    const { context } = await loadPlugin({
+      transform: async (edit: (editor: { add: (def: { name: string }) => void }) => void) =>
+        edit({ add: (def) => (tool = def) }),
+      hook: async (name: string, fn: Hook) => {
+        if (name === 'execute.after') afterExecute = fn;
+      },
+    } as never);
+    assert.equal(tool?.name, 'report_finding');
+    assert.deepEqual(tool?.options, { codemode: false });
+    assert.equal(tool?.description, REPORT_FINDING_TOOL_DESCRIPTION);
+    // Every final-JSON finding field is accepted; only the anchoring ones are required.
+    assert.deepEqual(Object.keys(tool?.input?.properties ?? {}).sort(), [
+      'body',
+      'confidence',
+      'evidence',
+      'kind',
+      'line',
+      'path',
+      'severity',
+      'title',
+    ]);
+    assert.deepEqual([...(tool?.input?.required ?? [])].sort(), [
+      'body',
+      'line',
+      'path',
+      'severity',
+      'title',
+    ]);
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
+    temps.push(dir);
+    const file = join(dir, 'opts.json');
+    writeFileSync(file, JSON.stringify({ ses_1: { jbotReportFindings: true } }));
+    process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
+    try {
+      const withTool = () => ({ ...tools(), report_finding: { description: 'r', input: {} } });
+      const flagged = { agent: 'plan', tools: withTool(), sessionID: 'ses_1', options: {} };
+      context(flagged);
+      assert.ok('report_finding' in flagged.tools);
+      assert.deepEqual(flagged.options, {});
+      const other = { agent: 'plan', tools: withTool(), sessionID: 'ses_2', options: {} };
+      context(other);
+      assert.ok(!('report_finding' in other.tools));
+      const finding = { path: 'a.ts', line: 1, severity: 'P2', title: 't', body: 'b' };
+      for (const status of ['completed', 'error'])
+        afterExecute!({ tool: 'report_finding', status, sessionID: 'ses_1', input: finding });
+      afterExecute!({ tool: 'read', status: 'completed', sessionID: 'ses_1', input: {} });
+      const recorded = readFileSync(
+        join(dir, `reported-${createHash('sha256').update('ses_1').digest('hex')}.jsonl`),
+        'utf8',
+      );
+      assert.deepEqual(
+        recorded
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line)),
+        [finding],
+      );
+      // A row that would overflow the journal is dropped, and a failed write never fails the call.
+      const journal = (id: string) =>
+        join(dir, `reported-${createHash('sha256').update(id).digest('hex')}.jsonl`);
+      writeFileSync(journal('ses_full'), 'x'.repeat(1024 * 1024 - 10));
+      mkdirSync(journal('ses_dir'));
+      const warnings = t.mock.method(console, 'warn', () => {});
+      for (const sessionID of ['ses_full', 'ses_dir'])
+        afterExecute!({ tool: 'report_finding', status: 'completed', sessionID, input: finding });
+      assert.equal(readFileSync(journal('ses_full'), 'utf8').length, 1024 * 1024 - 10);
+      assert.equal(warnings.mock.callCount(), 1);
     } finally {
       delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
     }

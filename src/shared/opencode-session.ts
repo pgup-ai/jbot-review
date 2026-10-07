@@ -257,6 +257,7 @@ export interface CreateSessionSpec {
   agent?: string;
   forkFrom?: string;
   deadline?: number;
+  reportFindings?: boolean;
 }
 
 /** Control-plane calls never wait on a wedged server longer than one request timeout. */
@@ -328,9 +329,13 @@ function registerSessionOptions(
     spec.modelOptions ?? sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
   const experiment = runtime.explorationExperiment;
   const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
-  if (!options && !label) return;
+  if (!options && !label && !spec.reportFindings) return;
   const map = sessionOptionsByRuntime.get(runtime) ?? {};
-  map[sessionID] = { ...options, ...(label ? { jbotSessionLabel: spec.label } : {}) };
+  map[sessionID] = {
+    ...options,
+    ...(label ? { jbotSessionLabel: spec.label } : {}),
+    ...(spec.reportFindings ? { jbotReportFindings: true } : {}),
+  };
   sessionOptionsByRuntime.set(runtime, map);
   const tmp = `${runtime.sessionOptionsFile}.tmp`;
   writeFileSync(tmp, JSON.stringify(map));
@@ -645,6 +650,28 @@ export async function promptInSession(
   } finally {
     release?.();
   }
+}
+
+export function reportedFindingRows(runtime: OpencodeRuntime, sessionID: string): unknown[] {
+  const file = join(
+    dirname(runtime.sessionOptionsFile),
+    `reported-${createHash('sha256').update(sessionID).digest('hex')}.jsonl`,
+  );
+  // Recovery is best-effort: an unreadable journal or a partial last line from a page cut off
+  // mid-append must not mask the page's own error.
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  return text.split('\n').flatMap((line) => {
+    try {
+      return [JSON.parse(line) as unknown];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function sessionExplorationStats(runtime: OpencodeRuntime, sessionID: string) {

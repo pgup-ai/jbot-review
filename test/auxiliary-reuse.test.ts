@@ -72,6 +72,7 @@ test('documentation reuse requires a successful ancestor with matching base and 
       policyFor: () => policy,
       sessions: ['review-interactions', 'guideline-compliance'],
       priorBodies: [withAuxiliaryBaselines('<sup>driver</sup>', [baseline])],
+      rulesChangedSince: async () => false,
     };
     const decisions = await planAuxiliaryReuse(input);
     assert.equal(decisions[0].baseline?.head, reviewed);
@@ -81,6 +82,7 @@ test('documentation reuse requires a successful ancestor with matching base and 
       [{ head: base }, 'history-unavailable'],
       [{ base: reviewed }, 'base-changed'],
       [{ policyFor: () => auxiliaryPolicy('new model') }, 'policy-changed'],
+      [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ priorBodies: ['reviewed head, but incomplete auxiliaries'] }, 'no-completed-baseline'],
       [
         { priorBodies: [...input.priorBodies, '<sup>Newer incomplete run</sup>'] },
@@ -149,6 +151,7 @@ test('a follow-up re-checks compliance only on files whose edits differ from the
     // The pass's own base...head, whatever the PR's base is today.
     audited: async (...range: string[]) =>
       range.join() === `${base},${reviewed}` ? auditedFiles : [],
+    rulesChangedSince: async () => false,
   };
   assert.deepEqual(await planComplianceRecheck(input), {
     reason: 'edits-since-review',
@@ -164,6 +167,7 @@ test('a follow-up re-checks compliance only on files whose edits differ from the
     [{ priorBody: '<sup>driver</sup>' }, 'no-completed-baseline'],
     [{ policy: auxiliaryPolicy('changed rules') }, 'policy-changed'],
     [{ head: reviewed }, 'same-head-rerun'],
+    [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
     [{ files: Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.ts` })) }, 'large-pr'],
     [{ audited: () => Promise.reject(new Error('compare capped')) }, 'history-unavailable'],
     [{ files: [{ filename: 'b.ts', patch: '@@ -1 +1 @@\n-p\n+r' }] }, 'every-file-changed'],
