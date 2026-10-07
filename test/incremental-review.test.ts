@@ -11,6 +11,7 @@ import {
   type PrFile,
 } from '../src/shared/github.ts';
 import {
+  BASELINE_REFRESH_REASONS,
   impactedReviewFiles,
   planIncrementalReview,
   reviewBaseline,
@@ -180,6 +181,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       result.files.map((file) => file.filename),
       ['core/limit.ts', 'worker/job.ts'],
     );
+    const emitted = new Set<string>();
     for (const [overrides, reason] of [
       [{ forceFull: true }, 'explicit-or-incomplete-review'],
       [{ priorBodies: [] }, 'no-completed-baseline'],
@@ -204,8 +206,11 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       const plan = await planIncrementalReview({ ...input, ...overrides });
       assert.equal(plan.mode, 'full', reason);
       assert.equal(plan.reason, reason);
+      emitted.add(plan.reason);
       assert.deepEqual(plan.files, overrides.files ?? files);
     }
+    // A renamed reason must not silently stop the clean-run baseline refresh.
+    for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
     write(
       'unchanged/wrapper.ts',
       'import { limit } from "../core/limit";\nexport const wrapper = () => limit();\n',

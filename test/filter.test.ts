@@ -729,11 +729,9 @@ describe('shouldPostReviewComment', () => {
     assert.equal(shouldPostReviewComment(2, 0, false), true);
   });
 
-  it('posts a clean re-run whose stored baseline could not be used, so a new one is recorded', () => {
-    for (const reason of ['no-completed-baseline', 'policy-changed', 'guidelines-changed'])
-      assert.equal(shouldPostReviewComment(2, 0, true, reason), true, reason);
-    for (const reason of ['broad-or-empty-followup', 'unsupported-or-large-pr', undefined])
-      assert.equal(shouldPostReviewComment(2, 0, true, reason), false, String(reason));
+  it('posts a clean re-run that refreshes an unusable baseline', () => {
+    assert.equal(shouldPostReviewComment(2, 0, true, true), true);
+    assert.equal(shouldPostReviewComment(2, 0, true, false), false);
   });
 });
 

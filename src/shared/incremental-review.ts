@@ -130,6 +130,13 @@ export function impactedReviewFiles(
   return files.filter((file) => selected.has(file.filename));
 }
 
+/** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
+export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
+  'no-completed-baseline',
+  'policy-changed',
+  'guidelines-changed',
+]);
+
 export async function planIncrementalReview(input: {
   workspace: string;
   files: PrFile[];

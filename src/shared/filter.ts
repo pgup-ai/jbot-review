@@ -647,26 +647,14 @@ export function anchorFindings(
   return result;
 }
 
-// Full-scope reasons the stored baseline caused; only a posted review body records a new one.
-const BASELINE_REFRESH_REASONS = new Set([
-  'no-completed-baseline',
-  'policy-changed',
-  'guidelines-changed',
-]);
-
 export function shouldPostReviewComment(
   priorJbotReviewCount: number,
   findingCount: number,
   coverageComplete = true,
-  /** Set only when this run's body records a baseline; otherwise posting refreshes nothing. */
-  refreshedBaselineReason?: string,
+  /** The stored baseline was unusable and this run's body records a new one. */
+  refreshesBaseline = false,
 ): boolean {
-  return (
-    !coverageComplete ||
-    priorJbotReviewCount === 0 ||
-    findingCount > 0 ||
-    BASELINE_REFRESH_REASONS.has(refreshedBaselineReason ?? '')
-  );
+  return !coverageComplete || priorJbotReviewCount === 0 || findingCount > 0 || refreshesBaseline;
 }
 
 /** Minimal review-thread shape for the reaction gate (no GitHub-layer import). */

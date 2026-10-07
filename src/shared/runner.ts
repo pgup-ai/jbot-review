@@ -1,5 +1,6 @@
 import { VerificationEvidence } from './verification-evidence.ts';
 import {
+  BASELINE_REFRESH_REASONS,
   planIncrementalReview,
   ruleDocsChanged,
   withReviewBaseline,
@@ -3816,7 +3817,7 @@ async function runReviewPipeline(params: {
       priorJbotReviewCount,
       findingCount,
       incompleteSessions.length === 0,
-      reviewMetadata.baseline ? reviewScope.reason : undefined,
+      Boolean(reviewMetadata.baseline) && BASELINE_REFRESH_REASONS.has(reviewScope.reason),
     );
     const deferCleanComment = options.autoApprove && verifiedFindings.length === 0;
     const buildCurrentBody = () =>
