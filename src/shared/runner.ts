@@ -2578,12 +2578,15 @@ async function runReviewPipeline(params: {
         : options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
+    // Hashed into the compliance policy and used to size pages: the prompt actually sent.
+    const complianceReportTool =
+      auxBackend.name === 'opencode' && complianceReportsFindings(auxModel);
     const policyFor = (session: string) =>
       auxiliaryPolicy({
         ...auxPolicy,
         prompt:
           session === 'guideline-compliance'
-            ? assembleGuidelineCompliancePrompt('', '')
+            ? assembleGuidelineCompliancePrompt('', '', complianceReportTool)
             : assembleReviewPrompt(
                 '',
                 '',
@@ -3159,11 +3162,7 @@ async function runReviewPipeline(params: {
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
-          : assembleGuidelineCompliancePrompt(
-              context,
-              rules,
-              auxBackend.name === 'opencode' && complianceReportsFindings(auxModel),
-            );
+          : assembleGuidelineCompliancePrompt(context, rules, complianceReportTool);
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
       // The pack's callers replace the usage list; pages it cannot serve get it back as a trailer.
       const usageTrailer = lens && packPages ? blastRadiusBlock : '';
