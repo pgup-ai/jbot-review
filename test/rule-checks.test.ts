@@ -46,6 +46,14 @@ test('parseRuleChecks keeps valid checks and rejects malformed or duplicate ones
     'Upper',
     '#6',
   ]);
+  assert.deepEqual(
+    parseRuleChecks(
+      JSON.stringify({
+        checks: Array.from({ length: 201 }, (_, i) => ({ ...check, id: `c${i}` })),
+      }),
+    ).rejected,
+    ['c200'],
+  );
   assert.throws(() => parseRuleChecks('{"rules":[]}'), /"checks" array/);
 });
 
@@ -65,10 +73,21 @@ test('runRuleChecks matches added lines in scoped files only and honours unless'
     { filename: 'src/empty.spec.ts' },
   ]);
   assert.deepEqual(
-    hits.map(({ path, line }) => ({ path, line })),
+    hits?.map(({ path, line }) => ({ path, line })),
     [{ path: 'src/order.spec.ts', line: 2 }],
   );
-  assert.match(ruleCheckFinding(hits[0]).body, /createTestXyz[\s\S]*`tests-use-create-test`/);
+  assert.match(ruleCheckFinding(hits![0]).body, /createTestXyz[\s\S]*`tests-use-create-test`/);
+});
+
+test('runRuleChecks matches past any line length and gives up on catastrophic backtracking', () => {
+  const parse = (pattern: string) =>
+    parseRuleChecks(JSON.stringify({ checks: [{ ...check, pattern, unless: undefined }] })).checks;
+  const patch = (line: string) => [{ filename: 'a.spec.ts', patch: `@@ -0,0 +1 @@\n+${line}` }];
+  assert.equal(
+    runRuleChecks(parse('it\\.only\\('), patch(`${' '.repeat(5000)}it.only(`))?.length,
+    1,
+  );
+  assert.equal(runRuleChecks(parse('^(a+)+$'), patch(`${'a'.repeat(40)}!`), 50), undefined);
 });
 
 test('ruleCheckAgreement counts hits the guideline pass also found and its findings no hit explains', () => {

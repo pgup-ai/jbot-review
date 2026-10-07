@@ -1323,11 +1323,19 @@ agrees with any labelled lines passed with `--examples`. It reports how often
 each check fires on today's code, which exposes broad patterns. Review every
 check before committing.
 
-A `shadow` check posts nothing. Each review logs `Rule checks (shadow)`: per
-check, how many hits the guideline pass also reported, and how many guideline
-findings in those files no hit explains. Switch a check to `enforce` once those
+A `shadow` check posts nothing. After a complete guideline pass, a review
+logs `Rule checks (shadow)` for the checks with hits: per check, how many hits
+have a guideline finding within three lines, and how many guideline findings
+in those files no hit explains. Agreement is by location, so confirm that a
+nearby finding cites the check's rule. Switch a check to `enforce` once those
 agree. Its hits then post as compliance findings, and the guideline pass is
 told to leave that rule alone.
+
+Matching is time-boxed. When the checks outrun the budget (a pattern that
+backtracks catastrophically), the review logs it, posts no check hits and
+leaves every rule to the guideline pass. `rules:compile` rejects such a
+pattern as `pattern-too-slow`, and refuses to overwrite an existing checks
+file.
 
 CommandCode logs progress every minute: elapsed time, observed tool outcomes,
 last completed tool, and time since the last event. A final `commandcode-progress`

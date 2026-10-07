@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Script } from 'node:vm';
 import type { PrFile } from './github.ts';
 import { newSideLines } from './patch.ts';
 import { globMatches } from './review-context.ts';
@@ -34,10 +35,10 @@ interface RuleCheckHit {
   line: number;
 }
 
-// Repo-controlled regexes run on PR-controlled lines: bound both.
+// Repo-controlled regexes run on PR-controlled lines: bound the checks and the time spent matching.
 const MAX_CHECKS = 200;
 const MAX_PATTERN_LENGTH = 500;
-const MAX_LINE_LENGTH = 1000;
+const MATCH_TIMEOUT_MS = 2000;
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SEVERITIES = new Set(['P1', 'P2', 'P3']);
 
@@ -49,8 +50,8 @@ export function parseRuleChecks(json: string): { checks: RuleCheck[]; rejected: 
   const checks: RuleCheck[] = [];
   const rejected: string[] = [];
   const ids = new Set<string>();
-  for (const [index, row] of rows.slice(0, MAX_CHECKS).entries()) {
-    const check = parseCheck(row);
+  for (const [index, row] of rows.entries()) {
+    const check = index < MAX_CHECKS ? parseCheck(row) : undefined;
     if (check && !ids.has(check.id)) {
       ids.add(check.id);
       checks.push(check);
@@ -114,20 +115,50 @@ export async function loadRuleChecks(
   return parseRuleChecks(await git('show', `${fork}:${RULE_CHECKS_PATH}`));
 }
 
-export function runRuleChecks(checks: RuleCheck[], files: PrFile[]): RuleCheckHit[] {
-  const hits: RuleCheckHit[] = [];
+// A context-local RegExp, so the vm timeout can interrupt catastrophic backtracking.
+const MATCH = new Script(`
+  const compiled = sources.map(([pattern, unless]) => [
+    new RegExp(pattern),
+    unless === undefined ? undefined : new RegExp(unless),
+  ]);
+  const pairs = [];
+  lines.forEach(({ text, checks }, index) => {
+    for (const id of checks) {
+      const [pattern, unless] = compiled[id];
+      if (pattern.test(text) && !unless?.test(text)) pairs.push(index, id);
+    }
+  });
+  pairs;
+`);
+
+/** Undefined when matching outran its time budget, so a slow pattern cannot stall a review. */
+export function runRuleChecks(
+  checks: RuleCheck[],
+  files: PrFile[],
+  timeoutMs = MATCH_TIMEOUT_MS,
+): RuleCheckHit[] | undefined {
+  const lines: { path: string; line: number; text: string; checks: number[] }[] = [];
   for (const file of files) {
-    const applicable = checks.filter((check) =>
-      check.files.some((glob) => globMatches(glob, file.filename)),
+    const applicable = checks.flatMap((check, index) =>
+      check.files.some((glob) => globMatches(glob, file.filename)) ? [index] : [],
     );
     if (!applicable.length || !file.patch) continue;
-    for (const { added, line, content } of newSideLines(file.patch)) {
-      if (!added) continue;
-      const text = content.slice(0, MAX_LINE_LENGTH);
-      for (const check of applicable)
-        if (check.pattern.test(text) && !check.unless?.test(text))
-          hits.push({ check, path: file.filename, line });
-    }
+    for (const { added, line, content } of newSideLines(file.patch))
+      if (added) lines.push({ path: file.filename, line, text: content, checks: applicable });
+  }
+  if (!lines.length) return [];
+  const sources = checks.map((check) => [check.pattern.source, check.unless?.source]);
+  let pairs: number[];
+  try {
+    pairs = MATCH.runInNewContext({ sources, lines }, { timeout: timeoutMs }) as number[];
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') return undefined;
+    throw error;
+  }
+  const hits: RuleCheckHit[] = [];
+  for (let i = 0; i < pairs.length; i += 2) {
+    const { path, line } = lines[pairs[i]];
+    hits.push({ check: checks[pairs[i + 1]], path, line });
   }
   return hits;
 }
@@ -148,8 +179,9 @@ export function ruleCheckFinding({ check, path, line }: RuleCheckHit): Finding {
 const AGREEMENT_LINES = 3;
 
 /**
- * Shadow evidence for promoting a check: how many of its hits the guideline pass also
- * reported, and how many guideline findings in the check's files no check hit explains.
+ * Shadow evidence for promoting a check, matched by location only: how many of its hits have
+ * a guideline finding (for any rule) nearby, and how many guideline findings in files with a
+ * hit no hit explains. A reader confirms which rule each nearby finding cites before promoting.
  */
 export function ruleCheckAgreement(hits: RuleCheckHit[], compliance: Finding[]) {
   const near = (a: { path: string; line: number }, b: { path: string; line: number }) =>
@@ -193,6 +225,8 @@ const allAdded = (path: string, text: string): PrFile => {
   };
 };
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+// The whole repository runs as added lines, so its budget is wider than a review's.
+const COMPILE_TIMEOUT_MS = 30_000;
 
 /**
  * Keeps a compiled check only when it parses, quotes a rule that a loaded doc states
@@ -217,23 +251,25 @@ export function validateCompiledChecks(
   }));
   const kept: Record<string, unknown>[] = [];
   for (const check of checks) {
+    const existing = runRuleChecks([check], repo, COMPILE_TIMEOUT_MS);
     const row: CompiledCheckReport = {
       id: check.id,
       kept: false,
-      existingHits: runRuleChecks([check], repo).length,
+      existingHits: existing?.length ?? 0,
     };
     const quote = /"([^"]{12,})"/.exec(check.rule)?.[1];
     const examples = input.examples.filter((example) => example.check === check.id);
     if (examples.length) {
       const hit = (example: RuleCheckExample) =>
-        runRuleChecks([check], [allAdded(example.path, example.text)]).length > 0;
+        Boolean(runRuleChecks([check], [allAdded(example.path, example.text)])?.length);
       row.examples = {
         caught: examples.filter((example) => example.violation && hit(example)).length,
         missed: examples.filter((example) => example.violation && !hit(example)).length,
         falseHits: examples.filter((example) => !example.violation && hit(example)).length,
       };
     }
-    if (!quote || !docs.some((doc) => doc.includes(squash(quote))))
+    if (!existing) row.reason = 'pattern-too-slow';
+    else if (!quote || !docs.some((doc) => doc.includes(squash(quote))))
       row.reason = 'rule-not-quoted-verbatim';
     else if (row.examples && (row.examples.missed || row.examples.falseHits))
       row.reason = 'disagrees-with-examples';

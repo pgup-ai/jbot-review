@@ -2584,9 +2584,15 @@ async function runReviewPipeline(params: {
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     let guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
+    // Matched before any guideline prompt is built: a timed-out run leaves every rule to the pass.
+    const ruleCheckHits = ruleChecks && runRuleChecks(ruleChecks.checks, files);
+    if (ruleChecks && !ruleCheckHits)
+      log('Rule checks skipped: matching exceeded its time budget.');
+    const enforcedRules =
+      (ruleCheckHits && ruleChecks?.checks.filter((check) => check.mode === 'enforce')) ?? [];
     const complianceGuidelines = withEnforcedRuleChecks(
       rankedGuidelines || !followupGuidelines ? guidelines : formatGuidelines(followupGuidelines),
-      (ruleChecks?.checks ?? []).filter((check) => check.mode === 'enforce'),
+      enforcedRules,
     );
     let candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
@@ -2689,7 +2695,9 @@ async function runReviewPipeline(params: {
       modelSupportsAgenticTools(auxProviderID, auxModelID),
     );
     const sweepGuidelines =
-      options.guidelineSweep && mainBackend.supportsGuidelineSweep ? guidelines : undefined;
+      options.guidelineSweep && mainBackend.supportsGuidelineSweep
+        ? withEnforcedRuleChecks(guidelines, enforcedRules)
+        : undefined;
     if (sweepGuidelines)
       log(
         'Guideline checking will continue in each main review session; verification remains separate.',
@@ -3535,12 +3543,12 @@ async function runReviewPipeline(params: {
       ),
     ]);
     graceDone();
-    const ruleCheckHits = ruleChecks ? runRuleChecks(ruleChecks.checks, files) : [];
     // Shadow checks earn promotion by matching what a completed guideline pass reported.
     if (
       guidelineCandidate &&
       auxCoverage.get('guideline-compliance')?.complete &&
       !partialSessions.has('guideline-compliance') &&
+      ruleCheckHits &&
       ruleChecks?.checks.some((check) => check.mode === 'shadow')
     ) {
       const audited = new Set(recheckFiles ?? files.map((file) => file.filename));
@@ -3553,7 +3561,7 @@ async function runReviewPipeline(params: {
         )}`,
       );
     }
-    const enforcedFindings = ruleCheckHits
+    const enforcedFindings = (ruleCheckHits ?? [])
       .filter((hit) => hit.check.mode === 'enforce')
       .map(ruleCheckFinding);
     const [verifiedAddressedPriorComments, changesSinceText] = await (optionalAtMainEnd ??

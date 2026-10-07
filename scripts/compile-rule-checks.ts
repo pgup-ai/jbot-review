@@ -3,7 +3,7 @@
 // labelled.jsonl: {"check": "no-focused-tests", "path": "a.spec.ts", "text": "it.only('x')", "violation": true}
 // Every kept check starts in shadow mode; promote one to "enforce" only after its shadow runs agree.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseModelName } from '@symma/protocol';
 
@@ -23,6 +23,8 @@ import { benchmarkArgument } from './benchmark-args.ts';
 const MAX_REPO_FILE_BYTES = 512 * 1024;
 const workspace = resolve(benchmarkArgument('workspace') ?? '.');
 const out = resolve(benchmarkArgument('out') ?? join(workspace, RULE_CHECKS_PATH));
+// A rerun would drop omitted checks and reset promoted ones to shadow.
+if (existsSync(out)) throw new Error(`${out} exists; pass --out to draft beside it.`);
 const model = benchmarkArgument('model') ?? process.env.MODEL ?? 'deepseek/deepseek-flash';
 const examplesPath = benchmarkArgument('examples');
 const examples: RuleCheckExample[] = examplesPath
@@ -39,7 +41,9 @@ const discovered = await discoverGuidelineDocs(workspace, tracked);
 const repoFiles = tracked.flatMap((path) => {
   try {
     const file = join(workspace, path);
-    return statSync(file).size > MAX_REPO_FILE_BYTES
+    // lstat: a tracked symlink to a device or FIFO would never reach EOF.
+    const stat = lstatSync(file);
+    return !stat.isFile() || stat.size > MAX_REPO_FILE_BYTES
       ? []
       : [{ path, text: readFileSync(file, 'utf8') }];
   } catch {
@@ -48,10 +52,13 @@ const repoFiles = tracked.flatMap((path) => {
 });
 
 const { providerID, modelID } = parseModelName(model);
-const keyEnv = PROVIDERS[providerID]?.keyEnv;
-const apiKey = (keyEnv && process.env[keyEnv]) || '';
-if (!apiKey) throw new Error(`Set ${keyEnv ?? 'the provider key'} for ${model}.`);
-const runtime = await startOpencode(workspace, providerID, modelID, apiKey, console.error);
+const provider = PROVIDERS[providerID];
+const apiKey = (provider?.keyEnv && process.env[provider.keyEnv]) || '';
+if (!apiKey) throw new Error(`Set ${provider?.keyEnv ?? 'the provider key'} for ${model}.`);
+const runtime = await startOpencode(workspace, providerID, modelID, apiKey, console.error, {
+  baseURL: provider?.custom && process.env[provider.custom.baseURL.env],
+  promptCache: provider?.promptCache,
+});
 let raw: string;
 try {
   const spec = { label: 'rule-check-compiler', model, log: console.error };
@@ -65,14 +72,14 @@ try {
   runtime.stop();
 }
 
-const json = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
+const start = raw.indexOf('{');
+if (start < 0) throw new Error(`The model returned no JSON object:\n${raw.slice(0, 500)}`);
+const json = raw.slice(start, raw.lastIndexOf('}') + 1);
 const { checks, report } = validateCompiledChecks(json, {
   docs: discovered.docs.map((doc) => doc.text),
   repoFiles,
   examples,
 });
-mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, `${JSON.stringify({ checks }, null, 2)}\n`);
 for (const row of report)
   console.log(
     `${row.kept ? 'kept    ' : 'rejected'} ${row.id}  existing hits ${row.existingHits}${
@@ -81,4 +88,8 @@ for (const row of report)
         : ''
     }${row.reason ? `  (${row.reason})` : ''}`,
   );
-console.log(`Wrote ${checks.length} shadow check(s) to ${out}. Review them before committing.`);
+if (checks.length) {
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, `${JSON.stringify({ checks }, null, 2)}\n`);
+  console.log(`Wrote ${checks.length} shadow check(s) to ${out}. Review them before committing.`);
+} else console.log('No check was kept; nothing written.');
