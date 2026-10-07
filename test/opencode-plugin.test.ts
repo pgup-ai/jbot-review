@@ -235,13 +235,20 @@ describe('jbot opencode plugin', () => {
     assert.deepEqual(Object.keys(tool?.input?.properties ?? {}).sort(), [
       'body',
       'confidence',
+      'evidence',
       'kind',
       'line',
       'path',
       'severity',
       'title',
     ]);
-    assert.deepEqual(tool?.input?.required, ['path', 'line', 'severity', 'title', 'body']);
+    assert.deepEqual([...(tool?.input?.required ?? [])].sort(), [
+      'body',
+      'line',
+      'path',
+      'severity',
+      'title',
+    ]);
     const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
     temps.push(dir);
     const file = join(dir, 'opts.json');
