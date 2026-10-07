@@ -386,6 +386,7 @@ export async function ruleDocsChanged(
     const deleted = await git(
       'diff',
       '--no-ext-diff',
+      '--no-renames',
       '--name-only',
       '--diff-filter=D',
       '-z',

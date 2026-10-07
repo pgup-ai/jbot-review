@@ -348,7 +348,11 @@ test('rule docs count as changed between heads only when their content moved', a
     const cursorRules = commit();
     assert.equal(await ruleDocsChanged(workspace, [], none, deletion, cursorRules), true);
     rmSync(join(workspace, 'src/notes.txt'));
-    assert.equal(await ruleDocsChanged(workspace, [], none, cursorRules, commit()), false);
+    const unrelated = commit();
+    assert.equal(await ruleDocsChanged(workspace, [], none, cursorRules, unrelated), false);
+    // Rename detection must not hide a guideline file moved to a non-guideline name.
+    git('mv', 'AGENTS.md', 'NOTES.txt');
+    assert.equal(await ruleDocsChanged(workspace, [], none, unrelated, commit()), true);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
