@@ -3816,6 +3816,7 @@ async function runReviewPipeline(params: {
       priorJbotReviewCount,
       findingCount,
       incompleteSessions.length === 0,
+      reviewScope.reason,
     );
     const deferCleanComment = options.autoApprove && verifiedFindings.length === 0;
     const buildCurrentBody = () =>
