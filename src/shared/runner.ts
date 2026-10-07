@@ -1408,6 +1408,34 @@ async function runReviewPipeline(params: {
     return;
   }
 
+  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
+  log(
+    `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
+  );
+  // Discovery follows the diff, so policies leave rule text out; a rule doc the PR does not
+  // edit changing since the baseline (a base-branch merge) is checked on its own.
+  // Every PR file, noise and patchless ones included: the PR's own edits and deletions are not base changes.
+  const prPaths = new Set(rawFiles.map((file) => file.filename));
+  const ruleSources = [
+    ...new Set([
+      ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
+      ...GUIDELINE_CONTROL_FILES,
+    ]),
+  ];
+  const rules = {
+    paths: ruleSources.filter((path) => !prPaths.has(path)),
+    prEdited: ruleSources.filter((path) => prPaths.has(path)),
+    prPaths,
+    base: baseSha,
+  };
+  const ruleChanges = new Map<string, Promise<boolean>>();
+  const rulesChangedSince = (reviewed: string) => {
+    if (!ruleChanges.has(reviewed))
+      ruleChanges.set(reviewed, ruleDocsChanged(workspace, rules, reviewed, headSha ?? 'HEAD'));
+    return ruleChanges.get(reviewed)!;
+  };
+
   // Unchanged-diff gate (contract on `skipUnchanged`): nothing new for the
   // model at this exact content, so skip before any server boot or LLM session.
   // Auto-approve runs never skip: approval must re-attest the latest pushed
@@ -1433,7 +1461,12 @@ async function runReviewPipeline(params: {
         );
         return null;
       });
-      if (priorFiles !== null && samePatchSet(rawFiles, priorFiles)) {
+      // Identical patches still need a review when the base changed the rules they answer to.
+      if (
+        priorFiles !== null &&
+        samePatchSet(rawFiles, priorFiles) &&
+        !(await rulesChangedSince(reviewedHead))
+      ) {
         log(
           `Diff unchanged since the last posted review (head ${reviewedHead.slice(0, 7)}); skipping the full review.`,
         );
@@ -1580,34 +1613,6 @@ async function runReviewPipeline(params: {
     mainOnPoolside ? options.modelOptions : resolvedMainOptions,
     commandCodeEffortContext,
   );
-
-  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
-  const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
-  log(
-    `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
-  );
-  // Discovery follows the diff, so policies leave rule text out; a rule doc the PR does not
-  // edit changing since the baseline (a base-branch merge) is checked on its own.
-  // Every PR file, noise and patchless ones included: the PR's own edits and deletions are not base changes.
-  const prPaths = new Set(rawFiles.map((file) => file.filename));
-  const ruleSources = [
-    ...new Set([
-      ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
-      ...GUIDELINE_CONTROL_FILES,
-    ]),
-  ];
-  const rules = {
-    paths: ruleSources.filter((path) => !prPaths.has(path)),
-    prEdited: ruleSources.filter((path) => prPaths.has(path)),
-    prPaths,
-    base: baseSha,
-  };
-  const ruleChanges = new Map<string, Promise<boolean>>();
-  const rulesChangedSince = (reviewed: string) => {
-    if (!ruleChanges.has(reviewed))
-      ruleChanges.set(reviewed, ruleDocsChanged(workspace, rules, reviewed, headSha ?? 'HEAD'));
-    return ruleChanges.get(reviewed)!;
-  };
 
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
