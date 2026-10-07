@@ -1587,7 +1587,8 @@ async function runReviewPipeline(params: {
   );
   // Discovery follows the diff, so policies leave rule text out; a rule doc the PR does not
   // edit changing since the baseline (a base-branch merge) is checked on its own.
-  const prPaths = new Set(changedFiles);
+  // Every PR file, noise and patchless ones included: the PR's own edits and deletions are not base changes.
+  const prPaths = new Set(rawFiles.map((file) => file.filename));
   const rulePaths = [
     ...new Set([
       ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
