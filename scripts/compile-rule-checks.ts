@@ -83,7 +83,9 @@ const { checks, report } = validateCompiledChecks(json, {
 // A mistyped label would otherwise leave its check unvalidated and kept.
 const unmatched = [
   ...new Set(
-    examples.map((example) => example.check).filter((id) => !report.some((row) => row.id === id)),
+    examples
+      .map((example) => example.check)
+      .filter((id) => !report.some((row) => row.id === id && row.examples)),
   ),
 ];
 if (unmatched.length)

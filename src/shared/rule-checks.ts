@@ -271,16 +271,18 @@ export function validateCompiledChecks(
     };
     const quote = /"([^"]{12,})"/.exec(check.rule)?.[1];
     const examples = input.examples.filter((example) => example.check === check.id);
-    if (examples.length) {
-      const hit = (example: RuleCheckExample) =>
-        Boolean(runRuleChecks([check], [allAdded(example.path, example.text)])?.length);
+    // A timed-out example proves nothing either way, so it rejects the check.
+    const results = examples.map((example) => ({
+      violation: example.violation,
+      hits: runRuleChecks([check], [allAdded(example.path, example.text)])?.length,
+    }));
+    if (examples.length)
       row.examples = {
-        caught: examples.filter((example) => example.violation && hit(example)).length,
-        missed: examples.filter((example) => example.violation && !hit(example)).length,
-        falseHits: examples.filter((example) => !example.violation && hit(example)).length,
+        caught: results.filter((r) => r.violation && r.hits).length,
+        missed: results.filter((r) => r.violation && r.hits === 0).length,
+        falseHits: results.filter((r) => !r.violation && r.hits).length,
       };
-    }
-    if (!existing) row.reason = 'pattern-too-slow';
+    if (!existing || results.some((r) => r.hits === undefined)) row.reason = 'pattern-too-slow';
     else if (!quote || !docs.some((doc) => doc.includes(squash(quote))))
       row.reason = 'rule-not-quoted-verbatim';
     else if (row.examples && (row.examples.missed || row.examples.falseHits))

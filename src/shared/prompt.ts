@@ -1763,8 +1763,11 @@ export function withEnforcedRuleChecks(
   checks: { rule: string; files: string[] }[],
 ): string {
   if (!guidelines || !checks.length) return guidelines;
+  const intro =
+    'jbot checks these rules deterministically in the files listed with each and reports their violations itself. Do not audit or report them in those files; audit them as usual in any other file:';
   const listed: string[] = [];
-  let bytes = 0;
+  // The heading, intro and omission note count against the budget too.
+  let bytes = Buffer.byteLength(`## Rules checked in code\n\n${intro}\n\n`) + 128;
   for (const check of checks) {
     const line = `- ${check.rule} (files matching ${check.files.map((glob) => `\`${glob}\``).join(', ')})`;
     bytes += Buffer.byteLength(line) + 1;
@@ -1776,7 +1779,7 @@ export function withEnforcedRuleChecks(
   return [
     guidelines,
     '## Rules checked in code',
-    'jbot checks these rules deterministically in the files listed with each and reports their violations itself. Do not audit or report them in those files; audit them as usual in any other file:',
+    intro,
     listed.join('\n'),
     ...(omitted
       ? [`${omitted} more rule(s) checked in code did not fit here; audit those as usual.`]
