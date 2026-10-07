@@ -11,6 +11,7 @@ import {
 } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
+import { isGuidelineSource } from './review-context.ts';
 
 const exec = promisify(execFile);
 const MARKER = /\n<!-- jbot-review:baseline:(\{[^\n]*\}) -->\n/;
@@ -390,11 +391,10 @@ export async function ruleDocsChanged(
       '-z',
       from,
       to,
-      '--',
-      '*.md',
-      '*.mdc',
     );
-    return deleted.split('\0').some((path) => path && !prPaths.has(path));
+    return deleted
+      .split('\0')
+      .some((path) => path && isGuidelineSource(path) && !prPaths.has(path));
   } catch {
     return true;
   }

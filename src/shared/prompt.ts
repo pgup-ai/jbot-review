@@ -1697,7 +1697,7 @@ export function assembleGuidelineSweepPrompt(guidelines: string): string {
 }
 
 export const REPORT_FINDING_TOOL_DESCRIPTION =
-  'Record one confirmed guideline violation the moment you confirm it, so it survives if the audit is cut short. Use the same fields as a finding in your final JSON, which must still list it.';
+  'Record one confirmed guideline violation the moment you confirm it, so it can survive if the audit is cut short. Recording is best-effort: your final JSON is the only guaranteed copy and must still list it. Use the same fields as a finding there.';
 
 /** Only opencode offers report_finding; other backends' compliance prompts omit this. */
 export const REPORT_FINDING_DIRECTIVE = `## Record findings as you confirm them

@@ -143,7 +143,7 @@ export default {
             additionalProperties: false,
           },
           async execute() {
-            return { content: 'Recorded. Keep auditing, and list it again in your final JSON.' };
+            return { content: 'Noted (best-effort). Keep auditing, and list it in your final JSON.' };
           },
         });
       });

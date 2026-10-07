@@ -873,6 +873,15 @@ const SCOPED_GUIDELINE_FILES = [
 ];
 
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
+
+/** Whether discovery could load this path as guidance: a known guideline file or any rule doc. */
+export function isGuidelineSource(path: string): boolean {
+  return (
+    ROOT_GUIDELINE_FILES.includes(path) ||
+    SCOPED_GUIDELINE_FILES.some((name) => path.endsWith(`/${name}`)) ||
+    /\.mdc?$/.test(path)
+  );
+}
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.
 const MAX_GUIDELINE_FILE_BYTES = 128 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;

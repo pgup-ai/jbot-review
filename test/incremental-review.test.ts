@@ -320,6 +320,8 @@ test('rule docs count as changed between heads only when their content moved', a
     git('init', '-q');
     write('AGENTS.md', 'Use LoadedModel.\n');
     write('docs/EXEMPTIONS.md', 'Tests may build fixtures by hand.\n');
+    write('.cursorrules', 'Prefer named exports.\n');
+    write('src/notes.txt', 'not guidance\n');
     write('src/a.ts', 'export const a = 1;\n');
     const reviewed = commit();
     write('src/a.ts', 'export const a = 2;\n');
@@ -342,6 +344,11 @@ test('rule docs count as changed between heads only when their content moved', a
       await ruleDocsChanged(workspace, [], new Set(['docs/EXEMPTIONS.md']), ruleEdit, deletion),
       false,
     );
+    rmSync(join(workspace, '.cursorrules'));
+    const cursorRules = commit();
+    assert.equal(await ruleDocsChanged(workspace, [], none, deletion, cursorRules), true);
+    rmSync(join(workspace, 'src/notes.txt'));
+    assert.equal(await ruleDocsChanged(workspace, [], none, cursorRules, commit()), false);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
