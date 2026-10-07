@@ -9,6 +9,7 @@ import {
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from './prompt.ts';
+import { VALID_FINDING_KINDS } from './types.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -132,6 +133,8 @@ export default {
               path: { type: 'string' },
               line: { type: 'integer', minimum: 0 },
               severity: { type: 'string', enum: ['P1', 'P2', 'P3'] },
+              kind: { type: 'string', enum: ${JSON.stringify([...VALID_FINDING_KINDS])} },
+              confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
               title: { type: 'string' },
               body: { type: 'string' },
             },

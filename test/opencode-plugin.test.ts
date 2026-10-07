@@ -212,7 +212,14 @@ describe('jbot opencode plugin', () => {
   });
 
   it('offers report_finding only to flagged sessions and records each call for that session', async (t) => {
-    let tool: { name: string; options?: unknown; description?: string } | undefined;
+    let tool:
+      | {
+          name: string;
+          options?: unknown;
+          description?: string;
+          input?: { properties: object; required: string[] };
+        }
+      | undefined;
     let afterExecute: Hook | undefined;
     const { context } = await loadPlugin({
       transform: async (edit: (editor: { add: (def: { name: string }) => void }) => void) =>
@@ -224,6 +231,17 @@ describe('jbot opencode plugin', () => {
     assert.equal(tool?.name, 'report_finding');
     assert.deepEqual(tool?.options, { codemode: false });
     assert.equal(tool?.description, REPORT_FINDING_TOOL_DESCRIPTION);
+    // Every final-JSON finding field is accepted; only the anchoring ones are required.
+    assert.deepEqual(Object.keys(tool?.input?.properties ?? {}).sort(), [
+      'body',
+      'confidence',
+      'kind',
+      'line',
+      'path',
+      'severity',
+      'title',
+    ]);
+    assert.deepEqual(tool?.input?.required, ['path', 'line', 'severity', 'title', 'body']);
     const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
     temps.push(dir);
     const file = join(dir, 'opts.json');

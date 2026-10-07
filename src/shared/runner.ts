@@ -188,6 +188,7 @@ import {
   runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
   runFindingVerification as runOpencodeFindingVerification,
   runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
+  complianceReportsFindings,
   runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
   enableContext7Mcp,
   disableContext7Mcp,
@@ -3158,7 +3159,11 @@ async function runReviewPipeline(params: {
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
-          : assembleGuidelineCompliancePrompt(context, rules, true);
+          : assembleGuidelineCompliancePrompt(
+              context,
+              rules,
+              auxBackend.name === 'opencode' && complianceReportsFindings(auxModel),
+            );
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
       // The pack's callers replace the usage list; pages it cannot serve get it back as a trailer.
       const usageTrailer = lens && packPages ? blastRadiusBlock : '';
