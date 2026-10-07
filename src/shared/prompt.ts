@@ -1699,7 +1699,7 @@ export function assembleGuidelineSweepPrompt(guidelines: string): string {
 export const REPORT_FINDING_TOOL_DESCRIPTION =
   'Record one confirmed guideline violation the moment you confirm it, so it survives if the audit is cut short. Use the same fields as a finding in your final JSON, which must still list it.';
 
-/** opencode compliance pages: the plugin's report_finding tool keeps confirmed violations through a cut-off. */
+/** Only opencode offers report_finding; other backends' compliance prompts omit this. */
 export const REPORT_FINDING_DIRECTIVE = `## Record findings as you confirm them
 
 - Each time you confirm a violation, call the \`report_finding\` tool with it

@@ -258,7 +258,6 @@ export interface CreateSessionSpec {
   agent?: string;
   forkFrom?: string;
   deadline?: number;
-  /** Offers the plugin's report_finding tool (compliance pages). */
   reportFindings?: boolean;
 }
 
@@ -654,7 +653,6 @@ export async function promptInSession(
   }
 }
 
-/** The raw finding objects a session recorded with report_finding. */
 export function reportedFindingRows(runtime: OpencodeRuntime, sessionID: string): unknown[] {
   const file = join(
     dirname(runtime.sessionOptionsFile),
