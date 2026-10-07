@@ -385,6 +385,7 @@ function createOpencodeBackend(
       timeoutMs,
       onTokenUsage,
       modelOptions,
+      label,
     ) =>
       runOpencodeGuidelineComplianceCheck(
         runtime,
@@ -395,6 +396,7 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
         modelOptions,
+        label,
       ),
     runFindingVerification: (
       model,
@@ -5518,6 +5520,7 @@ export function startGuidelineComplianceCheck(params: {
               params.timeoutMs,
               params.onTokenUsage,
               params.modelOptions,
+              plans.length > 1 ? `${session}-page-${page + 1}` : undefined,
             );
             const kept = clampFindingsToFiles(findings, plan.assignedFiles, changed);
             params.onFindings?.(kept);

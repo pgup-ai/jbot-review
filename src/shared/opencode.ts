@@ -290,6 +290,7 @@ async function repromptForJson(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  abortLabel = label,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
   if (isNoAttemptReply(raw)) {
@@ -303,7 +304,7 @@ async function repromptForJson(
       log,
       timeoutMs,
       onTokenUsage,
-      label,
+      abortLabel,
     );
   }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
@@ -316,7 +317,7 @@ async function repromptForJson(
     log,
     timeoutMs,
     onTokenUsage,
-    label,
+    abortLabel,
   );
 }
 
@@ -328,13 +329,15 @@ async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorC
     sessionID: string;
     raw: string;
     label: string;
+    abortLabel?: string;
     log: (msg: string) => void;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   },
   field: K,
 ): Promise<ReviewResult[K]> {
-  const { runtime, model, sessionID, raw, label, log, timeoutMs, onTokenUsage } = session;
+  const { runtime, model, sessionID, raw, label, abortLabel, log, timeoutMs, onTokenUsage } =
+    session;
   try {
     return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
@@ -348,6 +351,7 @@ async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorC
       log,
       timeoutMs,
       onTokenUsage,
+      abortLabel,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
   }
@@ -395,21 +399,24 @@ export async function runGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
+  label = 'guideline-compliance',
 ): Promise<Finding[]> {
   const prompt = promptForModel(model, assembleGuidelineCompliancePrompt(prContext, guidelines));
+  // Pages log under their own label; abort and wrap-up still address every page at once.
+  const abortLabel = 'guideline-compliance';
   const { raw, sessionID } = await promptPlanAgent(
     runtime,
     model,
     prompt,
-    'guideline-compliance',
+    label,
     log,
     timeoutMs,
     onTokenUsage,
     undefined,
-    { modelOptions },
+    { modelOptions, abortLabel },
   );
   return parseAuxSessionWithRepair(
-    { runtime, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
+    { runtime, model, sessionID, raw, label, abortLabel, log, timeoutMs, onTokenUsage },
     'findings',
   );
 }
@@ -610,6 +617,7 @@ async function promptPlanAgent(
     modelOptions?: Record<string, unknown>;
     forkFrom?: string;
     toolLess?: boolean;
+    abortLabel?: string;
   } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
@@ -630,6 +638,7 @@ async function promptPlanAgent(
     log,
     onTokenUsage,
     outcome,
+    abortLabel: session.abortLabel,
   });
   return { raw: text, sessionID };
 }

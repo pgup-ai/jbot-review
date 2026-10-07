@@ -580,6 +580,28 @@ describe('runFindingVerification on V2', () => {
     ]);
   });
 
+  it('logs a compliance page under its own label and keeps it abortable as guideline-compliance', async () => {
+    let n = 0;
+    const fake = fakeOpencodeServer(() => (++n === 1 ? { text: 'not json' } : { hang: true }));
+    const lines: string[] = [];
+    const rt = runtime(fake);
+    const pending = runGuidelineComplianceCheck(
+      rt,
+      'openai/gpt-5',
+      'ctx',
+      'guides',
+      (line) => lines.push(line),
+      5_000,
+      undefined,
+      undefined,
+      'guideline-compliance-page-2',
+    ).catch((error: unknown) => error);
+    while (fake.prompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(abortOpencodeSessionsByLabel(rt.client, 'guideline-compliance', log), 1);
+    await pending;
+    assert.ok(lines.includes('Creating guideline-compliance-page-2 session'));
+  });
+
   it('forks the main review session, not a lens pass, when JBOT_VERIFY_FORK is on', async () => {
     const fake = fakeOpencodeServer((session) =>
       session.forkedFrom ? { text: verdicts } : { text: '{"findings":[]}' },

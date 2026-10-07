@@ -54,6 +54,8 @@ export interface ReviewBackend {
     onTokenUsage?: TokenUsageRecorder,
     /** Compliance's own options (effort pinned to low); backends without per-session options ignore them. */
     modelOptions?: Record<string, unknown>,
+    /** One page's label in logs and telemetry; backends that cannot separate it from abort ignore it. */
+    label?: string,
   ): Promise<Finding[]>;
   runFindingVerification(
     model: string,
