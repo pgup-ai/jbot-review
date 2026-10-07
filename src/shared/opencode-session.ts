@@ -2,7 +2,6 @@ import {
   appendFileSync,
   closeSync,
   constants,
-  existsSync,
   fchmodSync,
   mkdirSync,
   openSync,
@@ -658,17 +657,21 @@ export function reportedFindingRows(runtime: OpencodeRuntime, sessionID: string)
     dirname(runtime.sessionOptionsFile),
     `reported-${createHash('sha256').update(sessionID).digest('hex')}.jsonl`,
   );
-  if (!existsSync(file)) return [];
-  // A page cut off mid-append leaves a partial last line; it must not mask the page's own error.
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as unknown];
-      } catch {
-        return [];
-      }
-    });
+  // Recovery is best-effort: an unreadable journal or a partial last line from a page cut off
+  // mid-append must not mask the page's own error.
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  return text.split('\n').flatMap((line) => {
+    try {
+      return [JSON.parse(line) as unknown];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function sessionExplorationStats(runtime: OpencodeRuntime, sessionID: string) {

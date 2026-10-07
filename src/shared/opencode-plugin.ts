@@ -24,11 +24,13 @@ import {
 // Format after configuration imports finish initializing.
 const pluginSource =
   () => `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute']);
 const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
+// A runaway or prompt-injected page must not grow its journal without bound.
+const REPORTED_FINDINGS_MAX_BYTES = 1024 * 1024;
 
 function stripTools(tools, agent) {
   const all = TOOL_LESS_AGENTS.has(agent);
@@ -102,6 +104,20 @@ export default {
     });
     // Compliance pages record each confirmed violation here, so a cut-off keeps what they found.
     try {
+      // The hook first: a tool whose calls are never persisted would only claim to record.
+      await ctx.tool.hook('execute.after', (event) => {
+        if (event.tool !== 'report_finding' || event.status !== 'completed') return;
+        const file = process.env.JBOT_OPENCODE_SESSION_OPTIONS;
+        if (!file) return;
+        const name = 'reported-' + createHash('sha256').update(event.sessionID).digest('hex') + '.jsonl';
+        const journal = join(dirname(file), name);
+        try {
+          if (existsSync(journal) && statSync(journal).size >= REPORTED_FINDINGS_MAX_BYTES) return;
+          appendFileSync(journal, JSON.stringify(event.input) + '\\n', { mode: 0o600 });
+        } catch {
+          console.warn('[jbot-review] report_finding could not record a finding; the final JSON still lists it.');
+        }
+      });
       await ctx.tool.transform((editor) => {
         editor.add({
           name: 'report_finding',
@@ -124,13 +140,6 @@ export default {
             return { content: 'Recorded. Keep auditing, and list it again in your final JSON.' };
           },
         });
-      });
-      await ctx.tool.hook('execute.after', (event) => {
-        if (event.tool !== 'report_finding' || event.status !== 'completed') return;
-        const file = process.env.JBOT_OPENCODE_SESSION_OPTIONS;
-        if (!file) return;
-        const name = 'reported-' + createHash('sha256').update(event.sessionID).digest('hex') + '.jsonl';
-        appendFileSync(join(dirname(file), name), JSON.stringify(event.input) + '\\n', { mode: 0o600 });
       });
     } catch {
       console.warn('[jbot-review] report_finding setup failed; compliance pages keep only their final JSON.');

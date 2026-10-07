@@ -271,6 +271,7 @@ import {
   buildReviewContext,
   buildReviewScopeContext,
   discoverGuidelineDocs,
+  GUIDELINE_CONTROL_FILES,
   applicableGuidelines,
   canCheckGlobalGuidelinesInMain,
   citedGuidelineSections,
@@ -1588,7 +1589,10 @@ async function runReviewPipeline(params: {
   // edit changing since the baseline (a base-branch merge) is checked on its own.
   const prPaths = new Set(changedFiles);
   const rulePaths = [
-    ...new Set(applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, ''))),
+    ...new Set([
+      ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
+      ...GUIDELINE_CONTROL_FILES,
+    ]),
   ].filter((path) => !prPaths.has(path));
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {
@@ -3150,7 +3154,7 @@ async function runReviewPipeline(params: {
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
-          : assembleGuidelineCompliancePrompt(context, rules);
+          : assembleGuidelineCompliancePrompt(context, rules, true);
       const packPages = options.experiment.contextPack && (!lens || toolLessAux);
       // The pack's callers replace the usage list; pages it cannot serve get it back as a trailer.
       const usageTrailer = lens && packPages ? blastRadiusBlock : '';

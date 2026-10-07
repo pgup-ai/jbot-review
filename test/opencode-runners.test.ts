@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -600,7 +600,9 @@ describe('runFindingVerification on V2', () => {
       undefined,
       'guideline-compliance-page-2',
     ).catch((error: unknown) => error);
-    while (fake.prompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+    for (const deadline = Date.now() + 2000; fake.prompts.length < 2 && Date.now() < deadline;)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(fake.prompts.length, 2);
     assert.equal(abortOpencodeSessionsByLabel(rt.client, 'guideline-compliance', log), 1);
     await pending;
     assert.ok(lines.includes('Creating guideline-compliance-page-2 session'));
@@ -628,6 +630,20 @@ describe('runFindingVerification on V2', () => {
       error.findings.map(({ path, line, title }) => ({ path, line, title })),
       [{ path: 'a.ts', line: 3, title: 'Hand-rolled id' }],
     );
+  });
+
+  it('keeps the original page error when its findings journal cannot be read', async () => {
+    const fake = fakeOpencodeServer((session) => {
+      const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+      mkdirSync(join(dirname(rt.sessionOptionsFile), name));
+      return { rejectPrompt: true };
+    });
+    const rt = runtime(fake);
+    const error = await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log).catch(
+      (caught: unknown) => caught,
+    );
+    assert.ok(error instanceof Error && !(error instanceof IncompleteReviewError));
+    assert.match(error.message, /UnexpectedStatus: 500/);
   });
 
   it('forks the main review session, not a lens pass, when JBOT_VERIFY_FORK is on', async () => {
