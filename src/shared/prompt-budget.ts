@@ -1,3 +1,4 @@
+import { complianceReportsFindings } from './opencode.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 import { measureReviewPrompt, type ReviewPromptBudget } from './review-plan.ts';
 import {
@@ -39,7 +40,8 @@ export function budgetReviewBackend(
       return backend.runReview(model, context, guidelines, log, options);
     },
     async runGuidelineComplianceCheck(model, context, guidelines, ...rest) {
-      check(assembleGuidelineCompliancePrompt(context, guidelines, true));
+      const reportTool = backend.name === 'opencode' && complianceReportsFindings(model);
+      check(assembleGuidelineCompliancePrompt(context, guidelines, reportTool));
       return backend.runGuidelineComplianceCheck(model, context, guidelines, ...rest);
     },
     async runFindingVerification(model, context, findings, ...rest) {

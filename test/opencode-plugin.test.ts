@@ -253,15 +253,15 @@ describe('jbot opencode plugin', () => {
           .map((line) => JSON.parse(line)),
         [finding],
       );
-      // A full journal stops growing, and a failed write never fails the tool call.
+      // A row that would overflow the journal is dropped, and a failed write never fails the call.
       const journal = (id: string) =>
         join(dir, `reported-${createHash('sha256').update(id).digest('hex')}.jsonl`);
-      writeFileSync(journal('ses_full'), 'x'.repeat(1024 * 1024));
+      writeFileSync(journal('ses_full'), 'x'.repeat(1024 * 1024 - 10));
       mkdirSync(journal('ses_dir'));
       const warnings = t.mock.method(console, 'warn', () => {});
       for (const sessionID of ['ses_full', 'ses_dir'])
         afterExecute!({ tool: 'report_finding', status: 'completed', sessionID, input: finding });
-      assert.equal(readFileSync(journal('ses_full'), 'utf8').length, 1024 * 1024);
+      assert.equal(readFileSync(journal('ses_full'), 'utf8').length, 1024 * 1024 - 10);
       assert.equal(warnings.mock.callCount(), 1);
     } finally {
       delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;

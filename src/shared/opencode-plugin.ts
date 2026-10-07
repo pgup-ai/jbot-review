@@ -112,8 +112,10 @@ export default {
         const name = 'reported-' + createHash('sha256').update(event.sessionID).digest('hex') + '.jsonl';
         const journal = join(dirname(file), name);
         try {
-          if (existsSync(journal) && statSync(journal).size >= REPORTED_FINDINGS_MAX_BYTES) return;
-          appendFileSync(journal, JSON.stringify(event.input) + '\\n', { mode: 0o600 });
+          const row = JSON.stringify(event.input) + '\\n';
+          const size = existsSync(journal) ? statSync(journal).size : 0;
+          if (size + Buffer.byteLength(row) > REPORTED_FINDINGS_MAX_BYTES) return;
+          appendFileSync(journal, row, { mode: 0o600 });
         } catch {
           console.warn('[jbot-review] report_finding could not record a finding; the final JSON still lists it.');
         }

@@ -403,7 +403,7 @@ export async function runGuidelineComplianceCheck(
   modelOptions?: Record<string, unknown>,
   label = 'guideline-compliance',
 ): Promise<Finding[]> {
-  const reportTool = !isSingleShotModel(model);
+  const reportTool = complianceReportsFindings(model);
   const prompt = promptForModel(
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelines, reportTool),
@@ -623,6 +623,11 @@ function singleReviewSession(runtime: OpencodeRuntime): string | undefined {
 function isSingleShotModel(model: string): boolean {
   const { providerID, modelID } = parseModelName(model);
   return !modelSupportsAgenticTools(providerID, modelID);
+}
+
+/** Whether an opencode compliance page is offered report_finding (and told to use it). */
+export function complianceReportsFindings(model: string): boolean {
+  return !isSingleShotModel(model);
 }
 
 /**
