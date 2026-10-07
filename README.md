@@ -182,11 +182,11 @@ finding thread is resolved, and removed when a review starts. So 🚀-present
 means "reviewed, all good"; 🚀-absent means a review is in flight or the PR
 has open findings. Addressed-thread replies and resolution always run
 regardless. A push that leaves the diff byte-identical to the last posted
-review, typically an "Update branch" merge from main (see `skip-unchanged`),
-unless that merge changed a rule document the review loads, or a
-docs/diagram-only PR under `skip-doc-only: true`, is skipped before any model
+review, typically an "Update branch" merge from main (see `skip-unchanged`), or
+a docs/diagram-only PR under `skip-doc-only: true`, is skipped before any model
 call and leaves the reaction unchanged (it isn't reviewed, so it neither earns
-nor loses the 🚀). _Reactions are best-effort: if they don't
+nor loses the 🚀). The exception is a merge that changed a rule document the
+review loads: that push is reviewed. _Reactions are best-effort: if they don't
 appear, grant the workflow `issues: write` (PR reactions use the issues API);
 the review itself is unaffected._
 
