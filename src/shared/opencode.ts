@@ -1,5 +1,9 @@
 import { parseModelName } from '@symma/protocol';
-import { modelAcceptsForcedToolChoice, modelSupportsAgenticTools } from './config.ts';
+import {
+  complianceReportsFindings,
+  modelAcceptsForcedToolChoice,
+  modelSupportsAgenticTools,
+} from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import {
@@ -403,7 +407,7 @@ export async function runGuidelineComplianceCheck(
   modelOptions?: Record<string, unknown>,
   label = 'guideline-compliance',
 ): Promise<Finding[]> {
-  const reportTool = complianceReportsFindings(model);
+  const reportTool = complianceReportsFindings('opencode', model);
   const prompt = promptForModel(
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelines, reportTool),
@@ -627,11 +631,6 @@ function singleReviewSession(runtime: OpencodeRuntime): string | undefined {
 function isSingleShotModel(model: string): boolean {
   const { providerID, modelID } = parseModelName(model);
   return !modelSupportsAgenticTools(providerID, modelID);
-}
-
-/** Whether an opencode compliance page is offered report_finding (and told to use it). */
-export function complianceReportsFindings(model: string): boolean {
-  return !isSingleShotModel(model);
 }
 
 /**

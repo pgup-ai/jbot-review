@@ -878,6 +878,7 @@ const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
 export function isGuidelineSource(path: string): boolean {
   return (
     ROOT_GUIDELINE_FILES.includes(path) ||
+    GUIDELINE_CONTROL_FILES.includes(path) ||
     SCOPED_GUIDELINE_FILES.some((name) => path.endsWith(`/${name}`)) ||
     /\.mdc?$/.test(path)
   );

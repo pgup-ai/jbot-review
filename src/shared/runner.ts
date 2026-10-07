@@ -142,6 +142,7 @@ import {
 import {
   auxModelOptionsFor,
   complianceModelOptions,
+  complianceReportsFindings,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
@@ -188,7 +189,6 @@ import {
   runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
   runFindingVerification as runOpencodeFindingVerification,
   runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
-  complianceReportsFindings,
   runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
   enableContext7Mcp,
   disableContext7Mcp,
@@ -2588,8 +2588,7 @@ async function runReviewPipeline(params: {
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
     // Hashed into the compliance policy and used to size pages: the prompt actually sent.
-    const complianceReportTool =
-      auxBackend.name === 'opencode' && complianceReportsFindings(auxModel);
+    const complianceReportTool = complianceReportsFindings(auxBackend.name, auxModel);
     const policyFor = (session: string) =>
       auxiliaryPolicy({
         ...auxPolicy,
