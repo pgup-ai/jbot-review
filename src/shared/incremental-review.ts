@@ -358,30 +358,33 @@ export async function planIncrementalReview(input: {
  */
 export async function ruleDocsChanged(
   workspace: string,
-  paths: string[],
-  prPaths: ReadonlySet<string>,
+  rules: {
+    /** Rule sources the PR does not edit. */
+    paths: string[];
+    /** Rule sources the PR edits: only their base-side versions count. */
+    prEdited: string[];
+    prPaths: ReadonlySet<string>;
+    base?: string;
+  },
   from: string,
   to: string,
 ): Promise<boolean> {
   const git = async (...args: string[]) =>
     (await exec('git', args, { cwd: workspace, timeout: 5000, maxBuffer: 1024 * 1024 })).stdout;
+  const changed = async (a: string, b: string, paths: string[]) =>
+    paths.length > 0 &&
+    (
+      await git('--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', a, b, '--', ...paths)
+    ).trim() !== '';
   try {
-    if (
-      paths.length &&
-      (
-        await git(
-          '--literal-pathspecs',
-          'diff',
-          '--no-ext-diff',
-          '--name-only',
-          from,
-          to,
-          '--',
-          ...paths,
-        )
-      ).trim()
-    )
-      return true;
+    if (await changed(from, to, rules.paths)) return true;
+    // A base edit to a doc the PR also edits shows only between the two heads' fork points.
+    if (rules.prEdited.length && rules.base) {
+      const [oldFork, newFork] = await Promise.all(
+        [from, to].map(async (head) => (await git('merge-base', head, rules.base!)).trim()),
+      );
+      if (oldFork !== newFork && (await changed(oldFork, newFork, rules.prEdited))) return true;
+    }
     // Today's discovery cannot list a doc the base deleted, and removing one (an exemption) can add obligations.
     const deleted = await git(
       'diff',
@@ -395,7 +398,7 @@ export async function ruleDocsChanged(
     );
     return deleted
       .split('\0')
-      .some((path) => path && isGuidelineSource(path) && !prPaths.has(path));
+      .some((path) => path && isGuidelineSource(path) && !rules.prPaths.has(path));
   } catch {
     return true;
   }

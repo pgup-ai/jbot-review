@@ -1590,19 +1590,22 @@ async function runReviewPipeline(params: {
   // edit changing since the baseline (a base-branch merge) is checked on its own.
   // Every PR file, noise and patchless ones included: the PR's own edits and deletions are not base changes.
   const prPaths = new Set(rawFiles.map((file) => file.filename));
-  const rulePaths = [
+  const ruleSources = [
     ...new Set([
       ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
       ...GUIDELINE_CONTROL_FILES,
     ]),
-  ].filter((path) => !prPaths.has(path));
+  ];
+  const rules = {
+    paths: ruleSources.filter((path) => !prPaths.has(path)),
+    prEdited: ruleSources.filter((path) => prPaths.has(path)),
+    prPaths,
+    base: baseSha,
+  };
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {
     if (!ruleChanges.has(reviewed))
-      ruleChanges.set(
-        reviewed,
-        ruleDocsChanged(workspace, rulePaths, prPaths, reviewed, headSha ?? 'HEAD'),
-      );
+      ruleChanges.set(reviewed, ruleDocsChanged(workspace, rules, reviewed, headSha ?? 'HEAD'));
     return ruleChanges.get(reviewed)!;
   };
 
