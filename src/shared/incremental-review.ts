@@ -365,6 +365,8 @@ export async function ruleDocsChanged(
     prEdited: string[];
     prPaths: ReadonlySet<string>;
     base?: string;
+    /** False when discovery ran out of budget, so some rule sources went unlisted. */
+    complete: boolean;
   },
   from: string,
   to: string,
@@ -378,12 +380,28 @@ export async function ruleDocsChanged(
     ).trim() !== '';
   try {
     if (await changed(from, to, rules.paths)) return true;
-    // A base edit to a doc the PR also edits shows only between the two heads' fork points.
-    if (rules.prEdited.length && rules.base) {
+    // What a base merge brought in shows between the two heads' fork points, without the PR's edits.
+    if (rules.prEdited.length || !rules.complete) {
+      if (!rules.base) return true;
       const [oldFork, newFork] = await Promise.all(
         [from, to].map(async (head) => (await git('merge-base', head, rules.base!)).trim()),
       );
-      if (oldFork !== newFork && (await changed(oldFork, newFork, rules.prEdited))) return true;
+      if (oldFork !== newFork) {
+        if (await changed(oldFork, newFork, rules.prEdited)) return true;
+        // Discovery that ran out of budget did not list every rule source: any guidance the base changed counts.
+        if (!rules.complete) {
+          const merged = await git(
+            'diff',
+            '--no-ext-diff',
+            '--no-renames',
+            '--name-only',
+            '-z',
+            oldFork,
+            newFork,
+          );
+          if (merged.split('\0').some((path) => path && isGuidelineSource(path))) return true;
+        }
+      }
     }
     // Today's discovery cannot list a doc the base deleted, and removing one (an exemption) can add obligations.
     const deleted = await git(

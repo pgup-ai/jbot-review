@@ -1428,6 +1428,7 @@ async function runReviewPipeline(params: {
     prEdited: ruleSources.filter((path) => prPaths.has(path)),
     prPaths,
     base: baseSha,
+    complete: !loadedGuidelines.budgetExhausted,
   };
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {

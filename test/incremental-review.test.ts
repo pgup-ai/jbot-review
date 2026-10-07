@@ -330,7 +330,7 @@ test('rule docs count as changed between heads only when their content moved', a
     const ruleEdit = commit();
     const none = new Set<string>();
     const changed = (paths: string[], from: string, to: string, prPaths = none) =>
-      ruleDocsChanged(workspace, { paths, prEdited: [], prPaths }, from, to);
+      ruleDocsChanged(workspace, { paths, prEdited: [], prPaths, complete: true }, from, to);
     assert.equal(await changed(['AGENTS.md'], reviewed, codeOnly), false);
     assert.equal(await changed(['AGENTS.md'], reviewed, ruleEdit), true);
     assert.equal(await changed([], reviewed, ruleEdit), false);
@@ -377,9 +377,26 @@ test('a base edit to a rule doc the PR also edits counts; edits by the PR itself
       prEdited: ['AGENTS.md'],
       prPaths: new Set(['AGENTS.md']),
       base: main,
+      complete: true,
     };
     assert.equal(await ruleDocsChanged(workspace, rules, reviewed, merged), true);
     assert.equal(await ruleDocsChanged(workspace, rules, merged, ownEdit), false);
+    // Discovery out of budget: any guidance a later base merge brings in counts, still not the PR's edits.
+    git('checkout', '-q', 'main');
+    write('docs/unlisted.md', 'A rule discovery never reached.\n');
+    const mainDoc = commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    const mergedDoc = git('rev-parse', 'HEAD');
+    const partial = { paths: [], prEdited: [], prPaths: new Set<string>(), base: mainDoc };
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...partial, complete: false }, ownEdit, mergedDoc),
+      true,
+    );
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...partial, complete: true }, ownEdit, mergedDoc),
+      false,
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
