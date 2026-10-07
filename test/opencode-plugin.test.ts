@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -89,7 +90,8 @@ describe('jbot opencode plugin', () => {
       evaluate(permission);
       assert.equal(permission.effect, 'deny');
     }
-    assert.equal(warnings.mock.callCount(), 2);
+    // Each load warns once for report_finding (no transform) and once for retrieval.
+    assert.equal(warnings.mock.callCount(), 4);
     assert.equal(tool.hook.mock.callCount(), 1);
     assert.doesNotMatch(
       JSON.stringify(warnings.mock.calls.map((c) => c.arguments)),
@@ -200,6 +202,51 @@ describe('jbot opencode plugin', () => {
       const unknown = { agent: 'plan', tools: tools(), sessionID: 'ses_2', options: {} };
       context(unknown);
       assert.deepEqual(unknown.options, {});
+    } finally {
+      delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
+    }
+  });
+
+  it('offers report_finding only to flagged sessions and records each call for that session', async () => {
+    let tool: { name: string; options?: unknown } | undefined;
+    let afterExecute: Hook | undefined;
+    const { context } = await loadPlugin({
+      transform: async (edit: (editor: { add: (def: { name: string }) => void }) => void) =>
+        edit({ add: (def) => (tool = def) }),
+      hook: async (name: string, fn: Hook) => {
+        if (name === 'execute.after') afterExecute = fn;
+      },
+    } as never);
+    assert.deepEqual(tool, { ...tool, name: 'report_finding', options: { codemode: false } });
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
+    temps.push(dir);
+    const file = join(dir, 'opts.json');
+    writeFileSync(file, JSON.stringify({ ses_1: { jbotReportFindings: true } }));
+    process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
+    try {
+      const withTool = () => ({ ...tools(), report_finding: { description: 'r', input: {} } });
+      const flagged = { agent: 'plan', tools: withTool(), sessionID: 'ses_1', options: {} };
+      context(flagged);
+      assert.ok('report_finding' in flagged.tools);
+      assert.deepEqual(flagged.options, {});
+      const other = { agent: 'plan', tools: withTool(), sessionID: 'ses_2', options: {} };
+      context(other);
+      assert.ok(!('report_finding' in other.tools));
+      const finding = { path: 'a.ts', line: 1, severity: 'P2', title: 't', body: 'b' };
+      for (const status of ['completed', 'error'])
+        afterExecute!({ tool: 'report_finding', status, sessionID: 'ses_1', input: finding });
+      afterExecute!({ tool: 'read', status: 'completed', sessionID: 'ses_1', input: {} });
+      const recorded = readFileSync(
+        join(dir, `reported-${createHash('sha256').update('ses_1').digest('hex')}.jsonl`),
+        'utf8',
+      );
+      assert.deepEqual(
+        recorded
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line)),
+        [finding],
+      );
     } finally {
       delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
     }

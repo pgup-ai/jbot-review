@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { VERIFY_AGENT } from './opencode-config.ts';
 import {
   PERMISSION_DENIED_MESSAGE,
+  REPORT_FINDING_TOOL_DESCRIPTION,
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from './prompt.ts';
@@ -23,7 +24,9 @@ import {
 // Format after configuration imports finish initializing.
 const pluginSource =
   () => `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
 const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute']);
 const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
 
@@ -81,8 +84,10 @@ export default {
         }
       }
       const options = sessionOptions(event.sessionID);
+      if (!options?.jbotReportFindings) delete event.tools.report_finding;
       if (options) {
         delete options.jbotSessionLabel;
+        delete options.jbotReportFindings;
         Object.assign(event.options, options);
       }
     });
@@ -95,6 +100,41 @@ export default {
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }
     });
+    // Compliance pages record each confirmed violation here, so a cut-off keeps what they found.
+    try {
+      await ctx.tool.transform((editor) => {
+        editor.add({
+          name: 'report_finding',
+          // A code-mode tool is reachable only through \`execute\`, which the read-only layer strips.
+          options: { codemode: false },
+          description: ${JSON.stringify(REPORT_FINDING_TOOL_DESCRIPTION)},
+          input: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              line: { type: 'integer', minimum: 0 },
+              severity: { type: 'string', enum: ['P1', 'P2', 'P3'] },
+              title: { type: 'string' },
+              body: { type: 'string' },
+            },
+            required: ['path', 'line', 'severity', 'title', 'body'],
+            additionalProperties: false,
+          },
+          async execute() {
+            return { content: 'Recorded. Keep auditing, and list it again in your final JSON.' };
+          },
+        });
+      });
+      await ctx.tool.hook('execute.after', (event) => {
+        if (event.tool !== 'report_finding' || event.status !== 'completed') return;
+        const file = process.env.JBOT_OPENCODE_SESSION_OPTIONS;
+        if (!file) return;
+        const name = 'reported-' + createHash('sha256').update(event.sessionID).digest('hex') + '.jsonl';
+        appendFileSync(join(dirname(file), name), JSON.stringify(event.input) + '\\n', { mode: 0o600 });
+      });
+    } catch {
+      console.warn('[jbot-review] report_finding setup failed; compliance pages keep only their final JSON.');
+    }
     try {
       const experiment = JSON.parse(process.env.JBOT_EXPLORATION_CONFIG || '{}');
       if (experiment.checkpoints || experiment.readEvidence) {

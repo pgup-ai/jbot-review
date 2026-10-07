@@ -124,6 +124,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    single-shot agent, and drops the
    "Instructions from:" messages opencode's read tool injects for nested
    `AGENTS.md` files so repo text never reaches a session as instructions;
+   its own `report_finding` tool reaches only guideline-compliance pages and
+   appends to a file in the run's data dir, never the workspace;
    wrap-up and `jbot-closed-book` retain native tool schemas for model and
    free-tier gateway compatibility, and the permission hook denies wrap-up
    shell execution and every `jbot-closed-book` call), and `OPENCODE_DISABLE_PROJECT_CONFIG` on

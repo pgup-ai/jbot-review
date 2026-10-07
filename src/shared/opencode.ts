@@ -14,6 +14,7 @@ import {
   agentForModel,
   createReviewSession,
   promptInSession,
+  reportedFindingRows,
   type PromptOutcome,
 } from './opencode-session.ts';
 import {
@@ -31,6 +32,7 @@ import {
 } from './prompt.ts';
 import type { TokenUsageRecorder } from './token-usage.ts';
 import {
+  IncompleteReviewError,
   sanitizeFinding,
   VALID_SEVERITIES,
   VALID_FINDING_KINDS,
@@ -401,24 +403,55 @@ export async function runGuidelineComplianceCheck(
   modelOptions?: Record<string, unknown>,
   label = 'guideline-compliance',
 ): Promise<Finding[]> {
-  const prompt = promptForModel(model, assembleGuidelineCompliancePrompt(prContext, guidelines));
+  const reportTool = !isSingleShotModel(model);
+  const prompt = promptForModel(
+    model,
+    assembleGuidelineCompliancePrompt(prContext, guidelines, reportTool),
+  );
   // Pages log under their own label; abort and wrap-up still address every page at once.
   const abortLabel = 'guideline-compliance';
-  const { raw, sessionID } = await promptPlanAgent(
-    runtime,
-    model,
-    prompt,
-    label,
-    log,
-    timeoutMs,
-    onTokenUsage,
-    undefined,
-    { modelOptions, abortLabel },
-  );
-  return parseAuxSessionWithRepair(
-    { runtime, model, sessionID, raw, label, abortLabel, log, timeoutMs, onTokenUsage },
-    'findings',
-  );
+  let sessionID: string | undefined;
+  try {
+    const turn = await promptPlanAgent(
+      runtime,
+      model,
+      prompt,
+      label,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      undefined,
+      {
+        modelOptions,
+        abortLabel,
+        reportFindings: reportTool,
+        onSession: (id) => (sessionID = id),
+      },
+    );
+    return await parseAuxSessionWithRepair(
+      {
+        runtime,
+        model,
+        sessionID: turn.sessionID,
+        raw: turn.raw,
+        label,
+        abortLabel,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      },
+      'findings',
+    );
+  } catch (error) {
+    const rows = sessionID ? reportedFindingRows(runtime, sessionID) : [];
+    if (!rows.length) throw error;
+    const { findings } = parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new IncompleteReviewError(
+      `${message}; kept ${findings.length} finding(s) the session reported before it stopped`,
+      findings,
+    );
+  }
 }
 
 export async function runChangesSinceLastReview(
@@ -618,6 +651,8 @@ async function promptPlanAgent(
     forkFrom?: string;
     toolLess?: boolean;
     abortLabel?: string;
+    reportFindings?: boolean;
+    onSession?: (sessionID: string) => void;
   } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
@@ -628,7 +663,9 @@ async function promptPlanAgent(
     modelOptions: session.modelOptions,
     forkFrom: session.forkFrom,
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent, session.toolLess),
+    reportFindings: session.reportFindings,
   });
+  session.onSession?.(sessionID);
   log(`${label} session created: ${sessionID}`);
   const text = await promptInSession(runtime, sessionID, {
     model,

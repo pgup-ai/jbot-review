@@ -1287,6 +1287,10 @@ files are dropped; that review's results stand for them. The review states the
 narrowed scope. Explicit reruns, auto-approval, PRs of 300 or more files and
 unavailable history check every file.
 
+On OpenCode, a compliance page records each violation it confirms with a
+`report_finding` tool. When a page is cut off and its wrap-up fails, the
+findings it recorded are kept as partial results.
+
 CommandCode logs progress every minute: elapsed time, observed tool outcomes,
 last completed tool, and time since the last event. A final `commandcode-progress`
 telemetry row survives normal timeout or abort handling. Incomplete snapshots are

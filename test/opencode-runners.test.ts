@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
   abortOpencodeSessionsByLabel,
@@ -19,7 +20,7 @@ import {
   NO_TOOLS_REVIEW_DIRECTIVE,
   WRAP_UP_PROMPT,
 } from '../src/shared/prompt.ts';
-import type { Finding } from '../src/shared/types.ts';
+import { IncompleteReviewError, type Finding } from '../src/shared/types.ts';
 import {
   fakeOpencodeServer,
   fakeRuntime as runtime,
@@ -574,10 +575,13 @@ describe('runFindingVerification on V2', () => {
       low,
     );
     await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log);
-    assert.deepEqual(Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))), [
-      low,
-      { reasoningEffort: 'high' },
-    ]);
+    const options = Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))).map(
+      ({ jbotReportFindings, ...rest }: Record<string, unknown>) => (
+        assert.equal(jbotReportFindings, true),
+        rest
+      ),
+    );
+    assert.deepEqual(options, [low, { reasoningEffort: 'high' }]);
   });
 
   it('logs a compliance page under its own label and keeps it abortable as guideline-compliance', async () => {
@@ -600,6 +604,30 @@ describe('runFindingVerification on V2', () => {
     assert.equal(abortOpencodeSessionsByLabel(rt.client, 'guideline-compliance', log), 1);
     await pending;
     assert.ok(lines.includes('Creating guideline-compliance-page-2 session'));
+  });
+
+  it('keeps the findings a compliance page reported before it failed', async () => {
+    const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Hand-rolled id', body: 'R.' };
+    let options: Record<string, { jbotReportFindings?: boolean }> = {};
+    const fake = fakeOpencodeServer((session) => {
+      options = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
+      const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+      writeFileSync(
+        join(dirname(rt.sessionOptionsFile), name),
+        `${JSON.stringify(reported)}\n{"path":"b.ts"}\n{"path":"c.ts","li`,
+      );
+      return { rejectPrompt: true };
+    });
+    const rt = runtime(fake);
+    const error = await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log).catch(
+      (caught: unknown) => caught,
+    );
+    assert.equal(Object.values(options)[0]?.jbotReportFindings, true);
+    assert.ok(error instanceof IncompleteReviewError);
+    assert.deepEqual(
+      error.findings.map(({ path, line, title }) => ({ path, line, title })),
+      [{ path: 'a.ts', line: 3, title: 'Hand-rolled id' }],
+    );
   });
 
   it('forks the main review session, not a lens pass, when JBOT_VERIFY_FORK is on', async () => {
