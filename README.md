@@ -993,7 +993,7 @@ model, settings, instructions and PR intent, and every subsequent change is to a
 README, changelog or Markdown audit. Code, configuration, guidelines, unknown
 history and explicit same-head reruns run auxiliaries normally. Logs record each
 decision and the reused commit. Setting `dynamic-fanout: false` also forces normal
-auxiliary scheduling. The local CLI has no prior GitHub review state; comparison fixtures can supply a prior review explicitly. Clean follow-ups that do not post a new review keep the older completion baseline. See the
+auxiliary scheduling. The local CLI has no prior GitHub review state; comparison fixtures can supply a prior review explicitly. Clean follow-ups that do not post a new review keep the older completion baseline; a clean run whose stored baseline could not be used (none completed, changed policy or changed rules) posts, so the next push can reuse it. See the
 [paired follow-up experiment](docs/audits/2026-09-20-adaptive-auxiliary-review.md)
 for measured savings and the rejected verifier-retrieval trial.
 

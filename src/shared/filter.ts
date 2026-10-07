@@ -651,8 +651,10 @@ export function shouldPostReviewComment(
   priorJbotReviewCount: number,
   findingCount: number,
   coverageComplete = true,
+  /** The stored baseline was unusable and this run's body records a new one. */
+  refreshesBaseline = false,
 ): boolean {
-  return !coverageComplete || priorJbotReviewCount === 0 || findingCount > 0;
+  return !coverageComplete || priorJbotReviewCount === 0 || findingCount > 0 || refreshesBaseline;
 }
 
 /** Minimal review-thread shape for the reaction gate (no GitHub-layer import). */
