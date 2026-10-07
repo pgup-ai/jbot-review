@@ -14,6 +14,7 @@ import {
   impactedReviewFiles,
   planIncrementalReview,
   reviewBaseline,
+  ruleDocsChanged,
   withReviewBaseline,
 } from '../src/shared/incremental-review.ts';
 import { buildIncrementalReviewContext } from '../src/shared/prompt.ts';
@@ -171,6 +172,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       priorBodies: [body(reviewed, base), 'A later review with an unverified finding.'],
       // An open finding on a file this follow-up leaves alone keeps it incremental.
       openThreadPaths: new Set(['other/label.ts']),
+      rulesChangedSince: async () => false,
     };
     const result = await planIncrementalReview(input);
     assert.equal(result.mode, 'incremental');
@@ -184,6 +186,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ base: undefined }, 'base-changed'],
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
+      [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: base }, 'history-or-impact-unavailable'],
       [{ openThreadPaths: new Set(['core/limit.ts']) }, 'open-finding-file-changed'],
       [
@@ -311,6 +314,26 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
   }
 });
 
+test('rule docs count as changed between heads only when their content moved', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-rules-');
+  try {
+    git('init', '-q');
+    write('AGENTS.md', 'Use LoadedModel.\n');
+    write('src/a.ts', 'export const a = 1;\n');
+    const reviewed = commit();
+    write('src/a.ts', 'export const a = 2;\n');
+    const codeOnly = commit();
+    write('AGENTS.md', 'Use LoadedModel for populated relations.\n');
+    const ruleEdit = commit();
+    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], reviewed, codeOnly), false);
+    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], reviewed, ruleEdit), true);
+    assert.equal(await ruleDocsChanged(workspace, [], reviewed, ruleEdit), false);
+    assert.equal(await ruleDocsChanged(workspace, ['AGENTS.md'], 'f'.repeat(40), ruleEdit), true);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('a merge from the base branch re-reviews only the PR files it or the author touched', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-merge-');
   const mergeMain = (path: string, text: string) => {
@@ -370,6 +393,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         base: mainTip,
         policy,
         priorBodies: [body(prior, priorBase)],
+        rulesChangedSince: async () => false,
       });
       return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
     };

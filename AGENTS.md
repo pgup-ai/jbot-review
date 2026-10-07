@@ -52,9 +52,11 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    Findings remain clamped to assigned files in code. Automatic incremental
    follow-ups may select affected files after a completed, matching baseline; every selected file still receives its complete base...head
    patch. Earlier PR files remain available as context, and findings there may
-   still be reported. Missing history, changed policy, a base tip the PR has not
-   merged, uncertain dependencies, explicit reruns and auto-approval require a full
-   review. A merge from the base branch does not: the follow-up selects the PR files
+   still be reported. Missing history, changed policy, a changed rule document the
+   PR does not itself edit, a base tip the PR has not merged, uncertain
+   dependencies, explicit reruns and auto-approval require a full review. Policies
+   hash models, options, prompts and the build, not rule text: discovery follows
+   the diff, and a rule document the PR edits is reviewed as a changed file. A merge from the base branch does not: the follow-up selects the PR files
    the author or the merged commits edited, plus PR files importing a module they
    changed. Never silently narrow
    scope via summary instructions. Incremental scope must be visible in the report
@@ -65,7 +67,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    rule applies and complete global guidance is delivered in the main prompt;
    unknown scope or incomplete guidance keeps the pass enabled. A full
    follow-up may run the guideline pass only on files whose own edits changed
-   since the latest review's completed pass under the same pass policy; the
+   since the latest review's completed pass under the same pass policy and rule
+   documents; the
    report and telemetry show that scope, and explicit reruns, auto-approval and
    unavailable history check every file. Main review
    still covers its selected scope and verification remains enabled. Repeat-comment noise is handled downstream by

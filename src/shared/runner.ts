@@ -1,6 +1,7 @@
 import { VerificationEvidence } from './verification-evidence.ts';
 import {
   planIncrementalReview,
+  ruleDocsChanged,
   withReviewBaseline,
   type ReviewBaseline,
 } from './incremental-review.ts';
@@ -1583,14 +1584,23 @@ async function runReviewPipeline(params: {
   log(
     `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
   );
-  // Reuse and incremental policies hash every applicable rule, not this diff's ranked render.
-  const policyGuidelines = JSON.stringify(applicable);
+  // Discovery follows the diff, so policies leave rule text out; a rule doc the PR does not
+  // edit changing since the baseline (a base-branch merge) is checked on its own.
+  const prPaths = new Set(changedFiles);
+  const rulePaths = [
+    ...new Set(applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, ''))),
+  ].filter((path) => !prPaths.has(path));
+  const ruleChanges = new Map<string, Promise<boolean>>();
+  const rulesChangedSince = (reviewed: string) => {
+    if (!ruleChanges.has(reviewed))
+      ruleChanges.set(reviewed, ruleDocsChanged(workspace, rulePaths, reviewed, headSha ?? 'HEAD'));
+    return ruleChanges.get(reviewed)!;
+  };
 
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
     ...modelPolicy(options, { model, auxModel, baseURL }),
-    guidelines: policyGuidelines,
     reviewer: runIdentity(process.env).reviewerRevision,
   });
   const openThreadPaths = new Set(
@@ -1619,6 +1629,7 @@ async function runReviewPipeline(params: {
           )),
     openThreadPaths,
     worktree: !!localDiff,
+    rulesChangedSince,
   });
   const scopeStats = {
     mode: reviewScope.mode,
@@ -2563,10 +2574,10 @@ async function runReviewPipeline(params: {
         ...auxPolicy,
         prompt:
           session === 'guideline-compliance'
-            ? assembleGuidelineCompliancePrompt('', policyGuidelines)
+            ? assembleGuidelineCompliancePrompt('', '')
             : assembleReviewPrompt(
                 '',
-                policyGuidelines,
+                '',
                 REVIEW_LENSES[session.slice(7)],
                 options.evidenceQuotes,
                 options.embeddedFirstPrompt,
@@ -2600,6 +2611,7 @@ async function runReviewPipeline(params: {
                   },
                 }
               : {}),
+            rulesChangedSince,
           })
         : [];
     const reusedAux = new Map(
@@ -2661,6 +2673,7 @@ async function runReviewPipeline(params: {
             head: headSha,
             files,
             audited: (base, head) => compareCommitFiles(octokit, owner, repo, base, head),
+            rulesChangedSince,
           })
         : undefined;
     const recheckFiles = complianceRecheck?.files;

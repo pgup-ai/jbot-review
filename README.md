@@ -1004,8 +1004,8 @@ callers selected by incremental planning. Unknown scope remains applicable.
 The extra pass can be reused only after a completed guideline check with matching
 base, policy and reviewed head, when the remaining rules are complete global
 guidance that fits in the main prompt. Main receives that guidance in full. Missing
-or truncated guidance, unknown scope, changed policy and incomplete history keep
-the check running. Logs record run/reuse/skip decisions and the reused head.
+or truncated guidance, unknown scope, changed policy, a changed rule document the
+PR does not edit, and incomplete history keep the check running. Logs record run/reuse/skip decisions and the reused head.
 Guidelines may share an interactions session, so reuse does not always remove a
 whole model session.
 

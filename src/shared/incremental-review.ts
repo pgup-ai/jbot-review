@@ -140,6 +140,7 @@ export async function planIncrementalReview(input: {
   forceFull?: boolean;
   openThreadPaths?: ReadonlySet<string>;
   worktree?: boolean;
+  rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
   const full = (reason: string): IncrementalReviewPlan => ({
     mode: 'full',
@@ -154,6 +155,7 @@ export async function planIncrementalReview(input: {
   if (!input.base) return full('base-changed');
   if (baseline.policy !== input.policy) return full('policy-changed');
   if (!input.head || input.head === baseline.head) return full('same-head-rerun');
+  if (await input.rulesChangedSince(baseline.head)) return full('guidelines-changed');
   const deadline = Date.now() + 5000;
   const git = async (...args: string[]) => {
     const timeout = deadline - Date.now();
@@ -346,5 +348,28 @@ export async function planIncrementalReview(input: {
     };
   } catch {
     return full('history-or-impact-unavailable');
+  }
+}
+
+/**
+ * Whether a rule doc changed between two heads. Callers pass only docs the PR does not edit
+ * (those are reviewed as changed files); history git cannot read counts as a change.
+ */
+export async function ruleDocsChanged(
+  workspace: string,
+  paths: string[],
+  from: string,
+  to: string,
+): Promise<boolean> {
+  if (!paths.length) return false;
+  try {
+    const { stdout } = await exec(
+      'git',
+      ['--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', from, to, '--', ...paths],
+      { cwd: workspace, timeout: 5000, maxBuffer: 1024 * 1024 },
+    );
+    return stdout.trim() !== '';
+  } catch {
+    return true;
   }
 }
