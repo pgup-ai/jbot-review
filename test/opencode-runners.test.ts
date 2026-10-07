@@ -632,6 +632,25 @@ describe('runFindingVerification on V2', () => {
     );
   });
 
+  it('keeps reported findings without a repair turn when a page answers with nothing', async () => {
+    const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Hand-rolled id', body: 'R.' };
+    const fake = fakeOpencodeServer((session) => {
+      const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+      writeFileSync(join(dirname(rt.sessionOptionsFile), name), `${JSON.stringify(reported)}\n`);
+      return { text: '' };
+    });
+    const rt = runtime(fake);
+    const error = await runGuidelineComplianceCheck(rt, 'openai/gpt-5', 'ctx', 'guides', log).catch(
+      (caught: unknown) => caught,
+    );
+    assert.ok(error instanceof IncompleteReviewError);
+    assert.deepEqual(
+      error.findings.map(({ path }) => path),
+      ['a.ts'],
+    );
+    assert.equal(fake.prompts.length, 1);
+  });
+
   it('keeps the original page error when its findings journal cannot be read', async () => {
     const fake = fakeOpencodeServer((session) => {
       const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;

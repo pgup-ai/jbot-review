@@ -428,6 +428,10 @@ export async function runGuidelineComplianceCheck(
         onSession: (id) => (sessionID = id),
       },
     );
+    // A cut-off page whose wrap-up said nothing keeps what it reported now; a full-length
+    // repair turn could outlast the settle grace and lose those findings too.
+    if (!turn.raw.trim() && reportedFindingRows(runtime, turn.sessionID).length)
+      throw new Error(`${label} returned no answer`);
     return await parseAuxSessionWithRepair(
       {
         runtime,
