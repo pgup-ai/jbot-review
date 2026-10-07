@@ -1324,9 +1324,9 @@ each check fires on today's code, which exposes broad patterns. Review every
 check before committing.
 
 A `shadow` check posts nothing. After a complete guideline pass, a review
-logs `Rule checks (shadow)` for the checks with hits: per check, how many hits
-have a guideline finding within three lines, and how many guideline findings
-in those files no hit explains. Agreement is by location, so confirm that a
+logs `Rule checks (shadow)`: per shadow check, how many hits have a
+guideline finding within three lines, and how many guideline findings in
+files a check covers no hit explains. Agreement is by location, so confirm that a
 nearby finding cites the check's rule. Switch a check to `enforce` once those
 agree. Its hits then post as compliance findings, and the guideline pass is
 told to leave that rule alone.

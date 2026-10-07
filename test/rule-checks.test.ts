@@ -90,17 +90,28 @@ test('runRuleChecks matches past any line length and gives up on catastrophic ba
   assert.equal(runRuleChecks(parse('^(a+)+$'), patch(`${'a'.repeat(40)}!`), 50), undefined);
 });
 
-test('ruleCheckAgreement counts hits the guideline pass also found and its findings no hit explains', () => {
-  const { checks } = parseRuleChecks(JSON.stringify({ checks: [check] }));
+test('ruleCheckAgreement reports every shadow check and findings it misses in covered files', () => {
+  const { checks } = parseRuleChecks(
+    JSON.stringify({ checks: [check, { ...check, id: 'quiet', files: ['*.md'] }] }),
+  );
   const hits = [10, 40].map((line) => ({ check: checks[0], path: 'a.spec.ts', line }));
   const finding = (path: string, line: number) => ({ path, line }) as Finding;
   assert.deepEqual(
-    ruleCheckAgreement(hits, [
-      finding('a.spec.ts', 12),
-      finding('a.spec.ts', 90),
-      finding('b.ts', 1),
-    ]),
-    { checks: { 'tests-use-create-test': { hits: 2, agreed: 1 } }, unexplained: 1 },
+    ruleCheckAgreement(
+      checks,
+      [...hits, { check: checks[0], path: 'skipped.spec.ts', line: 1 }],
+      [
+        finding('a.spec.ts', 12),
+        finding('a.spec.ts', 90),
+        finding('b.spec.ts', 5),
+        finding('b.ts', 1),
+      ],
+      new Set(['a.spec.ts', 'b.spec.ts', 'b.ts']),
+    ),
+    {
+      checks: { 'tests-use-create-test': { hits: 2, agreed: 1 }, quiet: { hits: 0, agreed: 0 } },
+      unexplained: 2,
+    },
   );
 });
 

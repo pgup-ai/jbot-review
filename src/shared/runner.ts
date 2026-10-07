@@ -3551,12 +3551,14 @@ async function runReviewPipeline(params: {
       ruleCheckHits &&
       ruleChecks?.checks.some((check) => check.mode === 'shadow')
     ) {
-      const audited = new Set(recheckFiles ?? files.map((file) => file.filename));
+      const shadow = ruleChecks.checks.filter((check) => check.mode === 'shadow');
       log(
         `Rule checks (shadow): ${JSON.stringify(
           ruleCheckAgreement(
-            ruleCheckHits.filter((hit) => hit.check.mode === 'shadow' && audited.has(hit.path)),
+            shadow,
+            ruleCheckHits.filter((hit) => hit.check.mode === 'shadow'),
             complianceFindings,
+            new Set(recheckFiles ?? files.map((file) => file.filename)),
           ),
         )}`,
       );

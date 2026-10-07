@@ -179,25 +179,32 @@ export function ruleCheckFinding({ check, path, line }: RuleCheckHit): Finding {
 const AGREEMENT_LINES = 3;
 
 /**
- * Shadow evidence for promoting a check, matched by location only: how many of its hits have
- * a guideline finding (for any rule) nearby, and how many guideline findings in files with a
- * hit no hit explains. A reader confirms which rule each nearby finding cites before promoting.
+ * Shadow evidence for promoting checks, matched by location only: per check, how many hits
+ * have a guideline finding (for any rule) nearby, and how many guideline findings in audited
+ * files a check covers no hit explains, so a check that misses every violation still shows.
  */
-export function ruleCheckAgreement(hits: RuleCheckHit[], compliance: Finding[]) {
+export function ruleCheckAgreement(
+  checks: RuleCheck[],
+  hits: RuleCheckHit[],
+  compliance: Finding[],
+  audited: Set<string>,
+) {
   const near = (a: { path: string; line: number }, b: { path: string; line: number }) =>
     a.path === b.path && Math.abs(a.line - b.line) <= AGREEMENT_LINES;
-  const byCheck = new Map<string, { hits: number; agreed: number }>();
+  const byCheck = Object.fromEntries(checks.map((check) => [check.id, { hits: 0, agreed: 0 }]));
+  hits = hits.filter((hit) => audited.has(hit.path));
   for (const hit of hits) {
-    const row = byCheck.get(hit.check.id) ?? { hits: 0, agreed: 0 };
+    const row = byCheck[hit.check.id];
     row.hits++;
     if (compliance.some((finding) => near(finding, hit))) row.agreed++;
-    byCheck.set(hit.check.id, row);
   }
+  const covered = (path: string) =>
+    audited.has(path) &&
+    checks.some((check) => check.files.some((glob) => globMatches(glob, path)));
   const unexplained = compliance.filter(
-    (finding) =>
-      hits.some((hit) => hit.path === finding.path) && !hits.some((hit) => near(finding, hit)),
+    (finding) => covered(finding.path) && !hits.some((hit) => near(finding, hit)),
   ).length;
-  return { checks: Object.fromEntries(byCheck), unexplained };
+  return { checks: byCheck, unexplained };
 }
 
 /** A labelled line for `npm run rules:compile --examples`: the named check must hit it iff `violation`. */
