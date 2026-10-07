@@ -54,7 +54,7 @@ export interface ReviewBackend {
     onTokenUsage?: TokenUsageRecorder,
     /** Compliance's own options (effort pinned to low); backends without per-session options ignore them. */
     modelOptions?: Record<string, unknown>,
-    /** One page's label in logs and telemetry; backends that cannot separate it from abort ignore it. */
+    /** One page's label in logs and telemetry; sent only to OpenCode, which keys its own rows by it. */
     label?: string,
   ): Promise<Finding[]>;
   runFindingVerification(

@@ -5546,7 +5546,10 @@ export function startGuidelineComplianceCheck(params: {
               params.timeoutMs,
               params.onTokenUsage,
               params.modelOptions,
-              plans.length > 1 ? `${session}-page-${page + 1}` : undefined,
+              // Only OpenCode keys its own rows by page; elsewhere a page label would split them.
+              plans.length > 1 && params.backend.name === 'opencode'
+                ? `${session}-page-${page + 1}`
+                : undefined,
             );
             const kept = clampFindingsToFiles(findings, plan.assignedFiles, changed);
             params.onFindings?.(kept);

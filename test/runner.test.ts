@@ -1678,6 +1678,32 @@ it('retains and clamps denied guideline candidates without claiming completed co
   assert.ok(coverage.includes('guideline-compliance:partial'));
 });
 
+it('labels compliance pages only on OpenCode, which keys its own rows by page', async () => {
+  for (const [name, expected] of [
+    ['opencode', ['guideline-compliance-page-1', 'guideline-compliance-page-2']],
+    ['cline', [undefined, undefined]],
+  ] as const) {
+    const labels: unknown[] = [];
+    await startGuidelineComplianceCheck({
+      backend: {
+        name,
+        runGuidelineComplianceCheck: async (...args: unknown[]) => {
+          labels.push(args[7]);
+          return [];
+        },
+      } as unknown as ReviewBackend,
+      model: 'fake/model',
+      prContext: '',
+      guidelinesForPrompt: 'rules',
+      hasGuidelines: true,
+      enabled: true,
+      plans: () => ['a.ts', 'b.ts'].map((path) => ({ context: path, assignedFiles: [path] })),
+      log: () => {},
+    });
+    assert.deepEqual(labels.sort(), [...expected].sort(), name);
+  }
+});
+
 it('runs compliance on its own options and drops findings on PR files left to an earlier pass', async () => {
   const options: unknown[] = [];
   const findings = ['a.ts', 'b.ts', 'outside.ts'].map((path): Finding => ({
