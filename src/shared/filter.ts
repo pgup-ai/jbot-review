@@ -658,13 +658,14 @@ export function shouldPostReviewComment(
   priorJbotReviewCount: number,
   findingCount: number,
   coverageComplete = true,
-  scopeReason?: string,
+  /** Set only when this run's body records a baseline; otherwise posting refreshes nothing. */
+  refreshedBaselineReason?: string,
 ): boolean {
   return (
     !coverageComplete ||
     priorJbotReviewCount === 0 ||
     findingCount > 0 ||
-    BASELINE_REFRESH_REASONS.has(scopeReason ?? '')
+    BASELINE_REFRESH_REASONS.has(refreshedBaselineReason ?? '')
   );
 }
 
