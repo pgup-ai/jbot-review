@@ -355,7 +355,7 @@ function matchGlobVariant(glob: string, target: string): boolean {
 }
 
 /** Slash-less globs match the basename (Cursor's `*.ts` means "any .ts file"). */
-function globMatches(glob: string, file: string): boolean {
+export function globMatches(glob: string, file: string): boolean {
   const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
   return expandBraces(glob).some((variant) => matchGlobVariant(variant, target));
 }

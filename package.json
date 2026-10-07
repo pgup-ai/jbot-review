@@ -20,6 +20,7 @@
     "holdout:aacr": "tsx scripts/aacr-bench.ts",
     "evidence:baseline": "tsx scripts/evidence-baseline.ts",
     "judge:findings": "tsx scripts/judge-findings.ts",
+    "rules:compile": "tsx scripts/compile-rule-checks.ts",
     "corpus:import-history": "tsx scripts/review-history-import.ts",
     "corpus:adjudicate": "tsx scripts/review-adjudication.ts",
     "performance:review": "tsx scripts/review-performance.ts",

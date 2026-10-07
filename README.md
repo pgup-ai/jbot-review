@@ -1293,6 +1293,51 @@ On OpenCode, a compliance page records each violation it confirms with a
 `report_finding` tool. When a page is cut off and its wrap-up fails, the
 findings it recorded are kept as partial results.
 
+### Deterministic rule checks
+
+Rules a regular expression can judge on one added line (a banned call, import
+or assertion) can run in code instead of in the guideline pass. Commit them as
+`.github/jbot-review-checks.json`; reviews read the file from the PR's
+merge-base, so a PR cannot change the checks that judge it.
+
+```json
+{
+  "checks": [
+    {
+      "id": "no-focused-tests",
+      "rule": "`TESTING.md` §3: \"Never commit focused tests (`.only`).\"",
+      "severity": "P2",
+      "title": "Focused test committed",
+      "files": ["*.spec.ts", "*.test.ts"],
+      "pattern": "\\b(?:it|describe|test)\\.only\\(",
+      "mode": "shadow"
+    }
+  ]
+}
+```
+
+`npm run rules:compile -- --workspace /path/to/repo` drafts this file from the
+repository's rule documents (default model `deepseek/deepseek-flash`). It keeps
+a check only when its quoted rule appears verbatim in a rule document and it
+agrees with any labelled lines passed with `--examples`. It reports how often
+each check fires on today's code, which exposes broad patterns. Review every
+check before committing.
+
+A `shadow` check posts nothing. After a complete guideline pass, a review
+logs `Rule checks (shadow)`: per shadow check, how many hits have a
+guideline finding within three lines, plus one total of guideline findings in
+files a check covers that no hit explains (not split by check). Agreement is by location, so confirm that a
+nearby finding cites the check's rule. Switch a check to `enforce` once those
+agree. Its hits then post as compliance findings, and the guideline pass is
+told to leave that rule alone in the files the check covers.
+
+Matching is time-boxed. When the checks outrun the budget (a pattern that
+backtracks catastrophically), the review logs it, posts no check hits and
+leaves every rule to the guideline pass. `rules:compile` rejects a pattern as
+`pattern-too-slow` when it times out on today's files or an example; that
+catches the worst patterns but cannot certify the 2 s review budget for
+future lines. It also refuses to overwrite an existing checks file.
+
 CommandCode logs progress every minute: elapsed time, observed tool outcomes,
 last completed tool, and time since the last event. A final `commandcode-progress`
 telemetry row survives normal timeout or abort handling. Incomplete snapshots are

@@ -7,6 +7,13 @@ import {
   type ReviewBaseline,
 } from './incremental-review.ts';
 import { NativeEvidenceStore } from './native-evidence.ts';
+import {
+  loadRuleChecks,
+  RULE_CHECKS_PATH,
+  ruleCheckAgreement,
+  ruleCheckFinding,
+  runRuleChecks,
+} from './rule-checks.ts';
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
   buildShardPlans,
@@ -171,6 +178,7 @@ import {
   buildReviewFocusBlock,
   assembleReviewPrompt,
   assembleGuidelineCompliancePrompt,
+  withEnforcedRuleChecks,
   assembleFindingVerificationPrompt,
   verifierOmissionNote,
   COMPLIANCE_PACK_NOTE,
@@ -1422,6 +1430,7 @@ async function runReviewPipeline(params: {
     ...new Set([
       ...applicable.docs.map((doc) => doc.label.replace(/ \(.*\)$/, '')),
       ...GUIDELINE_CONTROL_FILES,
+      RULE_CHECKS_PATH,
     ]),
   ];
   const rules = {
@@ -1616,6 +1625,20 @@ async function runReviewPipeline(params: {
     commandCodeEffortContext,
   );
 
+  const ruleChecks = baseSha
+    ? await loadRuleChecks(workspace, baseSha, headSha ?? 'HEAD').catch((error: unknown) => {
+        log(`Rule checks skipped: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      })
+    : undefined;
+  if (ruleChecks)
+    log(
+      `Rule checks: ${JSON.stringify({
+        shadow: ruleChecks.checks.filter((check) => check.mode === 'shadow').length,
+        enforce: ruleChecks.checks.filter((check) => check.mode === 'enforce').length,
+        rejected: ruleChecks.rejected,
+      })}`,
+    );
   const fullReviewFiles = files;
   const scopePolicy = auxiliaryPolicy({
     version: 1,
@@ -2561,8 +2584,16 @@ async function runReviewPipeline(params: {
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     let guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
-    const complianceGuidelines =
-      rankedGuidelines || !followupGuidelines ? guidelines : formatGuidelines(followupGuidelines);
+    // Matched before any guideline prompt is built: a timed-out run leaves every rule to the pass.
+    const ruleCheckHits = ruleChecks && runRuleChecks(ruleChecks.checks, files);
+    if (ruleChecks && !ruleCheckHits)
+      log('Rule checks skipped: matching exceeded its time budget.');
+    const enforcedRules =
+      (ruleCheckHits && ruleChecks?.checks.filter((check) => check.mode === 'enforce')) ?? [];
+    const complianceGuidelines = withEnforcedRuleChecks(
+      rankedGuidelines || !followupGuidelines ? guidelines : formatGuidelines(followupGuidelines),
+      enforcedRules,
+    );
     let candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
@@ -2664,7 +2695,9 @@ async function runReviewPipeline(params: {
       modelSupportsAgenticTools(auxProviderID, auxModelID),
     );
     const sweepGuidelines =
-      options.guidelineSweep && mainBackend.supportsGuidelineSweep ? guidelines : undefined;
+      options.guidelineSweep && mainBackend.supportsGuidelineSweep
+        ? withEnforcedRuleChecks(guidelines, enforcedRules)
+        : undefined;
     if (sweepGuidelines)
       log(
         'Guideline checking will continue in each main review session; verification remains separate.',
@@ -3510,6 +3543,29 @@ async function runReviewPipeline(params: {
       ),
     ]);
     graceDone();
+    // Shadow checks earn promotion by matching what a completed guideline pass reported.
+    if (
+      guidelineCandidate &&
+      auxCoverage.get('guideline-compliance')?.complete &&
+      !partialSessions.has('guideline-compliance') &&
+      ruleCheckHits &&
+      ruleChecks?.checks.some((check) => check.mode === 'shadow')
+    ) {
+      const shadow = ruleChecks.checks.filter((check) => check.mode === 'shadow');
+      log(
+        `Rule checks (shadow): ${JSON.stringify(
+          ruleCheckAgreement(
+            shadow,
+            ruleCheckHits.filter((hit) => hit.check.mode === 'shadow'),
+            complianceFindings,
+            new Set(recheckFiles ?? files.map((file) => file.filename)),
+          ),
+        )}`,
+      );
+    }
+    const enforcedFindings = (ruleCheckHits ?? [])
+      .filter((hit) => hit.check.mode === 'enforce')
+      .map(ruleCheckFinding);
     const [verifiedAddressedPriorComments, changesSinceText] = await (optionalAtMainEnd ??
       finishOptional());
     // Gate confidence BEFORE deduping so each finding carries its effective
@@ -3525,6 +3581,7 @@ async function runReviewPipeline(params: {
         telemetry.produced(`review-${candidateLensKeys[i]}`, list),
       ),
       telemetry.produced('guideline-compliance', complianceFindings),
+      telemetry.produced('rule-checks', enforcedFindings),
     ];
     const gatedLists = producedLists.map(demoteLowConfidenceBlockingFindings);
     telemetry.snapshot(
