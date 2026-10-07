@@ -137,6 +137,8 @@ export function limitReviewBackendSessions(
     run: () => Promise<T>,
     priority: SemaphorePriority = rolePriority,
     budget?: { timeoutMs: number; deadlineAt?: number; log: (message: string) => void },
+    /** Telemetry name when one session of a group (a compliance page) needs its own row. */
+    telemetrySession = session,
   ): Promise<T> => {
     const controller = new AbortController();
     pending.set(controller, session);
@@ -153,7 +155,7 @@ export function limitReviewBackendSessions(
     const queueDone = telemetry?.phases.start({
       phase: role === 'main' ? 'main-queue' : 'auxiliary-queue',
       scope: 'session',
-      session,
+      session: telemetrySession,
       backend: backend.name,
     });
     try {
@@ -181,7 +183,7 @@ export function limitReviewBackendSessions(
       const executionDone = telemetry?.phases.start({
         phase: role === 'main' ? 'main-execution' : 'auxiliary-execution',
         scope: 'session',
-        session,
+        session: telemetrySession,
         backend: backend.name,
       });
       try {
@@ -199,7 +201,7 @@ export function limitReviewBackendSessions(
           : await running;
         executionDone?.();
         telemetry?.tools.finishSession({
-          session,
+          session: telemetrySession,
           backend: backend.name,
           capability: backend.observability ?? 'opaque',
           budgetTier: 'observe-only',
@@ -213,7 +215,7 @@ export function limitReviewBackendSessions(
         const stopReason = classifyTelemetryStopReason(error);
         executionDone?.(stopReason);
         telemetry?.tools.finishSession({
-          session,
+          session: telemetrySession,
           backend: backend.name,
           capability: backend.observability ?? 'opaque',
           budgetTier: 'observe-only',
@@ -296,7 +298,13 @@ export function limitReviewBackendSessions(
         'low',
       ),
     runGuidelineComplianceCheck: (...args) =>
-      withSlots('guideline-compliance', () => backend.runGuidelineComplianceCheck(...args)),
+      withSlots(
+        'guideline-compliance',
+        () => backend.runGuidelineComplianceCheck(...args),
+        rolePriority,
+        undefined,
+        args[7],
+      ),
     runFindingVerification: (...args) =>
       withSlots(
         'finding-verification',

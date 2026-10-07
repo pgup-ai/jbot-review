@@ -423,6 +423,22 @@ describe('limitReviewBackendSessions', () => {
       ),
       /timed out/,
     );
+    await limitReviewBackendSessions(
+      makeBackend(),
+      'aux',
+      undefined,
+      undefined,
+      telemetry,
+    ).runGuidelineComplianceCheck(
+      'model',
+      'context',
+      '',
+      noLog,
+      undefined,
+      undefined,
+      undefined,
+      'guideline-compliance-page-2',
+    );
 
     const phases = recorder
       .toJsonl()
@@ -436,6 +452,8 @@ describe('limitReviewBackendSessions', () => {
         ['success', 'main-execution', 'completed'],
         ['timeout', 'auxiliary-queue', 'completed'],
         ['timeout', 'auxiliary-execution', 'timeout'],
+        ['guideline-compliance-page-2', 'auxiliary-queue', 'completed'],
+        ['guideline-compliance-page-2', 'auxiliary-execution', 'completed'],
       ],
     );
   });
