@@ -56,7 +56,7 @@ On #286 both models found the same real bug. A telemetry helper gained a
 workspace parameter that three backends never pass. Step 5 also traced a side
 effect in the shell-read classifier that DeepSeek did not mention.
 
-The median completed review took 16 minutes. Only three PRs have a DeepSeek
+The median review on the six completed production PRs, A to F, took 16 minutes. Only three PRs have a DeepSeek
 time to compare, and all three DeepSeek runs used older J-Bot code. Step 5 was
 1.9 times slower on #286 (8.2 against 4.4 minutes, same settings) and on A
 (17.7 against 9.2). It was faster on B (10.0 against 12.0).
