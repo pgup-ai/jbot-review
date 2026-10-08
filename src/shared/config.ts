@@ -534,11 +534,14 @@ export const OPENCODE_CLAUDE_PROVIDERS = new Set(['anthropic', 'opencode', 'open
 /**
  * Effort ladders by Claude generation, keyed by family pattern so dated
  * snapshots and every route share them: Haiku/Sonnet 4.5 and older reject
- * `effort` outright, Opus 4.5 stops at `high`, 4.6 lacks `xhigh`.
+ * `effort` outright, Opus 4.5 stops at `high`, 4.6 lacks `xhigh`. Ids outside
+ * the family-first scheme are the legacy generation-first ones
+ * (`claude-3-5-sonnet-…`), so they send no effort.
  */
 function claudeModelConfig(modelID: string): ModelConfig | undefined {
+  if (!modelID.startsWith('claude-')) return undefined;
   const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(?:-free)?$/.exec(modelID);
-  if (!match) return undefined;
+  if (!match) return { reasoningEfforts: [] };
   const [, family, major, minor = '0'] = match;
   const version = Number(major) * 10 + Number(minor);
   if (version < 45 || (version === 45 && family !== 'opus')) return { reasoningEfforts: [] };

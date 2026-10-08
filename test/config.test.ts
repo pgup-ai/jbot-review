@@ -170,6 +170,8 @@ describe('Claude effort ladders', () => {
     const low = { reasoningEffort: 'low' };
     assert.deepEqual(supportedModelOptions('anthropic', 'claude-haiku-4-5-20251001', low), {});
     assert.deepEqual(supportedModelOptions('opencode', 'claude-sonnet-4', low), {});
+    assert.deepEqual(supportedModelOptions('anthropic', 'claude-3-5-sonnet-20241022', low), {});
+    assert.equal(supportedModelOptions('opencode', 'deepseek-v4-flash', low), low);
     assert.deepEqual(
       supportedModelOptions('anthropic', 'claude-opus-4-5', { reasoningEffort: 'max' }),
       {
