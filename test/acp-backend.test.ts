@@ -59,7 +59,7 @@ describe('ACP tool telemetry', () => {
   it('observes protocol tool frames while retaining no frame content', () => {
     const recorder = createTelemetryRecorder(true);
     const telemetry = createToolTelemetryAccumulator(recorder, 'salt');
-    const observation = createAcpTelemetryTee(telemetry, 'acp:probe', 'review');
+    const observation = createAcpTelemetryTee(telemetry, 'acp:probe', 'review', '/w');
     const tee = observation.tee;
     tee('in', {
       method: 'session/update',
@@ -105,6 +105,38 @@ describe('ACP tool telemetry', () => {
     assert.equal(rows[0].capability, 'observable');
     assert.equal(rows[1].toolClass, 'search');
     assert.equal(rows[1].failureClass, 'unknown');
+  });
+
+  it('gives absolute and workspace-relative reads of one file one identity', () => {
+    const recorder = createTelemetryRecorder(true);
+    const telemetry = createToolTelemetryAccumulator(recorder, 'salt');
+    const { tee } = createAcpTelemetryTee(telemetry, 'acp:probe', 'review', '/w');
+    for (const [id, path] of [
+      ['1', '/w/src/a.ts'],
+      ['2', 'src/a.ts'],
+    ]) {
+      const update = { toolCallId: id, kind: 'read', rawInput: { path }, status: 'completed' };
+      tee('in', {
+        method: 'session/update',
+        params: { update: { sessionUpdate: 'tool_call', ...update } },
+      });
+    }
+    telemetry.finishSession({
+      session: 'review',
+      backend: 'acp:probe',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+      turnCount: 2,
+    });
+
+    const exploration = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((row) => row.kind === 'exploration');
+    assert.equal(exploration.uniquePathHashes, 1);
+    assert.equal(exploration.duplicateReads, 1);
   });
 });
 

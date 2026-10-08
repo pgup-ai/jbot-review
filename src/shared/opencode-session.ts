@@ -397,9 +397,9 @@ export function recordAssistantTools(
   options: {
     experiment?: ReturnType<typeof readExplorationStats>;
     stopReason?: TelemetryStopReason;
-    supplied?: { context: SuppliedContext; workspace: string };
-    workspace?: string;
-  } = {},
+    supplied?: SuppliedContext;
+    workspace: string;
+  },
 ): void {
   for (const message of messages) {
     for (const part of message.content ?? []) {
@@ -423,10 +423,10 @@ export function recordAssistantTools(
         ...(options.supplied
           ? {
               supplied: suppliedOverlap(
-                options.supplied.workspace,
+                options.workspace,
                 part.name,
                 part.state.input ?? {},
-                options.supplied.context,
+                options.supplied,
               ),
             }
           : {}),
@@ -759,7 +759,7 @@ async function promptHoldingSlot(
         recordAssistantTools(telemetry, label, turn, {
           experiment,
           stopReason,
-          supplied: supplied && { context: supplied, workspace: runtime.workspace },
+          supplied,
           workspace: runtime.workspace,
         });
       }

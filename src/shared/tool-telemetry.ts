@@ -280,7 +280,7 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
   }
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
   if (typeof command === 'string') {
-    if (shellReadPath(input as Record<string, unknown>)) return 'file-read';
+    if (shellReadPath(input as Record<string, unknown>, '/')) return 'file-read';
     if (shellSearchPattern(command)) return 'search';
   }
   if (
@@ -328,7 +328,7 @@ export function serializedBytes(value: unknown): number {
 export function toolIdentity(
   toolClass: ToolTelemetryClass,
   input: unknown,
-  workspace = '/',
+  workspace: string,
 ): { identity?: string; identityKind?: 'path' | 'query' | 'scope' } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return toolClass === 'diff-recovery' ? { identity: 'whole-diff', identityKind: 'scope' } : {};
@@ -370,7 +370,7 @@ function pathIdentity(path: string | undefined, workspace: string): string | und
 }
 
 /** A chained shell read is identified by its first file. */
-function shellReadPath(input: Record<string, unknown>, workspace = '/'): string | undefined {
+function shellReadPath(input: Record<string, unknown>, workspace: string): string | undefined {
   return reviewReadLocations(workspace, 'shell', input)[0]?.path;
 }
 

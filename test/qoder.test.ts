@@ -22,24 +22,24 @@ describe('Qoder tool telemetry', () => {
     const recorder = createTelemetryRecorder(true);
     const telemetry = createToolTelemetryAccumulator(recorder, 'salt');
     const pending = new Map<string, (finish: ToolTelemetryFinish) => void>();
-    observeQoderToolMessage(telemetry, 'review', pending, {
+    observeQoderToolMessage(telemetry, 'review', '/w', pending, {
       type: 'assistant',
       message: {
         content: [{ type: 'tool_use', id: 'call-1', name: 'Grep', input: { pattern: 'password' } }],
       },
     } as never);
-    observeQoderToolMessage(telemetry, 'review', pending, {
+    observeQoderToolMessage(telemetry, 'review', '/w', pending, {
       type: 'assistant',
       message: {
         content: [{ type: 'tool_use', id: 'call-2', name: 'Read', input: { path: 'denied.ts' } }],
       },
     } as never);
-    observeQoderToolMessage(telemetry, 'review', pending, {
+    observeQoderToolMessage(telemetry, 'review', '/w', pending, {
       type: 'system',
       subtype: 'permission_denied',
       tool_use_id: 'call-2',
     } as never);
-    observeQoderToolMessage(telemetry, 'review', pending, {
+    observeQoderToolMessage(telemetry, 'review', '/w', pending, {
       type: 'user',
       message: {
         content: [
