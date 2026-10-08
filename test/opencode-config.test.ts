@@ -13,6 +13,7 @@ import {
   WRAPUP_AGENT,
   buildConfig,
   modelOptionsByModel,
+  providerModelOptions,
   permissionRules,
   providerKeyVariables,
   sessionEnvironment,
@@ -190,5 +191,20 @@ describe('sessionEnvironment', () => {
       HTTPS_PROXY: 'http://proxy.local:3128',
       https_proxy: 'http://proxy.local:3128',
     });
+  });
+});
+
+describe('providerModelOptions', () => {
+  it('sends Anthropic the resolved effort as `effort`, leaving other providers untouched', () => {
+    assert.deepEqual(
+      providerModelOptions('anthropic/claude-haiku-5-5', { reasoningEffort: 'low', foo: 1 }),
+      { effort: 'low', foo: 1 },
+    );
+    assert.deepEqual(
+      providerModelOptions('anthropic/claude-haiku-5-5', { reasoningEffort: 'low', effort: 'max' }),
+      { effort: 'max' },
+    );
+    const openai = { reasoningEffort: 'low' };
+    assert.equal(providerModelOptions('openai/gpt-5', openai), openai);
   });
 });

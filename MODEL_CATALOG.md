@@ -793,16 +793,17 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.22`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.0.24`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-81 J-Bot model values:
+84 J-Bot model values:
 
 - `opencode/big-pickle`
 - `opencode/claude-fable-5`
 - `opencode/claude-fable-5-1`
 - `opencode/claude-haiku-4-5`
+- `opencode/claude-haiku-5-5`
 - `opencode/claude-opus-4-5`
 - `opencode/claude-opus-4-6`
 - `opencode/claude-opus-4-7`
@@ -818,6 +819,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/deepseek-v4-flash-vision-exp`
 - `opencode/deepseek-v4-pro`
 - `opencode/deepseek-v4.1-flash`
+- `opencode/exo-free`
 - `opencode/fledge-alpha-free`
 - `opencode/gemini-3-flash`
 - `opencode/gemini-3.1-pro`
@@ -870,6 +872,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/minimax-m2.5`
 - `opencode/minimax-m2.7`
 - `opencode/minimax-m3`
+- `opencode/mistral-large-4`
 - `opencode/muse-spark-1.2`
 - `opencode/muse-spark-1.3`
 - `opencode/muse-spark-1.3-contributor-free`
@@ -883,12 +886,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.22`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.0.24`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-29 J-Bot model values:
+30 J-Bot model values:
 
+- `opencode-go/claude-haiku-5-5`
 - `opencode-go/deepseek-v4-flash` **(default)**
 - `opencode-go/deepseek-v4-flash-vision-exp`
 - `opencode-go/deepseek-v4-pro`
@@ -917,7 +921,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode-go/qwen3.7-plus`
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
-- `opencode-go/space-bunny-free`
+- `opencode-go/space-bunny`
 
 ### `devin`
 

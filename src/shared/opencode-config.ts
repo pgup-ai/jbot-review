@@ -176,6 +176,20 @@ export function sessionModelOptions(
   return (tier === 'verify' ? entry?.verify : undefined) ?? entry?.main;
 }
 
+/**
+ * OpenCode's Anthropic adapter sends `effort` as `output_config.effort` and
+ * silently drops `reasoningEffort` (measured on 2.0.22 and 2.0.24); an explicit `effort` wins.
+ */
+export function providerModelOptions(
+  model: string,
+  options: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!model.startsWith('anthropic/') || typeof options?.reasoningEffort !== 'string')
+    return options;
+  const { reasoningEffort, ...rest } = options;
+  return { effort: reasoningEffort, ...rest };
+}
+
 export interface OpencodeConfigInput {
   models: ModelEntry[];
   reviewerSystem: string;
