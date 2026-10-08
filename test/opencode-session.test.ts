@@ -62,6 +62,34 @@ describe('createReviewSession', () => {
     assert.equal('JBOT_EXPLORATION_CONFIG' in fake.sessions.get(fork)!.environment!, false);
   });
 
+  it('registers Anthropic effort as `effort` for mapped, forked and direct options', async () => {
+    const model = 'anthropic/claude-haiku-5-5';
+    const rt = runtime(
+      fakeOpencodeServer(() => ({ text: '{}' })),
+      {
+        modelOptions: {
+          [model]: { main: { reasoningEffort: 'high' }, verify: { reasoningEffort: 'medium' } },
+        },
+      },
+    );
+    const main = await createReviewSession(rt, { label: 'review', model });
+    const verify = await createReviewSession(rt, {
+      label: 'finding-verification',
+      model,
+      tier: 'verify',
+      forkFrom: main,
+    });
+    const direct = await createReviewSession(rt, {
+      label: 'guideline-compliance',
+      model,
+      modelOptions: { reasoningEffort: 'low' },
+    });
+    const options = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
+    assert.deepEqual(options[main], { effort: 'high' });
+    assert.deepEqual(options[verify], { effort: 'medium' });
+    assert.deepEqual(options[direct], { effort: 'low' });
+  });
+
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{}' }));
     const id = await createReviewSession(runtime(fake), { label: 'review', model: 'openai/gpt-5' });

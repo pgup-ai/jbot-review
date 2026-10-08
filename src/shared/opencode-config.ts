@@ -1,4 +1,4 @@
-import { PROVIDERS, supportedModelOptions } from './config.ts';
+import { OPENCODE_CLAUDE_PROVIDERS, PROVIDERS, supportedModelOptions } from './config.ts';
 import { BASH_PERMISSIONS, CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 
 /** Built-in read-only agent for review turns. */
@@ -174,6 +174,26 @@ export function sessionModelOptions(
 ): Record<string, unknown> | undefined {
   const entry = byModel[model];
   return (tier === 'verify' ? entry?.verify : undefined) ?? entry?.main;
+}
+
+/**
+ * OpenCode serves `claude-*` models over Anthropic Messages, which sends
+ * `effort` as `output_config.effort` and silently drops `reasoningEffort`
+ * (measured on 2.0.22 and 2.0.24, Zen and Go included); an explicit `effort` wins.
+ */
+export function providerModelOptions(
+  model: string,
+  options: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const [providerID, modelID = ''] = model.split('/', 2);
+  if (
+    !OPENCODE_CLAUDE_PROVIDERS.has(providerID!) ||
+    !modelID.startsWith('claude-') ||
+    typeof options?.reasoningEffort !== 'string'
+  )
+    return options;
+  const { reasoningEffort, ...rest } = options;
+  return { effort: reasoningEffort, ...rest };
 }
 
 export interface OpencodeConfigInput {

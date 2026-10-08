@@ -27,6 +27,7 @@ import {
   WRAPUP_AGENT,
   VERIFY_AGENT,
   permissionRules,
+  providerModelOptions,
   sessionEnvironment,
   sessionModelOptions,
   type OptionTier,
@@ -325,8 +326,10 @@ function registerSessionOptions(
   sessionID: string,
   spec: CreateSessionSpec,
 ): void {
-  const options =
-    spec.modelOptions ?? sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
+  const options = providerModelOptions(
+    spec.model,
+    spec.modelOptions ?? sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main'),
+  );
   const experiment = runtime.explorationExperiment;
   const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
   if (!options && !label && !spec.reportFindings) return;

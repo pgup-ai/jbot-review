@@ -32,7 +32,7 @@ FROM base AS runtime
 
 # opencode's npm package installs both the glibc and musl binaries (~190MB each);
 # this Debian image only runs the glibc one.
-RUN npm install -g @opencode/cli@2.0.22 command-code@1.74.1 \
+RUN npm install -g @opencode/cli@2.0.24 command-code@1.74.1 \
   && npm cache clean --force \
   && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules/@opencode/cli-linux-*-musl \
   && opencode --version \
@@ -104,7 +104,7 @@ RUN ln -s /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
 
 FROM base AS opencode-tools
 # Use the amd64 baseline binary so runners without AVX2 work too.
-RUN npm install -g @opencode/cli-linux-x64-baseline@2.0.22 \
+RUN npm install -g @opencode/cli-linux-x64-baseline@2.0.24 \
   && ln -s /usr/local/lib/node_modules/@opencode/cli-linux-x64-baseline/bin/opencode /usr/local/bin/opencode \
   && npm cache clean --force \
   && opencode --version
