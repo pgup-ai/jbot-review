@@ -28,8 +28,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      34 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
 | `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
-| `opencode`              | CLI snapshot         |      81 | `opencode/deepseek-v4-flash`                                    |
-| `opencode-go`           | CLI snapshot         |      29 | `opencode-go/deepseek-v4-flash`                                 |
+| `opencode`              | CLI snapshot         |      84 | `opencode/deepseek-v4-flash`                                    |
+| `opencode-go`           | CLI snapshot         |      30 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
 | `commandcode`           | CLI snapshot         |      85 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
