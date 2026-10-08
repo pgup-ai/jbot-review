@@ -205,6 +205,15 @@ describe('phase and tool telemetry', () => {
     });
   });
 
+  it('takes a quoted shell operator as the search pattern', () => {
+    const search = { command: "grep -n '||' src/a.ts" };
+    assert.equal(classifyReadonlyTool('bash', search), 'search');
+    assert.deepEqual(toolIdentity('search', search, '/w'), {
+      identity: '||',
+      identityKind: 'query',
+    });
+  });
+
   it('closes every phase exactly once with its terminal reason', () => {
     const rec = createTelemetryRecorder(true);
     let now = 10;
