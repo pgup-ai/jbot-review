@@ -154,6 +154,36 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   });
 });
 
+describe('Claude effort ladders', () => {
+  it('defaults Haiku 5+ to xhigh on every OpenCode route and keeps other Claude defaults', () => {
+    for (const providerID of ['anthropic', 'opencode', 'opencode-go']) {
+      assert.deepEqual(defaultModelOptions(providerID, 'claude-haiku-5-5'), {
+        reasoningEffort: 'xhigh',
+      });
+    }
+    assert.deepEqual(defaultModelOptions('anthropic', 'claude-sonnet-4-6'), {
+      reasoningEffort: 'low',
+    });
+  });
+
+  it('drops effort where the model rejects it and clamps to the generation ladder', () => {
+    const low = { reasoningEffort: 'low' };
+    assert.deepEqual(supportedModelOptions('anthropic', 'claude-haiku-4-5-20251001', low), {});
+    assert.deepEqual(supportedModelOptions('opencode', 'claude-sonnet-4', low), {});
+    assert.deepEqual(
+      supportedModelOptions('anthropic', 'claude-opus-4-5', { reasoningEffort: 'max' }),
+      {
+        reasoningEffort: 'high',
+      },
+    );
+    assert.deepEqual(
+      supportedModelOptions('anthropic', 'claude-sonnet-4-6', { reasoningEffort: 'xhigh' }, 'down'),
+      { reasoningEffort: 'high' },
+    );
+    assert.equal(supportedModelOptions('opencode-go', 'claude-haiku-5-5', low), low);
+  });
+});
+
 describe('compliance effort', () => {
   it('pins the compliance session to low whatever the model default', () => {
     assert.deepEqual(

@@ -195,7 +195,7 @@ describe('sessionEnvironment', () => {
 });
 
 describe('providerModelOptions', () => {
-  it('sends Anthropic the resolved effort as `effort`, leaving other providers untouched', () => {
+  it('sends OpenCode-served Claude the resolved effort as `effort`, leaving other models untouched', () => {
     assert.deepEqual(
       providerModelOptions('anthropic/claude-haiku-5-5', { reasoningEffort: 'low', foo: 1 }),
       { effort: 'low', foo: 1 },
@@ -204,7 +204,14 @@ describe('providerModelOptions', () => {
       providerModelOptions('anthropic/claude-haiku-5-5', { reasoningEffort: 'low', effort: 'max' }),
       { effort: 'max' },
     );
-    const openai = { reasoningEffort: 'low' };
-    assert.equal(providerModelOptions('openai/gpt-5', openai), openai);
+    assert.deepEqual(
+      providerModelOptions('opencode-go/claude-haiku-5-5', { reasoningEffort: 'xhigh' }),
+      {
+        effort: 'xhigh',
+      },
+    );
+    const low = { reasoningEffort: 'low' };
+    assert.equal(providerModelOptions('openai/gpt-5', low), low);
+    assert.equal(providerModelOptions('opencode/gpt-5', low), low);
   });
 });

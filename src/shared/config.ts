@@ -522,7 +522,33 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
  * rather than every id listed twice.
  */
 function modelConfigFor(providerID: string, modelID: string): ModelConfig | undefined {
-  return PROVIDERS[providerID]?.models?.[modelID.replace(/-free$/, '')];
+  return (
+    PROVIDERS[providerID]?.models?.[modelID.replace(/-free$/, '')] ??
+    (OPENCODE_CLAUDE_PROVIDERS.has(providerID) ? claudeModelConfig(modelID) : undefined)
+  );
+}
+
+/** Providers whose `claude-*` models OpenCode serves over Anthropic Messages, where effort is `output_config.effort`. */
+export const OPENCODE_CLAUDE_PROVIDERS = new Set(['anthropic', 'opencode', 'opencode-go']);
+
+/**
+ * Effort ladders by Claude generation, keyed by family pattern so dated
+ * snapshots and every route share them: Haiku/Sonnet 4.5 and older reject
+ * `effort` outright, Opus 4.5 stops at `high`, 4.6 lacks `xhigh`.
+ */
+function claudeModelConfig(modelID: string): ModelConfig | undefined {
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(?:-free)?$/.exec(modelID);
+  if (!match) return undefined;
+  const [, family, major, minor = '0'] = match;
+  const version = Number(major) * 10 + Number(minor);
+  if (version < 45 || (version === 45 && family !== 'opus')) return { reasoningEfforts: [] };
+  if (version === 45) return { reasoningEfforts: ['low', 'medium', 'high'] };
+  if (version === 46) return { reasoningEfforts: ['low', 'medium', 'high', 'max'] };
+  return {
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    // Operator default: Haiku reviews at xhigh unless model-options says otherwise.
+    ...(family === 'haiku' ? { defaultReasoningEffort: 'xhigh' } : {}),
+  };
 }
 
 export function modelAcceptsForcedToolChoice(providerID: string, modelID: string): boolean {
