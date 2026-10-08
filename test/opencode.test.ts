@@ -24,58 +24,63 @@ describe('recordAssistantTools', () => {
       startTool: (input: unknown) => (finish: unknown) => rows.push({ input, finish }),
       finishSession: (input: unknown) => rows.push({ session: input }),
     } as never;
-    recordAssistantTools(telemetry, 'review', [
-      {
-        id: 'm1',
-        type: 'assistant',
-        time: { created: 1, completed: 2 },
-        content: [
-          {
-            type: 'tool',
-            id: 't1',
-            name: 'read',
-            state: {
-              status: 'completed',
-              input: { filePath: 'a.ts' },
-              content: [{ type: 'text', text: 'x' }],
-            },
-            time: { created: 1, completed: 3 },
-          },
-          {
-            type: 'tool',
-            id: 't2',
-            name: 'shell',
-            state: { status: 'error', input: { command: 'git diff' }, error: 'nope' },
-            time: { created: 1 },
-          },
-          {
-            type: 'tool',
-            id: 't3',
-            name: 'grep',
-            state: { status: 'running', input: {} },
-            time: { created: 1 },
-          },
-          {
-            type: 'tool',
-            id: 't4',
-            name: 'shell',
-            state: {
-              status: 'completed',
-              input: {
-                command: 'git --literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts',
+    recordAssistantTools(
+      telemetry,
+      'review',
+      [
+        {
+          id: 'm1',
+          type: 'assistant',
+          time: { created: 1, completed: 2 },
+          content: [
+            {
+              type: 'tool',
+              id: 't1',
+              name: 'read',
+              state: {
+                status: 'completed',
+                input: { filePath: 'a.ts' },
+                content: [{ type: 'text', text: 'x' }],
               },
-              content: [
-                {
-                  type: 'text',
-                  text: 'diff --git a/a.ts b/a.ts\n+new\ndiff --git a/b.ts b/b.ts\n+new',
-                },
-              ],
+              time: { created: 1, completed: 3 },
             },
-            time: { created: 1, completed: 3 },
-          },
-        ],
-      },
-    ]);
+            {
+              type: 'tool',
+              id: 't2',
+              name: 'shell',
+              state: { status: 'error', input: { command: 'git diff' }, error: 'nope' },
+              time: { created: 1 },
+            },
+            {
+              type: 'tool',
+              id: 't3',
+              name: 'grep',
+              state: { status: 'running', input: {} },
+              time: { created: 1 },
+            },
+            {
+              type: 'tool',
+              id: 't4',
+              name: 'shell',
+              state: {
+                status: 'completed',
+                input: {
+                  command: 'git --literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts',
+                },
+                content: [
+                  {
+                    type: 'text',
+                    text: 'diff --git a/a.ts b/a.ts\n+new\ndiff --git a/b.ts b/b.ts\n+new',
+                  },
+                ],
+              },
+              time: { created: 1, completed: 3 },
+            },
+          ],
+        },
+      ],
+      { workspace: '/w' },
+    );
     const [read, shell, batch, session] = rows as Array<{
       input?: { toolClass: string; diffScope?: string };
       finish?: {
@@ -135,14 +140,12 @@ describe('recordAssistantTools', () => {
         },
       ] as never,
       {
+        workspace: '/w',
         supplied: {
-          workspace: '/w',
-          context: {
-            ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
-            lines: new Map([['src/a.ts', 400]]),
-            symbols: new Set(['LedgerService']),
-            directories: new Set(),
-          },
+          ranges: new Map<string, [number, number][]>([['src/a.ts', [[12, 20]]]]),
+          lines: new Map([['src/a.ts', 400]]),
+          symbols: new Set(['LedgerService']),
+          directories: new Set(),
         },
       },
     );

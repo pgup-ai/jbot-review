@@ -316,6 +316,7 @@ export async function runQoderFindingVerification(
 export function observeQoderToolMessage(
   telemetry: ToolTelemetryAccumulator,
   session: string,
+  workspace: string,
   pending: Map<string, (finish: ToolTelemetryFinish) => void>,
   message: SDKMessage,
 ): void {
@@ -326,7 +327,7 @@ export function observeQoderToolMessage(
       const id = typeof block.id === 'string' ? block.id : '';
       if (!id || pending.has(id)) continue;
       const toolClass = classifyReadonlyTool(tool, block.input);
-      const identity = toolIdentity(toolClass, block.input);
+      const identity = toolIdentity(toolClass, block.input, workspace);
       pending.set(
         id,
         telemetry.startTool({
@@ -413,7 +414,8 @@ async function runQoderPrompt(
     timer.unref();
     try {
       for await (const message of session) {
-        if (toolTelemetry) observeQoderToolMessage(toolTelemetry, label, pendingTools, message);
+        if (toolTelemetry)
+          observeQoderToolMessage(toolTelemetry, label, workspace, pendingTools, message);
         if (message.type === 'result') result = message;
       }
     } catch (error) {

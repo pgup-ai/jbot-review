@@ -494,7 +494,7 @@ async function runDimPrompt(
       capability: DIM_TELEMETRY_CAPABILITY,
       toolClass,
       inputBytes: serializedBytes(event.input),
-      ...toolIdentity(toolClass, event.input),
+      ...toolIdentity(toolClass, event.input, workspace),
     });
     finish?.({
       success: event.success,

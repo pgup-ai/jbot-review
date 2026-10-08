@@ -173,7 +173,7 @@ describe('phase and tool telemetry', () => {
     assert.equal(classifyReadonlyTool('bash', { command: 'git status --short' }), 'other-readonly');
     const read = { command: 'sed -n 1,80p src/a.ts; echo ===; cat src/b.ts' };
     assert.equal(classifyReadonlyTool('bash', read), 'file-read');
-    assert.deepEqual(toolIdentity('file-read', read), {
+    assert.deepEqual(toolIdentity('file-read', read, '/w'), {
       identity: 'src/a.ts',
       identityKind: 'path',
     });
@@ -186,18 +186,30 @@ describe('phase and tool telemetry', () => {
         identity: 'src/a.ts',
         identityKind: 'path',
       });
-    assert.deepEqual(toolIdentity('diff-recovery', { command: 'cat a.ts; git diff --stat' }), {
-      identity: 'whole-diff',
-      identityKind: 'scope',
-    });
+    assert.deepEqual(
+      toolIdentity('diff-recovery', { command: 'cat a.ts; git diff --stat' }, '/w'),
+      {
+        identity: 'whole-diff',
+        identityKind: 'scope',
+      },
+    );
     const search = { command: 'grep -rn "formatDiffScope" src | head -20' };
     assert.equal(classifyReadonlyTool('shell', search), 'search');
-    assert.deepEqual(toolIdentity('search', search), {
+    assert.deepEqual(toolIdentity('search', search, '/w'), {
       identity: 'formatDiffScope',
       identityKind: 'query',
     });
-    assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }), {
+    assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }, '/w'), {
       identity: 'src/**/*.ts',
+      identityKind: 'query',
+    });
+  });
+
+  it('takes a quoted shell operator as the search pattern', () => {
+    const search = { command: "grep -n '||' src/a.ts" };
+    assert.equal(classifyReadonlyTool('bash', search), 'search');
+    assert.deepEqual(toolIdentity('search', search, '/w'), {
+      identity: '||',
       identityKind: 'query',
     });
   });

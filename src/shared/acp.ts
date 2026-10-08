@@ -52,7 +52,7 @@ export function createAcpBackend(
 ): ReviewBackend {
   return createAcpReviewBackend(`acp:${spec.id}`, async (model, prompt, label, log, timeoutMs) => {
     const telemetryTee = toolTelemetry
-      ? createAcpTelemetryTee(toolTelemetry, `acp:${spec.id}`, label)
+      ? createAcpTelemetryTee(toolTelemetry, `acp:${spec.id}`, label, workspace)
       : undefined;
     try {
       return await runLocalAcpPrompt(spec, workspace, model, prompt, label, log, {
@@ -81,6 +81,7 @@ export function createAcpTelemetryTee(
   telemetry: ToolTelemetryAccumulator,
   backend: string,
   session: string,
+  workspace: string,
 ): {
   tee: (dir: 'out' | 'in', frame: Record<string, unknown>) => void;
   finishPending: () => void;
@@ -105,7 +106,7 @@ export function createAcpTelemetryTee(
         capability: LOCAL_ACP_TELEMETRY_CAPABILITY,
         toolClass,
         inputBytes: serializedBytes(input),
-        ...toolIdentity(toolClass, input),
+        ...toolIdentity(toolClass, input, workspace),
       });
       pending.set(id, finish);
     }

@@ -135,14 +135,13 @@ export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedCont
 
 /** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
 export function shellSearchPattern(command: string): string | undefined {
-  const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(
-    (m) => m[1] ?? m[2] ?? m[3],
-  );
+  const matches = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)];
+  const tokens = matches.map((m) => m[1] ?? m[2] ?? m[3]);
   for (let i = 0; i < tokens.length; i++) {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
     for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
-      if (/^(?:\|\|?|&&|;)$/.test(tokens[j])) break;
+      if (/^(?:\|\|?|&&|;)$/.test(matches[j][3] ?? '')) break;
       if (tokens[j] === '-e') return tokens[j + 1];
       // These flags take a value, which is not the pattern.
       if (/^-[ABCmtgf]$|^--(?:include|exclude|glob|type)$/.test(tokens[j])) j++;
