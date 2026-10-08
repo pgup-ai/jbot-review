@@ -3,8 +3,8 @@
 _2026-10-08_
 
 Step 5 Preview reviews small pull requests about as well as DeepSeek V4.1 Flash,
-and it costs nothing this week. It takes roughly twice as long, and it could not
-finish either of the two large PRs we gave it. We would use it on small and
+and it costs nothing this week. It was slower on two of the three PRs where we have a DeepSeek time,
+and it could not finish either of the two large PRs we gave it. We would use it on small and
 medium PRs while the free window lasts. We would not put it in a default model
 pool.
 
@@ -56,8 +56,10 @@ On #286 both models found the same real bug. A telemetry helper gained a
 workspace parameter that three backends never pass. Step 5 also traced a side
 effect in the shell-read classifier that DeepSeek did not mention.
 
-The median review took 16 minutes, about 1.5 to 2 times DeepSeek. B was the
-exception, at 10.0 minutes against DeepSeek's 12.0.
+The median completed review took 16 minutes. Only three PRs have a DeepSeek
+time to compare, and all three DeepSeek runs used older J-Bot code. Step 5 was
+1.9 times slower on #286 (8.2 against 4.4 minutes, same settings) and on A
+(17.7 against 9.2). It was faster on B (10.0 against 12.0).
 
 ## The large PRs failed
 
