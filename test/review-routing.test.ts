@@ -82,6 +82,7 @@ describe('splitRuleId', () => {
   it('splits a prefixed section id and rejects non-ids', () => {
     assert.deepEqual(splitRuleId('TS-16.2'), { prefix: 'TS', section: '16.2' });
     assert.deepEqual(splitRuleId('INV-9'), { prefix: 'INV', section: '9' });
+    assert.deepEqual(splitRuleId('INV-013-A'), { prefix: 'INV', section: '013-A' });
     assert.equal(splitRuleId('not-an-id'), undefined);
     assert.equal(splitRuleId('TS-'), undefined);
     // An absurdly long dotted id is rejected, so it can't bloat a label or note.
@@ -134,6 +135,29 @@ describe('extractRuleSection', () => {
     assert.equal(extractRuleSection('## 16.2: Parity\ncolon', '16.2'), '## 16.2: Parity\ncolon');
     assert.equal(extractRuleSection('## 16.2.Parity\ndot', '16.2'), '## 16.2.Parity\ndot');
     assert.equal(extractRuleSection(doc, '99'), undefined);
+  });
+
+  it('extracts a section titled by rule ID, preferring a numbered heading', () => {
+    const ids = [
+      '# Invariants',
+      '### INV-013-A',
+      'lettered body',
+      '### INV-013',
+      'plain body',
+      '### INV-017, INV-018',
+      'shared body',
+      '## Step-1 Setup',
+      'step body',
+      '## 1. Numbered',
+      'numbered body',
+    ].join('\n');
+    // `013` must not stop at the `INV-013-A` heading, and padding is kept as written.
+    assert.equal(extractRuleSection(ids, '013'), '### INV-013\nplain body');
+    assert.equal(extractRuleSection(ids, '013-A'), '### INV-013-A\nlettered body');
+    assert.equal(extractRuleSection(ids, '017'), '### INV-017, INV-018\nshared body');
+    assert.equal(extractRuleSection(ids, '13'), undefined);
+    // A numbered heading wins over an earlier ID-shaped title with the same number.
+    assert.equal(extractRuleSection(ids, '1'), '## 1. Numbered\nnumbered body');
   });
 
   it('ignores a numbered heading inside a fenced code block', () => {
