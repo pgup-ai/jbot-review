@@ -793,7 +793,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.24`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.0.27`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
@@ -820,7 +820,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/deepseek-v4-pro`
 - `opencode/deepseek-v4.1-flash`
 - `opencode/exo-free`
-- `opencode/fledge-alpha-free`
 - `opencode/gemini-3-flash`
 - `opencode/gemini-3.1-pro`
 - `opencode/gemini-3.5-flash`
@@ -883,14 +882,15 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/qwen3.8-flash`
 - `opencode/qwen3.8-max`
 - `opencode/space-bunny-free`
+- `opencode/step-5-preview-free`
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.24`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.0.27`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-30 J-Bot model values:
+31 J-Bot model values:
 
 - `opencode-go/claude-haiku-5-5`
 - `opencode-go/deepseek-v4-flash` **(default)**
@@ -922,6 +922,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
 - `opencode-go/space-bunny`
+- `opencode-go/step-5-preview-free`
 
 ### `devin`
 
