@@ -137,7 +137,7 @@ describe('extractRuleSection', () => {
     assert.equal(extractRuleSection(doc, '99'), undefined);
   });
 
-  it('extracts a section titled by its own rule ID, preferring a numbered heading', () => {
+  it('extracts a section titled by its own rule ID before a numbered heading', () => {
     const ids = [
       '# Invariants',
       '### OTHER-013',
@@ -160,7 +160,9 @@ describe('extractRuleSection', () => {
     assert.equal(extractRuleSection(ids, '017', 'INV'), '### INV-017, INV-018\nshared body');
     assert.equal(extractRuleSection(ids, '13', 'INV'), undefined);
     assert.equal(extractRuleSection(ids, '013'), undefined);
-    assert.equal(extractRuleSection(ids, '1', 'STEP'), '## 1. Numbered\nnumbered body');
+    // An exact ID heading beats a same-numbered heading; without one, the number decides.
+    assert.equal(extractRuleSection(ids, '1', 'STEP'), '## Step-1 Setup\nstep body');
+    assert.equal(extractRuleSection(ids, '1', 'INV'), '## 1. Numbered\nnumbered body');
   });
 
   it('ignores a numbered heading inside a fenced code block', () => {

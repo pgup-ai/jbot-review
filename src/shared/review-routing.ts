@@ -145,9 +145,8 @@ export function selectDiffRoutes(
  * Extract the section a numbered heading owns. Sections are numbered headings
  * (`## 6. Title`, `### 6.2 Title`); a rule's section number is the heading's
  * leading numeric token (a trailing dot on whole numbers is ignored). Given the
- * rule's prefix, a doc that titles rules by ID (`### INV-001`, `### INV-013-A`)
- * also matches the heading with that exact prefix and section, zero padding
- * included; numbered headings are tried first. Bounded
+ * rule's prefix, a heading titled with that exact ID (`### INV-001`,
+ * `### INV-013-A`, zero padding included) wins over a numbered heading. Bounded
  * by the `#` level, not the number: a `##` section runs to the next `##`/`#`,
  * so its deeper (`###`) subsections are included, while flat same-level
  * headings (`## 16` then `## 16.2`) stay separate — which is what a doc that
@@ -169,8 +168,8 @@ export function extractRuleSection(
     );
     return id?.[1].toUpperCase() === prefix?.toUpperCase() && id?.[2] === section;
   };
-  const start =
-    numbered >= 0 || !prefix ? numbered : headings.findIndex(({ title }) => byId(title));
+  const titled = prefix ? headings.findIndex(({ title }) => byId(title)) : -1;
+  const start = titled >= 0 ? titled : numbered;
   if (start < 0) return undefined;
   const first = headings[start];
   const end = headings.slice(start + 1).find(({ level }) => level <= first.level)?.line;

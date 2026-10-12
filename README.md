@@ -1418,10 +1418,9 @@ sub-rules refine.
 
 A `rules` entry cites rule IDs instead (`rules: [TS-13.1, INV-013-A]`). The
 governance README maps each prefix to its doc with a line such as
-`` `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md` ``. The number selects a
-numbered heading (`### 13.1 …`) or, in a doc that titles rules by ID, the heading
-that starts with the ID (`### INV-013-A`), matched as written, zero padding
-included.
+`` `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md` ``. A heading titled
+with the full ID (`### INV-013-A`, matched as written, zero padding included)
+wins; otherwise the number selects a numbered heading (`### 13.1 …`).
 
 Guideline files load whole, up to 128 KB each and 1 MB in total. Guideline
 compliance ranks every section of every applicable file on one scale: routed

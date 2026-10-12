@@ -1176,47 +1176,58 @@ export async function discoverGuidelineDocs(
     const uniqueRules = [
       ...new Map(rules.map((rule) => [`${rule.prefix}-${rule.section}`, rule])).values(),
     ].sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
-    const uniqueSections = uniqueRules.map((rule) => rule.section);
+    // Several prefixes routed into one doc are told apart in labels and notes.
+    const multiPrefix = new Set(uniqueRules.map((rule) => rule.prefix)).size > 1;
+    const keyOf = (prefix: string, section: string) =>
+      multiPrefix ? `${prefix}-${section}` : section;
     const extracted = uniqueRules.map(({ prefix, section }) => ({
       section,
+      key: keyOf(prefix, section),
       text: extractRuleSection(source.text, section, prefix),
     }));
-    const found = extracted.filter((entry): entry is { section: string; text: string } =>
-      Boolean(entry.text),
+    const found = extracted.filter(
+      (entry): entry is { section: string; key: string; text: string } => Boolean(entry.text),
     );
     // Cited sections not present in the source (removed, mis-numbered, or past
     // the MAX_RULE_DOC_BYTES read) — named in the omission note, never dropped
     // silently.
-    const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.section);
+    const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.key);
     // A sub-rule refines its parent's defaults (TS-13.1 under §13): add each uncited
     // parent's own text, up to its first sub-heading, when it is short enough to be
     // defaults. A longer lead-in is a rule body the route did not cite.
-    const parents = uniqueSections.flatMap((section) => {
+    const parents = new Map<string, { prefix: string; section: string }>();
+    for (const { prefix, section } of uniqueRules) {
       const parts = section.split('.');
-      return parts.slice(1).map((_, index) => parts.slice(0, index + 1).join('.'));
-    });
-    for (const parent of new Set(parents)) {
-      if (uniqueSections.includes(parent)) continue;
-      const lines = extractRuleSection(source.text, parent)?.split('\n') ?? [];
+      for (let index = 1; index < parts.length; index += 1) {
+        const parent = parts.slice(0, index).join('.');
+        parents.set(`${prefix}-${parent}`, { prefix, section: parent });
+      }
+    }
+    for (const [id, { prefix, section: parent }] of parents) {
+      if (uniqueRules.some((rule) => `${rule.prefix}-${rule.section}` === id)) continue;
+      const lines = extractRuleSection(source.text, parent, prefix)?.split('\n') ?? [];
       const next = markdownHeadings(lines).find(({ line }) => line > 0)?.line;
       const own = lines.slice(0, next).join('\n').trim();
       if (own.includes('\n') && Buffer.byteLength(own) <= MAX_PARENT_RULE_BYTES)
-        found.push({ section: parent, text: own });
+        found.push({ section: parent, key: keyOf(prefix, parent), text: own });
     }
     found.sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
     // A nested child (`### 6.1` under `## 6`) is already inside its selected
     // parent's extract — drop the duplicate so it is neither emitted nor budgeted
-    // twice. Strictly-larger guard: equal-length distinct sections keep both.
+    // twice. Strictly-larger guard: equal-length distinct sections keep both; the
+    // same section routed by two prefixes keeps one copy.
     const deduped = found.filter(
-      (entry) =>
+      (entry, index) =>
         !found.some(
-          (other) => other.text.length > entry.text.length && other.text.includes(entry.text),
+          (other, otherIndex) =>
+            (other.text.length > entry.text.length && other.text.includes(entry.text)) ||
+            (otherIndex < index && other.text === entry.text),
         ),
     );
     const sourceTruncated = source.truncated
       ? deduped
           .filter((entry) => source.text.trimEnd().endsWith(entry.text))
-          .map((entry) => entry.section)
+          .map((entry) => entry.key)
       : [];
     if (deduped.length === 0) {
       // Every cited section was unavailable — disclose the request (invariant #4)
@@ -1249,8 +1260,8 @@ export async function discoverGuidelineDocs(
     seenRealPaths.add(resolved.realPath);
     const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingCandidateBytes);
     const sources: GuidelineFragmentSource[] = deduped.map((entry) => ({
-      id: entry.section,
-      label: `§${entry.section}`,
+      id: entry.key,
+      label: `§${entry.key}`,
       text: entry.text,
       relevance: GUIDELINE_RELEVANCE.scoped,
     }));
