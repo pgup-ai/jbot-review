@@ -1154,8 +1154,11 @@ export async function discoverGuidelineDocs(
 
   // Fragment matched sections round-robin so each gets a prefix before any one
   // section can consume the per-file budget.
-  async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
-    if (sections.length === 0) return;
+  async function addRuleSections(
+    governanceRelPath: string,
+    rules: { prefix: string; section: string }[],
+  ): Promise<void> {
+    if (rules.length === 0) return;
     if (remainingCandidateBytes <= 0) {
       markBudgetExhausted();
       return;
@@ -1170,12 +1173,13 @@ export async function discoverGuidelineDocs(
     } catch {
       return;
     }
-    const uniqueSections = [...new Set(sections)].sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true }),
-    );
-    const extracted = uniqueSections.map((section) => ({
+    const uniqueRules = [
+      ...new Map(rules.map((rule) => [`${rule.prefix}-${rule.section}`, rule])).values(),
+    ].sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
+    const uniqueSections = uniqueRules.map((rule) => rule.section);
+    const extracted = uniqueRules.map(({ prefix, section }) => ({
       section,
-      text: extractRuleSection(source.text, section),
+      text: extractRuleSection(source.text, section, prefix),
     }));
     const found = extracted.filter((entry): entry is { section: string; text: string } =>
       Boolean(entry.text),
@@ -1357,11 +1361,11 @@ export async function discoverGuidelineDocs(
           ]);
       }
       for (const path of wholeDocRealPaths) routedSections.delete(path);
-      const sectionsByDoc = new Map<string, string[]>();
+      const sectionsByDoc = new Map<string, { prefix: string; section: string }[]>();
       for (const id of matched.ruleIds) {
         const parsed = splitRuleId(id);
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
-        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
+        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed]);
       }
       // Mixed heading and numbered-rule routes keep the whole file so neither loses rules.
       for (const doc of sectionsByDoc.keys()) {

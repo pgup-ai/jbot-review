@@ -161,6 +161,20 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.doesNotMatch(docs.map((doc) => doc.text).join('\n'), /SIBLING-RULE|x{3000}/);
   });
 
+  it('routes a rule ID to the heading titled with that ID, not another prefix', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-gov-'));
+    roots.push(root);
+    writeRoutedRepo(root, {
+      rules: 'TS-013',
+      doc: ['# T', '### OTHER-013', 'WRONG-PREFIX', '### TS-013', 'RIGHT-RULE'].join('\n'),
+    });
+    const text = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs)
+      .map((doc) => doc.text)
+      .join('\n');
+    assert.match(text, /RIGHT-RULE/);
+    assert.ok(!text.includes('WRONG-PREFIX'));
+  });
+
   it('names a cited section absent from the source instead of dropping it silently', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-missing-'));
     roots.push(root);

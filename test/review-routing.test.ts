@@ -137,9 +137,11 @@ describe('extractRuleSection', () => {
     assert.equal(extractRuleSection(doc, '99'), undefined);
   });
 
-  it('extracts a section titled by rule ID, preferring a numbered heading', () => {
+  it('extracts a section titled by its own rule ID, preferring a numbered heading', () => {
     const ids = [
       '# Invariants',
+      '### OTHER-013',
+      'other prefix body',
       '### INV-013-A',
       'lettered body',
       '### INV-013',
@@ -151,13 +153,14 @@ describe('extractRuleSection', () => {
       '## 1. Numbered',
       'numbered body',
     ].join('\n');
-    // `013` must not stop at the `INV-013-A` heading, and padding is kept as written.
-    assert.equal(extractRuleSection(ids, '013'), '### INV-013\nplain body');
-    assert.equal(extractRuleSection(ids, '013-A'), '### INV-013-A\nlettered body');
-    assert.equal(extractRuleSection(ids, '017'), '### INV-017, INV-018\nshared body');
-    assert.equal(extractRuleSection(ids, '13'), undefined);
-    // A numbered heading wins over an earlier ID-shaped title with the same number.
-    assert.equal(extractRuleSection(ids, '1'), '## 1. Numbered\nnumbered body');
+    // Another prefix's same-numbered heading and `INV-013-A` must not satisfy `INV-013`.
+    assert.equal(extractRuleSection(ids, '013', 'INV'), '### INV-013\nplain body');
+    assert.equal(extractRuleSection(ids, '013', 'other'), '### OTHER-013\nother prefix body');
+    assert.equal(extractRuleSection(ids, '013-A', 'INV'), '### INV-013-A\nlettered body');
+    assert.equal(extractRuleSection(ids, '017', 'INV'), '### INV-017, INV-018\nshared body');
+    assert.equal(extractRuleSection(ids, '13', 'INV'), undefined);
+    assert.equal(extractRuleSection(ids, '013'), undefined);
+    assert.equal(extractRuleSection(ids, '1', 'STEP'), '## 1. Numbered\nnumbered body');
   });
 
   it('ignores a numbered heading inside a fenced code block', () => {
