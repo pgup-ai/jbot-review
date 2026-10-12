@@ -411,14 +411,19 @@ export function applicableGuidelines(
 }
 
 /**
- * Citations must name the file, then `§N` or a heading title in brackets or quotes
- * or after `'s` (`AGENTS.md` (Conventions)): a bare `§N` or title could be any doc's.
+ * Citations must name the file, then `§N`, `§PREFIX-N` or a heading title in brackets or
+ * quotes or after `'s` (`AGENTS.md` (Conventions)): a bare `§N` or title could be any doc's.
  */
 export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): string[] {
   const sections = new Set<string>();
   const pathOf = (doc: GuidelineDoc) => doc.label.replace(/ \(.*\)$/, '');
-  const cites = /([\w./-]+\.mdc?)`?(?:\s*§\s*(\d+(?:\.\d+)*)|['’]s\s+|\s*[([`'"“‘]+\s*(?:#+\s+)?)/g;
-  for (const { 0: cite, 1: file, 2: section, index } of text.matchAll(cites)) {
+  const cites =
+    /([\w./-]+\.mdc?)`?(?:\s*§\s*(?:([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*(?:-[A-Za-z0-9]+)?)|(\d+(?:\.\d+)*))|['’]s\s+|\s*[([`'"“‘]+\s*(?:#+\s+)?)/g;
+  for (const { 0: cite, 1: file, 2: prefix, 3: idSection, 4: number, index } of text.matchAll(
+    cites,
+  )) {
+    const section = idSection ?? number;
+    const sectionLabel = prefix ? `${prefix}-${section}` : section;
     const paths = new Set(
       docs.map(pathOf).filter((path) => path === file || path.endsWith(`/${file}`)),
     );
@@ -445,10 +450,10 @@ export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): stri
       // Titles that differ only in case are as ambiguous as duplicates.
       const unique = runnerUp?.toLowerCase() !== title?.toLowerCase();
       const found = section
-        ? extractRuleSection(doc.text, section)
+        ? extractRuleSection(doc.text, section, prefix)
         : title && unique && selectGuidelineSections(doc.text, [title]);
       if (found) {
-        sections.add(`### ${path} ${section ? `§${section}` : `(${title})`}\n${found}`);
+        sections.add(`### ${path} ${section ? `§${sectionLabel}` : `(${title})`}\n${found}`);
         break;
       }
     }
@@ -1154,8 +1159,11 @@ export async function discoverGuidelineDocs(
 
   // Fragment matched sections round-robin so each gets a prefix before any one
   // section can consume the per-file budget.
-  async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
-    if (sections.length === 0) return;
+  async function addRuleSections(
+    governanceRelPath: string,
+    rules: { prefix: string; section: string }[],
+  ): Promise<void> {
+    if (rules.length === 0) return;
     if (remainingCandidateBytes <= 0) {
       markBudgetExhausted();
       return;
@@ -1170,49 +1178,61 @@ export async function discoverGuidelineDocs(
     } catch {
       return;
     }
-    const uniqueSections = [...new Set(sections)].sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true }),
-    );
-    const extracted = uniqueSections.map((section) => ({
+    const uniqueRules = [
+      ...new Map(rules.map((rule) => [`${rule.prefix}-${rule.section}`, rule])).values(),
+    ].sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
+    // Several prefixes routed into one doc are told apart in labels and notes.
+    const multiPrefix = new Set(uniqueRules.map((rule) => rule.prefix)).size > 1;
+    const keyOf = (prefix: string, section: string) =>
+      multiPrefix ? `${prefix}-${section}` : section;
+    const extracted = uniqueRules.map(({ prefix, section }) => ({
       section,
-      text: extractRuleSection(source.text, section),
+      key: keyOf(prefix, section),
+      text: extractRuleSection(source.text, section, prefix),
     }));
-    const found = extracted.filter((entry): entry is { section: string; text: string } =>
-      Boolean(entry.text),
+    const found = extracted.filter(
+      (entry): entry is { section: string; key: string; text: string } => Boolean(entry.text),
     );
     // Cited sections not present in the source (removed, mis-numbered, or past
     // the MAX_RULE_DOC_BYTES read) — named in the omission note, never dropped
     // silently.
-    const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.section);
+    const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.key);
     // A sub-rule refines its parent's defaults (TS-13.1 under §13): add each uncited
     // parent's own text, up to its first sub-heading, when it is short enough to be
     // defaults. A longer lead-in is a rule body the route did not cite.
-    const parents = uniqueSections.flatMap((section) => {
+    const parents = new Map<string, { prefix: string; section: string }>();
+    for (const { prefix, section } of uniqueRules) {
       const parts = section.split('.');
-      return parts.slice(1).map((_, index) => parts.slice(0, index + 1).join('.'));
-    });
-    for (const parent of new Set(parents)) {
-      if (uniqueSections.includes(parent)) continue;
-      const lines = extractRuleSection(source.text, parent)?.split('\n') ?? [];
+      for (let index = 1; index < parts.length; index += 1) {
+        const parent = parts.slice(0, index).join('.');
+        parents.set(`${prefix}-${parent}`, { prefix, section: parent });
+      }
+    }
+    for (const [id, { prefix, section: parent }] of parents) {
+      if (uniqueRules.some((rule) => `${rule.prefix}-${rule.section}` === id)) continue;
+      const lines = extractRuleSection(source.text, parent, prefix)?.split('\n') ?? [];
       const next = markdownHeadings(lines).find(({ line }) => line > 0)?.line;
       const own = lines.slice(0, next).join('\n').trim();
       if (own.includes('\n') && Buffer.byteLength(own) <= MAX_PARENT_RULE_BYTES)
-        found.push({ section: parent, text: own });
+        found.push({ section: parent, key: keyOf(prefix, parent), text: own });
     }
     found.sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }));
     // A nested child (`### 6.1` under `## 6`) is already inside its selected
     // parent's extract — drop the duplicate so it is neither emitted nor budgeted
-    // twice. Strictly-larger guard: equal-length distinct sections keep both.
+    // twice. Strictly-larger guard: equal-length distinct sections keep both; the
+    // same section routed by two prefixes keeps one copy.
     const deduped = found.filter(
-      (entry) =>
+      (entry, index) =>
         !found.some(
-          (other) => other.text.length > entry.text.length && other.text.includes(entry.text),
+          (other, otherIndex) =>
+            (other.text.length > entry.text.length && other.text.includes(entry.text)) ||
+            (otherIndex < index && other.text === entry.text),
         ),
     );
     const sourceTruncated = source.truncated
       ? deduped
           .filter((entry) => source.text.trimEnd().endsWith(entry.text))
-          .map((entry) => entry.section)
+          .map((entry) => entry.key)
       : [];
     if (deduped.length === 0) {
       // Every cited section was unavailable — disclose the request (invariant #4)
@@ -1245,8 +1265,8 @@ export async function discoverGuidelineDocs(
     seenRealPaths.add(resolved.realPath);
     const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingCandidateBytes);
     const sources: GuidelineFragmentSource[] = deduped.map((entry) => ({
-      id: entry.section,
-      label: `§${entry.section}`,
+      id: entry.key,
+      label: `§${entry.key}`,
       text: entry.text,
       relevance: GUIDELINE_RELEVANCE.scoped,
     }));
@@ -1357,11 +1377,11 @@ export async function discoverGuidelineDocs(
           ]);
       }
       for (const path of wholeDocRealPaths) routedSections.delete(path);
-      const sectionsByDoc = new Map<string, string[]>();
+      const sectionsByDoc = new Map<string, { prefix: string; section: string }[]>();
       for (const id of matched.ruleIds) {
         const parsed = splitRuleId(id);
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
-        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
+        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed]);
       }
       // Mixed heading and numbered-rule routes keep the whole file so neither loses rules.
       for (const doc of sectionsByDoc.keys()) {

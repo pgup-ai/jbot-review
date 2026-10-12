@@ -117,11 +117,11 @@ export function parseRuleIdDocs(readmeText: string): Map<string, string> {
 // bloats a bundle label or omission note past budget.
 const MAX_RULE_ID_LENGTH = 64;
 
-/** Split `TS-16.2` into its prefix and section number; undefined if not an ID. */
+/** Split `TS-16.2` (or `INV-013-A`) into its prefix and section; undefined if not an ID. */
 export function splitRuleId(id: string): { prefix: string; section: string } | undefined {
   const trimmed = id.trim();
   if (trimmed.length > MAX_RULE_ID_LENGTH) return undefined;
-  const match = trimmed.match(/^([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*)$/);
+  const match = trimmed.match(/^([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*(?:-[A-Za-z0-9]+)?)$/);
   return match ? { prefix: match[1].toUpperCase(), section: match[2] } : undefined;
 }
 
@@ -144,18 +144,32 @@ export function selectDiffRoutes(
 /**
  * Extract the section a numbered heading owns. Sections are numbered headings
  * (`## 6. Title`, `### 6.2 Title`); a rule's section number is the heading's
- * leading numeric token (a trailing dot on whole numbers is ignored). Bounded
+ * leading numeric token (a trailing dot on whole numbers is ignored). Given the
+ * rule's prefix, a heading titled with that exact ID (`### INV-001`,
+ * `### INV-013-A`, zero padding included) wins over a numbered heading. Bounded
  * by the `#` level, not the number: a `##` section runs to the next `##`/`#`,
  * so its deeper (`###`) subsections are included, while flat same-level
  * headings (`## 16` then `## 16.2`) stay separate — which is what a doc that
  * cites both `TS-16` and `TS-16.2` wants (no duplicated body).
  */
-export function extractRuleSection(docText: string, section: string): string | undefined {
+export function extractRuleSection(
+  docText: string,
+  section: string,
+  prefix?: string,
+): string | undefined {
   const lines = docText.replace(/\r\n/g, '\n').split('\n');
   const headings = markdownHeadings(lines);
-  const start = headings.findIndex(
+  const numbered = headings.findIndex(
     ({ title }) => title.match(/^(\d+(?:\.\d+)*)(?=\s|$|[.:)\-–—])/)?.[1] === section,
   );
+  const byId = (title: string) => {
+    const id = title.match(
+      /^([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*(?:-[A-Za-z0-9]+)?)(?=\s|$|[.:,)–—]|-(?![A-Za-z0-9]))/,
+    );
+    return id?.[1].toUpperCase() === prefix?.toUpperCase() && id?.[2] === section;
+  };
+  const titled = prefix ? headings.findIndex(({ title }) => byId(title)) : -1;
+  const start = titled >= 0 ? titled : numbered;
   if (start < 0) return undefined;
   const first = headings[start];
   const end = headings.slice(start + 1).find(({ level }) => level <= first.level)?.line;

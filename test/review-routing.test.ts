@@ -82,6 +82,7 @@ describe('splitRuleId', () => {
   it('splits a prefixed section id and rejects non-ids', () => {
     assert.deepEqual(splitRuleId('TS-16.2'), { prefix: 'TS', section: '16.2' });
     assert.deepEqual(splitRuleId('INV-9'), { prefix: 'INV', section: '9' });
+    assert.deepEqual(splitRuleId('INV-013-A'), { prefix: 'INV', section: '013-A' });
     assert.equal(splitRuleId('not-an-id'), undefined);
     assert.equal(splitRuleId('TS-'), undefined);
     // An absurdly long dotted id is rejected, so it can't bloat a label or note.
@@ -134,6 +135,34 @@ describe('extractRuleSection', () => {
     assert.equal(extractRuleSection('## 16.2: Parity\ncolon', '16.2'), '## 16.2: Parity\ncolon');
     assert.equal(extractRuleSection('## 16.2.Parity\ndot', '16.2'), '## 16.2.Parity\ndot');
     assert.equal(extractRuleSection(doc, '99'), undefined);
+  });
+
+  it('extracts a section titled by its own rule ID before a numbered heading', () => {
+    const ids = [
+      '# Invariants',
+      '### OTHER-013',
+      'other prefix body',
+      '### INV-013-A',
+      'lettered body',
+      '### INV-013',
+      'plain body',
+      '### INV-017, INV-018',
+      'shared body',
+      '## Step-1 Setup',
+      'step body',
+      '## 1. Numbered',
+      'numbered body',
+    ].join('\n');
+    // Another prefix's same-numbered heading and `INV-013-A` must not satisfy `INV-013`.
+    assert.equal(extractRuleSection(ids, '013', 'INV'), '### INV-013\nplain body');
+    assert.equal(extractRuleSection(ids, '013', 'other'), '### OTHER-013\nother prefix body');
+    assert.equal(extractRuleSection(ids, '013-A', 'INV'), '### INV-013-A\nlettered body');
+    assert.equal(extractRuleSection(ids, '017', 'INV'), '### INV-017, INV-018\nshared body');
+    assert.equal(extractRuleSection(ids, '13', 'INV'), undefined);
+    assert.equal(extractRuleSection(ids, '013'), undefined);
+    // An exact ID heading beats a same-numbered heading; without one, the number decides.
+    assert.equal(extractRuleSection(ids, '1', 'STEP'), '## Step-1 Setup\nstep body');
+    assert.equal(extractRuleSection(ids, '1', 'INV'), '## 1. Numbered\nnumbered body');
   });
 
   it('ignores a numbered heading inside a fenced code block', () => {

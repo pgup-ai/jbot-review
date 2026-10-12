@@ -161,6 +161,43 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.doesNotMatch(docs.map((doc) => doc.text).join('\n'), /SIBLING-RULE|x{3000}/);
   });
 
+  it('routes each prefix to its own ID heading in a doc shared by two prefixes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-gov-'));
+    roots.push(root);
+    writeRoutedRepo(root, {
+      rules: 'TS-013, OTHER-013, TS-5, OTHER-5, TS-13.1, OTHER-99',
+      doc: [
+        '# T',
+        '### OTHER-013',
+        'OTHER-RULE',
+        '### TS-013',
+        'TS-RULE',
+        '## 5. Shared',
+        'SHARED-RULE',
+        '## TS-13',
+        'TS-13-DEFAULTS',
+        'second line',
+        '### TS-13.1',
+        'CHILD-RULE',
+      ].join('\n'),
+    });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      '- `TS-<n>` maps to `design/TECHNICAL_STANDARDS.md`\n- `OTHER-<n>` maps to `design/TECHNICAL_STANDARDS.md`',
+    );
+    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    const text = sections.map((doc) => doc.text).join('\n');
+    const labels = sections.map((doc) => doc.label).join('\n');
+    assert.ok(text.includes('### TS-013\nTS-RULE') && text.includes('### OTHER-013\nOTHER-RULE'));
+    assert.ok(labels.includes('§TS-013') && labels.includes('§OTHER-013'), labels);
+    // A numbered section both prefixes route loads once.
+    assert.equal(text.match(/SHARED-RULE/g)?.length, 1);
+    // A routed sub-rule brings its ID-titled parent's defaults.
+    assert.match(text, /TS-13-DEFAULTS/);
+    // Labels and notes name the prefix when one doc serves several.
+    assert.match(text, /§OTHER-99 \(not found\)/);
+  });
+
   it('names a cited section absent from the source instead of dropping it silently', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-missing-'));
     roots.push(root);
