@@ -411,14 +411,19 @@ export function applicableGuidelines(
 }
 
 /**
- * Citations must name the file, then `§N` or a heading title in brackets or quotes
- * or after `'s` (`AGENTS.md` (Conventions)): a bare `§N` or title could be any doc's.
+ * Citations must name the file, then `§N`, `§PREFIX-N` or a heading title in brackets or
+ * quotes or after `'s` (`AGENTS.md` (Conventions)): a bare `§N` or title could be any doc's.
  */
 export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): string[] {
   const sections = new Set<string>();
   const pathOf = (doc: GuidelineDoc) => doc.label.replace(/ \(.*\)$/, '');
-  const cites = /([\w./-]+\.mdc?)`?(?:\s*§\s*(\d+(?:\.\d+)*)|['’]s\s+|\s*[([`'"“‘]+\s*(?:#+\s+)?)/g;
-  for (const { 0: cite, 1: file, 2: section, index } of text.matchAll(cites)) {
+  const cites =
+    /([\w./-]+\.mdc?)`?(?:\s*§\s*(?:([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*(?:-[A-Za-z0-9]+)?)|(\d+(?:\.\d+)*))|['’]s\s+|\s*[([`'"“‘]+\s*(?:#+\s+)?)/g;
+  for (const { 0: cite, 1: file, 2: prefix, 3: idSection, 4: number, index } of text.matchAll(
+    cites,
+  )) {
+    const section = idSection ?? number;
+    const sectionLabel = prefix ? `${prefix}-${section}` : section;
     const paths = new Set(
       docs.map(pathOf).filter((path) => path === file || path.endsWith(`/${file}`)),
     );
@@ -445,10 +450,10 @@ export function citedGuidelineSections(text: string, docs: GuidelineDoc[]): stri
       // Titles that differ only in case are as ambiguous as duplicates.
       const unique = runnerUp?.toLowerCase() !== title?.toLowerCase();
       const found = section
-        ? extractRuleSection(doc.text, section)
+        ? extractRuleSection(doc.text, section, prefix)
         : title && unique && selectGuidelineSections(doc.text, [title]);
       if (found) {
-        sections.add(`### ${path} ${section ? `§${section}` : `(${title})`}\n${found}`);
+        sections.add(`### ${path} ${section ? `§${sectionLabel}` : `(${title})`}\n${found}`);
         break;
       }
     }

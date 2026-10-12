@@ -187,7 +187,9 @@ describe('discoverGuidelineDocs with diff routing', () => {
     );
     const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
     const text = sections.map((doc) => doc.text).join('\n');
+    const labels = sections.map((doc) => doc.label).join('\n');
     assert.ok(text.includes('### TS-013\nTS-RULE') && text.includes('### OTHER-013\nOTHER-RULE'));
+    assert.ok(labels.includes('§TS-013') && labels.includes('§OTHER-013'), labels);
     // A numbered section both prefixes route loads once.
     assert.equal(text.match(/SHARED-RULE/g)?.length, 1);
     // A routed sub-rule brings its ID-titled parent's defaults.
