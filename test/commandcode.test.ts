@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { mainReviewModelOptions } from '../src/shared/config.ts';
 import { NativeEvidenceStore } from '../src/shared/native-evidence.ts';
 import { REVIEW_LENSES } from '../src/shared/prompt.ts';
 import { IncompleteReviewError } from '../src/shared/types.ts';
@@ -802,7 +803,7 @@ process.stdin.on('end', async () => {
   if (args.includes('--mod')) throw new Error('Custom mod loaded');
   if (repair && args.includes('--add-dir')) throw new Error('Repair has workspace access');
   fs.appendFileSync(path.join(repair ? path.dirname(process.env.HOME) : process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, repair, args, input, cwd: process.cwd()}) + '\n');
-  const sessionId = resume || model + (repair ? '-repair-session' : '-session');
+  const sessionId = resume || encodeURIComponent(model) + (repair ? '-repair-session' : '-session');
   const dir = path.join(process.env.HOME, '.commandcode', 'projects');
   fs.mkdirSync(dir, {recursive: true});
   fs.appendFileSync(path.join(dir, sessionId + '.jsonl'), JSON.stringify({type:'message', message:{role:'assistant'}, usage:{costUsd: resume ? 0.125 : 0.25}}) + '\n');
@@ -912,10 +913,11 @@ process.stdin.on('end', async () => {
       { home, tools: true, evidence },
     );
     assert.equal(preparations, 0);
-    await runCommandCodeReview(home, 'commandcode/gpt-5.6-luna', 'FULL_DIFF', '', () => {}, {
+    const muse = 'commandcode/meta/muse-spark-1.3-contributor';
+    await runCommandCodeReview(home, muse, 'FULL_DIFF', '', () => {}, {
       runtime: { home, tools: true },
       effort: 'low',
-      modelOptions: { reasoningEffort: 'medium' },
+      modelOptions: mainReviewModelOptions(muse, { reasoningEffort: 'low' }, false),
       guidelineSweep: { guidelines: 'FULL_GUIDELINES' },
       timeoutMs: 5000,
     });
@@ -946,11 +948,11 @@ process.stdin.on('end', async () => {
         assert.equal(call.resume, undefined);
         assert.match(call.input, /Tool use disabled/);
       }
-      if (call.model === 'gpt-5.6-luna') {
+      if (call.model === 'meta/muse-spark-1.3-contributor') {
         assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'medium');
       }
       if (call.resume) {
-        assert.equal(call.resume, call.model + '-session');
+        assert.equal(call.resume, encodeURIComponent(call.model) + '-session');
         assert.match(call.input, /FULL_GUIDELINES/);
       }
     }

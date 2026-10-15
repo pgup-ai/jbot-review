@@ -1629,9 +1629,9 @@ async function runReviewPipeline(params: {
     model,
     mainOnPoolside ? options.modelOptions : resolvedMainOptions,
     {
-      ...commandCodeEffortContext,
+      auxModel,
       mainModelOptions: mainReviewOptions,
-      auxModelOptions: undefined,
+      explicit: options.modelOptionsExplicit,
     },
   );
 
@@ -2508,15 +2508,6 @@ async function runReviewPipeline(params: {
     limitReviewBackendSessions(
       {
         ...mainBaseBackend,
-        ...(mainReviewOptions !== options.modelOptions
-          ? ({
-              runReview: (m, context, guidelines, log, sessionOptions) =>
-                mainBaseBackend.runReview(m, context, guidelines, log, {
-                  ...sessionOptions,
-                  modelOptions: mainReviewOptions,
-                }),
-            } satisfies Partial<ReviewBackend>)
-          : {}),
         canReadWorkspace: mainBaseBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
       },
       'main',
@@ -3075,7 +3066,7 @@ async function runReviewPipeline(params: {
             config: JSON.stringify({
               engine: mainBackend.name,
               explorationExperiment: options.experiment.exploration,
-              modelOptions: options.modelOptions,
+              modelOptions: mainReviewOptions,
               baseURL,
               ...(options.embeddedFirstPrompt ? { embeddedFirstPrompt: true } : {}),
               ...(options.sharedPrefixPrompt ? { sharedPrefixPrompt: true } : {}),
@@ -3105,6 +3096,7 @@ async function runReviewPipeline(params: {
     const mainReview = runShardedReview({
       backend: mainBackend,
       model,
+      modelOptions: mainReviewOptions !== options.modelOptions ? mainReviewOptions : undefined,
       guidelinesForPrompt,
       shardPlans,
       // Main findings on rules-only files are kept, like incremental mode's earlier PR files.
@@ -4980,6 +4972,7 @@ export function buildSlimVerifierContext(params: {
 export async function runShardedReview(params: {
   backend: ReviewBackend;
   model: string;
+  modelOptions?: Record<string, unknown>;
   guidelinesForPrompt: string;
   sweepGuidelines?: string;
   shardPlans: ShardPlan[];
@@ -5114,6 +5107,7 @@ export async function runShardedReview(params: {
       try {
         const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
+          modelOptions: params.modelOptions,
           guidelineSweep,
           deadlineAt: params.deadlineAt,
           timeoutMs,
@@ -5223,6 +5217,7 @@ export async function runShardedReview(params: {
             log,
             {
               label: `${plan.label}-retry`,
+              modelOptions: params.modelOptions,
               guidelineSweep,
               deadlineAt: params.deadlineAt,
               timeoutMs: retryTimeoutMs,

@@ -500,9 +500,10 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
         context: string,
         _g: string,
         _log: unknown,
-        options: { deadlineAt?: number },
+        options: Parameters<ReviewBackend['runReview']>[4],
       ) => {
-        assert.equal(options.deadlineAt, 9_000_000_000_000);
+        assert.equal(options?.deadlineAt, 9_000_000_000_000);
+        assert.deepEqual(options?.modelOptions, { reasoningEffort: 'medium' });
         calls.push(context);
         if (calls.length === 1) throw new Error(message);
         return okResult;
@@ -512,6 +513,7 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     runShardedReview({
       backend,
       model: 'fake/model',
+      modelOptions: { reasoningEffort: 'medium' },
       deadlineAt: 9_000_000_000_000,
       guidelinesForPrompt: '',
       shardPlans: [shardPlan],
@@ -598,6 +600,7 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     const withContext7: string[] = [];
     await runShardedReview({
       backend: backendThrowingOnce('maximum context length exceeded', withContext7),
+      modelOptions: { reasoningEffort: 'medium' },
       deadlineAt: 9_000_000_000_000,
       model: 'fake/model',
       guidelinesForPrompt: '',
