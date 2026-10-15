@@ -17,6 +17,7 @@ import type { OpencodeRuntime } from './opencode-server.ts';
 import {
   agentForModel,
   createReviewSession,
+  registerSessionOptions,
   promptInSession,
   reportedFindingRows,
   type PromptOutcome,
@@ -186,6 +187,7 @@ export async function runReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    modelOptions?: Record<string, unknown>;
     guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     contextFirst?: boolean;
@@ -228,7 +230,7 @@ export async function runReview(
     options.timeoutMs,
     options.onTokenUsage,
     outcome,
-    { toolLess: options.toolLess },
+    { toolLess: options.toolLess, modelOptions: options.modelOptions },
   );
   let result: ReviewResult;
   try {
@@ -263,6 +265,8 @@ export async function runReview(
     sweepLabel,
     deadlineAt,
     async (timeoutMs) => {
+      if (options.modelOptions)
+        registerSessionOptions(runtime, sessionID, { model, label: sweepLabel });
       const raw = await promptPlanAgentInSession(
         runtime,
         model,

@@ -9,6 +9,7 @@ import {
   complianceModelOptions,
   credentialSecretValues,
   defaultModelOptions,
+  mainReviewModelOptions,
   modelSupportsPromptCache,
   supportedModelOptions,
   needsAuxOpencodeConfig,
@@ -414,6 +415,35 @@ describe('Kimi For Coding (native Models.dev providers)', () => {
         keyInput: 'kimi-api-key',
         promptCache: false,
       });
+    }
+  });
+});
+
+describe('main review reasoning', () => {
+  it('raises only the two Muse Contributor main defaults and preserves explicit options', () => {
+    for (const [model, effort] of [
+      ['opencode-go/muse-spark-1.3-contributor', 'medium'],
+      ['commandcode/meta/muse-spark-1.3-contributor', 'medium'],
+      ['opencode/muse-spark-1.3-contributor', 'low'],
+      ['opencode-go/muse-spark-1.2-contributor', 'low'],
+      ['commandcode/meta/muse-spark-1.3', 'low'],
+      ['opencode-go/deepseek-v4.1-flash', 'low'],
+    ]) {
+      const slash = model.indexOf('/');
+      const provider = model.slice(0, slash);
+      const id = model.slice(slash + 1);
+      const base = defaultModelOptions(provider, id);
+      const main = mainReviewModelOptions(model, base, false);
+      assert.deepEqual(main, { reasoningEffort: effort });
+      assert.deepEqual(base, { reasoningEffort: 'low' });
+      assert.equal(auxModelOptionsFor(provider, id, provider, id), undefined);
+      assert.deepEqual(auxModelOptionsFor('openai', 'gpt-5', provider, id), base);
+      assert.deepEqual(verificationModelOptions(main, undefined) ?? base, base);
+      assert.deepEqual(complianceModelOptions(main, undefined) ?? base, base);
+      for (const effort of ['low', 'high']) {
+        const explicit = { reasoningEffort: effort, temperature: 0 };
+        assert.equal(mainReviewModelOptions(model, explicit, true), explicit);
+      }
     }
   });
 });

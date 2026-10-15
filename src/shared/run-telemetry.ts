@@ -64,6 +64,7 @@ export function runConfiguration(
     evidenceReuse: { ...reuse, persistent: Boolean(cacheDir) },
     explorationExperiment: experiment.exploration,
     modelPool: options.modelPool?.length ? options.modelPool : [model],
+    // Before diff sizing, main-only defaults and provider clamping; roles record effective effort.
     requestedReasoningEffort: knownEffort(options.modelOptions?.reasoningEffort),
   };
   return {

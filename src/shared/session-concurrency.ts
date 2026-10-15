@@ -24,6 +24,7 @@ export interface ReviewBackend {
     guidelines: string,
     log: (msg: string) => void,
     options?: {
+      modelOptions?: Record<string, unknown>;
       guidelineSweep?: GuidelineSweep;
       deadlineAt?: number;
       lensAddendum?: string;

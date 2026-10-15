@@ -149,6 +149,7 @@ import {
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
+  mainReviewModelOptions,
   complianceModelOptions,
   complianceReportsFindings,
   modelSupportsAgenticTools,
@@ -1009,10 +1010,9 @@ export interface ReviewRunOptions {
    */
   reviewShards?: number;
   /**
-   * Provider options for the MAIN model — e.g. {"reasoningEffort":"medium"}
-   * to cap reasoning spend on heavy models. An aux model running an entry of
-   * its own gets that model's default options instead; one that IS the main model
-   * shares this.
+   * Base provider options, shared with auxiliary sessions on the same model.
+   * Main-only defaults are applied separately unless these options are explicit.
+   * A distinct auxiliary model gets its own defaults.
    */
   modelOptions?: Record<string, unknown>;
   /**
@@ -1589,7 +1589,12 @@ async function runReviewPipeline(params: {
     auxModelID,
     patchBytes,
   );
-  const resolvedMainOptions = supportedModelOptions(providerID, modelID, options.modelOptions);
+  const mainReviewOptions = mainReviewModelOptions(
+    model,
+    options.modelOptions,
+    options.modelOptionsExplicit,
+  );
+  const resolvedMainOptions = supportedModelOptions(providerID, modelID, mainReviewOptions);
   // The verifier runs one effort tier below the finder. An identity return
   // means the aux entry already delivers it, so no per-session override (and
   // no opencode alias entry) is needed; the verifier's own tier rounds down
@@ -1622,7 +1627,11 @@ async function runReviewPipeline(params: {
     mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode',
     model,
     mainOnPoolside ? options.modelOptions : resolvedMainOptions,
-    commandCodeEffortContext,
+    {
+      auxModel,
+      mainModelOptions: mainReviewOptions,
+      explicit: options.modelOptionsExplicit,
+    },
   );
 
   const ruleChecks = baseSha
@@ -3056,7 +3065,7 @@ async function runReviewPipeline(params: {
             config: JSON.stringify({
               engine: mainBackend.name,
               explorationExperiment: options.experiment.exploration,
-              modelOptions: options.modelOptions,
+              modelOptions: mainReviewOptions,
               baseURL,
               ...(options.embeddedFirstPrompt ? { embeddedFirstPrompt: true } : {}),
               ...(options.sharedPrefixPrompt ? { sharedPrefixPrompt: true } : {}),
@@ -3086,6 +3095,7 @@ async function runReviewPipeline(params: {
     const mainReview = runShardedReview({
       backend: mainBackend,
       model,
+      modelOptions: mainReviewOptions !== options.modelOptions ? mainReviewOptions : undefined,
       guidelinesForPrompt,
       shardPlans,
       // Main findings on rules-only files are kept, like incremental mode's earlier PR files.
@@ -4961,6 +4971,7 @@ export function buildSlimVerifierContext(params: {
 export async function runShardedReview(params: {
   backend: ReviewBackend;
   model: string;
+  modelOptions?: Record<string, unknown>;
   guidelinesForPrompt: string;
   sweepGuidelines?: string;
   shardPlans: ShardPlan[];
@@ -5095,6 +5106,7 @@ export async function runShardedReview(params: {
       try {
         const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
+          modelOptions: params.modelOptions,
           guidelineSweep,
           deadlineAt: params.deadlineAt,
           timeoutMs,
@@ -5204,6 +5216,7 @@ export async function runShardedReview(params: {
             log,
             {
               label: `${plan.label}-retry`,
+              modelOptions: params.modelOptions,
               guidelineSweep,
               deadlineAt: params.deadlineAt,
               timeoutMs: retryTimeoutMs,

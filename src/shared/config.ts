@@ -133,6 +133,20 @@ export function defaultModelOptions(
   );
 }
 
+const MAIN_REVIEW_REASONING = new Map([
+  ['opencode-go/muse-spark-1.3-contributor', 'medium'],
+  ['commandcode/meta/muse-spark-1.3-contributor', 'medium'],
+]);
+
+export function mainReviewModelOptions(
+  model: string,
+  modelOptions: Record<string, unknown>,
+  explicit: boolean | undefined,
+): Record<string, unknown> {
+  const reasoningEffort = !explicit && MAIN_REVIEW_REASONING.get(model);
+  return reasoningEffort ? { ...modelOptions, reasoningEffort } : modelOptions;
+}
+
 /** The main options once the diff size is known; an explicit model-options input stands. */
 export function sizedModelOptions(
   providerID: string,
