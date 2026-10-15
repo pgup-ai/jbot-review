@@ -133,6 +133,18 @@ export function defaultModelOptions(
   );
 }
 
+export function mainReviewModelOptions(
+  model: string,
+  modelOptions: Record<string, unknown>,
+  explicit: boolean | undefined,
+): Record<string, unknown> {
+  return !explicit &&
+    (model === 'opencode-go/muse-spark-1.3-contributor' ||
+      model === 'commandcode/meta/muse-spark-1.3-contributor')
+    ? { ...modelOptions, reasoningEffort: 'medium' }
+    : modelOptions;
+}
+
 /** The main options once the diff size is known; an explicit model-options input stands. */
 export function sizedModelOptions(
   providerID: string,

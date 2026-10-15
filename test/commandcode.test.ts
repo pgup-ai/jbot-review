@@ -912,11 +912,18 @@ process.stdin.on('end', async () => {
       { home, tools: true, evidence },
     );
     assert.equal(preparations, 0);
+    await runCommandCodeReview(home, 'commandcode/gpt-5.6-luna', 'FULL_DIFF', '', () => {}, {
+      runtime: { home, tools: true },
+      effort: 'low',
+      modelOptions: { reasoningEffort: 'medium' },
+      guidelineSweep: { guidelines: 'FULL_GUIDELINES' },
+      timeoutMs: 5000,
+    });
     const calls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 15);
+    assert.equal(calls.length, 17);
     const lensCall = calls.find((call) => call.input.includes('LENS_CTX'));
     assert.match(lensCall.input, /Tool use disabled/);
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
@@ -938,6 +945,9 @@ process.stdin.on('end', async () => {
         );
         assert.equal(call.resume, undefined);
         assert.match(call.input, /Tool use disabled/);
+      }
+      if (call.model === 'gpt-5.6-luna') {
+        assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'medium');
       }
       if (call.resume) {
         assert.equal(call.resume, call.model + '-session');

@@ -115,9 +115,22 @@ describe('runReview on V2', () => {
       { text: 'x', error: 'sweep unavailable' },
     ]) {
       let n = 0;
-      const fake = fakeOpencodeServer(() => (++n === 1 ? { text: main } : sweep));
+      const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+      const efforts: unknown[] = [];
+      const fake = fakeOpencodeServer(() => {
+        const options = Object.values(
+          JSON.parse(readFileSync(sessionOptionsFile, 'utf8')),
+        ) as Record<string, unknown>[];
+        efforts.push(options[0]?.reasoningEffort);
+        return ++n === 1 ? { text: main } : sweep;
+      });
+      const rt = runtime(fake, {
+        sessionOptionsFile,
+        modelOptions: { 'openai/gpt-5': { main: { reasoningEffort: 'low' } } },
+      });
       const coverage: Array<{ state: string }> = [];
-      const result = await runReview(runtime(fake), 'openai/gpt-5', 'CTX', 'GUIDES', log, {
+      const result = await runReview(rt, 'openai/gpt-5', 'CTX', 'GUIDES', log, {
+        modelOptions: { reasoningEffort: 'medium' },
         guidelineSweep: {
           guidelines: 'FULL GUIDES',
           onCoverage: (row) => coverage.push(row as { state: string }),
@@ -125,6 +138,7 @@ describe('runReview on V2', () => {
       });
       const ok = sweep.text?.startsWith('{"findings"');
       assert.equal(fake.sessions.size, 1);
+      assert.deepEqual(efforts, ['medium', 'low']);
       assert.equal(fake.prompts.length, 2);
       assert.match(fake.prompts[1]!.body.text, /FULL GUIDES/);
       assert.equal(result.findings.length, ok ? 2 : 1);
@@ -554,6 +568,26 @@ describe('runFindingVerification on V2', () => {
       (o) => (o as { reasoningEffort: string }).reasoningEffort,
     );
     assert.deepEqual(tiers, ['low', 'medium']);
+  });
+
+  it('keeps main review options out of lens and guideline sessions on the same model', async () => {
+    const fake = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
+    const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+    const model = 'opencode-go/muse-spark-1.3-contributor';
+    const rt = runtime(fake, {
+      sessionOptionsFile,
+      modelOptions: { [model]: { main: { reasoningEffort: 'low' } } },
+    });
+    await runReview(rt, model, 'ctx', '', log, { modelOptions: { reasoningEffort: 'medium' } });
+    await runReview(rt, model, 'ctx', '', log, {
+      lensAddendum: 'lens',
+      label: 'review-interactions',
+    });
+    await runGuidelineComplianceCheck(rt, model, 'ctx', 'guides', log);
+    const efforts = Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))).map(
+      (options: Record<string, unknown>) => options.reasoningEffort,
+    );
+    assert.deepEqual(efforts, ['medium', 'low', 'low']);
   });
 
   it('runs guideline compliance on its own session options', async () => {

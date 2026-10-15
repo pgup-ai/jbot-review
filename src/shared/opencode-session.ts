@@ -321,7 +321,7 @@ const sessionOptionsByRuntime = new WeakMap<
 >();
 
 /** The file the plugin re-reads per request; tmp+rename so a read never sees a partial map. */
-function registerSessionOptions(
+export function registerSessionOptions(
   runtime: OpencodeRuntime,
   sessionID: string,
   spec: CreateSessionSpec,

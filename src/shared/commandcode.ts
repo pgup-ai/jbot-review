@@ -251,6 +251,7 @@ export async function runCommandCodeReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    modelOptions?: Record<string, unknown>;
     guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     contextFirst?: boolean;
@@ -265,6 +266,9 @@ export async function runCommandCodeReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const effort = options.modelOptions
+    ? commandCodeReasoningEffort(model, options.modelOptions, true)
+    : options.effort;
   const deadlineAt = Date.now() + (options.timeoutMs ?? COMMANDCODE_PROMPT_TIMEOUT_MS);
   const prompt = assembleReviewPrompt(
     prContext,
@@ -290,7 +294,7 @@ export async function runCommandCodeReview(
     options.timeoutMs,
     options.onTokenUsage,
     options.runtime,
-    options.effort,
+    effort,
   );
   let result: ReviewResult;
   try {
@@ -317,7 +321,7 @@ export async function runCommandCodeReview(
       remaining,
       options.onTokenUsage,
       options.runtime,
-      options.effort,
+      effort,
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }

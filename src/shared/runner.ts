@@ -149,6 +149,7 @@ import {
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
+  mainReviewModelOptions,
   complianceModelOptions,
   complianceReportsFindings,
   modelSupportsAgenticTools,
@@ -1589,7 +1590,12 @@ async function runReviewPipeline(params: {
     auxModelID,
     patchBytes,
   );
-  const resolvedMainOptions = supportedModelOptions(providerID, modelID, options.modelOptions);
+  const mainReviewOptions = mainReviewModelOptions(
+    model,
+    options.modelOptions,
+    options.modelOptionsExplicit,
+  );
+  const resolvedMainOptions = supportedModelOptions(providerID, modelID, mainReviewOptions);
   // The verifier runs one effort tier below the finder. An identity return
   // means the aux entry already delivers it, so no per-session override (and
   // no opencode alias entry) is needed; the verifier's own tier rounds down
@@ -1622,7 +1628,11 @@ async function runReviewPipeline(params: {
     mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode',
     model,
     mainOnPoolside ? options.modelOptions : resolvedMainOptions,
-    commandCodeEffortContext,
+    {
+      ...commandCodeEffortContext,
+      mainModelOptions: mainReviewOptions,
+      auxModelOptions: undefined,
+    },
   );
 
   const ruleChecks = baseSha
@@ -2498,6 +2508,15 @@ async function runReviewPipeline(params: {
     limitReviewBackendSessions(
       {
         ...mainBaseBackend,
+        ...(mainReviewOptions !== options.modelOptions
+          ? ({
+              runReview: (m, context, guidelines, log, sessionOptions) =>
+                mainBaseBackend.runReview(m, context, guidelines, log, {
+                  ...sessionOptions,
+                  modelOptions: mainReviewOptions,
+                }),
+            } satisfies Partial<ReviewBackend>)
+          : {}),
         canReadWorkspace: mainBaseBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
       },
       'main',
