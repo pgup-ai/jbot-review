@@ -1010,10 +1010,9 @@ export interface ReviewRunOptions {
    */
   reviewShards?: number;
   /**
-   * Provider options for the MAIN model — e.g. {"reasoningEffort":"medium"}
-   * to cap reasoning spend on heavy models. An aux model running an entry of
-   * its own gets that model's default options instead; one that IS the main model
-   * shares this.
+   * Base provider options, shared with auxiliary sessions on the same model.
+   * Main-only defaults are applied separately unless these options are explicit.
+   * A distinct auxiliary model gets its own defaults.
    */
   modelOptions?: Record<string, unknown>;
   /**
