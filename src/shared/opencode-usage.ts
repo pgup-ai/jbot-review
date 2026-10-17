@@ -40,7 +40,7 @@ export function parseOpencodeGoStatus(payload: unknown): OpencodeGoUsage | undef
   if (!isNonArrayRecord(payload) || !isNonArrayRecord(payload.access)) return undefined;
   const { meters } = payload.access;
   // A present `meters` that is not a record (null included) is drift, not an
-  // unmetered account: reading it as "unlimited" would rank its key best.
+  // unmetered account: reading it as "unlimited" would let its key pass every cap gate.
   if (meters !== undefined && !isNonArrayRecord(meters)) return undefined;
   const windows = isNonArrayRecord(meters) ? meters : undefined;
   // Absent drops just that segment, present but unreadable poisons the payload.
@@ -67,21 +67,24 @@ function usd(value: number): string {
   return `$${(value / 1e8).toFixed(2)}`;
 }
 
+/** A reset already past is stale, so it gets no countdown rather than "0m". */
+function resetsIn(window: OpencodeUsageWindow, now: number): string {
+  return window.resetAtMs !== undefined && window.resetAtMs > now
+    ? `, resets in ${formatShortDuration(window.resetAtMs - now)}`
+    : '';
+}
+
 function meterLabel(
   label: string,
   window: OpencodeUsageWindow | undefined,
   now: number,
 ): string | undefined {
   if (!window) return undefined;
-  const resets =
-    window.resetAtMs === undefined
-      ? ''
-      : `, resets in ${formatShortDuration(Math.max(window.resetAtMs - now, 0))}`;
   const exceeded = window.used >= window.limit ? ', EXCEEDED' : '';
   return `${label} ${usd(window.used)}/${usd(window.limit)} (${percentLabel(
     window.used,
     window.limit,
-  )}${exceeded}${resets})`;
+  )}${exceeded}${resetsIn(window, now)})`;
 }
 
 function formatOpencodeGoUsageBody(usage: OpencodeGoUsage, now: number): string {
@@ -172,10 +175,7 @@ export function pickOpencodeApiKey(
   const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
   const { month } = best.usage;
   const standing = month
-    ? `${usd(monthlyLeft(month))} of monthly limit left` +
-      (month.resetAtMs === undefined
-        ? ''
-        : `, resets in ${formatShortDuration(Math.max(month.resetAtMs - now, 0))}`)
+    ? `${usd(monthlyLeft(month))} of monthly limit left${resetsIn(month, now)}`
     : 'no monthly limit';
   return {
     key: best.key,

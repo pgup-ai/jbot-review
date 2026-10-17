@@ -211,7 +211,7 @@ describe('opencode Go plan usage', () => {
       allSpent.reason,
       /all 2 window-limited; picked 1\/2 \(…a, \$5\.00 of monthly limit left\)/,
     );
-    // An unmetered account reads as full headroom, not as a 100% meter.
+    // An unmetered account says so rather than printing a meter it lacks.
     assert.match(
       pickOpencodeApiKey([{ key: 'solo', usage: { useBalance: false } }], NOW).reason,
       /no monthly limit/,
