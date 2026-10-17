@@ -5,6 +5,8 @@ import { formatShortDuration, isFiniteNumber, isNonArrayRecord, percentLabel } f
 // as "no usage" rather than as a failure.
 const OPENCODE_GO_STATUS_URL = 'https://opencode.ai/console/api/go/status';
 const OPENCODE_USAGE_TIMEOUT_MS = 4_000;
+// Horizon for a monthly meter that drops its reset timestamp: about one billing period.
+const MONTHLY_FALLBACK_HORIZON_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Providers whose key is an opencode.ai account credential. */
 function isOpencodeAccountProvider(providerID: string): boolean {
@@ -15,7 +17,6 @@ interface OpencodeUsageWindow {
   /** Microcents: the plan meters allowance in money, not tokens. */
   used: number;
   limit: number;
-  /** Absent on the monthly meter, which rolls with the billing period. */
   resetAtMs?: number;
 }
 
@@ -104,8 +105,22 @@ function weeklyHeadroom(usage: OpencodeGoUsage): number {
   return usage.week ? Math.max(0, 1 - usage.week.used / usage.week.limit) : 1;
 }
 
-function monthlyHeadroom(usage: OpencodeGoUsage): number {
-  return usage.month ? Math.max(0, 1 - usage.month.used / usage.month.limit) : 1;
+function monthlyLeft(month: OpencodeUsageWindow): number {
+  return Math.max(0, month.limit - month.used);
+}
+
+/**
+ * Monthly allowance left per millisecond until it resets: the key whose
+ * allowance would lapse unused soonest scores highest. No monthly meter means
+ * nothing lapses, so it scores zero.
+ */
+function monthlyUrgency(usage: OpencodeGoUsage, now: number): number {
+  if (!usage.month) return 0;
+  const untilReset =
+    usage.month.resetAtMs === undefined
+      ? MONTHLY_FALLBACK_HORIZON_MS
+      : Math.max(usage.month.resetAtMs - now, 1);
+  return monthlyLeft(usage.month) / untilReset;
 }
 
 function spent(window?: OpencodeUsageWindow): boolean {
@@ -123,12 +138,16 @@ interface OpencodeKeyProbe {
 }
 
 /**
- * Keys with the 5h and weekly windows open are eligible; most monthly allowance
- * left wins, weekly breaks ties. Unlike CommandCode a
+ * Keys with the 5h and weekly windows open are eligible; the one whose monthly
+ * allowance would lapse unused soonest (left ÷ time to reset) wins, weekly
+ * breaks ties. Unlike CommandCode a
  * spent plan is never fatal here — overage bills the credit balance rather than
  * refusing the request — so an exhausted key stays selectable as a last resort.
  */
-export function pickOpencodeApiKey(probes: readonly OpencodeKeyProbe[]): {
+export function pickOpencodeApiKey(
+  probes: readonly OpencodeKeyProbe[],
+  now: number,
+): {
   key: string;
   reason: string;
 } {
@@ -147,16 +166,19 @@ export function pickOpencodeApiKey(probes: readonly OpencodeKeyProbe[]): {
   const overageOk = reachable.filter((probe) => probe.usage.useBalance);
   const pool = windowOpen.length > 0 ? windowOpen : overageOk.length > 0 ? overageOk : reachable;
   const best = pool.reduce((a, b) => {
-    const headroomA = monthlyHeadroom(a.usage);
-    const headroomB = monthlyHeadroom(b.usage);
-    if (headroomB > headroomA) return b;
-    if (headroomB === headroomA && weeklyHeadroom(b.usage) > weeklyHeadroom(a.usage)) return b;
+    const urgencyA = monthlyUrgency(a.usage, now);
+    const urgencyB = monthlyUrgency(b.usage, now);
+    if (urgencyB > urgencyA) return b;
+    if (urgencyB === urgencyA && weeklyHeadroom(b.usage) > weeklyHeadroom(a.usage)) return b;
     return a;
   });
   const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
-  // The full-headroom sentinel for an unmetered account must not read as a real meter.
-  const standing = best.usage.month
-    ? `${Math.round(monthlyHeadroom(best.usage) * 100)}% of monthly limit left`
+  const { month } = best.usage;
+  const standing = month
+    ? `${usd(monthlyLeft(month))} of monthly limit left` +
+      (month.resetAtMs === undefined
+        ? ''
+        : `, resets in ${formatShortDuration(Math.max(month.resetAtMs - now, 0))}`)
     : 'no monthly limit';
   return {
     key: best.key,
@@ -201,8 +223,8 @@ async function fetchOpencodeGoUsage(key: string): Promise<OpencodeGoUsage | unde
 }
 
 /**
- * Resolves a comma-separated opencode key list to the open-window account with
- * the most monthly allowance left, probing once per run so both roles share that account.
+ * Resolves a comma-separated opencode key list to the open-window account whose
+ * monthly allowance lapses soonest, probing once per run so both roles share that account.
  * A single key still reports its meters; a non-opencode provider is returned
  * untouched without a request.
  */
@@ -233,7 +255,7 @@ async function selectOpencodeApiKey(
   probes.forEach((probe, index) =>
     log(formatOpencodeKeyProbeLine(probe, index, probes.length, now)),
   );
-  const picked = pickOpencodeApiKey(probes);
+  const picked = pickOpencodeApiKey(probes, now);
   log(`Opencode key: ${picked.reason}`);
   return picked.key;
 }
