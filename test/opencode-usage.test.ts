@@ -8,8 +8,8 @@ import {
   type OpencodeGoUsage,
 } from '../src/shared/opencode-usage.ts';
 
-// The live payload shape (probed 2026-09-18): microcents as strings, resetsAt
-// only on the rolling windows.
+// The live payload shape (probed 2026-10-16): microcents as strings; the
+// monthly meter resets at the subscription's own billing anchor.
 const statusPayload = (weekUsed: string, monthUsed = '100') => ({
   subscriberUserId: 'acc_1',
   useBalance: true,
@@ -27,7 +27,11 @@ const statusPayload = (weekUsed: string, monthUsed = '100') => ({
         limitMicroCents: '1000',
         usedMicroCents: weekUsed,
       },
-      month: { limitMicroCents: '1000', usedMicroCents: monthUsed },
+      month: {
+        resetsAt: '2026-10-06T02:22:32.000Z',
+        limitMicroCents: '1000',
+        usedMicroCents: monthUsed,
+      },
     },
   },
 });
@@ -45,11 +49,18 @@ const resolveKey = async (
     )
   ).apiKey;
 
-const usage = (weekUsed: number, monthUsed = 0): OpencodeGoUsage => ({
-  week: { used: weekUsed, limit: 1000 },
-  month: { used: monthUsed, limit: 1000 },
+// Thousandths of a $10 cap, so reasons print readable dollars.
+const usage = (weekUsed: number, monthUsed = 0, monthResetAtMs?: number): OpencodeGoUsage => ({
+  week: { used: weekUsed * 1e6, limit: 1e9 },
+  month: {
+    used: monthUsed * 1e6,
+    limit: 1e9,
+    ...(monthResetAtMs === undefined ? {} : { resetAtMs: monthResetAtMs }),
+  },
   useBalance: true,
 });
+const NOW = Date.parse('2026-10-17T00:00:00.000Z');
+const DAY = 24 * 60 * 60 * 1000;
 
 describe('opencode Go plan usage', () => {
   it('parses the meter payload, degrades on absent meters, and poisons on drift', () => {
@@ -59,8 +70,11 @@ describe('opencode Go plan usage', () => {
       limit: 1000,
       resetAtMs: Date.parse('2026-09-21T00:00:00.000Z'),
     });
-    // The monthly meter has no reset timestamp; useBalance rides along.
-    assert.deepEqual(parsed?.month, { used: 100, limit: 1000 });
+    assert.deepEqual(parsed?.month, {
+      used: 100,
+      limit: 1000,
+      resetAtMs: Date.parse('2026-10-06T02:22:32.000Z'),
+    });
     assert.equal(parsed?.useBalance, true);
     assert.equal(parsed?.fiveHour?.used, 285509386);
 
@@ -92,68 +106,118 @@ describe('opencode Go plan usage', () => {
     }
   });
 
-  it('picks the most monthly headroom among open windows, breaking ties on weekly', () => {
+  it('picks the open-window key whose monthly allowance lapses soonest', () => {
+    // Equal allowance left: the earliest monthly reset wins, but a key nearly
+    // spent loses to one that would otherwise lapse with far more unused.
+    assert.equal(
+      pickOpencodeApiKey(
+        [
+          { key: 'late', usage: usage(0, 800, NOW + 20 * DAY) },
+          { key: 'soon', usage: usage(900, 800, NOW + 8 * DAY) },
+        ],
+        NOW,
+      ).key,
+      'soon',
+    );
+    const picked = pickOpencodeApiKey(
+      [
+        { key: 'dregs', usage: usage(0, 990, NOW + 1 * DAY) },
+        { key: 'full', usage: usage(0, 0, NOW + 20 * DAY) },
+      ],
+      NOW,
+    );
+    assert.equal(picked.key, 'full');
+    // A reset already past is stale data, not an imminent lapse.
+    assert.equal(
+      pickOpencodeApiKey(
+        [
+          { key: 'stale', usage: usage(0, 500, NOW - DAY) },
+          { key: 'future', usage: usage(0, 500, NOW + 20 * DAY) },
+        ],
+        NOW,
+      ).key,
+      'future',
+    );
+    assert.match(picked.reason, /\(…full, \$10\.00 of monthly limit left, resets in 20d 0h\)/);
+  });
+
+  it('keeps the window gates and fallbacks, breaking ties on weekly', () => {
     // A barely-used week does not rescue a nearly spent month.
     const probes = [
       { key: 'aaaa1111', usage: usage(0, 940) },
       { key: 'bbbb2222', usage: usage(300, 380) },
       { key: 'cccc3333' },
     ];
-    const picked = pickOpencodeApiKey(probes);
+    const picked = pickOpencodeApiKey(probes, NOW);
     assert.equal(picked.key, 'bbbb2222');
-    assert.match(picked.reason, /picked 2\/3 \(…2222, 62% of monthly limit left\)/);
+    assert.match(picked.reason, /picked 2\/3 \(…2222, \$6\.20 of monthly limit left\)/);
 
     // Equal monthly headroom falls through to the weekly meter.
     assert.equal(
-      pickOpencodeApiKey([
-        { key: 'a', usage: usage(900, 500) },
-        { key: 'b', usage: usage(100, 500) },
-      ]).key,
+      pickOpencodeApiKey(
+        [
+          { key: 'a', usage: usage(900, 500) },
+          { key: 'b', usage: usage(100, 500) },
+        ],
+        NOW,
+      ).key,
       'b',
     );
     // A spent 5h or weekly window is skipped even with more monthly room.
     for (const spentKey of [{ ...usage(0), fiveHour: { used: 10, limit: 10 } }, usage(1000)]) {
       assert.equal(
-        pickOpencodeApiKey([
-          { key: 'a', usage: spentKey },
-          { key: 'b', usage: usage(0, 900) },
-        ]).key,
+        pickOpencodeApiKey(
+          [
+            { key: 'a', usage: spentKey },
+            { key: 'b', usage: usage(0, 900) },
+          ],
+          NOW,
+        ).key,
         'b',
       );
     }
     // A spent monthly cap with overage blocked cannot serve at all.
     assert.equal(
-      pickOpencodeApiKey([
-        { key: 'monthly-dead', usage: { ...usage(0, 1000), useBalance: false } },
-        { key: 'usable', usage: usage(900) },
-      ]).key,
+      pickOpencodeApiKey(
+        [
+          { key: 'monthly-dead', usage: { ...usage(0, 1000), useBalance: false } },
+          { key: 'usable', usage: usage(900) },
+        ],
+        NOW,
+      ).key,
       'usable',
     );
     // Every window spent still yields a key rather than failing the run, and a
     // plan that can bill overage outranks one where overage is blocked.
-    const allSpent = pickOpencodeApiKey([
-      { key: 'a', usage: usage(1000, 500) },
-      { key: 'b', usage: usage(1200, 600) },
-    ]);
+    const allSpent = pickOpencodeApiKey(
+      [
+        { key: 'a', usage: usage(1000, 500) },
+        { key: 'b', usage: usage(1200, 600) },
+      ],
+      NOW,
+    );
     assert.equal(allSpent.key, 'a');
     assert.equal(
-      pickOpencodeApiKey([
-        { key: 'blocked', usage: { ...usage(1000), useBalance: false } },
-        { key: 'overage-ok', usage: usage(1200) },
-      ]).key,
+      pickOpencodeApiKey(
+        [
+          { key: 'blocked', usage: { ...usage(1000), useBalance: false } },
+          { key: 'overage-ok', usage: usage(1200) },
+        ],
+        NOW,
+      ).key,
       'overage-ok',
     );
     assert.match(
       allSpent.reason,
-      /all 2 window-limited; picked 1\/2 \(…a, 50% of monthly limit left\)/,
+      /all 2 window-limited; picked 1\/2 \(…a, \$5\.00 of monthly limit left\)/,
     );
-    // An unmetered account reads as full headroom, not as a 100% meter.
+    // An unmetered account says so rather than printing a meter it lacks.
     assert.match(
-      pickOpencodeApiKey([{ key: 'solo', usage: { useBalance: false } }]).reason,
+      pickOpencodeApiKey([{ key: 'solo', usage: { useBalance: false } }], NOW).reason,
       /no monthly limit/,
     );
     // No probe reached: keep the first key rather than guessing.
-    assert.deepEqual(pickOpencodeApiKey([{ key: 'first' }, { key: 'second' }]), {
+    assert.deepEqual(pickOpencodeApiKey([{ key: 'first' }, { key: 'second' }], NOW), {
       key: 'first',
       reason: 'probes unavailable; using first of 2',
     });
