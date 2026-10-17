@@ -949,7 +949,7 @@ process.stdin.on('end', async () => {
         assert.match(call.input, /Tool use disabled/);
       }
       if (call.model === 'meta/muse-spark-1.3-contributor') {
-        assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'medium');
+        assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'high');
       }
       if (call.resume) {
         assert.equal(call.resume, encodeURIComponent(call.model) + '-session');

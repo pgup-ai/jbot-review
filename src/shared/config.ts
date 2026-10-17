@@ -134,8 +134,8 @@ export function defaultModelOptions(
 }
 
 const MAIN_REVIEW_REASONING = new Map([
-  ['opencode-go/muse-spark-1.3-contributor', 'medium'],
-  ['commandcode/meta/muse-spark-1.3-contributor', 'medium'],
+  ['opencode-go/muse-spark-1.3-contributor', 'high'],
+  ['commandcode/meta/muse-spark-1.3-contributor', 'high'],
 ]);
 
 export function mainReviewModelOptions(
