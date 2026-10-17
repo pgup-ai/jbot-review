@@ -488,6 +488,14 @@ describe('CommandCode plan usage', () => {
       formatCommandCodePlanUsage(usage, now),
       'CommandCode plan usage: 5h 0.6/14 (4%, resets in 2h 41m), weekly 35.0/35 (100%, EXCEEDED, resets in 2d 1h); 38.1 plan credits remaining.',
     );
+    // An idle window (resetAt 0 until first use) shows no countdown.
+    assert.match(
+      formatCommandCodePlanUsage(
+        { ...usage, fiveHour: { used: 0, cap: 14, exceeded: false, resetAt: 0 } },
+        now,
+      ),
+      /^CommandCode plan usage: 5h 0\.0\/14 \(0%\), weekly/,
+    );
     // Purchased credits surface — that is the balance overage draws from.
     assert.match(
       formatCommandCodePlanUsage({ ...usage, purchasedCredits: 12 }, now),
@@ -499,7 +507,7 @@ describe('CommandCode plan usage', () => {
         { ...usage, fiveHour: { used: 0.0006, cap: 14, exceeded: false, resetAt: now } },
         now,
       ),
-      /5h 0\.0\/14 \(<1%,/,
+      /5h 0\.0\/14 \(<1%\)/,
     );
   });
 

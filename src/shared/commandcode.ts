@@ -1014,7 +1014,10 @@ function formatCommandCodePlanUsageBody(usage: CommandCodePlanUsage, now: number
     if (!window) return undefined;
     return `${label} ${window.used.toFixed(1)}/${window.cap} (${percentLabel(window.used, window.cap)}${
       window.exceeded ? ', EXCEEDED' : ''
-    }, resets in ${formatShortDuration(Math.max(window.resetAt - now, 0))})`;
+    }${
+      // An idle window reports resetAt 0: its rolling timer starts on first use.
+      window.resetAt > now ? `, resets in ${formatShortDuration(window.resetAt - now)}` : ''
+    })`;
   };
   const monthly = usage.monthly
     ? `monthly ${usage.monthly.used.toFixed(1)}/${usage.monthly.cap.toFixed(1)} (${percentLabel(
