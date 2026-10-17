@@ -355,8 +355,10 @@ the action step's `env` block. The public `@v0` actions do not expose a
 
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`; comma-separate
 several of them and each run picks, among accounts whose 5h and weekly Go-plan
-windows are still open, the one whose monthly allowance would lapse unused
-soonest (allowance left ÷ time to its monthly reset). Unlike CommandCode a
+windows are still open, the one with the most monthly allowance left per unit
+of time until its monthly reset, so allowance about to lapse is spent first (a
+missing or stale reset counts as 30 days away; a key without a monthly meter
+ranks last). Unlike CommandCode a
 spent plan is not fatal on its own: accounts that bill overage to the credit
 balance keep serving and are preferred, while one with overage blocked is
 picked only when nothing else is left, and its requests can still fail. Ranking

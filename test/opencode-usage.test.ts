@@ -127,6 +127,17 @@ describe('opencode Go plan usage', () => {
       NOW,
     );
     assert.equal(picked.key, 'full');
+    // A reset already past is stale data, not an imminent lapse.
+    assert.equal(
+      pickOpencodeApiKey(
+        [
+          { key: 'stale', usage: usage(0, 500, NOW - DAY) },
+          { key: 'future', usage: usage(0, 500, NOW + 20 * DAY) },
+        ],
+        NOW,
+      ).key,
+      'future',
+    );
     assert.match(picked.reason, /\(…full, \$10\.00 of monthly limit left, resets in 20d 0h\)/);
   });
 

@@ -5,7 +5,7 @@ import { formatShortDuration, isFiniteNumber, isNonArrayRecord, percentLabel } f
 // as "no usage" rather than as a failure.
 const OPENCODE_GO_STATUS_URL = 'https://opencode.ai/console/api/go/status';
 const OPENCODE_USAGE_TIMEOUT_MS = 4_000;
-// Horizon for a monthly meter that drops its reset timestamp: about one billing period.
+// Horizon for a monthly meter with no usable reset timestamp: about one billing period.
 const MONTHLY_FALLBACK_HORIZON_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Providers whose key is an opencode.ai account credential. */
@@ -110,17 +110,14 @@ function monthlyLeft(month: OpencodeUsageWindow): number {
 }
 
 /**
- * Monthly allowance left per millisecond until it resets: the key whose
- * allowance would lapse unused soonest scores highest. No monthly meter means
- * nothing lapses, so it scores zero.
+ * Monthly allowance left per millisecond until it resets, so allowance that
+ * would otherwise lapse unused is spent first. No monthly meter means nothing
+ * lapses, so it scores zero. A reset already past is stale, not imminent.
  */
 function monthlyUrgency(usage: OpencodeGoUsage, now: number): number {
   if (!usage.month) return 0;
-  const untilReset =
-    usage.month.resetAtMs === undefined
-      ? MONTHLY_FALLBACK_HORIZON_MS
-      : Math.max(usage.month.resetAtMs - now, 1);
-  return monthlyLeft(usage.month) / untilReset;
+  const untilReset = (usage.month.resetAtMs ?? now) - now;
+  return monthlyLeft(usage.month) / (untilReset > 0 ? untilReset : MONTHLY_FALLBACK_HORIZON_MS);
 }
 
 function spent(window?: OpencodeUsageWindow): boolean {
@@ -138,8 +135,8 @@ interface OpencodeKeyProbe {
 }
 
 /**
- * Keys with the 5h and weekly windows open are eligible; the one whose monthly
- * allowance would lapse unused soonest (left ÷ time to reset) wins, weekly
+ * Keys with the 5h and weekly windows open are eligible; the one with the most
+ * monthly allowance left per unit of time until its reset wins, weekly
  * breaks ties. Unlike CommandCode a
  * spent plan is never fatal here — overage bills the credit balance rather than
  * refusing the request — so an exhausted key stays selectable as a last resort.
@@ -223,8 +220,8 @@ async function fetchOpencodeGoUsage(key: string): Promise<OpencodeGoUsage | unde
 }
 
 /**
- * Resolves a comma-separated opencode key list to the open-window account whose
- * monthly allowance lapses soonest, probing once per run so both roles share that account.
+ * Resolves a comma-separated opencode key list to the open-window account with the
+ * most monthly allowance left per unit of time until its reset, probing once per run so both roles share that account.
  * A single key still reports its meters; a non-opencode provider is returned
  * untouched without a request.
  */
