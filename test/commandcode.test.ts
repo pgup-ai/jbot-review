@@ -214,6 +214,18 @@ describe('CommandCode CLI provider helpers', () => {
     const maxCtx = { ...verifierCtx, mainModelOptions: { reasoningEffort: 'max' }, explicit: true };
     assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'xhigh' }, maxCtx), 'high');
     assert.equal(commandCodeSessionEffort(omni, { reasoningEffort: 'xhigh' }, maxCtx), 'medium');
+    // A main-only default raises the finder, so the verifier steps down from it.
+    const muse = 'commandcode/meta/muse-spark-1.3-contributor';
+    const raisedCtx = {
+      auxModel: muse,
+      mainModelOptions: { reasoningEffort: 'low' },
+      mainReviewOptions: { reasoningEffort: 'high' },
+      explicit: false,
+    };
+    assert.equal(
+      commandCodeSessionEffort(muse, { reasoningEffort: 'medium' }, raisedCtx),
+      'medium',
+    );
   });
 
   it('configures native workspace access and denies tools when disabled', () => {
@@ -949,7 +961,7 @@ process.stdin.on('end', async () => {
         assert.match(call.input, /Tool use disabled/);
       }
       if (call.model === 'meta/muse-spark-1.3-contributor') {
-        assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'medium');
+        assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'high');
       }
       if (call.resume) {
         assert.equal(call.resume, encodeURIComponent(call.model) + '-session');

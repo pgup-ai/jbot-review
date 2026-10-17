@@ -228,11 +228,19 @@ export function commandCodeSessionEffort(
     auxModel: string;
     auxModelOptions?: Record<string, unknown>;
     mainModelOptions?: Record<string, unknown>;
+    /** The main review's own options when a main-only default raised them. */
+    mainReviewOptions?: Record<string, unknown>;
     explicit: boolean;
   },
 ): string | undefined {
   if (override) {
-    const finder = commandCodeReasoningEffort(model, ctx.mainModelOptions, ctx.explicit);
+    // A raised main-only default reaches the finder as explicit options.
+    const finderOptions = ctx.mainReviewOptions ?? ctx.mainModelOptions;
+    const finder = commandCodeReasoningEffort(
+      model,
+      finderOptions,
+      ctx.explicit || finderOptions !== ctx.mainModelOptions,
+    );
     const tiers = COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers;
     return finder && tiers ? tiers[Math.max(0, tiers.indexOf(finder) - 1)] : undefined;
   }
