@@ -1621,6 +1621,7 @@ async function runReviewPipeline(params: {
     auxModel,
     auxModelOptions,
     mainModelOptions: options.modelOptions,
+    mainReviewOptions,
     explicit: options.modelOptionsExplicit,
   };
   const mainReasoningEffort = effectiveReasoningEffort(
@@ -2222,6 +2223,7 @@ async function runReviewPipeline(params: {
           auxModel,
           auxModelOptions,
           mainModelOptions: options.modelOptions,
+          mainReviewOptions,
           explicit: options.modelOptionsExplicit ?? false,
         }),
     );
