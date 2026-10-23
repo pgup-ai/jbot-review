@@ -28,10 +28,10 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      34 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
 | `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
-| `opencode`              | CLI snapshot         |      84 | `opencode/deepseek-v4-flash`                                    |
-| `opencode-go`           | CLI snapshot         |      31 | `opencode-go/deepseek-v4-flash`                                 |
+| `opencode`              | CLI snapshot         |      82 | `opencode/deepseek-v4-flash`                                    |
+| `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4.1-flash`                               |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      85 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      92 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
 | `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |       7 | `codex/default`                                                 |
@@ -793,12 +793,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.27`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.1.3`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-84 J-Bot model values:
+82 J-Bot model values:
 
+- `opencode/beam-free`
 - `opencode/big-pickle`
 - `opencode/claude-fable-5`
 - `opencode/claude-fable-5-1`
@@ -810,16 +811,15 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/claude-opus-4-8`
 - `opencode/claude-opus-5`
 - `opencode/claude-opus-5-5`
-- `opencode/claude-sonnet-4`
 - `opencode/claude-sonnet-4-5`
 - `opencode/claude-sonnet-4-6`
 - `opencode/claude-sonnet-5`
 - `opencode/claude-sonnet-5-5`
 - `opencode/deepseek-v4-flash` **(default)**
-- `opencode/deepseek-v4-flash-vision-exp`
 - `opencode/deepseek-v4-pro`
 - `opencode/deepseek-v4.1-flash`
-- `opencode/exo-free`
+- `opencode/deepseek-v4.1-flash-free`
+- `opencode/flint-40b-free`
 - `opencode/gemini-3-flash`
 - `opencode/gemini-3.1-pro`
 - `opencode/gemini-3.5-flash`
@@ -827,11 +827,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/gemini-3.6-flash`
 - `opencode/gemini-3.7-flash`
 - `opencode/gemini-3.8-flash`
+- `opencode/gemini-4-argon`
 - `opencode/glm-5`
 - `opencode/glm-5.1`
 - `opencode/glm-5.2`
 - `opencode/glm-5.3`
 - `opencode/glm-5.3-flash`
+- `opencode/glm-5.3-flash-free`
 - `opencode/gpt-5`
 - `opencode/gpt-5-codex`
 - `opencode/gpt-5-nano`
@@ -864,9 +866,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/kimi-k2.6`
 - `opencode/kimi-k2.7-code`
 - `opencode/kimi-k3`
-- `opencode/ling-3.0-flash-fin-free`
-- `opencode/ling-3.1-flash-free`
-- `opencode/longcat-2.5-preview-free`
 - `opencode/mimo-v2.6-flash-free`
 - `opencode/minimax-m2.5`
 - `opencode/minimax-m2.7`
@@ -874,55 +873,51 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/mistral-large-4`
 - `opencode/muse-spark-1.2`
 - `opencode/muse-spark-1.3`
-- `opencode/muse-spark-1.3-contributor-free`
+- `opencode/muse-wonder-1.0`
 - `opencode/nemotron-3-ultra-free`
 - `opencode/nemotron-3.5-lightning-free`
+- `opencode/nemotron-3.5-super-vl-free`
 - `opencode/qwen3.5-plus`
 - `opencode/qwen3.6-plus`
 - `opencode/qwen3.8-flash`
 - `opencode/qwen3.8-max`
-- `opencode/space-bunny-free`
-- `opencode/step-5-preview-free`
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.27`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.1.3`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-31 J-Bot model values:
+28 J-Bot model values:
 
+- `opencode-go/beam-free`
 - `opencode-go/claude-haiku-5-5`
-- `opencode-go/deepseek-v4-flash` **(default)**
-- `opencode-go/deepseek-v4-flash-vision-exp`
 - `opencode-go/deepseek-v4-pro`
-- `opencode-go/deepseek-v4.1-flash`
+- `opencode-go/deepseek-v4.1-flash` **(default)**
+- `opencode-go/gemini-4-argon-contributor`
 - `opencode-go/glm-5.2`
 - `opencode-go/glm-5.3`
 - `opencode-go/glm-5.3-flash`
 - `opencode-go/gpt-5.6-luna`
 - `opencode-go/gpt-6-luna`
-- `opencode-go/grok-4.6`
 - `opencode-go/grok-4.7`
 - `opencode-go/hy3`
 - `opencode-go/hy4-preview`
 - `opencode-go/kimi-k2.7-code`
 - `opencode-go/kimi-k3`
 - `opencode-go/longcat-2.0`
-- `opencode-go/longcat-2.5-preview-free`
 - `opencode-go/mimo-v2.5`
 - `opencode-go/mimo-v2.5-pro`
 - `opencode-go/mimo-v2.6-flash`
 - `opencode-go/mimo-v2.6-pro`
-- `opencode-go/minimax-m2.7`
 - `opencode-go/minimax-m3`
+- `opencode-go/minimax-m3.1-flash`
 - `opencode-go/muse-spark-1.2-contributor`
 - `opencode-go/muse-spark-1.3-contributor`
 - `opencode-go/qwen3.7-plus`
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
-- `opencode-go/space-bunny`
-- `opencode-go/step-5-preview-free`
+- `opencode-go/step-5-preview`
 
 ### `devin`
 
@@ -936,15 +931,16 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.74.1`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.87.3`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-85 J-Bot model values:
+92 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
 - `commandcode/claude-haiku-4-5`
+- `commandcode/claude-haiku-5-5`
 - `commandcode/claude-opus-4-7`
 - `commandcode/claude-opus-4-8`
 - `commandcode/claude-opus-5`
@@ -965,6 +961,7 @@ The CLI does not expose a complete list.
 - `commandcode/google/gemini-3.6-flash`
 - `commandcode/google/gemini-3.7-flash`
 - `commandcode/google/gemini-3.8-flash`
+- `commandcode/google/gemini-4-argon`
 - `commandcode/gpt-5.3-codex`
 - `commandcode/gpt-5.4`
 - `commandcode/gpt-5.4-mini`
@@ -976,21 +973,28 @@ The CLI does not expose a complete list.
 - `commandcode/gpt-6-luna`
 - `commandcode/gpt-6-sol`
 - `commandcode/gpt-6.1-sol`
+- `commandcode/inclusionai/ling-3.1-flash`
 - `commandcode/meituan/longcat-2.0`
 - `commandcode/meta/muse-spark-1.1`
 - `commandcode/meta/muse-spark-1.2`
 - `commandcode/meta/muse-spark-1.2-contributor`
 - `commandcode/meta/muse-spark-1.3`
 - `commandcode/meta/muse-spark-1.3-contributor`
+- `commandcode/meta/muse-spark-open`
+- `commandcode/meta/muse-wonder-1.0`
+- `commandcode/minimax/minimax-m3.1-flash`
 - `commandcode/minimaxai/minimax-m2.5`
 - `commandcode/minimaxai/minimax-m2.7`
 - `commandcode/minimaxai/minimax-m3`
+- `commandcode/mistral/mistral-large-4`
 - `commandcode/moonshotai/kimi-k2.5`
 - `commandcode/moonshotai/kimi-k2.6`
 - `commandcode/moonshotai/kimi-k2.7-code`
 - `commandcode/moonshotai/kimi-k2.7-code-highspeed`
 - `commandcode/moonshotai/kimi-k3`
 - `commandcode/nvidia/nemotron-3-ultra-550b-a55b`
+- `commandcode/nvidia/nemotron-3.5-super-vl`
+- `commandcode/ornith/ornith-1.5-122b`
 - `commandcode/poolside/laguna-s-2.1-free`
 - `commandcode/qwen/qwen3.6-max-preview`
 - `commandcode/qwen/qwen3.6-plus`
@@ -1001,9 +1005,9 @@ The CLI does not expose a complete list.
 - `commandcode/qwen/qwen3.8-flash`
 - `commandcode/qwen/qwen3.8-max`
 - `commandcode/qwen/qwen3.8-max-0902`
+- `commandcode/qwen/qwen3.8-max-prime`
 - `commandcode/qwen/qwen3.8-omni-flash`
 - `commandcode/sakana/fugu-ultra`
-- `commandcode/stealth/space-bunny-alpha`
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`
 - `commandcode/stepfun/step-5-preview`
@@ -1015,8 +1019,6 @@ The CLI does not expose a complete list.
 - `commandcode/xai/grok-4.5`
 - `commandcode/xai/grok-4.6`
 - `commandcode/xai/grok-4.7`
-- `commandcode/xiaomi/mimo-v2.5`
-- `commandcode/xiaomi/mimo-v2.5-pro`
 - `commandcode/xiaomi/mimo-v2.6-flash`
 - `commandcode/xiaomi/mimo-v2.6-pro`
 - `commandcode/xiaomi/mimo-v2.6-pro-ultraspeed`

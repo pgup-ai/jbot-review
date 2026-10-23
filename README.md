@@ -316,7 +316,7 @@ enumerable catalog command and is documented as that explicit boundary.
 | `provider`              | Default model                                                   | Action key input                | Secret/env var                       |
 | ----------------------- | --------------------------------------------------------------- | ------------------------------- | ------------------------------------ |
 | `opencode`              | `opencode/deepseek-v4-flash`                                    | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
-| `opencode-go`           | `opencode-go/deepseek-v4-flash`                                 | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `opencode-go`           | `opencode-go/deepseek-v4.1-flash`                               | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
 | `deepseek`              | `deepseek/deepseek-v4-flash`                                    | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
 | `openai`                | `openai/gpt-5.4-nano`                                           | `openai-api-key`                | `OPENAI_API_KEY`                     |
 | `openai-compatible`     | required                                                        | `openai-compatible-api-key`     | `JBOT_OPENAI_COMPATIBLE_API_KEY`     |

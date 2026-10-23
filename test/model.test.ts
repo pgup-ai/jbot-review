@@ -84,6 +84,7 @@ describe('resolveModelSelection', () => {
 
   it('uses the provider catalog default when no model is given', () => {
     assert.deepEqual(resolveModelSelection(), ['opencode/deepseek-v4-flash']);
+    assert.deepEqual(resolveModelSelection('', 'opencode-go'), ['opencode-go/deepseek-v4.1-flash']);
     assert.deepEqual(resolveModelSelection('', 'devin'), ['devin/default']);
     assert.throws(
       () => resolveModelSelection('', 'openai-compatible'),

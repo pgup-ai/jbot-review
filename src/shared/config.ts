@@ -294,7 +294,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     models: OPENCODE_ZEN_MODELS,
   },
   'opencode-go': {
-    defaultModel: 'opencode-go/deepseek-v4-flash',
+    defaultModel: 'opencode-go/deepseek-v4.1-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
     models: OPENCODE_ZEN_MODELS,
