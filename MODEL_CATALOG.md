@@ -31,7 +31,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `opencode`              | CLI snapshot         |      82 | `opencode/deepseek-v4-flash`                                    |
 | `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      85 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      92 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
 | `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |       7 | `codex/default`                                                 |
@@ -933,15 +933,16 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.74.1`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.87.3`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-85 J-Bot model values:
+92 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
 - `commandcode/claude-haiku-4-5`
+- `commandcode/claude-haiku-5-5`
 - `commandcode/claude-opus-4-7`
 - `commandcode/claude-opus-4-8`
 - `commandcode/claude-opus-5`
@@ -962,6 +963,7 @@ The CLI does not expose a complete list.
 - `commandcode/google/gemini-3.6-flash`
 - `commandcode/google/gemini-3.7-flash`
 - `commandcode/google/gemini-3.8-flash`
+- `commandcode/google/gemini-4-argon`
 - `commandcode/gpt-5.3-codex`
 - `commandcode/gpt-5.4`
 - `commandcode/gpt-5.4-mini`
@@ -973,21 +975,28 @@ The CLI does not expose a complete list.
 - `commandcode/gpt-6-luna`
 - `commandcode/gpt-6-sol`
 - `commandcode/gpt-6.1-sol`
+- `commandcode/inclusionai/ling-3.1-flash`
 - `commandcode/meituan/longcat-2.0`
 - `commandcode/meta/muse-spark-1.1`
 - `commandcode/meta/muse-spark-1.2`
 - `commandcode/meta/muse-spark-1.2-contributor`
 - `commandcode/meta/muse-spark-1.3`
 - `commandcode/meta/muse-spark-1.3-contributor`
+- `commandcode/meta/muse-spark-open`
+- `commandcode/meta/muse-wonder-1.0`
+- `commandcode/minimax/minimax-m3.1-flash`
 - `commandcode/minimaxai/minimax-m2.5`
 - `commandcode/minimaxai/minimax-m2.7`
 - `commandcode/minimaxai/minimax-m3`
+- `commandcode/mistral/mistral-large-4`
 - `commandcode/moonshotai/kimi-k2.5`
 - `commandcode/moonshotai/kimi-k2.6`
 - `commandcode/moonshotai/kimi-k2.7-code`
 - `commandcode/moonshotai/kimi-k2.7-code-highspeed`
 - `commandcode/moonshotai/kimi-k3`
 - `commandcode/nvidia/nemotron-3-ultra-550b-a55b`
+- `commandcode/nvidia/nemotron-3.5-super-vl`
+- `commandcode/ornith/ornith-1.5-122b`
 - `commandcode/poolside/laguna-s-2.1-free`
 - `commandcode/qwen/qwen3.6-max-preview`
 - `commandcode/qwen/qwen3.6-plus`
@@ -998,9 +1007,9 @@ The CLI does not expose a complete list.
 - `commandcode/qwen/qwen3.8-flash`
 - `commandcode/qwen/qwen3.8-max`
 - `commandcode/qwen/qwen3.8-max-0902`
+- `commandcode/qwen/qwen3.8-max-prime`
 - `commandcode/qwen/qwen3.8-omni-flash`
 - `commandcode/sakana/fugu-ultra`
-- `commandcode/stealth/space-bunny-alpha`
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`
 - `commandcode/stepfun/step-5-preview`
@@ -1012,8 +1021,6 @@ The CLI does not expose a complete list.
 - `commandcode/xai/grok-4.5`
 - `commandcode/xai/grok-4.6`
 - `commandcode/xai/grok-4.7`
-- `commandcode/xiaomi/mimo-v2.5`
-- `commandcode/xiaomi/mimo-v2.5-pro`
 - `commandcode/xiaomi/mimo-v2.6-flash`
 - `commandcode/xiaomi/mimo-v2.6-pro`
 - `commandcode/xiaomi/mimo-v2.6-pro-ultraspeed`

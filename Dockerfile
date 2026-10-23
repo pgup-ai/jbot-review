@@ -32,7 +32,7 @@ FROM base AS runtime
 
 # opencode's npm package installs both the glibc and musl binaries (~190MB each);
 # this Debian image only runs the glibc one.
-RUN npm install -g @opencode/cli@2.1.3 command-code@1.74.1 \
+RUN npm install -g @opencode/cli@2.1.3 command-code@1.87.3 \
   && npm cache clean --force \
   && rm -rf /usr/local/lib/node_modules/@opencode/cli/node_modules/@opencode/cli-linux-*-musl \
   && opencode --version \
