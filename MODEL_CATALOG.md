@@ -29,7 +29,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
 | `opencode`              | CLI snapshot         |      82 | `opencode/deepseek-v4-flash`                                    |
-| `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4-flash`                                 |
+| `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4.1-flash`                               |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
 | `commandcode`           | CLI snapshot         |      92 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
@@ -888,14 +888,12 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-Configured default: `opencode-go/deepseek-v4-flash` (absent from this runtime snapshot; select a listed model explicitly).
-
 28 J-Bot model values:
 
 - `opencode-go/beam-free`
 - `opencode-go/claude-haiku-5-5`
 - `opencode-go/deepseek-v4-pro`
-- `opencode-go/deepseek-v4.1-flash`
+- `opencode-go/deepseek-v4.1-flash` **(default)**
 - `opencode-go/gemini-4-argon-contributor`
 - `opencode-go/glm-5.2`
 - `opencode-go/glm-5.3`

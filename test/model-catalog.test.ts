@@ -48,7 +48,14 @@ describe('model catalog', () => {
     for (const [providerID, provider] of Object.entries(PROVIDERS)) {
       if (!provider.defaultModel) continue;
       const section = catalog.split(`### \`${providerID}\``)[1]?.split('\n### ')[0];
-      assert.ok(section?.includes(`\`${provider.defaultModel}\``));
+      const entries = [...(section?.matchAll(/^- `([^`]+)`/gm) ?? [])].map((match) => match[1]);
+      const defaultModelID = provider.defaultModel.slice(providerID.length + 1);
+      assert.ok(
+        entries.some(
+          (model) => model === provider.defaultModel || model.endsWith(`/${defaultModelID}`),
+        ),
+        `${providerID} default must be a model entry`,
+      );
     }
     assert.match(catalog, /`openai-compatible\/<endpoint-model-id>`/);
     assert.match(catalog, /does not invent or probe a default/);
