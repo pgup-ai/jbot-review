@@ -28,8 +28,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      34 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
 | `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
-| `opencode`              | CLI snapshot         |      84 | `opencode/deepseek-v4-flash`                                    |
-| `opencode-go`           | CLI snapshot         |      31 | `opencode-go/deepseek-v4-flash`                                 |
+| `opencode`              | CLI snapshot         |      82 | `opencode/deepseek-v4-flash`                                    |
+| `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
 | `commandcode`           | CLI snapshot         |      85 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
@@ -793,12 +793,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.27`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.1.3`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-84 J-Bot model values:
+82 J-Bot model values:
 
+- `opencode/beam-free`
 - `opencode/big-pickle`
 - `opencode/claude-fable-5`
 - `opencode/claude-fable-5-1`
@@ -810,16 +811,15 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/claude-opus-4-8`
 - `opencode/claude-opus-5`
 - `opencode/claude-opus-5-5`
-- `opencode/claude-sonnet-4`
 - `opencode/claude-sonnet-4-5`
 - `opencode/claude-sonnet-4-6`
 - `opencode/claude-sonnet-5`
 - `opencode/claude-sonnet-5-5`
 - `opencode/deepseek-v4-flash` **(default)**
-- `opencode/deepseek-v4-flash-vision-exp`
 - `opencode/deepseek-v4-pro`
 - `opencode/deepseek-v4.1-flash`
-- `opencode/exo-free`
+- `opencode/deepseek-v4.1-flash-free`
+- `opencode/flint-40b-free`
 - `opencode/gemini-3-flash`
 - `opencode/gemini-3.1-pro`
 - `opencode/gemini-3.5-flash`
@@ -827,11 +827,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/gemini-3.6-flash`
 - `opencode/gemini-3.7-flash`
 - `opencode/gemini-3.8-flash`
+- `opencode/gemini-4-argon`
 - `opencode/glm-5`
 - `opencode/glm-5.1`
 - `opencode/glm-5.2`
 - `opencode/glm-5.3`
 - `opencode/glm-5.3-flash`
+- `opencode/glm-5.3-flash-free`
 - `opencode/gpt-5`
 - `opencode/gpt-5-codex`
 - `opencode/gpt-5-nano`
@@ -864,9 +866,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/kimi-k2.6`
 - `opencode/kimi-k2.7-code`
 - `opencode/kimi-k3`
-- `opencode/ling-3.0-flash-fin-free`
-- `opencode/ling-3.1-flash-free`
-- `opencode/longcat-2.5-preview-free`
 - `opencode/mimo-v2.6-flash-free`
 - `opencode/minimax-m2.5`
 - `opencode/minimax-m2.7`
@@ -874,55 +873,53 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/mistral-large-4`
 - `opencode/muse-spark-1.2`
 - `opencode/muse-spark-1.3`
-- `opencode/muse-spark-1.3-contributor-free`
+- `opencode/muse-wonder-1.0`
 - `opencode/nemotron-3-ultra-free`
 - `opencode/nemotron-3.5-lightning-free`
+- `opencode/nemotron-3.5-super-vl-free`
 - `opencode/qwen3.5-plus`
 - `opencode/qwen3.6-plus`
 - `opencode/qwen3.8-flash`
 - `opencode/qwen3.8-max`
-- `opencode/space-bunny-free`
-- `opencode/step-5-preview-free`
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.0.27`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.1.3`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-31 J-Bot model values:
+Configured default: `opencode-go/deepseek-v4-flash` (absent from this runtime snapshot; select a listed model explicitly).
 
+28 J-Bot model values:
+
+- `opencode-go/beam-free`
 - `opencode-go/claude-haiku-5-5`
-- `opencode-go/deepseek-v4-flash` **(default)**
-- `opencode-go/deepseek-v4-flash-vision-exp`
 - `opencode-go/deepseek-v4-pro`
 - `opencode-go/deepseek-v4.1-flash`
+- `opencode-go/gemini-4-argon-contributor`
 - `opencode-go/glm-5.2`
 - `opencode-go/glm-5.3`
 - `opencode-go/glm-5.3-flash`
 - `opencode-go/gpt-5.6-luna`
 - `opencode-go/gpt-6-luna`
-- `opencode-go/grok-4.6`
 - `opencode-go/grok-4.7`
 - `opencode-go/hy3`
 - `opencode-go/hy4-preview`
 - `opencode-go/kimi-k2.7-code`
 - `opencode-go/kimi-k3`
 - `opencode-go/longcat-2.0`
-- `opencode-go/longcat-2.5-preview-free`
 - `opencode-go/mimo-v2.5`
 - `opencode-go/mimo-v2.5-pro`
 - `opencode-go/mimo-v2.6-flash`
 - `opencode-go/mimo-v2.6-pro`
-- `opencode-go/minimax-m2.7`
 - `opencode-go/minimax-m3`
+- `opencode-go/minimax-m3.1-flash`
 - `opencode-go/muse-spark-1.2-contributor`
 - `opencode-go/muse-spark-1.3-contributor`
 - `opencode-go/qwen3.7-plus`
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
-- `opencode-go/space-bunny`
-- `opencode-go/step-5-preview-free`
+- `opencode-go/step-5-preview`
 
 ### `devin`
 
