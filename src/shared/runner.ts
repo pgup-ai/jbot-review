@@ -1684,6 +1684,10 @@ async function runReviewPipeline(params: {
     rulesChangedSince,
   });
   const shadowScope = reviewScope.shadow;
+  const totalPatchBytes = fullReviewFiles.reduce(
+    (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
+    0,
+  );
   const scopeStats = {
     mode: reviewScope.mode,
     reason: reviewScope.reason,
@@ -1693,10 +1697,7 @@ async function runReviewPipeline(params: {
       (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
       0,
     ),
-    totalPatchBytes: fullReviewFiles.reduce(
-      (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
-      0,
-    ),
+    totalPatchBytes,
     planningMs: Date.now() - scopeStartedAt,
     baseline: reviewScope.baseline,
     ...(shadowScope
@@ -1704,10 +1705,14 @@ async function runReviewPipeline(params: {
           shadow: {
             mode: shadowScope.mode,
             reason: shadowScope.reason,
-            files: shadowScope.files.length,
-            patchBytes: fullReviewFiles
-              .filter((file) => shadowScope.files.includes(file.filename))
-              .reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0),
+            ...(shadowScope.mode === 'full'
+              ? { files: fullReviewFiles.length, patchBytes: totalPatchBytes }
+              : {
+                  files: shadowScope.files.length,
+                  patchBytes: fullReviewFiles
+                    .filter((file) => shadowScope.files.includes(file.filename))
+                    .reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0),
+                }),
             planningMs: shadowScope.planningMs,
           },
         }
@@ -1746,7 +1751,8 @@ async function runReviewPipeline(params: {
       `Incremental shadow: ${JSON.stringify({
         ...scopeStats.shadow,
         totalFiles: fullReviewFiles.length,
-        paths: paths.slice(0, 100),
+        // A full shadow covers every PR file, so only an incremental one lists paths.
+        ...(paths.length ? { paths: paths.slice(0, 100) } : {}),
         ...(paths.length > 100 ? { omittedPaths: paths.length - 100 } : {}),
       })}`,
     );

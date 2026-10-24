@@ -38,8 +38,8 @@ interface ShadowReviewPlan {
   planningMs: number;
 }
 
-const REEXPORT =
-  /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*['"]([^'"]+)['"]/g;
+// `from`, side-effect and dynamic imports, `require` and re-exports alike.
+const SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g;
 const BARREL = /(^|\/)index\.[cm]?[jt]sx?$/;
 
 function gitWithin(workspace: string, deadline: () => number, maxBuffer = 2 * 1024 * 1024) {
@@ -81,12 +81,16 @@ async function deltaImportersPlan(input: {
     return texts.get(path)!;
   };
   const targets = new Set([...input.edited, ...(input.merged ?? [])]);
+  // A deleted file resolves only against the edits themselves.
+  const resolve = (path: string, specifier: string) =>
+    resolveEvidenceImport(path, specifier, repo, aliases) ??
+    resolveEvidenceImport(path, specifier, targets, aliases);
   // Only index barrels are followed: reading every imported module would exhaust the budget.
   const reaches = async (path: string, depth = 0): Promise<boolean> => {
     if (targets.has(path)) return true;
     if (depth >= 3 || !BARREL.test(path)) return false;
-    for (const match of (await read(path)).matchAll(REEXPORT)) {
-      const next = resolveEvidenceImport(path, match[1], repo, aliases);
+    for (const [, specifier] of (await read(path)).matchAll(SPECIFIER)) {
+      const next = resolve(path, specifier);
       if (next && (await reaches(next, depth + 1))) return true;
     }
     return false;
@@ -95,15 +99,8 @@ async function deltaImportersPlan(input: {
   for (const { filename } of input.files) {
     if (selected.size * 2 >= paths.size) break;
     if (selected.has(filename) || !JS_SOURCE.test(filename)) continue;
-    const text = await read(filename);
-    for (const from of [
-      ...indexEvidenceSource(filename, text).imports.map((binding) => binding.from),
-      ...[...text.matchAll(REEXPORT)].map((match) => match[1]),
-    ]) {
-      // A deleted file resolves only against the edits themselves.
-      const target =
-        resolveEvidenceImport(filename, from, repo, aliases) ??
-        resolveEvidenceImport(filename, from, targets, aliases);
+    for (const [, specifier] of (await read(filename)).matchAll(SPECIFIER)) {
+      const target = resolve(filename, specifier);
       if (target && (await reaches(target))) {
         selected.add(filename);
         break;
