@@ -38,8 +38,8 @@ interface ShadowReviewPlan {
   planningMs: number;
 }
 
-// `from`, side-effect and dynamic imports, `require` and re-exports alike.
-const SPECIFIER = /\b(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g;
+// `from`, side-effect and dynamic imports, `require` and re-exports; no overlapping `\s*` keeps it linear.
+const SPECIFIER = /\b(?:from|import|require)\s*(?:\(\s*)?['"]([^'"]+)['"]/g;
 const BARREL = /(^|\/)index\.[cm]?[jt]sx?$/;
 
 function gitWithin(workspace: string, deadline: () => number, maxBuffer = 2 * 1024 * 1024) {
