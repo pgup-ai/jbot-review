@@ -123,6 +123,7 @@ describe('withModelFallback', () => {
       'go/deepseek',
       'go/deepseek',
       'go/deepseek undefined',
+      'abort aux',
       'abort main',
     ]);
     assert.deepEqual(rejections, [{ model: 'go/muse', rejection: 'privacy-setting' }]);

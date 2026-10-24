@@ -204,9 +204,12 @@ export function withModelFallback(
         () => backend.runChangesSinceLastReview(model, ...args),
         () => to.runChangesSinceLastReview(toModel, ...args),
       ),
+    // Both: pages queued on the rejected model still hold their place there.
     abortSessionsByLabel: (label, log) =>
-      (rerouted ? to : backend).abortSessionsByLabel?.(label, log) ?? 0,
+      (backend.abortSessionsByLabel?.(label, log) ?? 0) +
+      (to.abortSessionsByLabel?.(label, log) ?? 0),
     finalizeSessionsByLabel: (label, log, budgetMs) =>
-      (rerouted ? to : backend).finalizeSessionsByLabel?.(label, log, budgetMs) ?? 0,
+      (backend.finalizeSessionsByLabel?.(label, log, budgetMs) ?? 0) +
+      (to.finalizeSessionsByLabel?.(label, log, budgetMs) ?? 0),
   };
 }
