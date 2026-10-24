@@ -25,6 +25,7 @@ import {
   resolveModelSelection,
 } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
+import { isMainReviewLabel } from '../shared/report.ts';
 import type { Octokit } from '../shared/github.ts';
 import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
 import { sdkEngineForProxy, verifyOpencodeProxy } from './proxy.ts';
@@ -143,6 +144,7 @@ async function main(): Promise<void> {
     const auxCredential = auxProviderID === providerID ? undefined : credentials.get(auxProviderID);
 
     let findingCount: number | undefined;
+    let mainCutOff = false;
     await runPrReview({
       octokit,
       owner,
@@ -168,6 +170,7 @@ async function main(): Promise<void> {
         modelOptionsExplicit: core.getInput('model-options').trim() !== '',
         onReviewResult: (result) => {
           findingCount = result.findings.filter((finding) => !isWithheldFinding(finding)).length;
+          mainCutOff = result.incompleteSessions.some(({ label }) => isMainReviewLabel(label));
         },
       },
       log: (msg) => core.info(msg),
@@ -175,6 +178,13 @@ async function main(): Promise<void> {
     // Set only after the whole run — posting included — succeeded, so the
     // output never claims findings were posted by a run that then failed.
     if (findingCount !== undefined) core.setOutput('findings-posted', String(findingCount));
+    if (mainCutOff) {
+      core.setOutput('terminal-state', 'partial');
+      // A green check would read as full coverage.
+      throw new Error(
+        'The main review was cut off or timed out; posted its recovered findings with a coverage notice.',
+      );
+    }
     core.setOutput('terminal-state', 'completed');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -29,6 +29,7 @@ import {
   measureReviewPrompt,
   reviewPromptBudget,
   reviewDelivery,
+  uncoveredFiles,
   REVIEW_EVIDENCE_BYTES,
   type ShardPlan,
 } from './review-plan.ts';
@@ -151,7 +152,7 @@ import {
   auxModelOptionsFor,
   mainReviewModelOptions,
   complianceModelOptions,
-  complianceReportsFindings,
+  reportsFindings,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
@@ -348,6 +349,7 @@ import {
   buildSeverityTable,
   condenseSummary,
   describeIncompleteReason,
+  describeMainCoverageGap,
   formatIncompleteCoverage,
   type IncompleteSession,
   isMainReviewLabel,
@@ -2631,7 +2633,7 @@ async function runReviewPipeline(params: {
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
     // Hashed into the compliance policy and used to size pages: the prompt actually sent.
-    const complianceReportTool = complianceReportsFindings(auxBackend.name, auxModel);
+    const complianceReportTool = reportsFindings(auxBackend.name, auxModel);
     const policyFor = (session: string) =>
       auxiliaryPolicy({
         ...auxPolicy,
@@ -2923,6 +2925,7 @@ async function runReviewPipeline(params: {
           toolsAvailable: guidelineSelection.mainCanReadWorkspace,
           contextFirst: options.sharedPrefixPrompt,
           contextPack,
+          reportTool: reportsFindings(mainBackend.name, model),
         },
       );
     const renderMainPrompt = mainPromptRenderer();
@@ -3359,8 +3362,9 @@ async function runReviewPipeline(params: {
 
     let summary: string;
     let findings: Finding[];
+    let mainCoverageGap: IncompleteSession | undefined;
     try {
-      ({ summary, findings } = await mainReview);
+      ({ summary, findings, coverageGap: mainCoverageGap } = await mainReview);
     } catch (error) {
       // TASK-155: the PR merged, closed, or moved mid-review — nothing this
       // run produces can post against the reviewed state. Not a failure: the
@@ -3715,12 +3719,13 @@ async function runReviewPipeline(params: {
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
     const incompleteSessions = reviewCoverageSessions([
+      ...(mainCoverageGap ? [mainCoverageGap] : []),
       ...[...auxCoverage]
         .filter(([, row]) => !row.complete)
         .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) })),
       // A wrap-up that itself failed is already listed above as a failure.
       ...[...partialSessions]
-        .filter((label) => auxCoverage.get(label)?.complete !== false)
+        .filter((label) => !isMainReviewLabel(label) && auxCoverage.get(label)?.complete !== false)
         .map((label) => ({ label, reason: PARTIAL_COVERAGE_REASON })),
     ]);
     const coverageNotice = formatIncompleteCoverage(incompleteSessions);
@@ -4998,7 +5003,7 @@ export async function runShardedReview(params: {
   onCoverage?: SessionCoverageRecorder;
   /** Content-addressed reuse of completed shard results. */
   cache?: { dir: string; headSha: string; config: string };
-}): Promise<{ summary: string; findings: Finding[] }> {
+}): Promise<{ summary: string; findings: Finding[]; coverageGap?: IncompleteSession }> {
   const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
   const changed = new Set(params.changedFiles);
@@ -5240,10 +5245,10 @@ export async function runShardedReview(params: {
     }),
   );
 
-  const delivery = reviewDelivery(
-    shardPlans,
-    new Set(outcomes.filter((o) => o.result && !o.result.partial).map((o) => o.plan.label)),
+  const completed = new Set(
+    outcomes.filter((o) => o.result && !o.result.partial).map((o) => o.plan.label),
   );
+  const delivery = reviewDelivery(shardPlans, completed);
   if (delivery.expectedHunks) {
     log(`Diff delivery: ${JSON.stringify(delivery)}`);
     params.onCoverage?.({
@@ -5252,24 +5257,26 @@ export async function runShardedReview(params: {
       delivery,
     });
   }
-  const failures = outcomes.filter(
-    (outcome) => outcome.result === undefined || outcome.result.partial,
-  );
+  const failures = outcomes.filter((outcome) => !completed.has(outcome.plan.label));
+  // A page cut off or timed out posts what it recovered under a coverage
+  // notice; any other failure still refuses partial coverage.
+  const cutOff = (outcome: ShardOutcome) =>
+    outcome.result !== undefined ||
+    classifyMainShardFailure(outcome.error).failureClass === 'timeout';
   for (const failure of failures) {
     log(
-      `${failure.plan.label} failed permanently: ${
-        failure.error instanceof Error
-          ? failure.error.message
-          : failure.result?.partial
-            ? 'incomplete partial result'
-            : String(failure.error)
-      }`,
+      failure.result
+        ? `${failure.plan.label} was cut off; keeping its ${failure.result.findings.length} recovered finding(s).`
+        : `${failure.plan.label} ${cutOff(failure) ? 'was cut off' : 'failed permanently'}: ${
+            failure.error instanceof Error ? failure.error.message : String(failure.error)
+          }`,
     );
   }
-  if (failures.length > 0) {
-    const first = failures[0]?.error ?? new Error('A main review page returned a partial result.');
-    throw new Error(buildMainShardFailureMessage(failures.length, shardPlans.length, first));
-  }
+  const hardFailures = failures.filter((failure) => !cutOff(failure));
+  if (hardFailures.length > 0)
+    throw new Error(
+      buildMainShardFailureMessage(hardFailures.length, shardPlans.length, hardFailures[0].error),
+    );
 
   const successes = outcomes.filter((outcome) => outcome.result !== undefined);
   const findings = successes.flatMap(({ plan, result }) => {
@@ -5287,7 +5294,13 @@ export async function runShardedReview(params: {
 
   const summaryParts = successes.map(({ result }) => result.summary).filter(Boolean);
   const summary = condenseSummary(summaryParts);
-  return { summary, findings };
+  if (!failures.length) return { summary, findings };
+  const reason = describeMainCoverageGap(
+    failures.length,
+    shardPlans.length,
+    uncoveredFiles(shardPlans, completed),
+  );
+  return { summary, findings, coverageGap: { label: 'review', reason } };
 }
 
 export function buildMainShardFailureMessage(

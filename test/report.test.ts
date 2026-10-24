@@ -5,6 +5,7 @@ import {
   ORPHANED_FINDINGS_HEADING,
   candidateDiagnostics,
   describeIncompleteReason,
+  describeMainCoverageGap,
   formatIncompleteCoverage,
   isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
@@ -473,6 +474,21 @@ test('incomplete-coverage notice groups page failures without hiding missing pas
   assert.match(notice, /Finding verification:\*\* failed/);
   assert.match(notice, /Candidates with incomplete verification remain in run diagnostics/);
   assert.equal(formatIncompleteCoverage([]), '');
+});
+
+test('a cut-off main review names the pages and files it left unreviewed', () => {
+  const reason = describeMainCoverageGap(2, 3, [
+    { path: 'a.ts', hunks: 1, totalHunks: 2 },
+    { path: 'b.ts', hunks: 1, totalHunks: 1 },
+  ]);
+  assert.equal(
+    reason,
+    '2 of 3 pages cut off or timed out; not fully reviewed: `a.ts` (1 of 2 hunks), `b.ts`',
+  );
+  assert.match(
+    formatIncompleteCoverage([{ label: 'review', reason }]),
+    /Main review cut short\.\n\n- \*\*Main review:\*\* 2 of 3 pages cut off .*`b\.ts`\.\n/,
+  );
 });
 
 test('coverage errors collapse to a short reason without leaking provider text', () => {

@@ -103,7 +103,7 @@ export default {
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }
     });
-    // Compliance pages record each confirmed violation here, so a cut-off keeps what they found.
+    // Main and compliance pages record each confirmed finding here, so a cut-off keeps what they found.
     try {
       // The hook first: a tool whose calls are never persisted would only claim to record.
       await ctx.tool.hook('execute.after', (event) => {
@@ -143,12 +143,12 @@ export default {
             additionalProperties: false,
           },
           async execute() {
-            return { content: 'Noted (best-effort). Keep auditing, and list it in your final JSON.' };
+            return { content: 'Noted (best-effort). Keep reviewing, and list it in your final JSON.' };
           },
         });
       });
     } catch {
-      console.warn('[jbot-review] report_finding setup failed; compliance pages keep only their final JSON.');
+      console.warn('[jbot-review] report_finding setup failed; pages keep only their final JSON.');
     }
     try {
       const experiment = JSON.parse(process.env.JBOT_EXPLORATION_CONFIG || '{}');

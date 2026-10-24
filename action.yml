@@ -226,7 +226,7 @@ outputs:
   findings-posted:
     description: 'Findings posted (or logged in dry-run) by this run. Unset when the review fails before completing.'
   terminal-state:
-    description: 'completed when the review pipeline finished; failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
+    description: 'completed when the review pipeline finished; partial when it posted a main review that was cut off or timed out (the step then fails unless fail-on-error is false); failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
 
 runs:
   using: 'docker'

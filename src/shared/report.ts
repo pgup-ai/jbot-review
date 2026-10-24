@@ -1,4 +1,4 @@
-import { escapeHtml } from './text.ts';
+import { escapeHtml, formatFileList } from './text.ts';
 import type { Finding, Severity } from './types.ts';
 import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
@@ -408,6 +408,19 @@ export function describeIncompleteReason(error: unknown): string {
   return 'failed';
 }
 
+export function describeMainCoverageGap(
+  cutOffPages: number,
+  totalPages: number,
+  files: { path: string; hunks: number; totalHunks: number }[],
+): string {
+  const pages = `${cutOffPages} of ${totalPages} page${totalPages === 1 ? '' : 's'} cut off or timed out`;
+  if (!files.length) return pages;
+  const listed = files.map(({ path, hunks, totalHunks }) =>
+    hunks === totalHunks ? `\`${path}\`` : `\`${path}\` (${hunks} of ${totalHunks} hunks)`,
+  );
+  return `${pages}; not fully reviewed: ${formatFileList(listed)}`;
+}
+
 export function formatIncompleteCoverage(sessions: readonly IncompleteSession[]): string {
   if (sessions.length === 0) return '';
   const verificationFailed = sessions.some(
@@ -436,7 +449,7 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
     '',
     ...list,
     '',
-    `Findings from completed passes and any recovered auxiliary findings were retained.${verificationFailed ? ' Candidates with incomplete verification remain in run diagnostics.' : ''}`,
+    `Findings from completed passes and any recovered from passes cut short were retained.${verificationFailed ? ' Candidates with incomplete verification remain in run diagnostics.' : ''}`,
   ].join('\n');
 }
 

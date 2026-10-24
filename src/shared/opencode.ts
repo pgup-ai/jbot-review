@@ -1,6 +1,6 @@
 import { parseModelName } from '@symma/protocol';
 import {
-  complianceReportsFindings,
+  reportsFindings,
   modelAcceptsForcedToolChoice,
   modelSupportsAgenticTools,
 } from './config.ts';
@@ -202,6 +202,8 @@ export async function runReview(
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
   const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
+  const reportTool =
+    !options.lensAddendum && !options.toolLess && reportsFindings('opencode', model);
   const prompt = promptForModel(
     model,
     assembleReviewPrompt(
@@ -214,6 +216,7 @@ export async function runReview(
         toolsAvailable: !isSingleShotModel(model) && !options.toolLess,
         contextFirst: options.contextFirst,
         contextPack: options.contextPack,
+        reportTool,
       },
     ),
     options.toolLess,
@@ -221,24 +224,44 @@ export async function runReview(
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const outcome: PromptOutcome = { wrappedUp: false };
-  const { raw, sessionID } = await promptPlanAgent(
-    runtime,
-    model,
-    prompt,
-    label,
-    log,
-    options.timeoutMs,
-    options.onTokenUsage,
-    outcome,
-    { toolLess: options.toolLess, modelOptions: options.modelOptions },
-  );
+  let sessionID!: string;
+  const cutOff = (
+    result: ReviewResult = { summary: '', findings: [], addressedPriorComments: [] },
+  ): ReviewResult => ({
+    ...result,
+    findings: [...result.findings, ...reportedFindings(runtime, sessionID, label, log)],
+    partial: true,
+  });
+  let raw: string;
+  try {
+    ({ raw } = await promptPlanAgent(
+      runtime,
+      model,
+      prompt,
+      label,
+      log,
+      options.timeoutMs,
+      options.onTokenUsage,
+      outcome,
+      {
+        toolLess: options.toolLess,
+        modelOptions: options.modelOptions,
+        reportFindings: reportTool,
+        onSession: (id) => (sessionID = id),
+      },
+    ));
+  } catch (error) {
+    if (!outcome.wrappedUp) throw error;
+    log(`${label} wrap-up failed; keeping the findings it reported: ${String(error)}`);
+    return cutOff();
+  }
   let result: ReviewResult;
   try {
     result = parseReview(raw, label, log, { strict: true });
   } catch (error) {
     // A wrap-up reply is the last answer its deadline allows: a repair turn
     // would re-enable tools and a fresh timeout past it.
-    if (outcome.wrappedUp) throw error;
+    if (outcome.wrappedUp) return cutOff();
     const repaired = await repromptForJson(
       runtime,
       model,
@@ -255,8 +278,8 @@ export async function runReview(
   // A fork candidate produced a result and carries the review ruleset (a tool-less
   // session's deny-all would stay under any rules added to its fork).
   if (!isSingleShotModel(model)) rememberReviewSession(runtime, label, sessionID);
-  if (outcome.wrappedUp) result.partial = true;
-  if (!options.guidelineSweep || outcome.wrappedUp) return result;
+  if (outcome.wrappedUp) return cutOff(result);
+  if (!options.guidelineSweep) return result;
   const sweep = options.guidelineSweep;
   const sweepLabel = `guideline-sweep-${label}`;
   return appendGuidelineSweep(
@@ -266,7 +289,11 @@ export async function runReview(
     deadlineAt,
     async (timeoutMs) => {
       if (options.modelOptions)
-        registerSessionOptions(runtime, sessionID, { model, label: sweepLabel });
+        registerSessionOptions(runtime, sessionID, {
+          model,
+          label: sweepLabel,
+          reportFindings: reportTool,
+        });
       const raw = await promptPlanAgentInSession(
         runtime,
         model,
@@ -411,7 +438,7 @@ export async function runGuidelineComplianceCheck(
   modelOptions?: Record<string, unknown>,
   label = 'guideline-compliance',
 ): Promise<Finding[]> {
-  const reportTool = complianceReportsFindings('opencode', model);
+  const reportTool = reportsFindings('opencode', model);
   const prompt = promptForModel(
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelines, reportTool),
@@ -455,15 +482,26 @@ export async function runGuidelineComplianceCheck(
       'findings',
     );
   } catch (error) {
-    const rows = sessionID ? reportedFindingRows(runtime, sessionID) : [];
-    if (!rows.length) throw error;
-    const { findings } = parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log);
+    const findings = reportedFindings(runtime, sessionID, label, log);
+    if (!findings.length) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new IncompleteReviewError(
       `${message}; kept ${findings.length} finding(s) the session reported before it stopped`,
       findings,
     );
   }
+}
+
+function reportedFindings(
+  runtime: OpencodeRuntime,
+  sessionID: string | undefined,
+  label: string,
+  log: (msg: string) => void,
+): Finding[] {
+  const rows = sessionID ? reportedFindingRows(runtime, sessionID) : [];
+  return rows.length
+    ? parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log).findings
+    : [];
 }
 
 export async function runChangesSinceLastReview(

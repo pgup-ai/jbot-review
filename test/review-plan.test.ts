@@ -19,6 +19,7 @@ import {
   measureReviewPrompt,
   reviewDelivery,
   reviewPromptBudget,
+  uncoveredFiles,
 } from '../src/shared/review-plan.ts';
 import {
   assembleReviewPrompt,
@@ -362,11 +363,12 @@ test('single-page diff-first keeps the trust boundary before author-controlled c
   assert.doesNotMatch(prefix, /reviewer [12]\b/);
 });
 
-test('queued pages respect session concurrency and a failed page cannot count as complete delivery', async () => {
+test('queued pages respect session concurrency and only a cut-off page posts short of complete delivery', async () => {
   const shards = Array.from({ length: 6 }, (_, i) => [
     { filename: `a${i}.ts`, patch: '@@ -1 +1 @@\n-old\n+new' },
   ]);
   const plans = buildShardPlans({ ...base, shards });
+  const recovered = { path: 'a5.ts', line: 1, severity: 'P2', title: 'Leak', body: 'R.' } as const;
   for (const failure of ['throw', 'partial']) {
     let active = 0,
       maximum = 0;
@@ -379,7 +381,7 @@ test('queued pages respect session concurrency and a failed page cannot count as
           active--;
           if (options?.label === 'review-shard-6') {
             if (failure === 'throw') throw new Error('context length exceeded');
-            return { summary: '', findings: [], partial: true };
+            return { summary: '', findings: [recovered], partial: true };
           }
           return { summary: '', findings: [] };
         },
@@ -389,20 +391,27 @@ test('queued pages respect session concurrency and a failed page cannot count as
     );
     const rows: Parameters<NonNullable<Parameters<typeof runShardedReview>[0]['onCoverage']>>[0][] =
       [];
-    await assert.rejects(
-      runShardedReview({
-        backend,
-        model: 'test/model',
-        guidelinesForPrompt: '',
-        shardPlans: plans,
-        changedFiles: shards.flat().map((f) => f.filename),
-        context7Active: false,
-        context7ApiKey: '',
-        log: () => {},
-        onCoverage: (row) => rows.push(row),
-      }),
-      /refusing to post partial/,
-    );
+    const review = runShardedReview({
+      backend,
+      model: 'test/model',
+      guidelinesForPrompt: '',
+      shardPlans: plans,
+      changedFiles: shards.flat().map((f) => f.filename),
+      context7Active: false,
+      context7ApiKey: '',
+      log: () => {},
+      onCoverage: (row) => rows.push(row),
+    });
+    if (failure === 'throw') await assert.rejects(review, /refusing to post partial/);
+    else
+      assert.deepEqual(await review, {
+        summary: '',
+        findings: [recovered],
+        coverageGap: {
+          label: 'review',
+          reason: '1 of 6 pages cut off or timed out; not fully reviewed: `a5.ts`',
+        },
+      });
     assert.equal(maximum, 2);
     assert.deepEqual(rows.find((row) => row.delivery)?.delivery, {
       expectedHunks: 6,
@@ -412,6 +421,20 @@ test('queued pages respect session concurrency and a failed page cannot count as
       incompleteTasks: 1,
     });
   }
+});
+
+test('a hunk split across pages counts as unreviewed until every part completed', () => {
+  const file = (filename: string) => ({ filename, patch: '' });
+  const unit = (id: string, hunk: string, filename: string) => ({ id, hunk, file: file(filename) });
+  const plans = [
+    { label: 'p1', units: [unit('h1#0', 'h1', 'a.ts'), unit('h2', 'h2', 'a.ts')] },
+    { label: 'p2', units: [unit('h1#1', 'h1', 'a.ts'), unit('h3', 'h3', 'b.ts')] },
+  ];
+  assert.deepEqual(uncoveredFiles(plans, new Set(['p1'])), [
+    { path: 'a.ts', hunks: 1, totalHunks: 2 },
+    { path: 'b.ts', hunks: 1, totalHunks: 1 },
+  ]);
+  assert.deepEqual(uncoveredFiles(plans, new Set(['p1', 'p2'])), []);
 });
 
 test('late diff pages receive actual unchanged caller code and verifier selection includes citations and file-level findings', async (t) => {

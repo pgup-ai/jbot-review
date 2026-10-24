@@ -18,6 +18,7 @@ import { permissionRules, verificationAgent, VERIFY_STEPS } from '../src/shared/
 import {
   CONTINUATION_NUDGE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
+  REPORT_FINDING_DIRECTIVE,
   WRAP_UP_PROMPT,
 } from '../src/shared/prompt.ts';
 import { IncompleteReviewError, type Finding } from '../src/shared/types.ts';
@@ -74,21 +75,43 @@ describe('runReview on V2', () => {
     }
   });
 
-  it('fails the run when the repair is also malformed or the wrap-up reply cannot be parsed', async () => {
+  it('fails the run when the repair is also malformed', async () => {
     const twice = fakeOpencodeServer(() => ({ text: '{"summary": "broken' }));
     await assert.rejects(
       runReview(runtime(twice), 'openai/gpt-5', 'ctx', '', log),
       /unparseable JSON/,
     );
     assert.equal(twice.prompts.length, 2);
-    const cut = fakeOpencodeServer((session) =>
-      session.agent === 'jbot-wrapup' ? { text: 'not json' } : { hang: true },
-    );
-    const rt = runtime(cut);
-    const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 60_000 });
-    while (cut.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
-    await assert.rejects(review, /unparseable JSON/);
+  });
+
+  it('keeps what a cut-off page reported, whatever its wrap-up answers', async () => {
+    const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Leak', body: 'R.' };
+    const answered =
+      '{"findings":[{"path":"b.ts","line":1,"severity":"P1","title":"t","body":"b"}]}';
+    for (const [wrapUp, paths] of [
+      [{ text: answered }, ['b.ts', 'a.ts']],
+      [{ text: 'not json' }, ['a.ts']],
+      [{ error: 'provider failure' }, ['a.ts']],
+    ] as const) {
+      const cut = fakeOpencodeServer((session, text) => {
+        if (text === WRAP_UP_PROMPT) return wrapUp;
+        const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+        writeFileSync(join(dirname(rt.sessionOptionsFile), name), `${JSON.stringify(reported)}\n`);
+        return { hang: true };
+      });
+      const rt = runtime(cut);
+      const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 60_000 });
+      while (cut.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
+      const result = await review;
+      assert.equal(result.partial, true);
+      assert.deepEqual(
+        result.findings.map(({ path }) => path),
+        paths,
+      );
+      const options = Object.values(JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8')));
+      assert.deepEqual(options, [{ jbotReportFindings: true }]);
+    }
   });
 
   it('keeps the BASE label abortable while a repair prompt is in flight', async () => {
@@ -240,6 +263,7 @@ describe('runReview on V2', () => {
       const result = await review;
       assert.equal(result.partial, true);
       assert.equal(fake.prompts.length, 2);
+      assert.equal(fake.prompts[0]!.body.text.includes(REPORT_FINDING_DIRECTIVE), !toolLess);
       // A closed-book pass wraps up in place, so its tools stay denied.
       assert.deepEqual(wrapUpAgents, [toolLess ? 'jbot-closed-book' : 'jbot-wrapup']);
     }

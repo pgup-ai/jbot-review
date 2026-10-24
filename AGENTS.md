@@ -51,6 +51,11 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    (`shardFilesForReview` assigns file groups; `buildShardPlans` partitions every
    hunk into budgeted pages, with byte-conserving splits for oversized hunks).
    Every mandatory page must complete; repository access alone is not delivery.
+   The one exception is a main page cut off at its time limit or timed out: the
+   run may post that page's recovered findings (reported mid-review, plus any
+   wrap-up answer) with a coverage notice naming the files and hunks it left
+   unreviewed. Never silently, never as a baseline, and any other page failure
+   still refuses partial coverage.
    Findings remain clamped to assigned files in code. Automatic incremental
    follow-ups may select affected files after a completed, matching baseline; every selected file still receives its complete base...head
    patch. Earlier PR files remain available as context, and findings there may
@@ -126,7 +131,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    single-shot agent, and drops the
    "Instructions from:" messages opencode's read tool injects for nested
    `AGENTS.md` files so repo text never reaches a session as instructions;
-   its own `report_finding` tool reaches only guideline-compliance pages and
+   its own `report_finding` tool reaches only main review and guideline-compliance
+   pages on agentic models and
    appends to a file in the run's data dir, never the workspace;
    wrap-up and `jbot-closed-book` retain native tool schemas for model and
    free-tier gateway compatibility, and the permission hook denies wrap-up
