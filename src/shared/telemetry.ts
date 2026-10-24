@@ -233,6 +233,13 @@ export interface RunExecutionTelemetry {
     totalPatchBytes: number;
     planningMs: number;
     baseline?: string;
+    shadow?: {
+      mode: 'full' | 'incremental';
+      reason: string;
+      files: number;
+      patchBytes: number;
+      planningMs: number;
+    };
   };
   complianceScope?: { reason: string; files: number; totalFiles: number; reviewedHead?: string };
   rulesOnlyTests?: { files: number; patchBytes: number };

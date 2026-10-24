@@ -1683,6 +1683,7 @@ async function runReviewPipeline(params: {
     worktree: !!localDiff,
     rulesChangedSince,
   });
+  const shadowScope = reviewScope.shadow;
   const scopeStats = {
     mode: reviewScope.mode,
     reason: reviewScope.reason,
@@ -1698,6 +1699,19 @@ async function runReviewPipeline(params: {
     ),
     planningMs: Date.now() - scopeStartedAt,
     baseline: reviewScope.baseline,
+    ...(shadowScope
+      ? {
+          shadow: {
+            mode: shadowScope.mode,
+            reason: shadowScope.reason,
+            files: shadowScope.files.length,
+            patchBytes: fullReviewFiles
+              .filter((file) => shadowScope.files.includes(file.filename))
+              .reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0),
+            planningMs: shadowScope.planningMs,
+          },
+        }
+      : {}),
   };
   files = reviewScope.files;
   const incrementalContext = buildIncrementalReviewContext(reviewScope, fullReviewFiles);
@@ -1725,6 +1739,18 @@ async function runReviewPipeline(params: {
   log(
     `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
   );
+  // Logged so posted findings can be judged against the scope a follow-up would get.
+  if (shadowScope) {
+    const paths = shadowScope.files;
+    log(
+      `Incremental shadow: ${JSON.stringify({
+        ...scopeStats.shadow,
+        totalFiles: fullReviewFiles.length,
+        paths: paths.slice(0, 100),
+        ...(paths.length > 100 ? { omittedPaths: paths.length - 100 } : {}),
+      })}`,
+    );
+  }
 
   // A real review is about to run: clear the prior 🚀 so it only reappears if
   // this run leaves the PR with zero open findings. A removed reaction means

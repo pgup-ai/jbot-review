@@ -27,6 +27,96 @@ export interface IncrementalReviewPlan {
   reason: string;
   files: PrFile[];
   baseline?: string;
+  shadow?: ShadowReviewPlan;
+}
+
+/** A candidate scope logged beside the real plan and never applied. */
+interface ShadowReviewPlan {
+  mode: 'full' | 'incremental';
+  reason: string;
+  files: string[];
+  planningMs: number;
+}
+
+const REEXPORT =
+  /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*['"]([^'"]+)['"]/g;
+const BARREL = /(^|\/)index\.[cm]?[jt]sx?$/;
+
+function gitWithin(workspace: string, deadline: () => number, maxBuffer = 2 * 1024 * 1024) {
+  return async (...args: string[]) => {
+    const timeout = deadline() - Date.now();
+    if (timeout <= 0) throw new Error('Impact lookup budget exhausted');
+    return (await exec('git', args, { cwd: workspace, timeout, maxBuffer })).stdout;
+  };
+}
+
+/** PR files edited since the baseline plus PR files importing one, or a module a base merge changed. */
+async function deltaImportersPlan(input: {
+  workspace: string;
+  files: PrFile[];
+  head: string;
+  edited: Set<string>;
+  merged?: Set<string>;
+}): Promise<ShadowReviewPlan> {
+  const started = Date.now();
+  const done = (mode: ShadowReviewPlan['mode'], reason: string, files: string[] = []) => ({
+    mode,
+    reason,
+    files,
+    planningMs: Date.now() - started,
+  });
+  const paths = new Set(input.files.map((file) => file.filename));
+  if (!input.edited.size) return done('full', 'broad-or-empty-followup');
+  if ([...input.edited].some((path) => !paths.has(path)))
+    return done('full', 'change-outside-current-pr-diff');
+  const git = gitWithin(input.workspace, () => started + 10_000, 32 * 1024 * 1024);
+  const repo = new Set(
+    (await git('ls-tree', '-r', '--name-only', '-z', input.head)).split('\0').filter(Boolean),
+  );
+  const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
+  const texts = new Map<string, Promise<string>>();
+  const read = (path: string) => {
+    if (!texts.has(path))
+      texts.set(path, repo.has(path) ? git('show', `${input.head}:${path}`) : Promise.resolve(''));
+    return texts.get(path)!;
+  };
+  const targets = new Set([...input.edited, ...(input.merged ?? [])]);
+  // Only index barrels are followed: reading every imported module would exhaust the budget.
+  const reaches = async (path: string, depth = 0): Promise<boolean> => {
+    if (targets.has(path)) return true;
+    if (depth >= 3 || !BARREL.test(path)) return false;
+    for (const match of (await read(path)).matchAll(REEXPORT)) {
+      const next = resolveEvidenceImport(path, match[1], repo, aliases);
+      if (next && (await reaches(next, depth + 1))) return true;
+    }
+    return false;
+  };
+  const selected = new Set(input.edited);
+  for (const { filename } of input.files) {
+    if (selected.size * 2 >= paths.size) break;
+    if (selected.has(filename) || !JS_SOURCE.test(filename)) continue;
+    const text = await read(filename);
+    for (const from of [
+      ...indexEvidenceSource(filename, text).imports.map((binding) => binding.from),
+      ...[...text.matchAll(REEXPORT)].map((match) => match[1]),
+    ]) {
+      // A deleted file resolves only against the edits themselves.
+      const target =
+        resolveEvidenceImport(filename, from, repo, aliases) ??
+        resolveEvidenceImport(filename, from, targets, aliases);
+      if (target && (await reaches(target))) {
+        selected.add(filename);
+        break;
+      }
+    }
+  }
+  // Half the PR or more saves little over a full review.
+  if (selected.size * 2 >= paths.size) return done('full', 'broad-impact');
+  return done(
+    'incremental',
+    'delta-importers',
+    input.files.map((file) => file.filename).filter((path) => selected.has(path)),
+  );
 }
 
 export function reviewBaseline(body: string): ReviewBaseline | undefined {
@@ -150,10 +240,12 @@ export async function planIncrementalReview(input: {
   worktree?: boolean;
   rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
+  let shadow: ShadowReviewPlan | undefined;
   const full = (reason: string): IncrementalReviewPlan => ({
     mode: 'full',
     reason,
     files: input.files,
+    ...(shadow ? { shadow } : {}),
   });
   if (input.forceFull) return full('explicit-or-incomplete-review');
   // A later review that could not set a baseline (a finding left unverified, a session
@@ -164,18 +256,8 @@ export async function planIncrementalReview(input: {
   if (baseline.policy !== input.policy) return full('policy-changed');
   if (!input.head || input.head === baseline.head) return full('same-head-rerun');
   if (await input.rulesChangedSince(baseline.head)) return full('guidelines-changed');
-  const deadline = Date.now() + 5000;
-  const git = async (...args: string[]) => {
-    const timeout = deadline - Date.now();
-    if (timeout <= 0) throw new Error('Impact lookup budget exhausted');
-    return (
-      await exec('git', args, {
-        cwd: input.workspace,
-        timeout,
-        maxBuffer: 2 * 1024 * 1024,
-      })
-    ).stdout;
-  };
+  let deadline = Date.now() + 5000;
+  const git = gitWithin(input.workspace, () => deadline);
   try {
     if (input.worktree && (await git('status', '--porcelain')).trim())
       return full('uncommitted-changes');
@@ -221,11 +303,29 @@ export async function planIncrementalReview(input: {
     );
     const paths = new Set(input.files.map((file) => file.filename));
     const entries = delta.split('\0').filter(Boolean);
+    const touched: [status: string, path: string][] = [];
+    for (let i = 0; i < entries.length; i += 2)
+      if (!merged?.has(entries[i + 1]) || paths.has(entries[i + 1]))
+        touched.push([entries[i], entries[i + 1]]);
+    const shadowStarted = Date.now();
+    shadow = await deltaImportersPlan({
+      workspace: input.workspace,
+      files: input.files,
+      head: input.head,
+      edited: new Set(touched.map(([, path]) => path)),
+      merged,
+    }).catch(() => ({
+      mode: 'full' as const,
+      reason: 'history-or-impact-unavailable',
+      files: [],
+      planningMs: Date.now() - shadowStarted,
+    }));
+    // The shadow's git time does not count against the real plan's budget.
+    deadline += Date.now() - shadowStarted;
     const changed: string[] = [];
-    for (let i = 0; i < entries.length; i += 2) {
-      if (merged?.has(entries[i + 1]) && !paths.has(entries[i + 1])) continue;
-      if (entries[i] !== 'M') return full('added-removed-or-renamed-file');
-      changed.push(entries[i + 1]);
+    for (const [status, path] of touched) {
+      if (status !== 'M') return full('added-removed-or-renamed-file');
+      changed.push(path);
     }
     if (!changed.length || changed.length > 3) return full('broad-or-empty-followup');
     if (
@@ -353,6 +453,7 @@ export async function planIncrementalReview(input: {
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',
       files,
       baseline: baseline.head,
+      shadow,
     };
   } catch {
     return full('history-or-impact-unavailable');
