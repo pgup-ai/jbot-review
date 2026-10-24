@@ -66,7 +66,7 @@ async function deltaImportersPlan(input: {
     planningMs: Date.now() - started,
   });
   const paths = new Set(input.files.map((file) => file.filename));
-  if (!input.edited.size) return done('full', 'broad-or-empty-followup');
+  if (!input.edited.size && !input.merged?.size) return done('full', 'broad-or-empty-followup');
   if ([...input.edited].some((path) => !paths.has(path)))
     return done('full', 'change-outside-current-pr-diff');
   const git = gitWithin(input.workspace, () => started + 10_000, 32 * 1024 * 1024);
@@ -107,6 +107,7 @@ async function deltaImportersPlan(input: {
       }
     }
   }
+  if (!selected.size) return done('full', 'broad-or-empty-followup');
   // Half the PR or more saves little over a full review.
   if (selected.size * 2 >= paths.size) return done('full', 'broad-impact');
   return done(

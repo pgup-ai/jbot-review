@@ -481,8 +481,20 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       ['a/alpha.ts'],
     ]);
     // A PR file importing a merged module by alias joins the review, up to the file limit.
+    const [notesTip, edited] = [mainTip, head];
     mainTip = mergeMain('shared/gamma.ts', 'export function gamma() {\n  return 4;\n}\n');
     head = git('rev-parse', 'HEAD');
+    // With no author edit since the baseline, the shadow still selects the merged module's importers.
+    const mergeOnly = await planIncrementalReview({
+      workspace,
+      files,
+      head,
+      base: mainTip,
+      policy,
+      priorBodies: [body(edited, notesTip)],
+      rulesChangedSince: async () => false,
+    });
+    assert.deepEqual(mergeOnly.shadow?.files, ['b/beta.ts']);
     assert.deepEqual(await scope(head, mainTip, reviewed, base), [
       'incremental',
       'bounded-base-merge',
