@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import {
   EvidenceStore,
   indexEvidenceSource,
+  moduleSpecifiers,
   changedEvidenceLines,
   resolveEvidenceImport,
   evidenceMode,
@@ -875,5 +876,24 @@ test('pack provider reads tracked head sources with tsconfig aliases and word re
   ]);
   assert.deepEqual(await provider.references('total', ['libs/money/src/total.ts']), [
     { path: 'libs/money/src/total.ts', line: 1 },
+  ]);
+});
+
+test('module specifiers come from syntax, not from strings or comments', () => {
+  const text = [
+    "import { a } from './a';",
+    "import /* setup */ './register';",
+    "export * from './barrel';",
+    "const lazy = () => import('./lazy');",
+    "const legacy = require('./legacy');",
+    "// import { gone } from './commented';",
+    'const note = "import x from \'./quoted\'";',
+  ].join('\n');
+  assert.deepEqual(moduleSpecifiers('src/file.ts', text), [
+    './a',
+    './register',
+    './barrel',
+    './lazy',
+    './legacy',
   ]);
 });

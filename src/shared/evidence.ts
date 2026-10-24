@@ -338,6 +338,31 @@ export function indexEvidenceSource(
   return { definitions, imports, uses };
 }
 
+/** Every module a file loads: imports with or without bindings, re-exports, `import()` and `require`. */
+export function moduleSpecifiers(path: string, text: string): string[] {
+  const found: string[] = [];
+  const literal = (value: unknown) => {
+    const n = ast(value);
+    if (n?.type === 'StringLiteral') found.push(n.value as string);
+  };
+  const walk = (n: Ast) => {
+    if (/^(Import|ExportAll|ExportNamed)Declaration$/.test(n.type)) literal(n.source);
+    if (n.type === 'CallExpression') {
+      const callee = ast(n.callee);
+      if (callee?.type === 'Import' || (callee?.type === 'Identifier' && callee.name === 'require'))
+        literal((n.arguments as unknown[])[0]);
+    }
+    for (const [key, value] of Object.entries(n)) {
+      if (key === 'loc') continue;
+      if (Array.isArray(value)) {
+        for (const child of value) if (ast(child)?.type) walk(child as Ast);
+      } else if (ast(value)?.type) walk(value as Ast);
+    }
+  };
+  walk(parseSource(path, text) as unknown as Ast);
+  return found;
+}
+
 export function changedEvidenceLines(patch: string): number[] {
   const lines: number[] = [];
   let current = 0;

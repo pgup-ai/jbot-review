@@ -5,6 +5,7 @@ import { completedReviewHead, type PrFile } from './github.ts';
 import {
   indexEvidenceSource,
   loadPathAliases,
+  moduleSpecifiers,
   resolveEvidenceImport,
   JS_SOURCE,
   JS_GLOBS,
@@ -38,8 +39,6 @@ interface ShadowReviewPlan {
   planningMs: number;
 }
 
-// `from`, side-effect and dynamic imports, `require` and re-exports; no overlapping `\s*` keeps it linear.
-const SPECIFIER = /\b(?:from|import|require)\s*(?:\(\s*)?['"]([^'"]+)['"]/g;
 const BARREL = /(^|\/)index\.[cm]?[jt]sx?$/;
 
 function gitWithin(workspace: string, deadline: () => number, maxBuffer = 2 * 1024 * 1024) {
@@ -85,11 +84,22 @@ async function deltaImportersPlan(input: {
   const resolve = (path: string, specifier: string) =>
     resolveEvidenceImport(path, specifier, repo, aliases) ??
     resolveEvidenceImport(path, specifier, targets, aliases);
+  // A file that does not parse counts as reaching the edits: over-selecting beats a missed importer.
+  const loads = async (path: string) => {
+    const text = await read(path);
+    try {
+      return moduleSpecifiers(path, text);
+    } catch {
+      return undefined;
+    }
+  };
   // Only index barrels are followed: reading every imported module would exhaust the budget.
   const reaches = async (path: string, depth = 0): Promise<boolean> => {
     if (targets.has(path)) return true;
     if (depth >= 3 || !BARREL.test(path)) return false;
-    for (const [, specifier] of (await read(path)).matchAll(SPECIFIER)) {
+    const specifiers = await loads(path);
+    if (!specifiers) return true;
+    for (const specifier of specifiers) {
       const next = resolve(path, specifier);
       if (next && (await reaches(next, depth + 1))) return true;
     }
@@ -99,13 +109,16 @@ async function deltaImportersPlan(input: {
   for (const { filename } of input.files) {
     if (selected.size * 2 >= paths.size) break;
     if (selected.has(filename) || !JS_SOURCE.test(filename)) continue;
-    for (const [, specifier] of (await read(filename)).matchAll(SPECIFIER)) {
-      const target = resolve(filename, specifier);
-      if (target && (await reaches(target))) {
-        selected.add(filename);
-        break;
+    const specifiers = await loads(filename);
+    if (!specifiers) selected.add(filename);
+    else
+      for (const specifier of specifiers) {
+        const target = resolve(filename, specifier);
+        if (target && (await reaches(target))) {
+          selected.add(filename);
+          break;
+        }
       }
-    }
   }
   if (!selected.size) return done('full', 'broad-or-empty-followup');
   // Half the PR or more saves little over a full review.
