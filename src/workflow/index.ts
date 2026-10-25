@@ -182,7 +182,7 @@ async function main(): Promise<void> {
       core.setOutput('terminal-state', 'partial');
       // A green check would read as full coverage.
       throw new Error(
-        'The main review was cut off or timed out; posted its recovered findings with a coverage notice.',
+        'The main review was cut off or timed out; its recovered findings carry a coverage notice.',
       );
     }
     core.setOutput('terminal-state', 'completed');
