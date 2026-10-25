@@ -91,13 +91,17 @@ export class ModelRejectedError extends Error {
 
 /**
  * Reroutes an auxiliary backend to an already-running model once its own model
- * is rejected; later sessions skip the rejected model. The fallback model gets
- * its own default options: the aux ones were sized for another model.
+ * is rejected; later sessions skip the rejected model. Per-session options pass
+ * through `fallback.options`, which fits them to the fallback model's tiers.
  */
 export function withModelFallback(
   backend: ReviewBackend,
   model: string,
-  fallback: { backend: ReviewBackend; model: string },
+  fallback: {
+    backend: ReviewBackend;
+    model: string;
+    options: (modelOptions?: Record<string, unknown>) => Record<string, unknown> | undefined;
+  },
   onFallback: (rejection: ModelRejection) => void,
 ): ReviewBackend {
   let rerouted = false;
@@ -114,14 +118,17 @@ export function withModelFallback(
     }
     return secondary();
   };
-  const { backend: to, model: toModel } = fallback;
+  const { backend: to, model: toModel, options: fit } = fallback;
   return {
     ...backend,
     runReview: (model, context, guidelines, log, options) =>
       route(
         () => backend.runReview(model, context, guidelines, log, options),
         () =>
-          to.runReview(toModel, context, guidelines, log, { ...options, modelOptions: undefined }),
+          to.runReview(toModel, context, guidelines, log, {
+            ...options,
+            modelOptions: fit(options?.modelOptions),
+          }),
       ),
     runAddressedPriorCommentsCheck: (model, ...args) =>
       route(
@@ -158,7 +165,7 @@ export function withModelFallback(
             log,
             timeoutMs,
             onUsage,
-            undefined,
+            fit(options),
             label,
           ),
       ),
@@ -194,7 +201,7 @@ export function withModelFallback(
             log,
             timeoutMs,
             onUsage,
-            undefined,
+            fit(options),
             mode,
             proof,
           ),

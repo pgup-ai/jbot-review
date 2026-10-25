@@ -103,13 +103,17 @@ describe('withModelFallback', () => {
       },
     }) as unknown as ReviewBackend;
 
-  it('reroutes a rejected aux model once, without its options, and skips it afterwards', async () => {
+  it('reroutes a rejected aux model once, with fitted options, and skips it afterwards', async () => {
     const calls: string[] = [];
     const rejections: ModelRejection[] = [];
     const wrapped = withModelFallback(
       backend('aux', calls, PRIVACY),
       'go/muse',
-      { backend: backend('main', calls), model: 'go/deepseek' },
+      {
+        backend: backend('main', calls),
+        model: 'go/deepseek',
+        options: (options) => ({ ...options, fitted: true }),
+      },
       (rejection) => rejections.push(rejection),
     );
     assert.equal(await wrapped.runChangesSinceLastReview('go/muse', '', () => {}), 'go/deepseek');
@@ -122,7 +126,7 @@ describe('withModelFallback', () => {
       'go/muse',
       'go/deepseek',
       'go/deepseek',
-      'go/deepseek undefined',
+      'go/deepseek {"reasoningEffort":"low","fitted":true}',
       'abort aux',
       'abort main',
     ]);
@@ -135,7 +139,7 @@ describe('withModelFallback', () => {
       const wrapped = withModelFallback(
         backend('aux', calls, fail),
         'cc/muse',
-        { backend: backend('main', calls), model: 'cc/deepseek' },
+        { backend: backend('main', calls), model: 'cc/deepseek', options: () => undefined },
         () => assert.fail('no fallback'),
       );
       await assert.rejects(wrapped.runChangesSinceLastReview('cc/muse', '', () => {}));

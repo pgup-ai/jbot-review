@@ -2591,6 +2591,8 @@ async function runReviewPipeline(params: {
             mainPromptBudget,
           ),
           model,
+          options: (modelOptions) =>
+            supportedModelOptions(providerID, modelID, modelOptions, 'down'),
         },
         (rejection) => {
           const fallback: ModelFallback = { ...rejection, role: 'auxiliary', to: model };
