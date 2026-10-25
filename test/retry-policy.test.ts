@@ -13,6 +13,12 @@ describe('classifyMainShardFailure', () => {
 
     // Deterministic: an identical prompt re-buys the identical failure.
     assert.deepEqual(classify('401 Unauthorized'), { failureClass: 'auth', retryable: false });
+    for (const message of [
+      'Upstream request failed: This Go model trains on request data.',
+      '403 meta/muse-spark-1.3-contributor is not available in your region',
+    ]) {
+      assert.deepEqual(classify(message), { failureClass: 'provider-rejected', retryable: false });
+    }
     assert.deepEqual(classify('invalid API key provided'), {
       failureClass: 'auth',
       retryable: false,

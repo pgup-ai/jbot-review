@@ -1,6 +1,7 @@
 import type { EvidenceCacheStats } from './evidence.ts';
 import type { CommandCodeProgress } from './commandcode-progress.ts';
 import type { JevPrefetchStats } from './jev-prefetch.ts';
+import type { ModelFallback } from './model-fallback.ts';
 import type { runConfiguration, runIdentity, roleTelemetry } from './run-telemetry.ts';
 import type { Finding, FindingConfidence, Severity } from './types.ts';
 
@@ -355,6 +356,7 @@ export interface TelemetryRecorder {
   /** Open the run header row; identity fields only, sealed at start. */
   beginRun(meta: RunTelemetryMeta): void;
   recordExecution(execution: RunExecutionTelemetry): void;
+  recordModelFallback(fallback: ModelFallback): void;
   /** Close the run header with its terminal state and wall clock. */
   finishRun(state: RunTerminalState, elapsedMs: number): void;
   recordCoverage(coverage: SessionCoverage): void;
@@ -378,6 +380,7 @@ const DISABLED: TelemetryRecorder = {
   recordOutcome: () => undefined,
   beginRun: () => undefined,
   recordExecution: () => undefined,
+  recordModelFallback: () => undefined,
   finishRun: () => undefined,
   recordCoverage: () => undefined,
   findingRows: () => [],
@@ -422,7 +425,12 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const exploration = new Map<string, ExplorationTelemetryRow>();
   const outcomes: OutcomeTelemetryRow[] = [];
   let run:
-    (RunTelemetryMeta & { terminalState?: RunTerminalState; elapsedMs?: number }) | undefined;
+    | (RunTelemetryMeta & {
+        terminalState?: RunTerminalState;
+        elapsedMs?: number;
+        modelFallbacks?: ModelFallback[];
+      })
+    | undefined;
   const coverage: Record<string, unknown>[] = [];
 
   const idsOf = (findings: Finding[]): Set<string> =>
@@ -524,6 +532,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     recordExecution(execution) {
       if (run) Object.assign(run, { execution });
+    },
+    recordModelFallback(fallback) {
+      if (run) (run.modelFallbacks ??= []).push(fallback);
     },
     finishRun(state, elapsedMs) {
       if (run) Object.assign(run, { terminalState: state, elapsedMs });

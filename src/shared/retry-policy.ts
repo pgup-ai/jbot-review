@@ -1,3 +1,5 @@
+import { classifyProviderRejection } from './model-fallback.ts';
+
 /**
  * Main-shard retry policy (TASK-150/155): a deterministic failure re-buys the
  * identical error for up to another finder window (the INC-001 waste class),
@@ -8,6 +10,7 @@
  */
 
 export type MainShardFailureClass =
+  | 'provider-rejected'
   | 'auth'
   | 'model-not-found'
   | 'model-no-response'
@@ -21,6 +24,7 @@ export type MainShardFailureClass =
   | 'unknown';
 
 const NON_RETRYABLE: ReadonlySet<MainShardFailureClass> = new Set([
+  'provider-rejected',
   'auth',
   'model-not-found',
   'model-no-response',
@@ -33,6 +37,9 @@ export function classifyMainShardFailure(error: unknown): {
   failureClass: MainShardFailureClass;
   retryable: boolean;
 } {
+  // Ahead of auth and provider-transient, which a 403 region block and an "Upstream" refusal would hit.
+  if (classifyProviderRejection(error))
+    return { failureClass: 'provider-rejected', retryable: false };
   const message = error instanceof Error ? error.message : String(error);
   const matches = (pattern: RegExp) => pattern.test(message);
   const failureClass: MainShardFailureClass = matches(
