@@ -175,8 +175,8 @@ async function main(): Promise<void> {
       },
       log: (msg) => core.info(msg),
     });
-    // Set only after the whole run — posting included — succeeded, so the
-    // output never claims findings were posted by a run that then failed.
+    // Set only once posting succeeded (a cut-off main review included), so the
+    // output never claims findings were posted by a run that failed earlier.
     if (findingCount !== undefined) core.setOutput('findings-posted', String(findingCount));
     if (mainCutOff) {
       core.setOutput('terminal-state', 'partial');
