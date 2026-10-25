@@ -1,4 +1,4 @@
-import type { Finding, ReviewResult } from './types.ts';
+import { IncompleteReviewError, type Finding, type ReviewResult } from './types.ts';
 import type { SessionCoverageRecorder } from './telemetry.ts';
 
 export interface GuidelineSweep {
@@ -30,7 +30,10 @@ export async function appendGuidelineSweep(
       error,
       durationMs: Date.now() - startedAt,
     });
-    log(`(${label} failed; keeping main findings: ${String(error)})`);
-    return result;
+    const kept = error instanceof IncompleteReviewError ? error.findings : [];
+    log(
+      `(${label} failed; keeping main findings and ${kept.length} it reported: ${String(error)})`,
+    );
+    return { ...result, findings: [...result.findings, ...kept] };
   }
 }

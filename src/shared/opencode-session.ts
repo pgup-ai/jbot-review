@@ -229,6 +229,7 @@ export interface AssistantMessage {
 }
 
 export interface PromptOutcome {
+  /** Set once a turn is cut off, so a failed wrap-up still reads as cut off. */
   wrappedUp: boolean;
 }
 
@@ -814,13 +815,14 @@ async function promptHoldingSlot(
         log(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
+        if (spec.outcome) spec.outcome.wrappedUp = true;
         await interruptBestEffort(client, sessionID, label, log);
         await recordTurn([], 'aborted');
         const wrapUpAgent = agent === CLOSED_BOOK_AGENT ? agent : WRAPUP_AGENT;
         await client.session.switchAgent({ sessionID, agent: wrapUpAgent }, control());
         rememberSession(client, sessionID, { agent: wrapUpAgent });
         try {
-          const wrapped = await promptHoldingSlot(runtime, sessionID, {
+          return await promptHoldingSlot(runtime, sessionID, {
             ...spec,
             text: WRAP_UP_PROMPT,
             label: `${label}-wrap-up`,
@@ -828,8 +830,6 @@ async function promptHoldingSlot(
             abortLabel,
             outcome: undefined,
           });
-          if (spec.outcome) spec.outcome.wrappedUp = true;
-          return wrapped;
         } finally {
           rememberSession(client, sessionID, { agent });
           await client.session.switchAgent({ sessionID, agent }, control()).catch(() => undefined);

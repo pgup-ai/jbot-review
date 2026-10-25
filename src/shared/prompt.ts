@@ -1479,6 +1479,8 @@ export function assembleReviewPrompt(
     contextFirst?: boolean;
     /** context-pack main pages; overrides embeddedFirstPrompt=false. Lens prompts ignore it. */
     contextPack?: boolean;
+    /** The page is offered report_finding (see reportsFindings). */
+    reportTool?: boolean;
   } = {},
 ): string {
   const focusedLens = Object.values(REVIEW_LENSES).some((lens) => lensAddendum.startsWith(lens));
@@ -1505,6 +1507,7 @@ export function assembleReviewPrompt(
     : [instructions, ...guidelineBlock, prContext];
   if (lensAddendum) parts.push(lensAddendum);
   if (evidenceQuotes) parts.push(EVIDENCE_INSTRUCTION);
+  if (options.reportTool) parts.push(REPORT_FINDING_DIRECTIVE);
   parts.push(REVIEW_OUTPUT_REMINDER);
   return parts.join('\n\n');
 }
@@ -1689,10 +1692,11 @@ Audit only the files in this page's diff hunks, not the whole PR diff. An
 earlier review audited the PR's other files against these rules, and their
 edits have not changed since; findings on them are discarded.`;
 
-export function assembleGuidelineSweepPrompt(guidelines: string): string {
+export function assembleGuidelineSweepPrompt(guidelines: string, reportTool = false): string {
   return assembleGuidelineCompliancePrompt(
     'Continue the review in this session, using the PR diff and inspected evidence already in its history. Check the written guidelines below against the same assigned diff scope. Return only additional guideline violations not already reported in your main review.',
     guidelines,
+    reportTool,
   );
 }
 
@@ -1788,13 +1792,13 @@ export function withEnforcedRuleChecks(
 }
 
 export const REPORT_FINDING_TOOL_DESCRIPTION =
-  'Record one confirmed guideline violation the moment you confirm it, so it can survive if the audit is cut short. Recording is best-effort: your final JSON is the only guaranteed copy and must still list it. Use the same fields as a finding there.';
+  'Record one confirmed finding the moment you confirm it, so it can survive if the review is cut short. Recording is best-effort: your final JSON is the only guaranteed copy and must still list it. Use the same fields as a finding there.';
 
-/** Only opencode offers report_finding; other backends' compliance prompts omit this. */
+/** Only opencode offers report_finding; other backends' main and compliance prompts omit this. */
 export const REPORT_FINDING_DIRECTIVE = `## Record findings as you confirm them
 
-- Each time you confirm a violation, call the \`report_finding\` tool with it
-  right away, then keep auditing. Do not batch them up for the end.
+- Each time you confirm a finding, call the \`report_finding\` tool with it
+  right away, then keep reviewing. Do not batch them up for the end.
 - Your final JSON must still list every finding, including the reported ones.`;
 
 export function assembleGuidelineCompliancePrompt(

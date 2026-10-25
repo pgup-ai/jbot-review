@@ -613,8 +613,8 @@ export function modelSupportsAgenticTools(providerID: string, modelID: string): 
   return !/gemini|gpt-5/i.test(modelID);
 }
 
-/** Whether a compliance page is offered report_finding (and told to use it): OpenCode, agentic models. */
-export function complianceReportsFindings(backendName: string, model: string): boolean {
+/** Whether a main or compliance page is offered report_finding (and told to use it): OpenCode, agentic models. */
+export function reportsFindings(backendName: string, model: string): boolean {
   if (backendName !== 'opencode') return false;
   const { providerID, modelID } = parseModelName(model);
   return modelSupportsAgenticTools(providerID, modelID);

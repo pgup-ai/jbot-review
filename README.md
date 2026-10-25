@@ -305,9 +305,13 @@ supported effort.
 `review-shards` controls initial grouping. Complete diff pages are then fitted
 to the assembled prompt budget, so even `1` can produce several sessions.
 A main page that still fails after its retry aborts the run before posting
-partial coverage; auxiliary sessions fail open and report their incomplete
-coverage. On free/throttled tiers, leave the initial grouping at `1` and keep
-session concurrency within the provider's limits.
+partial coverage, unless it was cut off or timed out: then the review
+posts what that page found with a notice naming the files it did not finish,
+sets no incremental baseline, and sets `terminal-state: partial`. That fails
+the job by default; `fail-on-error: false` downgrades it to a warning.
+Auxiliary sessions fail open and report their incomplete coverage. On
+free/throttled tiers, leave the initial grouping at `1` and keep session
+concurrency within the provider's limits.
 
 ### Provider configuration (in-repo)
 
@@ -1301,9 +1305,10 @@ files are dropped; that review's results stand for them. The review states the
 narrowed scope. Explicit reruns, auto-approval, PRs of 300 or more files and
 unavailable history check every file.
 
-On OpenCode, a compliance page records each violation it confirms with a
-`report_finding` tool. When a page is cut off and its wrap-up fails, the
-findings it recorded are kept as partial results.
+On OpenCode with a tool-calling (agentic) model, main review and compliance
+pages record each finding they confirm with a `report_finding` tool; lens and
+tool-less pages do not. When a page is cut off and its wrap-up
+fails, the findings it recorded are kept as partial results.
 
 ### Deterministic rule checks
 

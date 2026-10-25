@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -18,6 +18,7 @@ import { permissionRules, verificationAgent, VERIFY_STEPS } from '../src/shared/
 import {
   CONTINUATION_NUDGE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
+  REPORT_FINDING_DIRECTIVE,
   WRAP_UP_PROMPT,
 } from '../src/shared/prompt.ts';
 import { IncompleteReviewError, type Finding } from '../src/shared/types.ts';
@@ -74,21 +75,49 @@ describe('runReview on V2', () => {
     }
   });
 
-  it('fails the run when the repair is also malformed or the wrap-up reply cannot be parsed', async () => {
+  it('fails the run when the repair is also malformed', async () => {
     const twice = fakeOpencodeServer(() => ({ text: '{"summary": "broken' }));
     await assert.rejects(
       runReview(runtime(twice), 'openai/gpt-5', 'ctx', '', log),
       /unparseable JSON/,
     );
     assert.equal(twice.prompts.length, 2);
-    const cut = fakeOpencodeServer((session) =>
-      session.agent === 'jbot-wrapup' ? { text: 'not json' } : { hang: true },
-    );
-    const rt = runtime(cut);
-    const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 60_000 });
-    while (cut.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
-    await assert.rejects(review, /unparseable JSON/);
+  });
+
+  it('keeps what a cut-off page reported, whatever its wrap-up answers', async () => {
+    const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Leak', body: 'R.' };
+    // The answer re-lists the reported finding at another line; it must not post twice.
+    const answered =
+      '{"findings":[{"path":"b.ts","line":1,"severity":"P1","title":"t","body":"b"},{"path":"a.ts","line":4,"severity":"P2","title":"Leak","body":"R."}]}';
+    for (const [wrapUp, paths] of [
+      [{ text: answered }, ['b.ts', 'a.ts']],
+      // Same title, another body and line: a second instance, kept.
+      [
+        { text: answered.replace('"line":4', '"line":9').replace('"R."', '"Other."') },
+        ['b.ts', 'a.ts', 'a.ts'],
+      ],
+      [{ text: 'not json' }, ['a.ts']],
+      [{ error: 'provider failure' }, ['a.ts']],
+    ] as const) {
+      const cut = fakeOpencodeServer((session, text) => {
+        if (text === WRAP_UP_PROMPT) return wrapUp;
+        const name = `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`;
+        writeFileSync(join(dirname(rt.sessionOptionsFile), name), `${JSON.stringify(reported)}\n`);
+        return { hang: true };
+      });
+      const rt = runtime(cut);
+      const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 60_000 });
+      while (cut.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
+      const result = await review;
+      assert.equal(result.partial, true);
+      assert.deepEqual(
+        result.findings.map(({ path }) => path),
+        paths,
+      );
+      const options = Object.values(JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8')));
+      assert.deepEqual(options, [{ jbotReportFindings: true }]);
+    }
   });
 
   it('keeps the BASE label abortable while a repair prompt is in flight', async () => {
@@ -106,23 +135,34 @@ describe('runReview on V2', () => {
     assert.equal([...fake.sessions.values()][0]!.interrupted, 1);
   });
 
-  it('reuses the main session for the guideline sweep and keeps main findings when it fails', async () => {
+  it('reuses the main session for the guideline sweep and keeps main and reported findings when it fails', async () => {
     const main =
       '{"findings":[{"path":"a.ts","line":1,"severity":"P1","title":"t","body":"b"}],"summary":"ok"}';
     for (const sweep of [
       { text: '{"findings":[{"path":"b.ts","line":2,"severity":"P2","title":"rule","body":"v"}]}' },
       { text: '{}' },
       { text: 'x', error: 'sweep unavailable' },
+      { text: 'x', error: 'sweep unavailable', reported: true },
     ]) {
       let n = 0;
       const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
       const efforts: unknown[] = [];
-      const fake = fakeOpencodeServer(() => {
+      const fake = fakeOpencodeServer((session) => {
         const options = Object.values(
           JSON.parse(readFileSync(sessionOptionsFile, 'utf8')),
         ) as Record<string, unknown>[];
         efforts.push(options[0]?.reasoningEffort);
-        return ++n === 1 ? { text: main } : sweep;
+        // The main turn's own row must not come back as a sweep finding.
+        const row = ++n === 1 ? 'a.ts' : sweep.reported ? 'c.ts' : undefined;
+        if (row)
+          appendFileSync(
+            join(
+              dirname(sessionOptionsFile),
+              `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`,
+            ),
+            `${JSON.stringify({ path: row, line: 3, severity: 'P0', title: 'r', body: 'r' })}\n`,
+          );
+        return n === 1 ? { text: main } : sweep;
       });
       const rt = runtime(fake, {
         sessionOptionsFile,
@@ -141,7 +181,11 @@ describe('runReview on V2', () => {
       assert.deepEqual(efforts, ['medium', 'low']);
       assert.equal(fake.prompts.length, 2);
       assert.match(fake.prompts[1]!.body.text, /FULL GUIDES/);
-      assert.equal(result.findings.length, ok ? 2 : 1);
+      assert.ok(fake.prompts[1]!.body.text.includes(REPORT_FINDING_DIRECTIVE));
+      assert.deepEqual(
+        result.findings.map(({ path }) => path),
+        ok ? ['a.ts', 'b.ts'] : sweep.reported ? ['a.ts', 'c.ts'] : ['a.ts'],
+      );
       assert.equal(coverage[0]?.state, ok ? 'completed' : 'failed');
     }
   });
@@ -240,6 +284,7 @@ describe('runReview on V2', () => {
       const result = await review;
       assert.equal(result.partial, true);
       assert.equal(fake.prompts.length, 2);
+      assert.equal(fake.prompts[0]!.body.text.includes(REPORT_FINDING_DIRECTIVE), !toolLess);
       // A closed-book pass wraps up in place, so its tools stay denied.
       assert.deepEqual(wrapUpAgents, [toolLess ? 'jbot-closed-book' : 'jbot-wrapup']);
     }

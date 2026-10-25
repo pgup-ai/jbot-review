@@ -1,6 +1,6 @@
 import { parseModelName } from '@symma/protocol';
 import {
-  complianceReportsFindings,
+  reportsFindings,
   modelAcceptsForcedToolChoice,
   modelSupportsAgenticTools,
 } from './config.ts';
@@ -202,6 +202,8 @@ export async function runReview(
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
   const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
+  const reportTool =
+    !options.lensAddendum && !options.toolLess && reportsFindings('opencode', model);
   const prompt = promptForModel(
     model,
     assembleReviewPrompt(
@@ -214,6 +216,7 @@ export async function runReview(
         toolsAvailable: !isSingleShotModel(model) && !options.toolLess,
         contextFirst: options.contextFirst,
         contextPack: options.contextPack,
+        reportTool,
       },
     ),
     options.toolLess,
@@ -221,24 +224,49 @@ export async function runReview(
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const outcome: PromptOutcome = { wrappedUp: false };
-  const { raw, sessionID } = await promptPlanAgent(
-    runtime,
-    model,
-    prompt,
-    label,
-    log,
-    options.timeoutMs,
-    options.onTokenUsage,
-    outcome,
-    { toolLess: options.toolLess, modelOptions: options.modelOptions },
-  );
+  let sessionID!: string;
+  const cutOff = (
+    result: ReviewResult = { summary: '', findings: [], addressedPriorComments: [] },
+  ): ReviewResult => {
+    // The final JSON re-lists reported findings, sometimes at a corrected line; same-line
+    // copies merge in dedupeFindings, and a shared title alone may be a second instance.
+    const listed = (row: Finding) =>
+      result.findings.some(
+        (found) => found.path === row.path && found.title === row.title && found.body === row.body,
+      );
+    const reported = reportedFindings(runtime, sessionID, label, log).filter((row) => !listed(row));
+    return { ...result, findings: [...result.findings, ...reported], partial: true };
+  };
+  let raw: string;
+  try {
+    ({ raw } = await promptPlanAgent(
+      runtime,
+      model,
+      prompt,
+      label,
+      log,
+      options.timeoutMs,
+      options.onTokenUsage,
+      outcome,
+      {
+        toolLess: options.toolLess,
+        modelOptions: options.modelOptions,
+        reportFindings: reportTool,
+        onSession: (id) => (sessionID = id),
+      },
+    ));
+  } catch (error) {
+    if (!outcome.wrappedUp) throw error;
+    log(`${label} wrap-up failed; keeping the findings it reported: ${String(error)}`);
+    return cutOff();
+  }
   let result: ReviewResult;
   try {
     result = parseReview(raw, label, log, { strict: true });
   } catch (error) {
     // A wrap-up reply is the last answer its deadline allows: a repair turn
     // would re-enable tools and a fresh timeout past it.
-    if (outcome.wrappedUp) throw error;
+    if (outcome.wrappedUp) return cutOff();
     const repaired = await repromptForJson(
       runtime,
       model,
@@ -255,8 +283,8 @@ export async function runReview(
   // A fork candidate produced a result and carries the review ruleset (a tool-less
   // session's deny-all would stay under any rules added to its fork).
   if (!isSingleShotModel(model)) rememberReviewSession(runtime, label, sessionID);
-  if (outcome.wrappedUp) result.partial = true;
-  if (!options.guidelineSweep || outcome.wrappedUp) return result;
+  if (outcome.wrappedUp) return cutOff(result);
+  if (!options.guidelineSweep) return result;
   const sweep = options.guidelineSweep;
   const sweepLabel = `guideline-sweep-${label}`;
   return appendGuidelineSweep(
@@ -266,19 +294,31 @@ export async function runReview(
     deadlineAt,
     async (timeoutMs) => {
       if (options.modelOptions)
-        registerSessionOptions(runtime, sessionID, { model, label: sweepLabel });
-      const raw = await promptPlanAgentInSession(
-        runtime,
-        model,
-        sessionID,
-        promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines)),
-        sweepLabel,
-        log,
-        timeoutMs,
-        options.onTokenUsage,
-        label,
-      );
-      return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+        registerSessionOptions(runtime, sessionID, {
+          model,
+          label: sweepLabel,
+          reportFindings: reportTool,
+        });
+      // The journal already holds the main turn's rows; only later ones are the sweep's.
+      const mainRows = reportedFindingRows(runtime, sessionID).length;
+      try {
+        const raw = await promptPlanAgentInSession(
+          runtime,
+          model,
+          sessionID,
+          promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines, reportTool)),
+          sweepLabel,
+          log,
+          timeoutMs,
+          options.onTokenUsage,
+          label,
+        );
+        return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+      } catch (error) {
+        const findings = reportedFindings(runtime, sessionID, sweepLabel, log, mainRows);
+        if (!findings.length) throw error;
+        throw new IncompleteReviewError(String(error), findings);
+      }
     },
     log,
   );
@@ -411,7 +451,7 @@ export async function runGuidelineComplianceCheck(
   modelOptions?: Record<string, unknown>,
   label = 'guideline-compliance',
 ): Promise<Finding[]> {
-  const reportTool = complianceReportsFindings('opencode', model);
+  const reportTool = reportsFindings('opencode', model);
   const prompt = promptForModel(
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelines, reportTool),
@@ -455,15 +495,27 @@ export async function runGuidelineComplianceCheck(
       'findings',
     );
   } catch (error) {
-    const rows = sessionID ? reportedFindingRows(runtime, sessionID) : [];
-    if (!rows.length) throw error;
-    const { findings } = parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log);
+    const findings = reportedFindings(runtime, sessionID, label, log);
+    if (!findings.length) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new IncompleteReviewError(
       `${message}; kept ${findings.length} finding(s) the session reported before it stopped`,
       findings,
     );
   }
+}
+
+function reportedFindings(
+  runtime: OpencodeRuntime,
+  sessionID: string | undefined,
+  label: string,
+  log: (msg: string) => void,
+  skipRows = 0,
+): Finding[] {
+  const rows = sessionID ? reportedFindingRows(runtime, sessionID).slice(skipRows) : [];
+  return rows.length
+    ? parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log).findings
+    : [];
 }
 
 export async function runChangesSinceLastReview(

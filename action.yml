@@ -179,7 +179,7 @@ inputs:
     required: false
     default: 'true'
   time-budget-minutes:
-    description: 'Wall-clock target in minutes (0 = no budget). Derives per-session timeouts; an auxiliary session over its share fails open (degrades only itself), while a main review shard that still fails after its retry aborts the run rather than posting partial coverage.'
+    description: 'Wall-clock target in minutes (0 = no budget). Derives per-session timeouts; an auxiliary session over its share fails open (degrades only itself), while a main review shard that still fails after its retry aborts the run rather than posting partial coverage, unless it was cut off or timed out: then the run posts what it recovered with a coverage notice and ends partial.'
     required: false
     default: '30'
   review-shards:
@@ -224,9 +224,9 @@ inputs:
 
 outputs:
   findings-posted:
-    description: 'Findings posted (or logged in dry-run) by this run. Unset when the review fails before completing.'
+    description: 'Findings posted (or logged in dry-run) by this run, including a partial review whose main pass was cut off. Unset when the review fails before posting.'
   terminal-state:
-    description: 'completed when the review pipeline finished; failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
+    description: 'completed when the review pipeline finished; partial when it posted a main review that was cut off or timed out (the step then fails unless fail-on-error is false); failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
 
 runs:
   using: 'docker'

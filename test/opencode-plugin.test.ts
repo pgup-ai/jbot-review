@@ -12,6 +12,7 @@ import {
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from '../src/shared/prompt.ts';
+import { VALID_SEVERITIES } from '../src/shared/types.ts';
 
 type Hook = (event: unknown) => unknown;
 
@@ -217,7 +218,7 @@ describe('jbot opencode plugin', () => {
           name: string;
           options?: unknown;
           description?: string;
-          input?: { properties: object; required: string[] };
+          input?: { properties: { severity?: { enum?: string[] } }; required: string[] };
         }
       | undefined;
     let afterExecute: Hook | undefined;
@@ -242,6 +243,8 @@ describe('jbot opencode plugin', () => {
       'severity',
       'title',
     ]);
+    // Main review findings use every severity, so the tool must accept them all.
+    assert.deepEqual(tool?.input?.properties?.severity?.enum, [...VALID_SEVERITIES]);
     assert.deepEqual([...(tool?.input?.required ?? [])].sort(), [
       'body',
       'line',

@@ -556,6 +556,28 @@ export function reviewDelivery(plans: ShardPlan[], completed: Set<string>) {
   };
 }
 
+/** Files with a hunk no completed page delivered whole, with that hunk count out of the file's. */
+export function uncoveredFiles(
+  plans: Pick<ShardPlan, 'label' | 'units'>[],
+  completed: Set<string>,
+) {
+  const hunks = new Map<string, { path: string; delivered: boolean }>();
+  for (const plan of plans)
+    for (const unit of plan.units ?? []) {
+      const hunk = hunks.get(unit.hunk) ?? { path: unit.file.filename, delivered: true };
+      hunk.delivered &&= completed.has(plan.label);
+      hunks.set(unit.hunk, hunk);
+    }
+  const files = new Map<string, { path: string; hunks: number; totalHunks: number }>();
+  for (const { path, delivered } of hunks.values()) {
+    const file = files.get(path) ?? { path, hunks: 0, totalHunks: 0 };
+    file.totalHunks++;
+    if (!delivered) file.hunks++;
+    files.set(path, file);
+  }
+  return [...files.values()].filter((file) => file.hunks > 0);
+}
+
 /** Files on no main page whose hunks verification and the addressed check still cite. */
 export function offPageFiles(
   files: PrFile[],

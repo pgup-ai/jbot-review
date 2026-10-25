@@ -9,7 +9,7 @@ import {
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from './prompt.ts';
-import { VALID_CONFIDENCES, VALID_FINDING_KINDS } from './types.ts';
+import { VALID_CONFIDENCES, VALID_FINDING_KINDS, VALID_SEVERITIES } from './types.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -103,7 +103,7 @@ export default {
         event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }
     });
-    // Compliance pages record each confirmed violation here, so a cut-off keeps what they found.
+    // Main and compliance pages record each confirmed finding here, so a cut-off keeps what they found.
     try {
       // The hook first: a tool whose calls are never persisted would only claim to record.
       await ctx.tool.hook('execute.after', (event) => {
@@ -132,7 +132,7 @@ export default {
             properties: {
               path: { type: 'string' },
               line: { type: 'integer', minimum: 0 },
-              severity: { type: 'string', enum: ['P1', 'P2', 'P3'] },
+              severity: { type: 'string', enum: ${JSON.stringify([...VALID_SEVERITIES])} },
               kind: { type: 'string', enum: ${JSON.stringify([...VALID_FINDING_KINDS])} },
               confidence: { type: 'string', enum: ${JSON.stringify([...VALID_CONFIDENCES])} },
               title: { type: 'string' },
@@ -143,12 +143,12 @@ export default {
             additionalProperties: false,
           },
           async execute() {
-            return { content: 'Noted (best-effort). Keep auditing, and list it in your final JSON.' };
+            return { content: 'Noted (best-effort). Keep reviewing, and list it in your final JSON.' };
           },
         });
       });
     } catch {
-      console.warn('[jbot-review] report_finding setup failed; compliance pages keep only their final JSON.');
+      console.warn('[jbot-review] report_finding setup failed; pages keep only their final JSON.');
     }
     try {
       const experiment = JSON.parse(process.env.JBOT_EXPLORATION_CONFIG || '{}');

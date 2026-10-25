@@ -612,6 +612,23 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     assert.deepEqual(result, { summary: 'ok', findings: [] });
   });
 
+  it('posts a page that timed out after its retry under a coverage gap', async () => {
+    const calls: string[] = [];
+    const backend = {
+      name: 'fake',
+      runReview: async (_m: string, context: string) => {
+        calls.push(context);
+        throw new Error('commandcode review prompt timed out after 1380s (model=fake/model)');
+      },
+    } as unknown as ReviewBackend;
+    assert.deepEqual(await run(backend), {
+      summary: '',
+      findings: [],
+      coverageGap: { label: 'review', reason: '1 of 1 page cut off or timed out' },
+    });
+    assert.deepEqual(calls, ['ctx', 'base']);
+  });
+
   it('keeps the Context7-stripped retry for context-length failures', async () => {
     // The retry deliberately differs when Context7 was active (baseContext
     // strips the block), so a context-length failure can succeed there —
@@ -1909,7 +1926,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.match(body, /Review incomplete/);
   assert.match(body, /Review interactions/);
   assert.match(body, /Main review completed/);
-  assert.match(body, /any recovered auxiliary findings were retained/);
+  assert.match(body, /any recovered from passes cut short were retained/);
   assert.doesNotMatch(body, /retained for verification/);
   assert.doesNotMatch(body, /unverified concerns/);
   assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
