@@ -301,7 +301,7 @@ export async function runReview(
           runtime,
           model,
           sessionID,
-          promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines)),
+          promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines, reportTool)),
           sweepLabel,
           log,
           timeoutMs,

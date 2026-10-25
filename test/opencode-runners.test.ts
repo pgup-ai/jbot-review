@@ -175,6 +175,7 @@ describe('runReview on V2', () => {
       assert.deepEqual(efforts, ['medium', 'low']);
       assert.equal(fake.prompts.length, 2);
       assert.match(fake.prompts[1]!.body.text, /FULL GUIDES/);
+      assert.ok(fake.prompts[1]!.body.text.includes(REPORT_FINDING_DIRECTIVE));
       assert.deepEqual(
         result.findings.map(({ path }) => path),
         ok ? ['a.ts', 'b.ts'] : sweep.reported ? ['a.ts', 'c.ts'] : ['a.ts'],

@@ -1692,10 +1692,11 @@ Audit only the files in this page's diff hunks, not the whole PR diff. An
 earlier review audited the PR's other files against these rules, and their
 edits have not changed since; findings on them are discarded.`;
 
-export function assembleGuidelineSweepPrompt(guidelines: string): string {
+export function assembleGuidelineSweepPrompt(guidelines: string, reportTool = false): string {
   return assembleGuidelineCompliancePrompt(
     'Continue the review in this session, using the PR diff and inspected evidence already in its history. Check the written guidelines below against the same assigned diff scope. Return only additional guideline violations not already reported in your main review.',
     guidelines,
+    reportTool,
   );
 }
 
