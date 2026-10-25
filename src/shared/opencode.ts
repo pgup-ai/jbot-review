@@ -228,11 +228,11 @@ export async function runReview(
   const cutOff = (
     result: ReviewResult = { summary: '', findings: [], addressedPriorComments: [] },
   ): ReviewResult => {
-    // The final JSON re-lists reported findings, often at a corrected line.
+    // The final JSON re-lists reported findings, sometimes at a corrected line; same-line
+    // copies merge in dedupeFindings, and a shared title alone may be a second instance.
     const listed = (row: Finding) =>
       result.findings.some(
-        (found) =>
-          found.path === row.path && (found.line === row.line || found.title === row.title),
+        (found) => found.path === row.path && found.title === row.title && found.body === row.body,
       );
     const reported = reportedFindings(runtime, sessionID, label, log).filter((row) => !listed(row));
     return { ...result, findings: [...result.findings, ...reported], partial: true };

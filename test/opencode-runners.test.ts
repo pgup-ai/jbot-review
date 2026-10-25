@@ -91,6 +91,11 @@ describe('runReview on V2', () => {
       '{"findings":[{"path":"b.ts","line":1,"severity":"P1","title":"t","body":"b"},{"path":"a.ts","line":4,"severity":"P2","title":"Leak","body":"R."}]}';
     for (const [wrapUp, paths] of [
       [{ text: answered }, ['b.ts', 'a.ts']],
+      // Same title, another body and line: a second instance, kept.
+      [
+        { text: answered.replace('"line":4', '"line":9').replace('"R."', '"Other."') },
+        ['b.ts', 'a.ts', 'a.ts'],
+      ],
       [{ text: 'not json' }, ['a.ts']],
       [{ error: 'provider failure' }, ['a.ts']],
     ] as const) {
