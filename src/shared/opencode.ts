@@ -227,11 +227,16 @@ export async function runReview(
   let sessionID!: string;
   const cutOff = (
     result: ReviewResult = { summary: '', findings: [], addressedPriorComments: [] },
-  ): ReviewResult => ({
-    ...result,
-    findings: [...result.findings, ...reportedFindings(runtime, sessionID, label, log)],
-    partial: true,
-  });
+  ): ReviewResult => {
+    // The final JSON re-lists reported findings, often at a corrected line.
+    const listed = (row: Finding) =>
+      result.findings.some(
+        (found) =>
+          found.path === row.path && (found.line === row.line || found.title === row.title),
+      );
+    const reported = reportedFindings(runtime, sessionID, label, log).filter((row) => !listed(row));
+    return { ...result, findings: [...result.findings, ...reported], partial: true };
+  };
   let raw: string;
   try {
     ({ raw } = await promptPlanAgent(

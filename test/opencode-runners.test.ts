@@ -86,8 +86,9 @@ describe('runReview on V2', () => {
 
   it('keeps what a cut-off page reported, whatever its wrap-up answers', async () => {
     const reported = { path: 'a.ts', line: 3, severity: 'P2', title: 'Leak', body: 'R.' };
+    // The answer re-lists the reported finding at another line; it must not post twice.
     const answered =
-      '{"findings":[{"path":"b.ts","line":1,"severity":"P1","title":"t","body":"b"}]}';
+      '{"findings":[{"path":"b.ts","line":1,"severity":"P1","title":"t","body":"b"},{"path":"a.ts","line":4,"severity":"P2","title":"Leak","body":"R."}]}';
     for (const [wrapUp, paths] of [
       [{ text: answered }, ['b.ts', 'a.ts']],
       [{ text: 'not json' }, ['a.ts']],
