@@ -481,8 +481,20 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       ['a/alpha.ts'],
     ]);
     // A PR file importing a merged module by alias joins the review, up to the file limit.
+    const [notesTip, edited] = [mainTip, head];
     mainTip = mergeMain('shared/gamma.ts', 'export function gamma() {\n  return 4;\n}\n');
     head = git('rev-parse', 'HEAD');
+    // With no author edit since the baseline, the shadow still selects the merged module's importers.
+    const mergeOnly = await planIncrementalReview({
+      workspace,
+      files,
+      head,
+      base: mainTip,
+      policy,
+      priorBodies: [body(edited, notesTip)],
+      rulesChangedSince: async () => false,
+    });
+    assert.deepEqual(mergeOnly.shadow?.files, ['b/beta.ts']);
     assert.deepEqual(await scope(head, mainTip, reviewed, base), [
       'incremental',
       'bounded-base-merge',
@@ -529,6 +541,63 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         'full',
         'sensitive-followup',
       ]);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('the shadow scope selects edited files and their importers without changing the plan', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-shadow-');
+  try {
+    git('init', '-q');
+    write('tsconfig.json', '{ "compilerOptions": { "paths": { "@app/*": ["*"] } } }\n');
+    write('core/limit.ts', 'export function limit() {\n  return 5;\n}\n');
+    write('lib/index.ts', "export * from '../core/limit';\n");
+    write('worker/job.ts', "import { limit } from '../core/limit';\nexport const job = limit;\n");
+    write('api/use.ts', "import { limit } from '@app/lib';\nexport const use = limit;\n");
+    write('boot/main.ts', "import '../core/limit';\n");
+    for (const name of ['a', 'b', 'c', 'd', 'e'])
+      write(`other/${name}.ts`, `export const ${name} = 1;\n`);
+    const base = commit();
+    write('other/a.ts', 'export const a = 2;\n');
+    const reviewed = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
+    const head = commit();
+    rmSync(join(workspace, 'core/limit.ts'));
+    const deleted = commit();
+    const prFiles = (...paths: string[]) =>
+      paths.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }));
+    const plan = (files: PrFile[], at = head) =>
+      planIncrementalReview({
+        workspace,
+        files,
+        head: at,
+        base,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      });
+    const selected = prFiles('core/limit.ts', 'worker/job.ts', 'api/use.ts', 'boot/main.ts');
+    const unrelated = prFiles(...['a', 'b', 'c', 'd', 'e'].map((name) => `other/${name}.ts`));
+    const files = [...selected, ...unrelated];
+    const result = await plan([...files, ...prFiles('config.json')]);
+    assert.equal(result.reason, 'unsupported-or-large-pr');
+    assert.equal(result.files.length, 10);
+    // A deleted file still reaches the importers of a barrel re-exporting it.
+    for (const shadow of [result.shadow, (await plan(files, deleted)).shadow])
+      assert.deepEqual(
+        { ...shadow, planningMs: 0 },
+        {
+          mode: 'incremental',
+          reason: 'delta-importers',
+          files: ['core/limit.ts', 'worker/job.ts', 'api/use.ts', 'boot/main.ts'],
+          planningMs: 0,
+        },
+      );
+    assert.equal(
+      (await plan([...selected, ...unrelated.slice(0, 1)])).shadow?.reason,
+      'broad-impact',
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

@@ -33,10 +33,13 @@ import {
   runPrReview,
   runShardedReview,
   buildSlimVerifierContext,
+  fallbackReviewParams,
 } from '../src/shared/runner.ts';
+import { defaultModelOptions } from '../src/shared/config.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
+import { ModelRejectedError } from '../src/shared/model-fallback.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import {
   limitReviewBackendSessions,
@@ -585,6 +588,22 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     );
     assert.equal(authCalls.length, 1);
 
+    const rejectedCalls: string[] = [];
+    await assert.rejects(
+      run(
+        backendThrowingOnce(
+          'Upstream request failed: This Go model trains on request data.',
+          rejectedCalls,
+        ),
+      ),
+      (error: unknown) =>
+        error instanceof ModelRejectedError &&
+        /refusing to post partial review coverage/.test(error.message) &&
+        error.rejections[0]?.model === 'fake/model' &&
+        error.rejections[0]?.rejection === 'privacy-setting',
+    );
+    assert.equal(rejectedCalls.length, 1);
+
     const transientCalls: string[] = [];
     const result = await run(
       backendThrowingOnce('The API server encountered an error', transientCalls),
@@ -787,6 +806,48 @@ describe('runPrReview local mode and early exits', () => {
       }),
       /requires headSha/,
     );
+  });
+
+  it('reruns a pooled review on the next draw with its credential and default options', () => {
+    const logs: string[] = [];
+    const state = {
+      startedAt: 0,
+      rejections: [{ model: 'opencode-go/muse', rejection: 'privacy-setting' as const }],
+      fallbacks: [],
+    };
+    const params = {
+      ...base,
+      model: 'opencode-go/muse',
+      options: {
+        modelPool: ['opencode-go/muse', 'commandcode/deepseek'],
+        auxModel: 'opencode-go/muse',
+        poolCredentials: new Map([
+          ['opencode-go', { apiKey: 'go-key' }],
+          ['commandcode', { apiKey: 'cc-key', baseURL: 'https://cc.test' }],
+        ]),
+        modelOptions: { reasoningEffort: 'high' },
+      },
+      log: (message: string) => logs.push(message),
+    };
+    const next = fallbackReviewParams(params, state);
+    assert.equal(next?.model, 'commandcode/deepseek');
+    assert.equal(next?.apiKey, 'cc-key');
+    assert.equal(next?.baseURL, 'https://cc.test');
+    assert.equal(next?.options?.auxModel, 'commandcode/deepseek');
+    assert.equal(next?.options?.auxApiKey, '');
+    assert.deepEqual(next?.options?.modelOptions, defaultModelOptions('commandcode', 'deepseek'));
+    assert.deepEqual(logs, [
+      'Model fallback (main): opencode-go/muse → commandcode/deepseek (privacy-setting).',
+      'Model fallback (auxiliary): opencode-go/muse → commandcode/deepseek (privacy-setting).',
+    ]);
+
+    const explicit = { ...params, options: { ...params.options, modelOptionsExplicit: true } };
+    assert.deepEqual(fallbackReviewParams(explicit, state)?.options?.modelOptions, {
+      reasoningEffort: 'high',
+    });
+    // A single-model config keeps today's failure.
+    const single = { ...params, options: { ...params.options, modelPool: ['opencode-go/muse'] } };
+    assert.equal(fallbackReviewParams(single, state), undefined);
   });
 
   it('skips a stale GitHub run before listing files', async () => {

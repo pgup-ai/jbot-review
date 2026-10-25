@@ -163,6 +163,7 @@ async function main(): Promise<void> {
       options: {
         ...options,
         modelPool,
+        poolCredentials: credentials,
         auxModel,
         auxApiKey: auxCredential?.apiKey ?? '',
         auxBaseURL: auxCredential?.baseURL,

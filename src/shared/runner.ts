@@ -31,6 +31,7 @@ import {
   reviewDelivery,
   uncoveredFiles,
   REVIEW_EVIDENCE_BYTES,
+  type ReviewPromptBudget,
   type ShardPlan,
 } from './review-plan.ts';
 import { buildContextPack } from './context-pack.ts';
@@ -153,6 +154,7 @@ import {
   mainReviewModelOptions,
   complianceModelOptions,
   reportsFindings,
+  defaultModelOptions,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   parseEnvBoolean,
@@ -161,7 +163,16 @@ import {
   sizedModelOptions,
   supportedModelOptions,
   verificationModelOptions,
+  type ProviderCredential,
 } from './config.ts';
+import {
+  classifyProviderRejection,
+  ModelRejectedError,
+  planModelFallback,
+  withModelFallback,
+  type ModelFallback,
+  type ModelRejection,
+} from './model-fallback.ts';
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -978,6 +989,8 @@ export interface ReviewRunOptions {
    */
   auxModel?: string;
   modelPool?: string[];
+  /** Every pool provider's credential: a provider rejecting the drawn main model reruns on another draw. */
+  poolCredentials?: ReadonlyMap<string, ProviderCredential>;
   /**
    * Optional API key for the auxiliary model provider when it differs from the
    * main model provider. Empty = reuse the main review API key.
@@ -1126,6 +1139,8 @@ async function runReviewPipeline(params: {
    * still emits the run's terminal telemetry.
    */
   telemetryLifecycle?: { onFailure?: (state: RunTerminalState) => void };
+  /** Internal: runPrReview's state across reruns after a provider rejects a pool model. */
+  fallbackState?: ModelFallbackState;
   log: (msg: string) => void;
 }): Promise<void> {
   const {
@@ -1164,7 +1179,8 @@ async function runReviewPipeline(params: {
   if (!localDiff && !headSha) {
     throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
   }
-  const runStartedAt = Date.now();
+  // A rerun on another pool model keeps the first draw's time budget.
+  const runStartedAt = params.fallbackState?.startedAt ?? Date.now();
 
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
@@ -1214,6 +1230,8 @@ async function runReviewPipeline(params: {
       model,
       ...(auxModel !== model ? { auxModel } : {}),
     });
+  for (const fallback of params.fallbackState?.fallbacks ?? [])
+    telemetry.recordModelFallback(fallback);
   // Once a label is abandoned at grace expiry, its eager coverage row owns the
   // terminal state: the abort settles the underlying promise promptly, whose
   // own catch handler would otherwise append a second, conflicting row.
@@ -1523,7 +1541,19 @@ async function runReviewPipeline(params: {
   // routed to commandcode, so skipped and non-commandcode runs stay silent.
   // Resolve once so main and auxiliary sessions use the same account.
   const commandCodeSelection = backendSelection.commandCodeAccessKey
-    ? await selectCommandCodeAccessKey(backendSelection.commandCodeAccessKey, log)
+    ? await selectCommandCodeAccessKey(backendSelection.commandCodeAccessKey, log).catch(
+        (error: unknown) => {
+          const rejection = classifyProviderRejection(error);
+          if (!rejection) throw error;
+          const rejected = [...new Set([model, auxModel])].filter(
+            (role) => parseModelName(role).providerID === COMMANDCODE_PROVIDER_ID,
+          );
+          throw new ModelRejectedError(
+            (error as Error).message,
+            rejected.map((role) => ({ model: role, rejection })),
+          );
+        },
+      )
     : { key: '', usageLogged: false };
   const commandCodeAccessKey = commandCodeSelection.key;
   // Live plan meters (what the CLI's /usage view shows), logged up front so
@@ -1685,6 +1715,11 @@ async function runReviewPipeline(params: {
     worktree: !!localDiff,
     rulesChangedSince,
   });
+  const shadowScope = reviewScope.shadow;
+  const totalPatchBytes = fullReviewFiles.reduce(
+    (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
+    0,
+  );
   const scopeStats = {
     mode: reviewScope.mode,
     reason: reviewScope.reason,
@@ -1694,12 +1729,26 @@ async function runReviewPipeline(params: {
       (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
       0,
     ),
-    totalPatchBytes: fullReviewFiles.reduce(
-      (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
-      0,
-    ),
+    totalPatchBytes,
     planningMs: Date.now() - scopeStartedAt,
     baseline: reviewScope.baseline,
+    ...(shadowScope
+      ? {
+          shadow: {
+            mode: shadowScope.mode,
+            reason: shadowScope.reason,
+            ...(shadowScope.mode === 'full'
+              ? { files: fullReviewFiles.length, patchBytes: totalPatchBytes }
+              : {
+                  files: shadowScope.files.length,
+                  patchBytes: fullReviewFiles
+                    .filter((file) => shadowScope.files.includes(file.filename))
+                    .reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0),
+                }),
+            planningMs: shadowScope.planningMs,
+          },
+        }
+      : {}),
   };
   files = reviewScope.files;
   const incrementalContext = buildIncrementalReviewContext(reviewScope, fullReviewFiles);
@@ -1727,6 +1776,19 @@ async function runReviewPipeline(params: {
   log(
     `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
   );
+  // Logged so posted findings can be judged against the scope a follow-up would get.
+  if (shadowScope) {
+    const paths = shadowScope.files;
+    log(
+      `Incremental shadow: ${JSON.stringify({
+        ...scopeStats.shadow,
+        totalFiles: fullReviewFiles.length,
+        // A full shadow covers every PR file, so only an incremental one lists paths.
+        ...(paths.length ? { paths: paths.slice(0, 100) } : {}),
+        ...(paths.length > 100 ? { omittedPaths: paths.length - 100 } : {}),
+      })}`,
+    );
+  }
 
   // A real review is about to run: clear the prior 🚀 so it only reappears if
   // this run leaves the PR with zero open findings. A removed reaction means
@@ -2507,32 +2569,74 @@ async function runReviewPipeline(params: {
         ? COMMANDCODE_MODEL_LIMITS[auxModelID.toLowerCase()]
         : undefined),
   );
-  const mainBackend = budgetReviewBackend(
-    limitReviewBackendSessions(
-      {
-        ...mainBaseBackend,
-        canReadWorkspace: mainBaseBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
-      },
-      'main',
-      sessionSlots,
-      providerLimiters.forProvider(providerID) ?? serializedBackends.get(mainBaseBackend),
-      sessionTelemetry,
-    ),
+  const mainCanReadWorkspace =
+    mainBaseBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff;
+  const auxCanReadWorkspace = auxBaseBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff;
+  const limitBackend = (
+    base: ReviewBackend,
+    role: 'main' | 'aux',
+    roleProviderID: string,
+    canReadWorkspace: boolean,
+    budget: ReviewPromptBudget,
+  ) =>
+    budgetReviewBackend(
+      limitReviewBackendSessions(
+        { ...base, canReadWorkspace },
+        role,
+        sessionSlots,
+        providerLimiters.forProvider(roleProviderID) ?? serializedBackends.get(base),
+        sessionTelemetry,
+      ),
+      budget,
+    );
+  const mainBackend = limitBackend(
+    mainBaseBackend,
+    'main',
+    providerID,
+    mainCanReadWorkspace,
     mainPromptBudget,
   );
-  const auxBackend = budgetReviewBackend(
-    limitReviewBackendSessions(
-      {
-        ...auxBaseBackend,
-        canReadWorkspace: auxBaseBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
-      },
-      'aux',
-      sessionSlots,
-      providerLimiters.forProvider(auxProviderID) ?? serializedBackends.get(auxBaseBackend),
-      sessionTelemetry,
-    ),
+  const auxRoleBackend = limitBackend(
+    auxBaseBackend,
+    'aux',
+    auxProviderID,
+    auxCanReadWorkspace,
     auxPromptBudget,
   );
+  // Aux prompts are built for the aux backend's tools, so only a main model
+  // that reads them the same way can take its sessions over.
+  const auxFallbackReady =
+    options.modelPool.length > 1 &&
+    auxModel !== model &&
+    mainBaseBackend.name === auxBaseBackend.name &&
+    mainCanReadWorkspace === auxCanReadWorkspace &&
+    modelSupportsAgenticTools(providerID, modelID) ===
+      modelSupportsAgenticTools(auxProviderID, auxModelID);
+  const auxBackend = auxFallbackReady
+    ? withModelFallback(
+        auxRoleBackend,
+        auxModel,
+        {
+          backend: limitBackend(
+            mainBaseBackend,
+            'aux',
+            providerID,
+            mainCanReadWorkspace,
+            mainPromptBudget,
+          ),
+          model,
+          options: (modelOptions) =>
+            supportedModelOptions(providerID, modelID, modelOptions, 'down'),
+        },
+        (rejection) => {
+          const fallback: ModelFallback = { ...rejection, role: 'auxiliary', to: model };
+          log(formatModelFallback(fallback));
+          params.fallbackState?.rejections.push(rejection);
+          params.fallbackState?.fallbacks.push(fallback);
+          telemetry.recordModelFallback(fallback);
+        },
+      )
+    : auxRoleBackend;
   const auxSessionsEnabled = !auxOpencodeBootError && !auxGatewayPreflightError;
   const verificationEnabled = options.verifyFindings && auxSessionsEnabled;
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, verificationEnabled);
@@ -4128,8 +4232,25 @@ export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0
   reportRun('reviewing');
   const signalled = markFatalSignals();
   const telemetryLifecycle: { onFailure?: (state: RunTerminalState) => void } = {};
+  const fallbackState: ModelFallbackState = {
+    startedAt: Date.now(),
+    rejections: [],
+    fallbacks: [],
+  };
   try {
-    await runReviewPipeline({ ...params, telemetryLifecycle });
+    for (let attempt = params; ;) {
+      try {
+        await runReviewPipeline({ ...attempt, telemetryLifecycle, fallbackState });
+        break;
+      } catch (error) {
+        if (!(error instanceof ModelRejectedError) || signalled()) throw error;
+        fallbackState.rejections.push(...error.rejections);
+        const next = fallbackReviewParams(attempt, fallbackState);
+        if (!next) throw error;
+        // The abandoned draw's telemetry is not emitted: the rerun's run row carries the fallback.
+        attempt = next;
+      }
+    }
     reportRun('completed');
   } catch (error) {
     const state = signalled() ? 'cancelled' : 'failed';
@@ -4141,6 +4262,60 @@ export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0
     // what lets an observer-enabled process exit (beforeExit can't fire).
     await closeObserver();
   }
+}
+
+export interface ModelFallbackState {
+  startedAt: number;
+  rejections: ModelRejection[];
+  fallbacks: ModelFallback[];
+}
+
+function formatModelFallback({ role, model, to, rejection }: ModelFallback): string {
+  return `Model fallback (${role}): ${model} → ${to} (${rejection}).`;
+}
+
+/**
+ * Exported for tests. Pooled policy hashes the pool, not the draw, so a fallback
+ * rerun keeps the policy and, when complete, may set a baseline like any draw.
+ */
+export function fallbackReviewParams(
+  params: Parameters<typeof runReviewPipeline>[0],
+  state: ModelFallbackState,
+): Parameters<typeof runReviewPipeline>[0] | undefined {
+  const options = params.options ?? {};
+  const pool = options.modelPool ?? [];
+  const credentials = options.poolCredentials;
+  if (pool.length < 2 || !credentials) return undefined;
+  const plan = planModelFallback(
+    pool,
+    { model: params.model, auxModel: options.auxModel || params.model },
+    state.rejections,
+  );
+  if (!plan) return undefined;
+  for (const fallback of plan.fallbacks) {
+    params.log(formatModelFallback(fallback));
+    state.fallbacks.push(fallback);
+  }
+  const { providerID, modelID } = parseModelName(plan.model);
+  const auxProviderID = parseModelName(plan.auxModel).providerID;
+  // Entry points resolve every pool provider's credential before the draw.
+  const { apiKey, baseURL } = credentials.get(providerID)!;
+  const auxCredential = auxProviderID === providerID ? undefined : credentials.get(auxProviderID)!;
+  return {
+    ...params,
+    model: plan.model,
+    apiKey,
+    baseURL,
+    options: {
+      ...options,
+      auxModel: plan.auxModel,
+      auxApiKey: auxCredential?.apiKey ?? '',
+      auxBaseURL: auxCredential?.baseURL,
+      modelOptions: options.modelOptionsExplicit
+        ? options.modelOptions
+        : defaultModelOptions(providerID, modelID),
+    },
+  };
 }
 
 /**
@@ -4228,6 +4403,7 @@ export function normalizeOptions(
     rulesOnlyTests: options?.rulesOnlyTests ?? true,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
+    poolCredentials: options?.poolCredentials ?? new Map(),
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),
@@ -5273,10 +5449,17 @@ export async function runShardedReview(params: {
     );
   }
   const hardFailures = failures.filter((failure) => !cutOff(failure));
-  if (hardFailures.length > 0)
-    throw new Error(
-      buildMainShardFailureMessage(hardFailures.length, shardPlans.length, hardFailures[0].error),
+  if (hardFailures.length > 0) {
+    const message = buildMainShardFailureMessage(
+      hardFailures.length,
+      shardPlans.length,
+      hardFailures[0].error,
     );
+    const rejection = hardFailures
+      .map((failure) => classifyProviderRejection(failure.error ?? ''))
+      .find(Boolean);
+    throw rejection ? new ModelRejectedError(message, [{ model, rejection }]) : new Error(message);
+  }
 
   const successes = outcomes.filter((outcome) => outcome.result !== undefined);
   const findings = successes.flatMap(({ plan, result }) => {
