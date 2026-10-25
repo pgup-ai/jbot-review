@@ -73,25 +73,29 @@ async function deltaImportersPlan(input: {
     (await git('ls-tree', '-r', '--name-only', '-z', input.head)).split('\0').filter(Boolean),
   );
   const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
-  const texts = new Map<string, Promise<string>>();
-  const read = (path: string) => {
-    if (!texts.has(path))
-      texts.set(path, repo.has(path) ? git('show', `${input.head}:${path}`) : Promise.resolve(''));
-    return texts.get(path)!;
-  };
   const targets = new Set([...input.edited, ...(input.merged ?? [])]);
   // A deleted file resolves only against the edits themselves.
   const resolve = (path: string, specifier: string) =>
     resolveEvidenceImport(path, specifier, repo, aliases) ??
     resolveEvidenceImport(path, specifier, targets, aliases);
-  // A file that does not parse counts as reaching the edits: over-selecting beats a missed importer.
-  const loads = async (path: string) => {
-    const text = await read(path);
-    try {
-      return moduleSpecifiers(path, text);
-    } catch {
-      return undefined;
-    }
+  // Parsed once per path: a barrel reached by many importers is read and parsed a single time.
+  const parsed = new Map<string, Promise<string[] | undefined>>();
+  const loads = (path: string) => {
+    if (!parsed.has(path))
+      parsed.set(
+        path,
+        (repo.has(path) ? git('show', `${input.head}:${path}`) : Promise.resolve('')).then(
+          (text) => {
+            // A file that does not parse counts as reaching the edits: over-selecting beats a miss.
+            try {
+              return moduleSpecifiers(path, text);
+            } catch {
+              return undefined;
+            }
+          },
+        ),
+      );
+    return parsed.get(path)!;
   };
   // Only index barrels are followed: reading every imported module would exhaust the budget.
   const reaches = async (path: string, depth = 0): Promise<boolean> => {
