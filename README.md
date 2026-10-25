@@ -286,8 +286,11 @@ variable, takes the default above.
 **Heavy-model recipe:** select one heavy model when every main review should
 use it. Main and auxiliary roles draw independently from a pool; list order
 does not assign roles. When a provider permanently rejects a drawn model (a
-workspace privacy setting, exhausted credits, a regional block), the run moves
-that role to another pool model instead of failing. For a provider tier that supports concurrent sessions:
+workspace privacy setting, exhausted credits, a regional block), a pooled Action
+or App run reruns the main review on another pool model instead of failing, and
+auxiliary sessions move to the main model when its backend can serve their
+prompts (otherwise they fail open as before). Single-model configs and
+`review:local` keep the failure. For a provider tier that supports concurrent sessions:
 
 ```yaml
 model: ${{ vars.JBOT_REVIEW_MODEL }}
