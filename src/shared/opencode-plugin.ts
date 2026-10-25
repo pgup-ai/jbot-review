@@ -9,7 +9,7 @@ import {
   TOOLS_OFF_MESSAGE,
   VERIFICATION_STEP_LIMIT_PROMPT,
 } from './prompt.ts';
-import { VALID_CONFIDENCES, VALID_FINDING_KINDS } from './types.ts';
+import { VALID_CONFIDENCES, VALID_FINDING_KINDS, VALID_SEVERITIES } from './types.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -132,7 +132,7 @@ export default {
             properties: {
               path: { type: 'string' },
               line: { type: 'integer', minimum: 0 },
-              severity: { type: 'string', enum: ['P1', 'P2', 'P3'] },
+              severity: { type: 'string', enum: ${JSON.stringify([...VALID_SEVERITIES])} },
               kind: { type: 'string', enum: ${JSON.stringify([...VALID_FINDING_KINDS])} },
               confidence: { type: 'string', enum: ${JSON.stringify([...VALID_CONFIDENCES])} },
               title: { type: 'string' },

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -129,23 +129,34 @@ describe('runReview on V2', () => {
     assert.equal([...fake.sessions.values()][0]!.interrupted, 1);
   });
 
-  it('reuses the main session for the guideline sweep and keeps main findings when it fails', async () => {
+  it('reuses the main session for the guideline sweep and keeps main and reported findings when it fails', async () => {
     const main =
       '{"findings":[{"path":"a.ts","line":1,"severity":"P1","title":"t","body":"b"}],"summary":"ok"}';
     for (const sweep of [
       { text: '{"findings":[{"path":"b.ts","line":2,"severity":"P2","title":"rule","body":"v"}]}' },
       { text: '{}' },
       { text: 'x', error: 'sweep unavailable' },
+      { text: 'x', error: 'sweep unavailable', reported: true },
     ]) {
       let n = 0;
       const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
       const efforts: unknown[] = [];
-      const fake = fakeOpencodeServer(() => {
+      const fake = fakeOpencodeServer((session) => {
         const options = Object.values(
           JSON.parse(readFileSync(sessionOptionsFile, 'utf8')),
         ) as Record<string, unknown>[];
         efforts.push(options[0]?.reasoningEffort);
-        return ++n === 1 ? { text: main } : sweep;
+        // The main turn's own row must not come back as a sweep finding.
+        const row = ++n === 1 ? 'a.ts' : sweep.reported ? 'c.ts' : undefined;
+        if (row)
+          appendFileSync(
+            join(
+              dirname(sessionOptionsFile),
+              `reported-${createHash('sha256').update(session.id).digest('hex')}.jsonl`,
+            ),
+            `${JSON.stringify({ path: row, line: 3, severity: 'P0', title: 'r', body: 'r' })}\n`,
+          );
+        return n === 1 ? { text: main } : sweep;
       });
       const rt = runtime(fake, {
         sessionOptionsFile,
@@ -164,7 +175,10 @@ describe('runReview on V2', () => {
       assert.deepEqual(efforts, ['medium', 'low']);
       assert.equal(fake.prompts.length, 2);
       assert.match(fake.prompts[1]!.body.text, /FULL GUIDES/);
-      assert.equal(result.findings.length, ok ? 2 : 1);
+      assert.deepEqual(
+        result.findings.map(({ path }) => path),
+        ok ? ['a.ts', 'b.ts'] : sweep.reported ? ['a.ts', 'c.ts'] : ['a.ts'],
+      );
       assert.equal(coverage[0]?.state, ok ? 'completed' : 'failed');
     }
   });

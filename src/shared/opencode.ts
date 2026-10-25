@@ -294,18 +294,26 @@ export async function runReview(
           label: sweepLabel,
           reportFindings: reportTool,
         });
-      const raw = await promptPlanAgentInSession(
-        runtime,
-        model,
-        sessionID,
-        promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines)),
-        sweepLabel,
-        log,
-        timeoutMs,
-        options.onTokenUsage,
-        label,
-      );
-      return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+      // The journal already holds the main turn's rows; only later ones are the sweep's.
+      const mainRows = reportedFindingRows(runtime, sessionID).length;
+      try {
+        const raw = await promptPlanAgentInSession(
+          runtime,
+          model,
+          sessionID,
+          promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines)),
+          sweepLabel,
+          log,
+          timeoutMs,
+          options.onTokenUsage,
+          label,
+        );
+        return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+      } catch (error) {
+        const findings = reportedFindings(runtime, sessionID, sweepLabel, log, mainRows);
+        if (!findings.length) throw error;
+        throw new IncompleteReviewError(String(error), findings);
+      }
     },
     log,
   );
@@ -497,8 +505,9 @@ function reportedFindings(
   sessionID: string | undefined,
   label: string,
   log: (msg: string) => void,
+  skipRows = 0,
 ): Finding[] {
-  const rows = sessionID ? reportedFindingRows(runtime, sessionID) : [];
+  const rows = sessionID ? reportedFindingRows(runtime, sessionID).slice(skipRows) : [];
   return rows.length
     ? parseReview(JSON.stringify({ findings: rows }), `${label}-reported`, log).findings
     : [];
