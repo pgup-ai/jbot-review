@@ -373,7 +373,7 @@ export async function planIncrementalReview(input: {
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = changed.map((path) => {
+    const modules = [...changed, ...(merged ?? [])].map((path) => {
       const stem = posix.basename(path).replace(/\.[^.]+$/, '');
       return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
     });

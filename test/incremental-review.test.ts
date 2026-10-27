@@ -470,6 +470,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       'f/foxtrot.ts',
       "import { session } from '@app/auth/session';\nexport function foxtrot() {\n  return session();\n}\n",
     );
+    write('g/golf.ts', "export * from '../shared/gamma';\n");
     const reviewed = commit();
     const prFiles = (...paths: string[]) =>
       paths.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }));
@@ -528,6 +529,11 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       'broad-or-empty-followup',
       [...files, ...importers].map((file) => file.filename),
     ]);
+    // An untouched PR file re-exporting a merged module is outside the graph.
+    assert.deepEqual(
+      (await scope(head, mainTip, reviewed, base, prFiles('g/golf.ts'))).slice(0, 2),
+      ['full', 'unsupported-module-dependencies'],
+    );
     // A PR file the merge itself edited is re-reviewed, even with no new author edit.
     const nextTip = mergeMain('c/charlie.ts', charlie('C', 3));
     const merge = git('rev-parse', 'HEAD');
