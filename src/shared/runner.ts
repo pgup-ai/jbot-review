@@ -1711,7 +1711,6 @@ async function runReviewPipeline(params: {
             mainCliBackend,
             mainOnOpencode ? modelID : undefined,
           )),
-    openThreadPaths,
     worktree: !!localDiff,
     rulesChangedSince,
   });
