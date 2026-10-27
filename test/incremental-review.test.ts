@@ -278,6 +278,22 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'bounded-followup',
     );
+    // An unchanged file loading a changed one through a form the graph cannot follow.
+    git('checkout', '-q', '--detach', head);
+    write('app/loader.ts', "export const load = () => import('../core/limit');\n");
+    const loader = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 2;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(loader, base)],
+          files: [...files, { filename: 'app/loader.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'unsupported-module-dependencies',
+    );
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],

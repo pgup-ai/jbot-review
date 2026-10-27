@@ -372,6 +372,11 @@ export async function planIncrementalReview(input: {
     if (edits.length > 120 || edits.some((line) => /\b(import|export|require)\b/.test(line)))
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
+    // What a specifier loading a changed module contains: its file stem, or its directory for an index.
+    const modules = changed.map((path) => {
+      const stem = posix.basename(path).replace(/\.[^.]+$/, '');
+      return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
+    });
     let bytes = 0;
     for (const file of input.files) {
       const texts = await Promise.all(
@@ -379,14 +384,15 @@ export async function planIncrementalReview(input: {
       );
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
-      // These forms defeat the simple declaration/reference expansion. Unchanged files had
-      // their full review at the baseline; their callers still match by imported name below.
+      // These forms defeat the simple declaration/reference expansion. An unchanged file had its
+      // full review at the baseline, so it counts only when it may load a changed module.
       if (
-        changed.includes(file.filename) &&
-        texts.some((text) =>
-          /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
-            text,
-          ),
+        texts.some(
+          (text) =>
+            /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
+              text,
+            ) &&
+            (changed.includes(file.filename) || modules.some((name) => text.includes(name))),
         )
       )
         return full('unsupported-module-dependencies');
