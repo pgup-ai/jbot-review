@@ -4274,7 +4274,7 @@ function formatModelFallback({ role, model, to, rejection }: ModelFallback): str
 }
 
 /**
- * Exported for tests. Pooled policy hashes the pool, not the draw, so a fallback
+ * Exported for tests. Pooled policy hashes neither the pool's members nor the draw, so a fallback
  * rerun keeps the policy and, when complete, may set a baseline like any draw.
  */
 export function fallbackReviewParams(

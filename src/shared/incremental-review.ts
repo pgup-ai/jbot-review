@@ -385,14 +385,17 @@ export async function planIncrementalReview(input: {
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
       // These forms defeat the simple declaration/reference expansion. An unchanged file had its
-      // full review at the baseline, so it counts only when it may load a changed module.
+      // full review at the baseline, so it counts only when it may load a changed module: by name,
+      // or through a computed specifier or eval that could name anything.
       if (
         texts.some(
           (text) =>
             /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
               text,
             ) &&
-            (changed.includes(file.filename) || modules.some((name) => text.includes(name))),
+            (changed.includes(file.filename) ||
+              /\b(?:require|import)\s*\(\s*(?!['"])|\beval\s*\(/.test(text) ||
+              modules.some((name) => text.includes(name))),
         )
       )
         return full('unsupported-module-dependencies');

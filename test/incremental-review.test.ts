@@ -294,6 +294,25 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // A computed specifier could name any changed module.
+    git('checkout', '-q', '--detach', head);
+    write(
+      'app/plugins.ts',
+      'export const load = (name: string) => import(`../plugins/${name}`);\n',
+    );
+    const plugins = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 3;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(plugins, base)],
+          files: [...files, { filename: 'app/plugins.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'unsupported-module-dependencies',
+    );
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],
