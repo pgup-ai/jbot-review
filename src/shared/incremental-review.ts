@@ -251,7 +251,6 @@ export async function planIncrementalReview(input: {
   /** Prior jbot review bodies, oldest first. */
   priorBodies?: string[];
   forceFull?: boolean;
-  openThreadPaths?: ReadonlySet<string>;
   worktree?: boolean;
   rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
@@ -373,6 +372,11 @@ export async function planIncrementalReview(input: {
     if (edits.length > 120 || edits.some((line) => /\b(import|export|require)\b/.test(line)))
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
+    // What a specifier loading a changed module contains: its file stem, or its directory for an index.
+    const modules = [...changed, ...(merged ?? [])].map((path) => {
+      const stem = posix.basename(path).replace(/\.[^.]+$/, '');
+      return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
+    });
     let bytes = 0;
     for (const file of input.files) {
       const texts = await Promise.all(
@@ -380,12 +384,18 @@ export async function planIncrementalReview(input: {
       );
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
-      // These forms defeat the simple declaration/reference expansion.
+      // These forms defeat the simple declaration/reference expansion. An unchanged file had its
+      // full review at the baseline, so it counts only when it may load a changed module: by name,
+      // or through a computed specifier or eval that could name anything.
       if (
-        texts.some((text) =>
-          /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
-            text,
-          ),
+        texts.some(
+          (text) =>
+            /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
+              text,
+            ) &&
+            (changed.includes(file.filename) ||
+              /\b(?:require|import)\s*\(\s*(?!['"])|\beval\s*\(/.test(text) ||
+              modules.some((name) => text.includes(name))),
         )
       )
         return full('unsupported-module-dependencies');
@@ -459,10 +469,6 @@ export async function planIncrementalReview(input: {
       )
         return full('references-outside-pr');
     }
-    // Editing a file with an open finding is likely its fix, which can reach past the symbol graph.
-    // Checked last, so the reason names this rule only when nothing else forces a full review.
-    if (changed.some((path) => input.openThreadPaths?.has(path)))
-      return full('open-finding-file-changed');
     return {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',

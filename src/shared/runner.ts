@@ -1682,10 +1682,10 @@ async function runReviewPipeline(params: {
       })}`,
     );
   const fullReviewFiles = files;
+  // The jbot build stays out, as in the auxiliary policy: releases ship daily.
   const scopePolicy = auxiliaryPolicy({
     version: 1,
     ...modelPolicy(options, { model, auxModel, baseURL }),
-    reviewer: runIdentity(process.env).reviewerRevision,
   });
   const openThreadPaths = new Set(
     allPriorJbotThreads.filter((thread) => !thread.isResolved).map((thread) => thread.path),
@@ -1711,7 +1711,6 @@ async function runReviewPipeline(params: {
             mainCliBackend,
             mainOnOpencode ? modelID : undefined,
           )),
-    openThreadPaths,
     worktree: !!localDiff,
     rulesChangedSince,
   });
@@ -4275,7 +4274,7 @@ function formatModelFallback({ role, model, to, rejection }: ModelFallback): str
 }
 
 /**
- * Exported for tests. Pooled policy hashes the pool, not the draw, so a fallback
+ * Exported for tests. Pooled policy hashes neither the pool's members nor the draw, so a fallback
  * rerun keeps the policy and, when complete, may set a baseline like any draw.
  */
 export function fallbackReviewParams(

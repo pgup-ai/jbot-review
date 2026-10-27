@@ -171,8 +171,6 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       policy,
       // A later review that set no baseline does not hide the completed one before it.
       priorBodies: [body(reviewed, base), 'A later review with an unverified finding.'],
-      // An open finding on a file this follow-up leaves alone keeps it incremental.
-      openThreadPaths: new Set(['other/label.ts']),
       rulesChangedSince: async () => false,
     };
     const result = await planIncrementalReview(input);
@@ -190,16 +188,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ head: reviewed }, 'same-head-rerun'],
       [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: base }, 'history-or-impact-unavailable'],
-      [{ openThreadPaths: new Set(['core/limit.ts']) }, 'open-finding-file-changed'],
       [
         { files: [...files, { filename: 'config.json', patch: 'patch' }] },
-        'unsupported-or-large-pr',
-      ],
-      [
-        {
-          files: [...files, { filename: 'config.json', patch: 'patch' }],
-          openThreadPaths: new Set(['core/limit.ts']),
-        },
         'unsupported-or-large-pr',
       ],
     ] as const) {
@@ -268,6 +258,57 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
             ...files,
             { filename: 'pkg/index.ts', patch: '@@ -2 +2 @@\n- return 1;\n+ return 0;' },
           ],
+        })
+      ).reason,
+      'unsupported-module-dependencies',
+    );
+    git('checkout', '-q', '--detach', head);
+    write('pkg/index.ts', 'export default function implementation() {\n return 1;\n}\n');
+    write('other/label.ts', 'export function label() {\n  return "ready";\n}\n');
+    const untouchedDefault = commit();
+    write('other/label.ts', 'export function label() {\n  return "idle";\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(untouchedDefault, base)],
+          files: [...files, { filename: 'pkg/index.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'bounded-followup',
+    );
+    // An unchanged file loading a changed one through a form the graph cannot follow.
+    git('checkout', '-q', '--detach', head);
+    write('app/loader.ts', "export const load = () => import('../core/limit');\n");
+    const loader = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 2;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(loader, base)],
+          files: [...files, { filename: 'app/loader.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'unsupported-module-dependencies',
+    );
+    // A computed specifier could name any changed module.
+    git('checkout', '-q', '--detach', head);
+    write(
+      'app/plugins.ts',
+      'export const load = (name: string) => import(`../plugins/${name}`);\n',
+    );
+    const plugins = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 3;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(plugins, base)],
+          files: [...files, { filename: 'app/plugins.ts', patch: '@@ -0,0 +1 @@\n+a' }],
         })
       ).reason,
       'unsupported-module-dependencies',
@@ -448,6 +489,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       'f/foxtrot.ts',
       "import { session } from '@app/auth/session';\nexport function foxtrot() {\n  return session();\n}\n",
     );
+    write('g/golf.ts', "export * from '../shared/gamma';\n");
     const reviewed = commit();
     const prFiles = (...paths: string[]) =>
       paths.map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }));
@@ -506,6 +548,11 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       'broad-or-empty-followup',
       [...files, ...importers].map((file) => file.filename),
     ]);
+    // An untouched PR file re-exporting a merged module is outside the graph.
+    assert.deepEqual(
+      (await scope(head, mainTip, reviewed, base, prFiles('g/golf.ts'))).slice(0, 2),
+      ['full', 'unsupported-module-dependencies'],
+    );
     // A PR file the merge itself edited is re-reviewed, even with no new author edit.
     const nextTip = mergeMain('c/charlie.ts', charlie('C', 3));
     const merge = git('rev-parse', 'HEAD');

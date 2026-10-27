@@ -73,14 +73,19 @@ export function runConfiguration(
   };
 }
 
-/** A pool's draw and the provider defaults it brings are not policy; the pool itself is. */
+/** A pool's members, its draw and the provider defaults it brings are not policy. */
 export function modelPolicy(
   options: ReviewRunOptions,
   draw: { model: string; auxModel: string; baseURL?: string; auxBackend?: string },
 ) {
   const pooled = (options.modelPool?.length ?? 0) > 1;
-  const policy =
-    pooled && !options.modelOptionsExplicit ? { ...options, modelOptions: undefined } : options;
+  const policy = pooled
+    ? {
+        ...options,
+        modelPool: ['pool'],
+        ...(options.modelOptionsExplicit ? {} : { modelOptions: undefined }),
+      }
+    : options;
   return {
     ...(pooled ? {} : { ...draw, auxBaseURL: options.auxBaseURL }),
     modelOptions: policy.modelOptions,

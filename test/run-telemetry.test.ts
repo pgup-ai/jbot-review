@@ -122,7 +122,7 @@ test('configuration fingerprints policy changes while excluding credentials and 
   );
 });
 
-test('a pool draw is not a policy change; explicit options and a single model are', () => {
+test('a pool draw or membership is not a policy change; explicit options and a single model are', () => {
   const pool = normalizeOptions({ modelPool: ['opencode/a', 'poolside/b'] });
   const policy = (options: typeof pool, model: string) =>
     JSON.stringify(modelPolicy(options, { model, auxModel: model }));
@@ -130,6 +130,10 @@ test('a pool draw is not a policy change; explicit options and a single model ar
   assert.equal(
     policy({ ...pool, modelOptions: { reasoningEffort: 'low' } }, 'opencode/a'),
     policy({ ...pool, modelOptions: { reasoningEffort: 'default' } }, 'poolside/b'),
+  );
+  assert.equal(
+    policy(pool, 'opencode/a'),
+    policy({ ...pool, modelPool: ['opencode/a', 'commandcode/c', 'opencode/d'] }, 'opencode/a'),
   );
   const explicit = { ...pool, modelOptionsExplicit: true };
   assert.notEqual(
