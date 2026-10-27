@@ -380,8 +380,10 @@ export async function planIncrementalReview(input: {
       );
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
-      // These forms defeat the simple declaration/reference expansion.
+      // These forms defeat the simple declaration/reference expansion. Unchanged files had
+      // their full review at the baseline; their callers still match by imported name below.
       if (
+        changed.includes(file.filename) &&
         texts.some((text) =>
           /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
             text,

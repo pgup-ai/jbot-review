@@ -272,6 +272,23 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    git('checkout', '-q', '--detach', head);
+    write('pkg/index.ts', 'export default function implementation() {\n return 1;\n}\n');
+    write('other/label.ts', 'export function label() {\n  return "ready";\n}\n');
+    const untouchedDefault = commit();
+    write('other/label.ts', 'export function label() {\n  return "idle";\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(untouchedDefault, base)],
+          openThreadPaths: new Set(),
+          files: [...files, { filename: 'pkg/index.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'bounded-followup',
+    );
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],

@@ -1682,10 +1682,10 @@ async function runReviewPipeline(params: {
       })}`,
     );
   const fullReviewFiles = files;
+  // The jbot build stays out, as in the auxiliary policy: releases ship daily.
   const scopePolicy = auxiliaryPolicy({
     version: 1,
     ...modelPolicy(options, { model, auxModel, baseURL }),
-    reviewer: runIdentity(process.env).reviewerRevision,
   });
   const openThreadPaths = new Set(
     allPriorJbotThreads.filter((thread) => !thread.isResolved).map((thread) => thread.path),

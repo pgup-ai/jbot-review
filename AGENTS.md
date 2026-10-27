@@ -62,7 +62,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    still be reported. Missing history, changed policy, a changed rule document the
    PR does not itself edit, a base tip the PR has not merged, uncertain
    dependencies, explicit reruns and auto-approval require a full review. Policies
-   hash models, options, prompts and the build, not rule text: discovery follows
+   hash options and a single model, not a pool's members, the jbot build or rule text: discovery follows
    the diff, and a rule document the PR edits is reviewed as a changed file. A merge from the base branch does not: the follow-up selects the PR files
    the author or the merged commits edited, plus PR files importing a module they
    changed. Never silently narrow
