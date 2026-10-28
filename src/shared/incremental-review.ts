@@ -409,9 +409,15 @@ export async function planIncrementalReview(input: {
       sources.set(file.filename, texts);
     }
     const edited = changed.flatMap((path) => sources.get(path)!);
-    const repo = new Set(
-      (await git('ls-tree', '-r', '--name-only', '-z', input.head)).split('\0').filter(Boolean),
+    // The tree listing outgrows the default buffer in large monorepos.
+    const listing = await gitWithin(input.workspace, () => deadline, 64 * 1024 * 1024)(
+      'ls-tree',
+      '-r',
+      '--name-only',
+      '-z',
+      input.head,
     );
+    const repo = new Set(listing.split('\0').filter(Boolean));
     const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
     for (const [path, texts] of sources) {
       // These forms defeat the simple declaration/reference expansion. An unchanged file had its
