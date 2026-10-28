@@ -351,6 +351,25 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
       'string-keyed-dependencies',
     );
+    write(
+      'core/limit.ts',
+      "import { format } from '../util/format';\nexport function limit() {\n  return format(bus.emit(LedgerEvents.Posted));\n}\n",
+    );
+    const constantKey = commit();
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: constantKey })).reason,
+      'string-keyed-dependencies',
+    );
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...quietPlan,
+          head: constantKey,
+          files: [...quietFiles, { filename: 'docs/guide.mdx', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'unsupported-or-large-pr',
+    );
     // A fix's own tests do not count toward a broad follow-up.
     git('checkout', '-q', '--detach', head);
     const suites = ['alpha', 'bravo', 'charlie'].map((name) => `core/__tests__/${name}.test.ts`);

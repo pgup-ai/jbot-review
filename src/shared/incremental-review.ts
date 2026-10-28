@@ -11,7 +11,7 @@ import {
   JS_GLOBS,
 } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
-import { isDocOnlyChange, PATH_PATTERNS } from './diff-context.ts';
+import { PATH_PATTERNS } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
 const exec = promisify(execFile);
@@ -235,6 +235,8 @@ export function impactedReviewFiles(
   return files.filter((file) => selected.has(file.filename));
 }
 
+// Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
+const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
@@ -350,8 +352,7 @@ export async function planIncrementalReview(input: {
     if (
       input.files.length > 80 ||
       input.files.some(
-        (file) =>
-          !file.patch || !(JS_SOURCE.test(file.filename) || isDocOnlyChange([file.filename])),
+        (file) => !file.patch || !(JS_SOURCE.test(file.filename) || PROSE_FILE.test(file.filename)),
       )
     )
       return full('unsupported-or-large-pr');
@@ -438,6 +439,12 @@ export async function planIncrementalReview(input: {
             ) &&
             (changed.includes(path) ||
               !!merged?.size ||
+              // A key passed as a constant could be any listener's.
+              edited.some((t) =>
+                /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage)|\.(?:emit|emitAsync|publish))\(\s*(?!['"`{[)\s])/.test(
+                  t,
+                ),
+              ) ||
               [
                 ...text.matchAll(
                   /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)|\.(?:emit|emitAsync|publish))\(\s*[{[]?[^'"`)]*(['"`])([^'"`\n]*)\1/g,
