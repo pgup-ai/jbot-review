@@ -235,6 +235,11 @@ export function impactedReviewFiles(
   return files.filter((file) => selected.has(file.filename));
 }
 
+// Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
+const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
+// Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
+const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
 export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
   'no-completed-baseline',
@@ -341,21 +346,28 @@ export async function planIncrementalReview(input: {
       if (status !== 'M') return full('added-removed-or-renamed-file');
       changed.push(path);
     }
-    if (!changed.length || changed.length > 3) return full('broad-or-empty-followup');
+    // A fix's own tests don't make a follow-up broad.
+    const broad = () => changed.filter((path) => !TEST_FILE.test(path)).length > 3;
+    if (!changed.length || broad()) return full('broad-or-empty-followup');
     if (
       input.files.length > 80 ||
-      input.files.some((file) => !file.patch || !JS_SOURCE.test(file.filename))
+      input.files.some(
+        (file) => !file.patch || !(JS_SOURCE.test(file.filename) || PROSE_FILE.test(file.filename)),
+      )
     )
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
+    // A test under a sensitive directory cannot change what that code does, and a monorepo
+    // app's own name (apps/api, apps/auth) says nothing about the file inside it.
     const sensitive = (path: string) =>
+      !TEST_FILE.test(path) &&
       [
         PATH_PATTERNS.security,
         PATH_PATTERNS.data,
         PATH_PATTERNS.api,
         PATH_PATTERNS.infra,
         PATH_PATTERNS.tooling,
-      ].some((pattern) => pattern.test(path));
+      ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
     if (changed.some(sensitive)) return full('sensitive-followup');
     const patch = await git(
       '--literal-pathspecs',
@@ -369,21 +381,47 @@ export async function planIncrementalReview(input: {
       ...changed,
     );
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
-    if (edits.length > 120 || edits.some((line) => /\b(import|export|require)\b/.test(line)))
+    // An export edit changes the contract and a computed load can reach anything; a static
+    // import or a comment naming one does not, as both sides' imports feed the graph below.
+    if (
+      edits.length > 120 ||
+      edits.some((line) => /^[+-]\s*export\b|\b(?:require|import)\s*\(/.test(line))
+    )
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = [...changed, ...(merged ?? [])].map((path) => {
-      const stem = posix.basename(path).replace(/\.[^.]+$/, '');
-      return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
-    });
+    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
+      .map((path) => {
+        const stem = posix.basename(path).replace(/\.[^.]+$/, '');
+        return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
+      })
+      .filter(Boolean);
     let bytes = 0;
     for (const file of input.files) {
+      // Prose carries no imports or wiring for the graph to follow.
+      if (!JS_SOURCE.test(file.filename)) {
+        sources.set(file.filename, ['', '']);
+        continue;
+      }
       const texts = await Promise.all(
         [baseline.head, input.head].map((ref) => git('show', `${ref}:${file.filename}`)),
       );
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
+      sources.set(file.filename, texts);
+    }
+    const edited = changed.flatMap((path) => sources.get(path)!);
+    // The tree listing outgrows the default buffer in large monorepos.
+    const listing = await gitWithin(input.workspace, () => deadline, 64 * 1024 * 1024)(
+      'ls-tree',
+      '-r',
+      '--name-only',
+      '-z',
+      input.head,
+    );
+    const repo = new Set(listing.split('\0').filter(Boolean));
+    const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
+    for (const [path, texts] of sources) {
       // These forms defeat the simple declaration/reference expansion. An unchanged file had its
       // full review at the baseline, so it counts only when it may load a changed module: by name,
       // or through a computed specifier or eval that could name anything.
@@ -393,36 +431,55 @@ export async function planIncrementalReview(input: {
             /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
               text,
             ) &&
-            (changed.includes(file.filename) ||
+            (changed.includes(path) ||
               /\b(?:require|import)\s*\(\s*(?!['"])|\beval\s*\(/.test(text) ||
               modules.some((name) => text.includes(name))),
         )
       )
         return full('unsupported-module-dependencies');
-      // String-keyed wiring (events, queues, DI tokens) is invisible to the symbol graph.
+      // String-keyed wiring (events, queues, DI tokens) is invisible to the symbol graph. An
+      // unchanged file counts only when a changed file names one of its keys, or a merge could.
       if (
-        texts.some((text) =>
-          /@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)\(\s*['"`{[]|\.(?:emit|emitAsync|publish)\(\s*['"`]/.test(
-            text,
-          ),
+        texts.some(
+          (text) =>
+            /@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)\(\s*['"`{[]|\.(?:emit|emitAsync|publish)\(\s*['"`]/.test(
+              text,
+            ) &&
+            (changed.includes(path) ||
+              !!merged?.size ||
+              // A key passed as a constant could be any listener's or consumer's.
+              edited.some((t) =>
+                /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)|\.(?:emit|emitAsync|publish))\(\s*(?!['"`{[)\s])|\bprovide:\s*(?!['"`\s])/.test(
+                  t,
+                ),
+              ) ||
+              [
+                ...text.matchAll(
+                  /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)|\.(?:emit|emitAsync|publish))\(\s*[{[]?[^'"`)]*(['"`])([^'"`\n]*)\1/g,
+                ),
+              ].some(
+                ([, , key]) => !key || key.includes('${') || edited.some((t) => t.includes(key)),
+              )),
         )
       )
         return full('string-keyed-dependencies');
+      // Relative imports resolve against the whole tree: an unchanged module outside the PR cannot
+      // carry this follow-up's change. A default import is anonymous to the graph only when it
+      // names a PR file.
       if (
         texts.some((text) =>
-          indexEvidenceSource(file.filename, text).imports.some((binding) =>
+          indexEvidenceSource(path, text).imports.some((binding) =>
             binding.from.startsWith('.')
-              ? !resolveEvidenceImport(file.filename, binding.from, paths)
-              : binding.imported === 'default',
+              ? !resolveEvidenceImport(path, binding.from, repo)
+              : binding.imported === 'default' &&
+                !!resolveEvidenceImport(path, binding.from, paths, aliases),
           ),
         )
       )
         return full('unresolved-import');
-      sources.set(file.filename, texts);
     }
     if (merged?.size) {
       // A PR file importing a module the merge changed can break without being edited.
-      const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
       for (const [path, [, text]] of sources) {
         const hits = indexEvidenceSource(path, text).imports.flatMap(
           (binding) => resolveEvidenceImport(path, binding.from, merged, aliases) ?? [],
@@ -432,7 +489,7 @@ export async function planIncrementalReview(input: {
         if ([path, ...hits].some(sensitive)) return full('sensitive-followup');
         if (!changed.includes(path)) changed.push(path);
       }
-      if (changed.length > 3) return full('broad-or-empty-followup');
+      if (broad()) return full('broad-or-empty-followup');
     }
     const files = impactedReviewFiles(input.files, changed, sources);
     if (files.length === input.files.length || files.length > 8) return full('broad-impact');
@@ -440,16 +497,19 @@ export async function planIncrementalReview(input: {
     // Widen to a full review rather than trusting that incomplete graph.
     const terms = [
       ...new Set(
-        files.flatMap((file) => [
-          posix.basename(file.filename).replace(/\.[^.]+$/, ''),
-          ...sources
-            .get(file.filename)!
-            .flatMap((text) => indexImpactSource(file.filename, text).declarations),
-        ]),
+        // Prose has no declarations, and its name is no module anyone imports.
+        files
+          .filter((file) => JS_SOURCE.test(file.filename))
+          .flatMap((file) => [
+            posix.basename(file.filename).replace(/\.[^.]+$/, ''),
+            ...sources
+              .get(file.filename)!
+              .flatMap((text) => indexImpactSource(file.filename, text).declarations),
+          ]),
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
-    for (const ref of [baseline.head, input.head]) {
+    for (const ref of terms.length ? [baseline.head, input.head] : []) {
       const references = await git(
         'grep',
         '-l',

@@ -313,6 +313,133 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // None of these block a follow-up: an unchanged listener whose key the change doesn't name,
+    // imports of modules outside the PR or from packages, prose, and an added import line.
+    git('checkout', '-q', '--detach', head);
+    write(
+      'ledger/listener.ts',
+      "import { OnEvent } from '@nestjs/event-emitter';\nexport class L {\n  @OnEvent('ledger.posted')\n  handle() {\n    return 1;\n  }\n}\n",
+    );
+    write('util/format.ts', 'export function format(value: number) {\n  return value;\n}\n');
+    write(
+      'other/label.ts',
+      "import dayjs from 'dayjs';\nimport { format } from '../util/format';\nexport function label() {\n  return format(dayjs().day());\n}\n",
+    );
+    write('docs/format.md', 'Notes.\n');
+    const quiet = commit();
+    const quietFiles = [
+      ...files,
+      ...['ledger/listener.ts', 'docs/format.md'].map((filename) => ({
+        filename,
+        patch: '@@ -0,0 +1 @@\n+a',
+      })),
+    ];
+    write(
+      'core/limit.ts',
+      "import { format } from '../util/format';\nexport function limit() {\n  return format(6);\n}\n",
+    );
+    const quietPlan = { ...input, priorBodies: [body(quiet, base)], files: quietFiles };
+    const importAdded = commit();
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: importAdded })).reason,
+      'bounded-followup',
+    );
+    // Prose named like a module outside the PR is no reference to it, even edited alone.
+    write('docs/format.md', 'Notes on limits.\n');
+    const proseOnly = await planIncrementalReview({
+      ...quietPlan,
+      head: commit(),
+      priorBodies: [body(importAdded, base)],
+    });
+    assert.deepEqual(
+      [proseOnly.reason, proseOnly.files.map((file) => file.filename)],
+      ['bounded-followup', ['docs/format.md']],
+    );
+    write(
+      'core/limit.ts',
+      "import { format } from '../util/format';\nexport function limit() {\n  return format('ledger.posted'.length);\n}\n",
+    );
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+      'string-keyed-dependencies',
+    );
+    write(
+      'core/limit.ts',
+      "import { format } from '../util/format';\nexport function limit() {\n  return format(bus.emit(LedgerEvents.Posted));\n}\n",
+    );
+    const constantKey = commit();
+    for (const line of [
+      'class Holder {\n  constructor(@Inject(TOKEN) readonly token: string) {}\n}',
+      'const provider = { provide: TOKEN, useValue: 1 };',
+    ]) {
+      write(
+        'core/limit.ts',
+        `import { format } from '../util/format';\n${line}\nexport function limit() {\n  return format(6);\n}\n`,
+      );
+      assert.equal(
+        (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+        'string-keyed-dependencies',
+        line,
+      );
+    }
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: constantKey })).reason,
+      'string-keyed-dependencies',
+    );
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...quietPlan,
+          head: constantKey,
+          files: [...quietFiles, { filename: 'docs/guide.mdx', patch: '@@ -0,0 +1 @@\n+a' }],
+        })
+      ).reason,
+      'unsupported-or-large-pr',
+    );
+    // A fix's own tests do not count toward a broad follow-up.
+    git('checkout', '-q', '--detach', head);
+    const suites = ['alpha', 'bravo', 'charlie'].map((name) => `core/__tests__/${name}.test.ts`);
+    const suite = (value: number) => `export function suite() {\n  return ${value};\n}\n`;
+    for (const path of suites) write(path, suite(1));
+    const untested = commit();
+    for (const path of suites) write(path, suite(2));
+    write('core/limit.ts', 'export function limit() {\n  return 4;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(untested, base)],
+          files: [
+            ...files,
+            ...suites.map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+          ],
+        })
+      ).reason,
+      'bounded-followup',
+    );
+    // A test under a sensitive directory is not itself sensitive.
+    for (const [path, reason] of [
+      ['api/__tests__/handler.test.ts', 'bounded-followup'],
+      ['api/handler.ts', 'sensitive-followup'],
+      ['api/spec/schema.ts', 'sensitive-followup'],
+      ['api/test/route.ts', 'sensitive-followup'],
+      ['apps/api/src/helper.ts', 'bounded-followup'],
+      ['packages/api/src/helper.ts', 'bounded-followup'],
+      ['apps/api/src/controllers/limits.ts', 'sensitive-followup'],
+    ] as const) {
+      git('checkout', '-q', '--detach', head);
+      write(path, 'export function check() {\n  return 1;\n}\n');
+      const prior = commit();
+      write(path, 'export function check() {\n  return 2;\n}\n');
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(prior, base)],
+        files: [...files, { filename: path, patch: '@@ -0,0 +1 @@\n+a' }],
+      });
+      assert.equal(plan.reason, reason, path);
+    }
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],
@@ -588,6 +715,46 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         'full',
         'sensitive-followup',
       ]);
+    // A merged test module under a sensitive directory is not itself sensitive.
+    const hotelBase = mergeMain(
+      'api/__tests__/fixture.test.ts',
+      'export function fixture() {\n  return 1;\n}\n',
+    );
+    write(
+      'h/hotel.ts',
+      "import { fixture } from '@app/api/__tests__/fixture.test';\nexport function hotel() {\n  return fixture();\n}\n",
+    );
+    const hotelHead = commit();
+    const fixtureTip = mergeMain(
+      'api/__tests__/fixture.test.ts',
+      'export function fixture() {\n  return 2;\n}\n',
+    );
+    write('a/alpha.ts', 'export function alpha() {\n  return 13;\n}\n');
+    assert.deepEqual(
+      await scope(commit(), fixtureTip, hotelHead, hotelBase, prFiles('h/hotel.ts')),
+      ['incremental', 'bounded-base-merge', ['a/alpha.ts', 'h/hotel.ts']],
+    );
+    // A merged non-code module still counts for an unchanged file that loads it.
+    const configBase = mergeMain('shared/config.json', '{ "limit": 1 }\n');
+    write(
+      'i/india.ts',
+      "const config = require('../shared/config.json');\nexport function india() {\n  return config;\n}\n",
+    );
+    const indiaHead = commit();
+    const configTip = mergeMain('shared/config.json', '{ "limit": 2 }\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 14;\n}\n');
+    assert.deepEqual(
+      (await scope(commit(), configTip, indiaHead, configBase, prFiles('i/india.ts'))).slice(0, 2),
+      ['full', 'unsupported-module-dependencies'],
+    );
+    // A merged dotfile has no module name to match.
+    const dotfileHead = git('rev-parse', 'HEAD');
+    const dotfileTip = mergeMain('.nvmrc', '22\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 15;\n}\n');
+    assert.deepEqual(
+      await scope(commit(), dotfileTip, dotfileHead, configTip, prFiles('g/golf.ts')),
+      ['incremental', 'bounded-base-merge', ['a/alpha.ts']],
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
