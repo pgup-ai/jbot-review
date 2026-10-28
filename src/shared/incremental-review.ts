@@ -390,12 +390,12 @@ export async function planIncrementalReview(input: {
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])].map(
-      (path) => {
+    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
+      .map((path) => {
         const stem = posix.basename(path).replace(/\.[^.]+$/, '');
         return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
-      },
-    );
+      })
+      .filter(Boolean);
     let bytes = 0;
     for (const file of input.files) {
       // Prose carries no imports or wiring for the graph to follow.

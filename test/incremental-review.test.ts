@@ -747,6 +747,14 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       (await scope(commit(), configTip, indiaHead, configBase, prFiles('i/india.ts'))).slice(0, 2),
       ['full', 'unsupported-module-dependencies'],
     );
+    // A merged dotfile has no module name to match.
+    const dotfileHead = git('rev-parse', 'HEAD');
+    const dotfileTip = mergeMain('.nvmrc', '22\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 15;\n}\n');
+    assert.deepEqual(
+      await scope(commit(), dotfileTip, dotfileHead, configTip, prFiles('g/golf.ts')),
+      ['incremental', 'bounded-base-merge', ['a/alpha.ts']],
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
