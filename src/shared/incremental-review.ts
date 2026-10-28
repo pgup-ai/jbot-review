@@ -235,10 +235,10 @@ export function impactedReviewFiles(
   return files.filter((file) => selected.has(file.filename));
 }
 
-/** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
+/** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
 export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
   'no-completed-baseline',
   'policy-changed',

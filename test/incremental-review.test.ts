@@ -380,6 +380,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ['api/spec/schema.ts', 'sensitive-followup'],
       ['api/test/route.ts', 'sensitive-followup'],
       ['apps/api/src/helper.ts', 'bounded-followup'],
+      ['packages/api/src/helper.ts', 'bounded-followup'],
       ['apps/api/src/controllers/limits.ts', 'sensitive-followup'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
