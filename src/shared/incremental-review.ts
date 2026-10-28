@@ -11,7 +11,7 @@ import {
   JS_GLOBS,
 } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
-import { PATH_PATTERNS } from './diff-context.ts';
+import { PATH_PATTERNS, TEST_ONLY_FILE } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
 const exec = promisify(execFile);
@@ -350,7 +350,7 @@ export async function planIncrementalReview(input: {
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does.
     const sensitive = (path: string) =>
-      !PATH_PATTERNS.tests.test(path) &&
+      !TEST_ONLY_FILE.test(path) &&
       [
         PATH_PATTERNS.security,
         PATH_PATTERNS.data,

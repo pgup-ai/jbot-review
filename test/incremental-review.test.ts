@@ -317,6 +317,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     for (const [path, reason] of [
       ['api/__tests__/handler.test.ts', 'bounded-followup'],
       ['api/handler.ts', 'sensitive-followup'],
+      ['api/spec/schema.ts', 'sensitive-followup'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write(path, 'export function check() {\n  return 1;\n}\n');
