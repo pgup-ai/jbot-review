@@ -1702,7 +1702,6 @@ async function runReviewPipeline(params: {
       : priorJbotReviewGroups.map((group) => group.body),
     forceFull:
       !options.skipUnchanged ||
-      options.autoApprove ||
       !priorThreadStateKnown ||
       (mainCliBackend === 'commandcode'
         ? !options.commandCodeTools
@@ -2824,14 +2823,13 @@ async function runReviewPipeline(params: {
       (decision) => decision.session === 'guideline-compliance',
     );
     // Compliance folded into main review (sweep) or a lens (joint) keeps its full scope.
-    // Explicit reruns and auto-approval re-attest every file.
+    // Explicit reruns re-attest every file.
     const complianceRecheck =
       !complianceDecided &&
       guidelineCandidate &&
       complianceGuidelines &&
       !localDiff &&
       options.skipUnchanged &&
-      !options.autoApprove &&
       headSha &&
       baseSha &&
       reviewScope.mode === 'full' &&

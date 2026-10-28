@@ -233,7 +233,7 @@ edits, module forms or string-keyed wiring that may reach a changed module,
 unresolvable relative imports, broad changes (a fix's own tests don't count),
 edits under security, data, API, infra or tooling paths (except `__tests__/`
 folders and `.test`/`.spec` files),
-tool-less reviewers, explicit reruns and auto-approval. Verification stays
+tool-less reviewers and explicit reruns. Verification stays
 enabled according to its existing setting. Reports identify incremental reviews;
 telemetry records the baseline, selected/total files and fallback reason. Quiet
 clean runs keep the last posted baseline, so their changes remain included in
@@ -1305,7 +1305,7 @@ Merging the base branch, editing the PR description, a new jbot release and
 the pool member a push draws don't count as changes; a base merge that edits a
 rule document the PR does not itself edit does. Findings on the other PR
 files are dropped; that review's results stand for them. The review states the
-narrowed scope. Explicit reruns, auto-approval, PRs of 300 or more files and
+narrowed scope. Explicit reruns, PRs of 300 or more files and
 unavailable history check every file.
 
 On OpenCode with a tool-calling (agentic) model, main review and compliance
