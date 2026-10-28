@@ -313,6 +313,23 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // A test under a sensitive directory is not itself sensitive.
+    for (const [path, reason] of [
+      ['api/__tests__/handler.test.ts', 'bounded-followup'],
+      ['api/handler.ts', 'sensitive-followup'],
+    ] as const) {
+      git('checkout', '-q', '--detach', head);
+      write(path, 'export function check() {\n  return 1;\n}\n');
+      const prior = commit();
+      write(path, 'export function check() {\n  return 2;\n}\n');
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(prior, base)],
+        files: [...files, { filename: path, patch: '@@ -0,0 +1 @@\n+a' }],
+      });
+      assert.equal(plan.reason, reason, path);
+    }
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],

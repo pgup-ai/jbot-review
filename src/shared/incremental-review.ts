@@ -348,7 +348,9 @@ export async function planIncrementalReview(input: {
     )
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
+    // A test under a sensitive directory cannot change what that code does.
     const sensitive = (path: string) =>
+      !PATH_PATTERNS.tests.test(path) &&
       [
         PATH_PATTERNS.security,
         PATH_PATTERNS.data,
