@@ -313,12 +313,36 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // A fix's own tests do not count toward a broad follow-up.
+    git('checkout', '-q', '--detach', head);
+    const suites = ['alpha', 'bravo', 'charlie'].map((name) => `core/__tests__/${name}.test.ts`);
+    const suite = (value: number) => `export function suite() {\n  return ${value};\n}\n`;
+    for (const path of suites) write(path, suite(1));
+    const untested = commit();
+    for (const path of suites) write(path, suite(2));
+    write('core/limit.ts', 'export function limit() {\n  return 4;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(untested, base)],
+          files: [
+            ...files,
+            ...suites.map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+          ],
+        })
+      ).reason,
+      'bounded-followup',
+    );
     // A test under a sensitive directory is not itself sensitive.
     for (const [path, reason] of [
       ['api/__tests__/handler.test.ts', 'bounded-followup'],
       ['api/handler.ts', 'sensitive-followup'],
       ['api/spec/schema.ts', 'sensitive-followup'],
       ['api/test/route.ts', 'sensitive-followup'],
+      ['apps/api/src/helper.ts', 'bounded-followup'],
+      ['apps/api/src/controllers/limits.ts', 'sensitive-followup'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write(path, 'export function check() {\n  return 1;\n}\n');

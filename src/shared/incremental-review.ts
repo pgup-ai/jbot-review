@@ -236,6 +236,9 @@ export function impactedReviewFiles(
 }
 
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
+// Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
+const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+
 export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
   'no-completed-baseline',
   'policy-changed',
@@ -341,24 +344,26 @@ export async function planIncrementalReview(input: {
       if (status !== 'M') return full('added-removed-or-renamed-file');
       changed.push(path);
     }
-    if (!changed.length || changed.length > 3) return full('broad-or-empty-followup');
+    // A fix's own tests don't make a follow-up broad.
+    const broad = () => changed.filter((path) => !TEST_FILE.test(path)).length > 3;
+    if (!changed.length || broad()) return full('broad-or-empty-followup');
     if (
       input.files.length > 80 ||
       input.files.some((file) => !file.patch || !JS_SOURCE.test(file.filename))
     )
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
-    // A test under a sensitive directory cannot change what that code does. Bare test/ and spec/
-    // directories are ambiguous (a route, an API contract), so only these markers count.
+    // A test under a sensitive directory cannot change what that code does, and a monorepo
+    // app's own name (apps/api, apps/auth) says nothing about the file inside it.
     const sensitive = (path: string) =>
-      !/(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i.test(path) &&
+      !TEST_FILE.test(path) &&
       [
         PATH_PATTERNS.security,
         PATH_PATTERNS.data,
         PATH_PATTERNS.api,
         PATH_PATTERNS.infra,
         PATH_PATTERNS.tooling,
-      ].some((pattern) => pattern.test(path));
+      ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
     if (changed.some(sensitive)) return full('sensitive-followup');
     const patch = await git(
       '--literal-pathspecs',
@@ -435,7 +440,7 @@ export async function planIncrementalReview(input: {
         if ([path, ...hits].some(sensitive)) return full('sensitive-followup');
         if (!changed.includes(path)) changed.push(path);
       }
-      if (changed.length > 3) return full('broad-or-empty-followup');
+      if (broad()) return full('broad-or-empty-followup');
     }
     const files = impactedReviewFiles(input.files, changed, sources);
     if (files.length === input.files.length || files.length > 8) return full('broad-impact');
