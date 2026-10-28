@@ -11,7 +11,7 @@ import {
   JS_GLOBS,
 } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
-import { PATH_PATTERNS, TEST_ONLY_FILE } from './diff-context.ts';
+import { PATH_PATTERNS } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
 const exec = promisify(execFile);
@@ -348,9 +348,10 @@ export async function planIncrementalReview(input: {
     )
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
-    // A test under a sensitive directory cannot change what that code does.
+    // A test under a sensitive directory cannot change what that code does. Bare test/ and spec/
+    // directories are ambiguous (a route, an API contract), so only these markers count.
     const sensitive = (path: string) =>
-      !TEST_ONLY_FILE.test(path) &&
+      !/(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i.test(path) &&
       [
         PATH_PATTERNS.security,
         PATH_PATTERNS.data,

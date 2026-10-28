@@ -172,8 +172,7 @@ const LARGE_DELETION_MIN_REMOVED = 40;
 const LARGE_DELETION_DOMINANCE = 3;
 
 /**
- * Stricter than `PATH_PATTERNS.tests` for the `testOnly` SUPPRESSION signal and the
- * incremental planner's sensitive-path exemption.
+ * Stricter than `PATH_PATTERNS.tests` for the `testOnly` SUPPRESSION signal.
  * A bare `spec/` directory is ambiguous — RSpec tests live there, but so do
  * OpenAPI/contract specs (`spec/openapi.yaml`) that are real API surface — so
  * testOnly requires an UNAMBIGUOUS marker: a `test`/`tests`/`__tests__`
@@ -181,7 +180,7 @@ const LARGE_DELETION_DOMINANCE = 3;
  * out of the suppressed path so contract-api review still fires. Erring toward
  * over-review here is safe; under-reviewing a contract is not.
  */
-export const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
 export function classifyChangeShape(files: PrFile[]): ChangeShape {
   const filenames = files.map((file) => file.filename);

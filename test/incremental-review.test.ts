@@ -318,6 +318,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ['api/__tests__/handler.test.ts', 'bounded-followup'],
       ['api/handler.ts', 'sensitive-followup'],
       ['api/spec/schema.ts', 'sensitive-followup'],
+      ['api/test/route.ts', 'sensitive-followup'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write(path, 'export function check() {\n  return 1;\n}\n');
@@ -606,6 +607,25 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         'full',
         'sensitive-followup',
       ]);
+    // A merged test module under a sensitive directory is not itself sensitive.
+    const hotelBase = mergeMain(
+      'api/__tests__/fixture.test.ts',
+      'export function fixture() {\n  return 1;\n}\n',
+    );
+    write(
+      'h/hotel.ts',
+      "import { fixture } from '@app/api/__tests__/fixture.test';\nexport function hotel() {\n  return fixture();\n}\n",
+    );
+    const hotelHead = commit();
+    const fixtureTip = mergeMain(
+      'api/__tests__/fixture.test.ts',
+      'export function fixture() {\n  return 2;\n}\n',
+    );
+    write('a/alpha.ts', 'export function alpha() {\n  return 13;\n}\n');
+    assert.deepEqual(
+      await scope(commit(), fixtureTip, hotelHead, hotelBase, prFiles('h/hotel.ts')),
+      ['incremental', 'bounded-base-merge', ['a/alpha.ts', 'h/hotel.ts']],
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
