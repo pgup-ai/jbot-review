@@ -356,6 +356,20 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       "import { format } from '../util/format';\nexport function limit() {\n  return format(bus.emit(LedgerEvents.Posted));\n}\n",
     );
     const constantKey = commit();
+    for (const line of [
+      'class Holder {\n  constructor(@Inject(TOKEN) readonly token: string) {}\n}',
+      'const provider = { provide: TOKEN, useValue: 1 };',
+    ]) {
+      write(
+        'core/limit.ts',
+        `import { format } from '../util/format';\n${line}\nexport function limit() {\n  return format(6);\n}\n`,
+      );
+      assert.equal(
+        (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+        'string-keyed-dependencies',
+        line,
+      );
+    }
     assert.equal(
       (await planIncrementalReview({ ...quietPlan, head: constantKey })).reason,
       'string-keyed-dependencies',

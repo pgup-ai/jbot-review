@@ -445,9 +445,9 @@ export async function planIncrementalReview(input: {
             ) &&
             (changed.includes(path) ||
               !!merged?.size ||
-              // A key passed as a constant could be any listener's.
+              // A key passed as a constant could be any listener's or consumer's.
               edited.some((t) =>
-                /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage)|\.(?:emit|emitAsync|publish))\(\s*(?!['"`{[)\s])/.test(
+                /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)|\.(?:emit|emitAsync|publish))\(\s*(?!['"`{[)\s])|\bprovide:\s*(?!['"`\s])/.test(
                   t,
                 ),
               ) ||
