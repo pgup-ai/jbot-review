@@ -390,12 +390,12 @@ export async function planIncrementalReview(input: {
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = [...changed, ...(merged ?? [])]
-      .filter((path) => JS_SOURCE.test(path))
-      .map((path) => {
+    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])].map(
+      (path) => {
         const stem = posix.basename(path).replace(/\.[^.]+$/, '');
         return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
-      });
+      },
+    );
     let bytes = 0;
     for (const file of input.files) {
       // Prose carries no imports or wiring for the graph to follow.
@@ -509,7 +509,7 @@ export async function planIncrementalReview(input: {
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
-    for (const ref of [baseline.head, input.head]) {
+    for (const ref of terms.length ? [baseline.head, input.head] : []) {
       const references = await git(
         'grep',
         '-l',

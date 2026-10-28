@@ -339,15 +339,21 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       "import { format } from '../util/format';\nexport function limit() {\n  return format(6);\n}\n",
     );
     const quietPlan = { ...input, priorBodies: [body(quiet, base)], files: quietFiles };
+    const importAdded = commit();
     assert.equal(
-      (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+      (await planIncrementalReview({ ...quietPlan, head: importAdded })).reason,
       'bounded-followup',
     );
-    // Prose named like a module outside the PR is no reference to it.
+    // Prose named like a module outside the PR is no reference to it, even edited alone.
     write('docs/format.md', 'Notes on limits.\n');
-    assert.equal(
-      (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
-      'bounded-followup',
+    const proseOnly = await planIncrementalReview({
+      ...quietPlan,
+      head: commit(),
+      priorBodies: [body(importAdded, base)],
+    });
+    assert.deepEqual(
+      [proseOnly.reason, proseOnly.files.map((file) => file.filename)],
+      ['bounded-followup', ['docs/format.md']],
     );
     write(
       'core/limit.ts',
@@ -727,6 +733,19 @@ test('a merge from the base branch re-reviews only the PR files it or the author
     assert.deepEqual(
       await scope(commit(), fixtureTip, hotelHead, hotelBase, prFiles('h/hotel.ts')),
       ['incremental', 'bounded-base-merge', ['a/alpha.ts', 'h/hotel.ts']],
+    );
+    // A merged non-code module still counts for an unchanged file that loads it.
+    const configBase = mergeMain('shared/config.json', '{ "limit": 1 }\n');
+    write(
+      'i/india.ts',
+      "const config = require('../shared/config.json');\nexport function india() {\n  return config;\n}\n",
+    );
+    const indiaHead = commit();
+    const configTip = mergeMain('shared/config.json', '{ "limit": 2 }\n');
+    write('a/alpha.ts', 'export function alpha() {\n  return 14;\n}\n');
+    assert.deepEqual(
+      (await scope(commit(), configTip, indiaHead, configBase, prFiles('i/india.ts'))).slice(0, 2),
+      ['full', 'unsupported-module-dependencies'],
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
