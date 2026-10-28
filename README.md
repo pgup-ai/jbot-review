@@ -240,7 +240,8 @@ clean runs keep the last posted baseline, so their changes remain included in
 the next follow-up.
 
 This is conservative impact detection, not proof that every possible runtime
-relationship is known. Keep full review for final approval. Compare locally with
+relationship is known. Auto-approval follows the same rules; comment `/jbot` for
+a full review before a final approval. Compare locally with
 `node --env-file=.env --import tsx scripts/incremental-review-compare.ts`; it runs
 paired full/incremental reviews with OpenCode's free MiMo Flash model, without
 posting to GitHub.
