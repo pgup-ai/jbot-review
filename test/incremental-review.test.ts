@@ -325,11 +325,11 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       'other/label.ts',
       "import dayjs from 'dayjs';\nimport { format } from '../util/format';\nexport function label() {\n  return format(dayjs().day());\n}\n",
     );
-    write('docs/README.md', 'Notes.\n');
+    write('docs/format.md', 'Notes.\n');
     const quiet = commit();
     const quietFiles = [
       ...files,
-      ...['ledger/listener.ts', 'docs/README.md'].map((filename) => ({
+      ...['ledger/listener.ts', 'docs/format.md'].map((filename) => ({
         filename,
         patch: '@@ -0,0 +1 @@\n+a',
       })),
@@ -339,6 +339,12 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       "import { format } from '../util/format';\nexport function limit() {\n  return format(6);\n}\n",
     );
     const quietPlan = { ...input, priorBodies: [body(quiet, base)], files: quietFiles };
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+      'bounded-followup',
+    );
+    // Prose named like a module outside the PR is no reference to it.
+    write('docs/format.md', 'Notes on limits.\n');
     assert.equal(
       (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
       'bounded-followup',

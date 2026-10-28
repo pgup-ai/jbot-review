@@ -390,10 +390,12 @@ export async function planIncrementalReview(input: {
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = [...changed, ...(merged ?? [])].map((path) => {
-      const stem = posix.basename(path).replace(/\.[^.]+$/, '');
-      return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
-    });
+    const modules = [...changed, ...(merged ?? [])]
+      .filter((path) => JS_SOURCE.test(path))
+      .map((path) => {
+        const stem = posix.basename(path).replace(/\.[^.]+$/, '');
+        return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
+      });
     let bytes = 0;
     for (const file of input.files) {
       // Prose carries no imports or wiring for the graph to follow.
@@ -495,12 +497,15 @@ export async function planIncrementalReview(input: {
     // Widen to a full review rather than trusting that incomplete graph.
     const terms = [
       ...new Set(
-        files.flatMap((file) => [
-          posix.basename(file.filename).replace(/\.[^.]+$/, ''),
-          ...sources
-            .get(file.filename)!
-            .flatMap((text) => indexImpactSource(file.filename, text).declarations),
-        ]),
+        // Prose has no declarations, and its name is no module anyone imports.
+        files
+          .filter((file) => JS_SOURCE.test(file.filename))
+          .flatMap((file) => [
+            posix.basename(file.filename).replace(/\.[^.]+$/, ''),
+            ...sources
+              .get(file.filename)!
+              .flatMap((text) => indexImpactSource(file.filename, text).declarations),
+          ]),
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
