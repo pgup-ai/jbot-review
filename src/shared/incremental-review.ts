@@ -11,7 +11,7 @@ import {
   JS_GLOBS,
 } from './evidence.ts';
 import { extractChangedExportedSymbols } from './blast-radius.ts';
-import { PATH_PATTERNS } from './diff-context.ts';
+import { isDocOnlyChange, PATH_PATTERNS } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
 const exec = promisify(execFile);
@@ -349,7 +349,10 @@ export async function planIncrementalReview(input: {
     if (!changed.length || broad()) return full('broad-or-empty-followup');
     if (
       input.files.length > 80 ||
-      input.files.some((file) => !file.patch || !JS_SOURCE.test(file.filename))
+      input.files.some(
+        (file) =>
+          !file.patch || !(JS_SOURCE.test(file.filename) || isDocOnlyChange([file.filename])),
+      )
     )
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
@@ -377,7 +380,12 @@ export async function planIncrementalReview(input: {
       ...changed,
     );
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
-    if (edits.length > 120 || edits.some((line) => /\b(import|export|require)\b/.test(line)))
+    // An export edit changes the contract and a computed load can reach anything; a static
+    // import or a comment naming one does not, as both sides' imports feed the graph below.
+    if (
+      edits.length > 120 ||
+      edits.some((line) => /^[+-]\s*export\b|\b(?:require|import)\s*\(/.test(line))
+    )
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
@@ -387,11 +395,24 @@ export async function planIncrementalReview(input: {
     });
     let bytes = 0;
     for (const file of input.files) {
+      // Prose carries no imports or wiring for the graph to follow.
+      if (!JS_SOURCE.test(file.filename)) {
+        sources.set(file.filename, ['', '']);
+        continue;
+      }
       const texts = await Promise.all(
         [baseline.head, input.head].map((ref) => git('show', `${ref}:${file.filename}`)),
       );
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
+      sources.set(file.filename, texts);
+    }
+    const edited = changed.flatMap((path) => sources.get(path)!);
+    const repo = new Set(
+      (await git('ls-tree', '-r', '--name-only', '-z', input.head)).split('\0').filter(Boolean),
+    );
+    const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
+    for (const [path, texts] of sources) {
       // These forms defeat the simple declaration/reference expansion. An unchanged file had its
       // full review at the baseline, so it counts only when it may load a changed module: by name,
       // or through a computed specifier or eval that could name anything.
@@ -401,36 +422,49 @@ export async function planIncrementalReview(input: {
             /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
               text,
             ) &&
-            (changed.includes(file.filename) ||
+            (changed.includes(path) ||
               /\b(?:require|import)\s*\(\s*(?!['"])|\beval\s*\(/.test(text) ||
               modules.some((name) => text.includes(name))),
         )
       )
         return full('unsupported-module-dependencies');
-      // String-keyed wiring (events, queues, DI tokens) is invisible to the symbol graph.
+      // String-keyed wiring (events, queues, DI tokens) is invisible to the symbol graph. An
+      // unchanged file counts only when a changed file names one of its keys, or a merge could.
       if (
-        texts.some((text) =>
-          /@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)\(\s*['"`{[]|\.(?:emit|emitAsync|publish)\(\s*['"`]/.test(
-            text,
-          ),
+        texts.some(
+          (text) =>
+            /@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)\(\s*['"`{[]|\.(?:emit|emitAsync|publish)\(\s*['"`]/.test(
+              text,
+            ) &&
+            (changed.includes(path) ||
+              !!merged?.size ||
+              [
+                ...text.matchAll(
+                  /(?:@(?:OnEvent|EventPattern|MessagePattern|Process|Processor|SubscribeMessage|Inject)|\.(?:emit|emitAsync|publish))\(\s*[{[]?[^'"`)]*(['"`])([^'"`\n]*)\1/g,
+                ),
+              ].some(
+                ([, , key]) => !key || key.includes('${') || edited.some((t) => t.includes(key)),
+              )),
         )
       )
         return full('string-keyed-dependencies');
+      // Relative imports resolve against the whole tree: an unchanged module outside the PR cannot
+      // carry this follow-up's change. A default import is anonymous to the graph only when it
+      // names a PR file.
       if (
         texts.some((text) =>
-          indexEvidenceSource(file.filename, text).imports.some((binding) =>
+          indexEvidenceSource(path, text).imports.some((binding) =>
             binding.from.startsWith('.')
-              ? !resolveEvidenceImport(file.filename, binding.from, paths)
-              : binding.imported === 'default',
+              ? !resolveEvidenceImport(path, binding.from, repo)
+              : binding.imported === 'default' &&
+                !!resolveEvidenceImport(path, binding.from, paths, aliases),
           ),
         )
       )
         return full('unresolved-import');
-      sources.set(file.filename, texts);
     }
     if (merged?.size) {
       // A PR file importing a module the merge changed can break without being edited.
-      const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
       for (const [path, [, text]] of sources) {
         const hits = indexEvidenceSource(path, text).imports.flatMap(
           (binding) => resolveEvidenceImport(path, binding.from, merged, aliases) ?? [],

@@ -313,6 +313,44 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // None of these block a follow-up: an unchanged listener whose key the change doesn't name,
+    // imports of modules outside the PR or from packages, prose, and an added import line.
+    git('checkout', '-q', '--detach', head);
+    write(
+      'ledger/listener.ts',
+      "import { OnEvent } from '@nestjs/event-emitter';\nexport class L {\n  @OnEvent('ledger.posted')\n  handle() {\n    return 1;\n  }\n}\n",
+    );
+    write('util/format.ts', 'export function format(value: number) {\n  return value;\n}\n');
+    write(
+      'other/label.ts',
+      "import dayjs from 'dayjs';\nimport { format } from '../util/format';\nexport function label() {\n  return format(dayjs().day());\n}\n",
+    );
+    write('docs/README.md', 'Notes.\n');
+    const quiet = commit();
+    const quietFiles = [
+      ...files,
+      ...['ledger/listener.ts', 'docs/README.md'].map((filename) => ({
+        filename,
+        patch: '@@ -0,0 +1 @@\n+a',
+      })),
+    ];
+    write(
+      'core/limit.ts',
+      "import { format } from '../util/format';\nexport function limit() {\n  return format(6);\n}\n",
+    );
+    const quietPlan = { ...input, priorBodies: [body(quiet, base)], files: quietFiles };
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+      'bounded-followup',
+    );
+    write(
+      'core/limit.ts',
+      "import { format } from '../util/format';\nexport function limit() {\n  return format('ledger.posted'.length);\n}\n",
+    );
+    assert.equal(
+      (await planIncrementalReview({ ...quietPlan, head: commit() })).reason,
+      'string-keyed-dependencies',
+    );
     // A fix's own tests do not count toward a broad follow-up.
     git('checkout', '-q', '--detach', head);
     const suites = ['alpha', 'bravo', 'charlie'].map((name) => `core/__tests__/${name}.test.ts`);
