@@ -68,7 +68,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    changed. Never silently narrow
    scope via summary instructions. Incremental scope must be visible in the report
    and telemetry; incomplete runs cannot establish a new baseline, and a run with
-   unverified concerns records their files for the next follow-up to re-review.
+   unverified concerns on PR files records those files for the next follow-up to
+   re-review (a concern outside the PR keeps the earlier baseline).
    The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
    documentation-only follow-ups with unchanged base and policy. Incremental
    follow-ups may also reuse a matching completed guideline pass when no scoped

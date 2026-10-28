@@ -3921,14 +3921,14 @@ async function runReviewPipeline(params: {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
     }
 
-    // Model paths may carry a leading ./; only PR files can be selected again.
+    // Model paths may carry a leading ./. A concern outside the PR names no PR file to select
+    // again, so it keeps the earlier baseline and the follow-up covers every change since.
     const prPaths = new Set(fullReviewFiles.map((file) => file.filename));
     const unresolvedPaths = [
       ...new Set(
         verifiedFindings
           .filter(isUnresolvedFinding)
-          .map((finding) => posix.normalize(finding.path))
-          .filter((path) => prPaths.has(path)),
+          .map((finding) => posix.normalize(finding.path)),
       ),
     ];
     const reviewMetadata = {
@@ -3946,7 +3946,11 @@ async function runReviewPipeline(params: {
         : {}),
       ...(rulesOnly.size ? { rulesOnlyTests: [...rulesOnly] } : {}),
       baseline:
-        verificationEnabled && headSha && baseSha && incompleteSessions.length === 0
+        verificationEnabled &&
+        headSha &&
+        baseSha &&
+        incompleteSessions.length === 0 &&
+        unresolvedPaths.every((path) => prPaths.has(path))
           ? {
               head: headSha,
               base: baseSha,
