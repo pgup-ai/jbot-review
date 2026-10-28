@@ -67,6 +67,7 @@ test('incremental baselines require driver metadata and completed coverage', () 
     body(head, base).replace(`"head":"${head}"`, `"head":"${base}"`),
     body(head, base) + '\n<sup>actual footer</sup>',
     '<sup>driver</sup>\n<!-- jbot-review:baseline:{broken} -->\n',
+    body(head, base).replace(`"policy":"${policy}"`, `"policy":"${policy}","recheck":"a.ts"`),
   ])
     assert.equal(reviewBaseline(invalid), undefined);
 });
@@ -170,7 +171,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       base,
       policy,
       // A later review that set no baseline does not hide the completed one before it.
-      priorBodies: [body(reviewed, base), 'A later review with an unverified finding.'],
+      priorBodies: [body(reviewed, base), 'A later review with an incomplete session.'],
       rulesChangedSince: async () => false,
     };
     const result = await planIncrementalReview(input);
@@ -178,6 +179,23 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     assert.deepEqual(
       result.files.map((file) => file.filename),
       ['core/limit.ts', 'worker/job.ts'],
+    );
+    // A file whose concern verification left open is reviewed again, unchanged or not.
+    const recheck = withReviewCoverage(
+      withReviewBaseline('<sup>driver</sup>', {
+        head: reviewed,
+        base,
+        policy,
+        recheck: ['other/label.ts', 'gone.ts'],
+      }),
+      reviewed,
+      true,
+    );
+    assert.deepEqual(
+      (await planIncrementalReview({ ...input, priorBodies: [recheck] })).files.map(
+        (file) => file.filename,
+      ),
+      ['core/limit.ts', 'worker/job.ts', 'other/label.ts'],
     );
     const emitted = new Set<string>();
     for (const [overrides, reason] of [

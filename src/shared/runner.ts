@@ -3921,6 +3921,9 @@ async function runReviewPipeline(params: {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
     }
 
+    const unresolvedPaths = [
+      ...new Set(verifiedFindings.filter(isUnresolvedFinding).map((finding) => finding.path)),
+    ];
     const reviewMetadata = {
       auxiliaryBaselines,
       diagnosticsUrl,
@@ -3936,12 +3939,13 @@ async function runReviewPipeline(params: {
         : {}),
       ...(rulesOnly.size ? { rulesOnlyTests: [...rulesOnly] } : {}),
       baseline:
-        verificationEnabled &&
-        headSha &&
-        baseSha &&
-        incompleteSessions.length === 0 &&
-        !verifiedFindings.some(isUnresolvedFinding)
-          ? { head: headSha, base: baseSha, policy: scopePolicy }
+        verificationEnabled && headSha && baseSha && incompleteSessions.length === 0
+          ? {
+              head: headSha,
+              base: baseSha,
+              policy: scopePolicy,
+              ...(unresolvedPaths.length ? { recheck: unresolvedPaths } : {}),
+            }
           : undefined,
     };
 

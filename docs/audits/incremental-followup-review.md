@@ -46,7 +46,7 @@ This first implementation accepts only bounded modifications to existing JavaScr
 
 Update 2026-09-28: open findings now force a full review only on files the follow-up edits, and a merge from the base branch no longer forces one; it re-reviews the PR files the author or the merged commits edited, plus PR files importing a module the merge changed.
 
-Reports identify incremental scope and file counts. A separate completion marker prevents existing full-review skip and compaction paths from treating incremental coverage as full coverage. Run telemetry includes the baseline, reason, selected/total files and patch bytes, and planning time. Incomplete or unverified results cannot become a baseline. Quiet clean reviews leave the last posted baseline in place, so the next review includes intervening commits.
+Reports identify incremental scope and file counts. A separate completion marker prevents existing full-review skip and compaction paths from treating incremental coverage as full coverage. Run telemetry includes the baseline, reason, selected/total files and patch bytes, and planning time. Incomplete results cannot become a baseline; a baseline with unverified concerns names their files, and the next follow-up re-reviews them. Quiet clean reviews leave the last posted baseline in place, so the next review includes intervening commits.
 
 This is a small synthetic follow-up experiment, not the full quality corpus or a production performance benchmark. The full quality corpus was not run, following the earlier request to defer it; the repository normally requires that gate for default-policy changes. The matched runs below are narrower evidence, not a substitute for that gate. No public Action wrapper change is needed.
 

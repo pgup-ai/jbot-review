@@ -222,8 +222,9 @@ description edits don't count. A moved base counts only until the PR merges
 it: the follow-up then selects the PR files the author or the merged commits
 edited, plus PR files importing a module the merge changed. A rebase rewrites
 history and falls back to full review. A model pool counts
-as one setting, so the member a push draws does not force full review, and a
-later review that left a finding unverified keeps the earlier baseline. The
+as one setting, so the member a push draws does not force full review. A
+review that leaves a concern unverified still sets the baseline, and the next
+follow-up re-reviews the files carrying those concerns. The
 first version handles small modifications to existing JavaScript/TypeScript
 files in PRs whose other files are JavaScript/TypeScript or prose. It expands the selected files
 through declarations, references and their directories, delivering each selected
