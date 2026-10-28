@@ -41,7 +41,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import {
   computeFinderTimeoutMs,
   computeRunDeadline,
@@ -3921,6 +3921,16 @@ async function runReviewPipeline(params: {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
     }
 
+    // Model paths may carry a leading ./. A concern outside the PR names no PR file to select
+    // again, so it keeps the earlier baseline and the follow-up covers every change since.
+    const prPaths = new Set(fullReviewFiles.map((file) => file.filename));
+    const unresolvedPaths = [
+      ...new Set(
+        verifiedFindings
+          .filter(isUnresolvedFinding)
+          .map((finding) => posix.normalize(finding.path)),
+      ),
+    ];
     const reviewMetadata = {
       auxiliaryBaselines,
       diagnosticsUrl,
@@ -3940,8 +3950,13 @@ async function runReviewPipeline(params: {
         headSha &&
         baseSha &&
         incompleteSessions.length === 0 &&
-        !verifiedFindings.some(isUnresolvedFinding)
-          ? { head: headSha, base: baseSha, policy: scopePolicy }
+        unresolvedPaths.every((path) => prPaths.has(path))
+          ? {
+              head: headSha,
+              base: baseSha,
+              policy: scopePolicy,
+              ...(unresolvedPaths.length ? { recheck: unresolvedPaths } : {}),
+            }
           : undefined,
     };
 

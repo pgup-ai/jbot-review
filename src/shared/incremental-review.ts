@@ -21,6 +21,8 @@ export interface ReviewBaseline {
   head: string;
   base: string;
   policy: string;
+  /** Files with a concern verification left unresolved; the next follow-up reviews them again. */
+  recheck?: string[];
 }
 
 export interface IncrementalReviewPlan {
@@ -141,7 +143,13 @@ export function reviewBaseline(body: string): ReviewBaseline | undefined {
   if (!match || !head) return;
   try {
     const row = JSON.parse(match[1]) as ReviewBaseline;
-    if (row.head === head && /^[a-f0-9]{40}$/.test(row.base) && /^[a-f0-9]{64}$/.test(row.policy))
+    if (
+      row.head === head &&
+      /^[a-f0-9]{40}$/.test(row.base) &&
+      /^[a-f0-9]{64}$/.test(row.policy) &&
+      (row.recheck === undefined ||
+        (Array.isArray(row.recheck) && row.recheck.every((path) => typeof path === 'string')))
+    )
       return row;
   } catch {
     return undefined;
@@ -267,8 +275,8 @@ export async function planIncrementalReview(input: {
     ...(shadow ? { shadow } : {}),
   });
   if (input.forceFull) return full('explicit-or-incomplete-review');
-  // A later review that could not set a baseline (a finding left unverified, a session
-  // incomplete) does not erase an earlier one: the follow-up still covers every change since it.
+  // A later review with an incomplete session sets no baseline and does not erase an earlier
+  // one: the follow-up still covers every change since it.
   const baseline = (input.priorBodies ?? []).map(reviewBaseline).reverse().find(Boolean);
   if (!baseline) return full('no-completed-baseline');
   if (!input.base) return full('base-changed');
@@ -532,7 +540,9 @@ export async function planIncrementalReview(input: {
     return {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',
-      files,
+      files: input.files.filter(
+        (file) => files.includes(file) || !!baseline.recheck?.includes(file.filename),
+      ),
       baseline: baseline.head,
       shadow,
     };
