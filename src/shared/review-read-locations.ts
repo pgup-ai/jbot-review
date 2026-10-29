@@ -144,6 +144,8 @@ export function shellSearchPattern(command: string): string | undefined {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
     let patternFile: string | undefined;
+    // rg --files and --type-list take no pattern, so their operands are paths.
+    let listing = false;
     let j = i + (gitGrep ? 2 : 1);
     for (; j < tokens.length; j++) {
       const token = tokens[j];
@@ -152,6 +154,7 @@ export function shellSearchPattern(command: string): string | undefined {
       if (token.startsWith('--regexp=')) return token.slice('--regexp='.length);
       if (token === '-f' || token === '--file') patternFile = tokens[++j];
       else if (token.startsWith('--file=')) patternFile = token.slice('--file='.length);
+      else if (token === '--files' || token === '--type-list') listing = true;
       // These flags take a value, which is not the pattern; grep's -T takes none.
       else if (
         /^-[ABCdmtg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
@@ -160,7 +163,7 @@ export function shellSearchPattern(command: string): string | undefined {
         (token === '-T' && tokens[i] === 'rg')
       )
         j++;
-      else if (!token.startsWith('-') && patternFile === undefined) return token;
+      else if (!token.startsWith('-') && patternFile === undefined && !listing) return token;
     }
     fallback ??= patternFile;
     // Its operands are paths, so the next search can only follow its separator.
