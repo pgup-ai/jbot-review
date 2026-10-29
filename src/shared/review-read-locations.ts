@@ -137,11 +137,12 @@ export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedCont
 export function shellSearchPattern(command: string): string | undefined {
   const matches = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)];
   const tokens = matches.map((m) => m[1] ?? m[2] ?? m[3]);
+  // A pattern file stands in for the pattern unless an explicit one follows,
+  // in its own command or a later one; its remaining operands are paths.
+  let fallback: string | undefined;
   for (let i = 0; i < tokens.length; i++) {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
-    // A pattern file stands in for the pattern unless an explicit one follows;
-    // either way the remaining operands are paths.
     let patternFile: string | undefined;
     for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
       const token = tokens[j];
@@ -160,9 +161,9 @@ export function shellSearchPattern(command: string): string | undefined {
         j++;
       else if (!token.startsWith('-') && patternFile === undefined) return token;
     }
-    if (patternFile !== undefined) return patternFile;
+    fallback ??= patternFile;
   }
-  return undefined;
+  return fallback;
 }
 
 /** Identifiers in a pattern; escapes are blanked so `\bFoo\b` yields `Foo`. */
