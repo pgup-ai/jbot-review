@@ -140,22 +140,26 @@ export function shellSearchPattern(command: string): string | undefined {
   for (let i = 0; i < tokens.length; i++) {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
+    // A pattern file stands in for the pattern unless an explicit one follows;
+    // either way the remaining operands are paths.
+    let patternFile: string | undefined;
     for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
       const token = tokens[j];
       if (/^(?:\|\|?|&&|;)$/.test(matches[j][3] ?? '')) break;
-      // A pattern file stands in for the pattern, leaving only paths as operands.
-      if (/^(?:-e|-f|--regexp|--file)$/.test(token)) return tokens[j + 1];
-      const attached = /^--(?:regexp|file)=(.*)$/.exec(token);
-      if (attached) return attached[1];
+      if (token === '-e' || token === '--regexp') return tokens[j + 1];
+      if (token.startsWith('--regexp=')) return token.slice('--regexp='.length);
+      if (token === '-f' || token === '--file') patternFile = tokens[++j];
+      else if (token.startsWith('--file=')) patternFile = token.slice('--file='.length);
       // These flags take a value, which is not the pattern.
-      if (
+      else if (
         /^-[ABCdmtg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
           token,
         )
       )
         j++;
-      else if (!token.startsWith('-')) return token;
+      else if (!token.startsWith('-') && patternFile === undefined) return token;
     }
+    if (patternFile !== undefined) return patternFile;
   }
   return undefined;
 }

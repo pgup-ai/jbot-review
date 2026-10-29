@@ -135,6 +135,7 @@ test('supplied overlap separates re-reads and searches of context-pack content',
     'rg -d 2 LedgerService src',
     "rg --regexp '-LedgerService' src",
     'rg --regexp=LedgerService src',
+    'grep -f patterns.txt -e LedgerService src',
   ])
     assert.equal(suppliedOverlap('/w', 'shell', { command }, supplied), 'search', command);
   assert.equal(
