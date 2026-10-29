@@ -308,6 +308,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'openai/gpt-5.4-nano',
     keyEnv: 'OPENAI_API_KEY',
     keyInput: 'openai-api-key',
+    // A 1-PR screen found one more real bug at high than at medium, for 14% more cost.
+    models: { 'gpt-6.1-terra': { defaultReasoningEffort: 'high' } },
   },
   'openai-compatible': {
     keyEnv: 'JBOT_OPENAI_COMPATIBLE_API_KEY',
