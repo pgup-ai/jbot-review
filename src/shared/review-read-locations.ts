@@ -144,7 +144,8 @@ export function shellSearchPattern(command: string): string | undefined {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
     let patternFile: string | undefined;
-    for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
+    let j = i + (gitGrep ? 2 : 1);
+    for (; j < tokens.length; j++) {
       const token = tokens[j];
       if (/^(?:\|\|?|&&|;)$/.test(matches[j][3] ?? '')) break;
       if (token === '-e' || token === '--regexp') return tokens[j + 1];
@@ -162,6 +163,8 @@ export function shellSearchPattern(command: string): string | undefined {
       else if (!token.startsWith('-') && patternFile === undefined) return token;
     }
     fallback ??= patternFile;
+    // Its operands are paths, so the next search can only follow its separator.
+    i = j;
   }
   return fallback;
 }
