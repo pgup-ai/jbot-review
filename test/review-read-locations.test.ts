@@ -131,6 +131,10 @@ test('supplied overlap separates re-reads and searches of context-pack content',
     'search',
   );
   assert.equal(
+    suppliedOverlap('/w', 'shell', { command: 'rg --max-count 5 LedgerService src' }, supplied),
+    'search',
+  );
+  assert.equal(
     suppliedOverlap('/w', 'shell', { command: 'rg --files | grep LedgerService' }, supplied),
     'search',
   );

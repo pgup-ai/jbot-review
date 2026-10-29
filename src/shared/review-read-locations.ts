@@ -142,9 +142,14 @@ export function shellSearchPattern(command: string): string | undefined {
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
     for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
       if (/^(?:\|\|?|&&|;)$/.test(matches[j][3] ?? '')) break;
-      if (tokens[j] === '-e') return tokens[j + 1];
+      if (tokens[j] === '-e' || tokens[j] === '--regexp') return tokens[j + 1];
       // These flags take a value, which is not the pattern.
-      if (/^-[ABCmtgf]$|^--(?:include|exclude|glob|type)$/.test(tokens[j])) j++;
+      if (
+        /^-[ABCmtgf]$|^--(?:(?:before-|after-)?context|max-count|max-depth|file|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
+          tokens[j],
+        )
+      )
+        j++;
       else if (!tokens[j].startsWith('-')) return tokens[j];
     }
   }
