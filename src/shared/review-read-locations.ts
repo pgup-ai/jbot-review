@@ -150,11 +150,12 @@ export function shellSearchPattern(command: string): string | undefined {
       if (token.startsWith('--regexp=')) return token.slice('--regexp='.length);
       if (token === '-f' || token === '--file') patternFile = tokens[++j];
       else if (token.startsWith('--file=')) patternFile = token.slice('--file='.length);
-      // These flags take a value, which is not the pattern.
+      // These flags take a value, which is not the pattern; grep's -T takes none.
       else if (
-        /^-[ABCdmtTg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
+        /^-[ABCdmtg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
           token,
-        )
+        ) ||
+        (token === '-T' && tokens[i] === 'rg')
       )
         j++;
       else if (!token.startsWith('-') && patternFile === undefined) return token;
