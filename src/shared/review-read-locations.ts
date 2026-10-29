@@ -152,7 +152,7 @@ export function shellSearchPattern(command: string): string | undefined {
       else if (token.startsWith('--file=')) patternFile = token.slice('--file='.length);
       // These flags take a value, which is not the pattern.
       else if (
-        /^-[ABCdmtg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
+        /^-[ABCdmtTg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
           token,
         )
       )

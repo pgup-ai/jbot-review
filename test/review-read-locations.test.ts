@@ -133,6 +133,7 @@ test('supplied overlap separates re-reads and searches of context-pack content',
   for (const command of [
     'rg --max-count 5 LedgerService src',
     'rg -d 2 LedgerService src',
+    'rg -T rust LedgerService src',
     "rg --regexp '-LedgerService' src",
     'rg --regexp=LedgerService src',
     'grep -f patterns.txt -e LedgerService src',
