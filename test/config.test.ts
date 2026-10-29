@@ -476,6 +476,7 @@ describe('openai-compatible custom provider', () => {
       ['opencode', 'space-bunny-free'],
       ['opencode-go', 'space-bunny-free'],
       ['commandcode', 'stealth/space-bunny-alpha'],
+      ['openai', 'gpt-6.1-terra'],
     ])
       assert.deepEqual(defaultModelOptions(providerID, modelID), { reasoningEffort: 'high' });
     assert.deepEqual(auxModelOptionsFor('opencode', 'm', 'opencode', 'space-bunny-free'), {
