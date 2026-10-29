@@ -140,8 +140,9 @@ export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedCont
 export function shellSearchPattern(command: string): string | undefined {
   const matches = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)];
   const tokens = matches.map((m) => m[1] ?? m[2] ?? m[3]);
-  // A pattern file stands in for the pattern unless an explicit one follows,
-  // in its own command or a later one; its remaining operands are paths.
+  // A pattern file stands in for the pattern unless an -e/--regexp follows or a
+  // later piped or chained search names one; like grep and rg, it makes every
+  // operand a path.
   let fallback: string | undefined;
   for (let i = 0; i < tokens.length; i++) {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
