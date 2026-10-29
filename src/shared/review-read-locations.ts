@@ -133,22 +133,47 @@ export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedCont
   return merged;
 }
 
-/** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
+/**
+ * The first grep, rg or git grep pattern in a shell command, else the first
+ * `-f` pattern file's path; `git log --grep` is not one.
+ */
 export function shellSearchPattern(command: string): string | undefined {
   const matches = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)];
   const tokens = matches.map((m) => m[1] ?? m[2] ?? m[3]);
+  // A pattern file stands in for the pattern unless an -e/--regexp follows or a
+  // later piped or chained search names one; like grep and rg, it makes every
+  // operand a path.
+  let fallback: string | undefined;
   for (let i = 0; i < tokens.length; i++) {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
-    for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
+    let patternFile: string | undefined;
+    // rg --files and --type-list take no pattern, so their operands are paths.
+    let listing = false;
+    let j = i + (gitGrep ? 2 : 1);
+    for (; j < tokens.length; j++) {
+      const token = tokens[j];
       if (/^(?:\|\|?|&&|;)$/.test(matches[j][3] ?? '')) break;
-      if (tokens[j] === '-e') return tokens[j + 1];
-      // These flags take a value, which is not the pattern.
-      if (/^-[ABCmtgf]$|^--(?:include|exclude|glob|type)$/.test(tokens[j])) j++;
-      else if (!tokens[j].startsWith('-')) return tokens[j];
+      if (token === '-e' || token === '--regexp') return tokens[j + 1];
+      if (token.startsWith('--regexp=')) return token.slice('--regexp='.length);
+      if (token === '-f' || token === '--file') patternFile = tokens[++j];
+      else if (token.startsWith('--file=')) patternFile = token.slice('--file='.length);
+      else if (token === '--files' || token === '--type-list') listing = true;
+      // These flags take a value, which is not the pattern; grep's -T takes none.
+      else if (
+        /^-[ABCdmtg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
+          token,
+        ) ||
+        (token === '-T' && tokens[i] === 'rg')
+      )
+        j++;
+      else if (!token.startsWith('-') && patternFile === undefined && !listing) return token;
     }
+    fallback ??= patternFile;
+    // Its operands are paths, so the next search can only follow its separator.
+    i = j;
   }
-  return undefined;
+  return fallback;
 }
 
 /** Identifiers in a pattern; escapes are blanked so `\bFoo\b` yields `Foo`. */
