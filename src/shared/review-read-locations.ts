@@ -133,7 +133,10 @@ export function mergeSuppliedContexts(contexts: SuppliedContext[]): SuppliedCont
   return merged;
 }
 
-/** The first grep, rg or git grep pattern in a shell command; `git log --grep` is not one. */
+/**
+ * The first grep, rg or git grep pattern in a shell command, else the first
+ * `-f` pattern file's path; `git log --grep` is not one.
+ */
 export function shellSearchPattern(command: string): string | undefined {
   const matches = [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)];
   const tokens = matches.map((m) => m[1] ?? m[2] ?? m[3]);
