@@ -130,9 +130,16 @@ test('supplied overlap separates re-reads and searches of context-pack content',
     suppliedOverlap('/w', 'shell', { command: "rg -n -C 3 'LedgerService' src" }, supplied),
     'search',
   );
+  for (const command of [
+    'rg --max-count 5 LedgerService src',
+    'rg -d 2 LedgerService src',
+    'rg --regexp LedgerService src',
+    'rg --regexp=LedgerService src',
+  ])
+    assert.equal(suppliedOverlap('/w', 'shell', { command }, supplied), 'search', command);
   assert.equal(
-    suppliedOverlap('/w', 'shell', { command: 'rg --max-count 5 LedgerService src' }, supplied),
-    'search',
+    suppliedOverlap('/w', 'shell', { command: 'rg --file patterns.txt LedgerService' }, supplied),
+    false,
   );
   assert.equal(
     suppliedOverlap('/w', 'shell', { command: 'rg --files | grep LedgerService' }, supplied),

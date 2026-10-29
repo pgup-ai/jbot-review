@@ -141,16 +141,20 @@ export function shellSearchPattern(command: string): string | undefined {
     const gitGrep = tokens[i] === 'git' && tokens[i + 1] === 'grep';
     if (tokens[i] !== 'grep' && tokens[i] !== 'rg' && !gitGrep) continue;
     for (let j = i + (gitGrep ? 2 : 1); j < tokens.length; j++) {
+      const token = tokens[j];
       if (/^(?:\|\|?|&&|;)$/.test(matches[j][3] ?? '')) break;
-      if (tokens[j] === '-e' || tokens[j] === '--regexp') return tokens[j + 1];
+      // A pattern file stands in for the pattern, leaving only paths as operands.
+      if (/^(?:-e|-f|--regexp|--file)$/.test(token)) return tokens[j + 1];
+      const attached = /^--(?:regexp|file)=(.*)$/.exec(token);
+      if (attached) return attached[1];
       // These flags take a value, which is not the pattern.
       if (
-        /^-[ABCmtgf]$|^--(?:(?:before-|after-)?context|max-count|max-depth|file|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
-          tokens[j],
+        /^-[ABCdmtg]$|^--(?:(?:before-|after-)?context|max-count|max-depth|include|exclude(?:-dir)?|i?glob|type(?:-not)?)$/.test(
+          token,
         )
       )
         j++;
-      else if (!tokens[j].startsWith('-')) return tokens[j];
+      else if (!token.startsWith('-')) return token;
     }
   }
   return undefined;
