@@ -381,23 +381,23 @@ export async function planIncrementalReview(input: {
         PATH_PATTERNS.tooling,
       ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
     if (changed.some(sensitive)) return full('sensitive-followup');
-    const patch = await git(
-      '--literal-pathspecs',
-      'diff',
-      '--no-ext-diff',
-      '--no-textconv',
-      '--unified=0',
-      baseline.head,
-      input.head,
-      '--',
-      ...changed,
-    );
-    // Dotenv edits (`export KEY=` included) are checked by key below.
-    let target = '';
-    const edits = patch.split('\n').filter((line) => {
-      if (line.startsWith('+++ ')) target = line.slice(4);
-      return /^[+-](?![+-])/.test(line) && !DOTENV_FILE.test(target);
-    });
+    // Dotenv edits (`export KEY=` included) are checked by key below. An empty pathspec would
+    // diff every file.
+    const code = changed.filter((path) => !DOTENV_FILE.test(path));
+    const patch = code.length
+      ? await git(
+          '--literal-pathspecs',
+          'diff',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--unified=0',
+          baseline.head,
+          input.head,
+          '--',
+          ...code,
+        )
+      : '';
+    const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
     // An export edit changes the contract and a computed load can reach anything; a static
     // import or a comment naming one does not, as both sides' imports feed the graph below.
     if (
