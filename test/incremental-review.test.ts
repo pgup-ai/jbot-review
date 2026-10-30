@@ -787,6 +787,8 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     write('src/use.ts', "import { url } from './env';\nexport const use = () => url;\n");
     write('other/a.ts', 'export const a = 1;\n');
     write('lib/outside.ts', 'export const other = import.meta.env.VITE_OTHER;\n');
+    // Docs naming a key read no value.
+    write('docs/flags.md', 'VITE_UNUSED is reserved.\n');
     const base = commit();
     write(
       'src/env.ts',
