@@ -388,6 +388,7 @@ export async function planIncrementalReview(input: {
       ? await git(
           '--literal-pathspecs',
           'diff',
+          '--no-color',
           '--no-ext-diff',
           '--no-textconv',
           '--unified=0',
@@ -514,6 +515,7 @@ export async function planIncrementalReview(input: {
           await git(
             '--literal-pathspecs',
             'diff',
+            '--no-color',
             '--no-ext-diff',
             '--no-textconv',
             '--unified=0',
@@ -532,37 +534,42 @@ export async function planIncrementalReview(input: {
     // A continuation line of a multiline value names no key to look up.
     if (keys.includes('')) return full('unsupported-or-large-pr');
     if (edits.length + lines.length > 120) return full('broad-or-contract-change');
-    // Files naming a pattern at the head, minus dotenv and prose, which read no value; no match is
-    // git grep's exit 1.
-    const grep = async (ref: string, ...args: string[]) =>
+    // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
+    // color.ui=always would wrap paths in ANSI codes.
+    const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
       (
-        await git('grep', '-l', '-z', ...args, ref, '--').catch((error) =>
-          error.code === 1 ? '' : Promise.reject(error),
+        await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
+          (error) => (error.code === 1 ? '' : Promise.reject(error)),
         )
       )
         .split('\0')
         .filter(Boolean)
-        .map((path) => path.slice(path.indexOf(':') + 1))
-        .filter((path) => !DOTENV_FILE.test(path) && !PROSE_FILE.test(path));
-    // A computed key (env[name], env['A_' + b], env[`A_${b}`]) could be any changed key.
+        .map((path) => path.slice(ref.length + 1));
+    const readsValue = (path: string) => !DOTENV_FILE.test(path) && !PROSE_FILE.test(path);
+    // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
+    // { [name]: v } = process.env) could be any changed key.
+    const access = 'env[[:space:]]*(\\?\\.)?[[:space:]]*\\[[[:space:]]*';
     if (
       keys.length &&
       (
-        await grep(
-          input.head,
+        await grep(input.head, [
           '-E',
           '-e',
-          'env[[:space:]]*\\[[[:space:]]*[^]\'"`[:space:]]',
+          `${access}[^]'"\`[:space:]]`,
           '-e',
-          'env[[:space:]]*\\[[[:space:]]*[\'"][^]]*\\+',
+          `${access}['"][^]]*\\+`,
           '-e',
-          'env[[:space:]]*\\[[[:space:]]*`[^`]*\\$\\{',
-        )
-      ).length
+          `${access}\`[^\`]*\\$\\{`,
+          '-e',
+          '\\[[^]]+\\][[:space:]]*:[^=]*=[[:space:]]*[[:alnum:]_.]*env([^[:alnum:]_]|$)',
+        ])
+      ).some(readsValue)
     )
       return full('string-keyed-dependencies');
     const readers = keys.length
-      ? await grep(input.head, '-w', '-F', ...keys.flatMap((key) => ['-e', key]))
+      ? (await grep(input.head, ['-w', '-F', ...keys.flatMap((key) => ['-e', key])])).filter(
+          readsValue,
+        )
       : [];
     if (readers.some((path) => !paths.has(path))) return full('references-outside-pr');
     // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.
@@ -589,26 +596,13 @@ export async function planIncrementalReview(input: {
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
-    for (const ref of terms.length ? [baseline.head, input.head] : []) {
-      const references = await git(
-        'grep',
-        '-l',
-        '-z',
-        '-w',
-        '-F',
-        ...terms.flatMap((term) => ['-e', term]),
-        ref,
-        '--',
-        ...JS_GLOBS,
-      );
+    for (const ref of terms.length ? [baseline.head, input.head] : [])
       if (
-        references
-          .split('\0')
-          .filter(Boolean)
-          .some((path) => !paths.has(path.slice(ref.length + 1)))
+        (await grep(ref, ['-w', '-F', ...terms.flatMap((term) => ['-e', term])], ...JS_GLOBS)).some(
+          (path) => !paths.has(path),
+        )
       )
         return full('references-outside-pr');
-    }
     return {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',

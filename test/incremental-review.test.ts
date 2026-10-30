@@ -809,13 +809,18 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     const large = edit(
       ['VITE_URL=x', ...Array.from({ length: 121 }, (_, i) => `VITE_K${i}=1`)].join('\n'),
     );
-    git('checkout', '-q', '--detach', reviewed);
-    write(
-      'lib/outside.ts',
-      "export const other = (name: string) => import.meta.env['VITE_' + name];\n",
-    );
-    const computedBase = commit();
-    const computed = edit('VITE_URL=y\n', computedBase);
+    const computed = [
+      "(name: string) => import.meta.env['VITE_' + name]",
+      '(name: string) => process.env?.[name]',
+      '(name: string) => {\n  const { [name]: value } = process.env;\n  return value;\n}',
+    ].map((reader) => {
+      git('checkout', '-q', '--detach', reviewed);
+      write('lib/outside.ts', `export const other = ${reader};\n`);
+      const from = commit();
+      return [edit('VITE_URL=y\n', from), from] as const;
+    });
+    // Paths stay plain under a user's color.ui=always.
+    git('config', 'color.ui', 'always');
     const plan = (at: string, from = reviewed) =>
       planIncrementalReview({
         workspace,
@@ -842,7 +847,8 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     assert.equal((await plan(outside)).reason, 'references-outside-pr');
     assert.equal((await plan(multiline)).reason, 'unsupported-or-large-pr');
     assert.equal((await plan(large)).reason, 'broad-or-contract-change');
-    assert.equal((await plan(computed, computedBase)).reason, 'string-keyed-dependencies');
+    for (const [at, from] of computed)
+      assert.equal((await plan(at, from)).reason, 'string-keyed-dependencies');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
