@@ -392,7 +392,12 @@ export async function planIncrementalReview(input: {
       '--',
       ...changed,
     );
-    const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
+    // Dotenv edits (`export KEY=` included) are checked by key below.
+    let target = '';
+    const edits = patch.split('\n').filter((line) => {
+      if (line.startsWith('+++ ')) target = line.slice(4);
+      return /^[+-](?![+-])/.test(line) && !DOTENV_FILE.test(target);
+    });
     // An export edit changes the contract and a computed load can reach anything; a static
     // import or a comment naming one does not, as both sides' imports feed the graph below.
     if (

@@ -802,7 +802,7 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
       write('.env.production', text);
       return commit();
     };
-    const unread = edit('VITE_URL=x\n# note\nVITE_UNUSED=1\n');
+    const unread = edit('VITE_URL=x\n# note\nexport VITE_UNUSED=1\n');
     const multiline = edit('VITE_URL="x\ny"\n');
     git('checkout', '-q', '--detach', reviewed);
     write(
