@@ -778,6 +778,90 @@ test('a merge from the base branch re-reviews only the PR files it or the author
   }
 });
 
+test('a dotenv edit re-reviews the file and the PR files reading its keys', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-dotenv-');
+  try {
+    git('init', '-q');
+    write('.env.production', 'VITE_URL=x\n');
+    write('src/env.ts', 'export const url = import.meta.env.VITE_URL;\n');
+    write('src/use.ts', "import { url } from './env';\nexport const use = () => url;\n");
+    write('other/a.ts', 'export const a = 1;\n');
+    write('lib/outside.ts', 'export const other = import.meta.env.VITE_OTHER;\n');
+    // Docs naming a key read no value.
+    write('docs/flags.md', 'VITE_UNUSED is reserved.\n');
+    write('config/.env.ts', 'const port = 1;\n');
+    const base = commit();
+    write(
+      'src/env.ts',
+      'export const url = import.meta.env.VITE_URL;\nexport const flag = import.meta.env.VITE_FLAG;\n',
+    );
+    const reviewed = commit();
+    write('.env.production', 'VITE_URL=x\nVITE_FLAG=true\n');
+    const head = commit();
+    write('.env.production', 'VITE_URL=x\nVITE_FLAG=true\nVITE_OTHER=1\n');
+    const outside = commit();
+    const edit = (text: string, from = reviewed) => {
+      git('checkout', '-q', '--detach', from);
+      write('.env.production', text);
+      return commit();
+    };
+    const unread = edit('VITE_URL=x\n# note\nexport VITE_UNUSED=1\n');
+    const multiline = edit('VITE_URL="x\ny"\n');
+    const large = edit(
+      ['VITE_URL=x', ...Array.from({ length: 121 }, (_, i) => `VITE_K${i}=1`)].join('\n'),
+    );
+    const computed = [
+      "(name: string) => import.meta.env['VITE_' + name]",
+      '(name: string) => process.env?.[name]',
+      '(name: string) => {\n  const { [name]: value } = process.env;\n  return value;\n}',
+    ].map((reader) => {
+      git('checkout', '-q', '--detach', reviewed);
+      write('lib/outside.ts', `export const other = ${reader};\n`);
+      const from = commit();
+      return [edit('VITE_URL=y\n', from), from] as const;
+    });
+    git('checkout', '-q', '--detach', reviewed);
+    // A .env.ts module is code: an export edit there is a contract change.
+    write('config/.env.ts', 'export const port = 1;\n');
+    const module = commit();
+    // Paths stay plain under a user's color.ui=always.
+    git('config', 'color.ui', 'always');
+    const plan = (at: string, from = reviewed) =>
+      planIncrementalReview({
+        workspace,
+        files: ['.env.production', 'src/env.ts', 'src/use.ts', 'other/a.ts', 'config/.env.ts'].map(
+          (filename) => ({
+            filename,
+            patch: '@@ -1 +1 @@\n-a\n+b',
+          }),
+        ),
+        head: at,
+        base,
+        policy,
+        priorBodies: [body(from, base)],
+        rulesChangedSince: async () => false,
+      });
+    for (const [at, files] of [
+      [head, ['.env.production', 'src/env.ts']],
+      [unread, ['.env.production']],
+    ] as const) {
+      const result = await plan(at);
+      assert.deepEqual(
+        [result.mode, result.files.map((file) => file.filename)],
+        ['incremental', files],
+      );
+    }
+    assert.equal((await plan(outside)).reason, 'references-outside-pr');
+    assert.equal((await plan(multiline)).reason, 'unsupported-or-large-pr');
+    assert.equal((await plan(large)).reason, 'broad-or-contract-change');
+    assert.equal((await plan(module)).reason, 'broad-or-contract-change');
+    for (const [at, from] of computed)
+      assert.equal((await plan(at, from)).reason, 'string-keyed-dependencies');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('the shadow scope selects edited files and their importers without changing the plan', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-shadow-');
   try {

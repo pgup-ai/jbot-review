@@ -245,6 +245,11 @@ export function impactedReviewFiles(
 
 // Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
+// Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
+const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
+// A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
+const isDotenv = (path: string) =>
+  DOTENV_FILE.test(path) && !JS_SOURCE.test(path) && !PROSE_FILE.test(path);
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
@@ -360,7 +365,9 @@ export async function planIncrementalReview(input: {
     if (
       input.files.length > 80 ||
       input.files.some(
-        (file) => !file.patch || !(JS_SOURCE.test(file.filename) || PROSE_FILE.test(file.filename)),
+        (file) =>
+          !file.patch ||
+          ![JS_SOURCE, PROSE_FILE, DOTENV_FILE].some((pattern) => pattern.test(file.filename)),
       )
     )
       return full('unsupported-or-large-pr');
@@ -377,17 +384,23 @@ export async function planIncrementalReview(input: {
         PATH_PATTERNS.tooling,
       ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
     if (changed.some(sensitive)) return full('sensitive-followup');
-    const patch = await git(
-      '--literal-pathspecs',
-      'diff',
-      '--no-ext-diff',
-      '--no-textconv',
-      '--unified=0',
-      baseline.head,
-      input.head,
-      '--',
-      ...changed,
-    );
+    // Dotenv edits (`export KEY=` included) are checked by key below. An empty pathspec would
+    // diff every file.
+    const code = changed.filter((path) => !isDotenv(path));
+    const patch = code.length
+      ? await git(
+          '--literal-pathspecs',
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--unified=0',
+          baseline.head,
+          input.head,
+          '--',
+          ...code,
+        )
+      : '';
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
     // An export edit changes the contract and a computed load can reach anything; a static
     // import or a comment naming one does not, as both sides' imports feed the graph below.
@@ -406,7 +419,7 @@ export async function planIncrementalReview(input: {
       .filter(Boolean);
     let bytes = 0;
     for (const file of input.files) {
-      // Prose carries no imports or wiring for the graph to follow.
+      // Prose and dotenv files carry no imports or wiring for the graph to follow.
       if (!JS_SOURCE.test(file.filename)) {
         sources.set(file.filename, ['', '']);
         continue;
@@ -499,8 +512,77 @@ export async function planIncrementalReview(input: {
       }
       if (broad()) return full('broad-or-empty-followup');
     }
-    const files = impactedReviewFiles(input.files, changed, sources);
-    if (files.length === input.files.length || files.length > 8) return full('broad-impact');
+    const dotenv = changed.filter(isDotenv);
+    const lines = dotenv.length
+      ? (
+          await git(
+            '--literal-pathspecs',
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--unified=0',
+            baseline.head,
+            input.head,
+            '--',
+            ...dotenv,
+          )
+        )
+          .split('\n')
+          .filter((line) => /^[+-](?![+-])/.test(line) && !/^.\s*(#|$)/.test(line))
+      : [];
+    const keys = lines.map(
+      (line) => line.match(/^.\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/)?.[1] ?? '',
+    );
+    // A continuation line of a multiline value names no key to look up.
+    if (keys.includes('')) return full('unsupported-or-large-pr');
+    if (edits.length + lines.length > 120) return full('broad-or-contract-change');
+    // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
+    // color.ui=always would wrap paths in ANSI codes.
+    const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
+      (
+        await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
+          (error) => (error.code === 1 ? '' : Promise.reject(error)),
+        )
+      )
+        .split('\0')
+        .filter(Boolean)
+        .map((path) => path.slice(ref.length + 1));
+    const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
+    // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
+    // { [name]: v } = process.env) could be any changed key.
+    const access = 'env[[:space:]]*(\\?\\.)?[[:space:]]*\\[[[:space:]]*';
+    if (
+      keys.length &&
+      (
+        await grep(input.head, [
+          '-E',
+          '-e',
+          `${access}[^]'"\`[:space:]]`,
+          '-e',
+          `${access}['"][^]]*\\+`,
+          '-e',
+          `${access}\`[^\`]*\\$\\{`,
+          '-e',
+          '\\[[^]]+\\][[:space:]]*:[^=]*=[[:space:]]*[[:alnum:]_.]*env([^[:alnum:]_]|$)',
+        ])
+      ).some(readsValue)
+    )
+      return full('string-keyed-dependencies');
+    const readers = keys.length
+      ? (await grep(input.head, ['-w', '-F', ...keys.flatMap((key) => ['-e', key])])).filter(
+          readsValue,
+        )
+      : [];
+    if (readers.some((path) => !paths.has(path))) return full('references-outside-pr');
+    // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.
+    const files = impactedReviewFiles(
+      input.files,
+      changed.filter((path) => !isDotenv(path)),
+      sources,
+    );
+    const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
+    if (selection.size === input.files.length || selection.size > 8) return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
     // Widen to a full review rather than trusting that incomplete graph.
     const terms = [
@@ -517,31 +599,18 @@ export async function planIncrementalReview(input: {
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
-    for (const ref of terms.length ? [baseline.head, input.head] : []) {
-      const references = await git(
-        'grep',
-        '-l',
-        '-z',
-        '-w',
-        '-F',
-        ...terms.flatMap((term) => ['-e', term]),
-        ref,
-        '--',
-        ...JS_GLOBS,
-      );
+    for (const ref of terms.length ? [baseline.head, input.head] : [])
       if (
-        references
-          .split('\0')
-          .filter(Boolean)
-          .some((path) => !paths.has(path.slice(ref.length + 1)))
+        (await grep(ref, ['-w', '-F', ...terms.flatMap((term) => ['-e', term])], ...JS_GLOBS)).some(
+          (path) => !paths.has(path),
+        )
       )
         return full('references-outside-pr');
-    }
     return {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',
       files: input.files.filter(
-        (file) => files.includes(file) || !!baseline.recheck?.includes(file.filename),
+        (file) => selection.has(file.filename) || !!baseline.recheck?.includes(file.filename),
       ),
       baseline: baseline.head,
       shadow,
