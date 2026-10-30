@@ -245,6 +245,8 @@ export function impactedReviewFiles(
 
 // Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
+// Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
+const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
@@ -360,7 +362,9 @@ export async function planIncrementalReview(input: {
     if (
       input.files.length > 80 ||
       input.files.some(
-        (file) => !file.patch || !(JS_SOURCE.test(file.filename) || PROSE_FILE.test(file.filename)),
+        (file) =>
+          !file.patch ||
+          ![JS_SOURCE, PROSE_FILE, DOTENV_FILE].some((pattern) => pattern.test(file.filename)),
       )
     )
       return full('unsupported-or-large-pr');
@@ -406,7 +410,7 @@ export async function planIncrementalReview(input: {
       .filter(Boolean);
     let bytes = 0;
     for (const file of input.files) {
-      // Prose carries no imports or wiring for the graph to follow.
+      // Prose and dotenv files carry no imports or wiring for the graph to follow.
       if (!JS_SOURCE.test(file.filename)) {
         sources.set(file.filename, ['', '']);
         continue;
@@ -499,8 +503,53 @@ export async function planIncrementalReview(input: {
       }
       if (broad()) return full('broad-or-empty-followup');
     }
-    const files = impactedReviewFiles(input.files, changed, sources);
-    if (files.length === input.files.length || files.length > 8) return full('broad-impact');
+    const dotenv = changed.filter((path) => DOTENV_FILE.test(path));
+    const keys = dotenv.length
+      ? (
+          await git(
+            '--literal-pathspecs',
+            'diff',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--unified=0',
+            baseline.head,
+            input.head,
+            '--',
+            ...dotenv,
+          )
+        )
+          .split('\n')
+          .flatMap(
+            (line) => line.match(/^[+-](?![+-])\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/)?.[1] ?? [],
+          )
+      : [];
+    const readers = keys.length
+      ? (
+          await git(
+            'grep',
+            '-l',
+            '-z',
+            '-w',
+            '-F',
+            ...keys.flatMap((key) => ['-e', key]),
+            input.head,
+            '--',
+          )
+        )
+          .split('\0')
+          .filter(Boolean)
+          .map((path) => path.slice(path.indexOf(':') + 1))
+          .filter((path) => !DOTENV_FILE.test(path))
+      : [];
+    if (readers.some((path) => !paths.has(path))) return full('references-outside-pr');
+    // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.
+    const files = impactedReviewFiles(
+      input.files,
+      changed.filter((path) => !DOTENV_FILE.test(path)),
+      sources,
+    );
+    const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
+    if (selection.size === input.files.length || selection.size > 8) return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
     // Widen to a full review rather than trusting that incomplete graph.
     const terms = [
@@ -541,7 +590,7 @@ export async function planIncrementalReview(input: {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',
       files: input.files.filter(
-        (file) => files.includes(file) || !!baseline.recheck?.includes(file.filename),
+        (file) => selection.has(file.filename) || !!baseline.recheck?.includes(file.filename),
       ),
       baseline: baseline.head,
       shadow,

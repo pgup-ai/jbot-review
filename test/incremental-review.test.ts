@@ -778,6 +778,49 @@ test('a merge from the base branch re-reviews only the PR files it or the author
   }
 });
 
+test('a dotenv edit re-reviews the file and the PR files reading its keys', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-dotenv-');
+  try {
+    git('init', '-q');
+    write('.env.production', 'VITE_URL=x\n');
+    write('src/env.ts', 'export const url = import.meta.env.VITE_URL;\n');
+    write('src/use.ts', "import { url } from './env';\nexport const use = () => url;\n");
+    write('other/a.ts', 'export const a = 1;\n');
+    write('lib/outside.ts', 'export const other = import.meta.env.VITE_OTHER;\n');
+    const base = commit();
+    write(
+      'src/env.ts',
+      'export const url = import.meta.env.VITE_URL;\nexport const flag = import.meta.env.VITE_FLAG;\n',
+    );
+    const reviewed = commit();
+    write('.env.production', 'VITE_URL=x\nVITE_FLAG=true\n');
+    const head = commit();
+    write('.env.production', 'VITE_URL=x\nVITE_FLAG=true\nVITE_OTHER=1\n');
+    const outside = commit();
+    const plan = (at: string) =>
+      planIncrementalReview({
+        workspace,
+        files: ['.env.production', 'src/env.ts', 'src/use.ts', 'other/a.ts'].map((filename) => ({
+          filename,
+          patch: '@@ -1 +1 @@\n-a\n+b',
+        })),
+        head: at,
+        base,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      });
+    const result = await plan(head);
+    assert.deepEqual(
+      [result.mode, result.files.map((file) => file.filename)],
+      ['incremental', ['.env.production', 'src/env.ts']],
+    );
+    assert.equal((await plan(outside)).reason, 'references-outside-pr');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('the shadow scope selects edited files and their importers without changing the plan', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-shadow-');
   try {
