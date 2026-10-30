@@ -806,6 +806,9 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     };
     const unread = edit('VITE_URL=x\n# note\nexport VITE_UNUSED=1\n');
     const multiline = edit('VITE_URL="x\ny"\n');
+    const large = edit(
+      ['VITE_URL=x', ...Array.from({ length: 121 }, (_, i) => `VITE_K${i}=1`)].join('\n'),
+    );
     git('checkout', '-q', '--detach', reviewed);
     write(
       'lib/outside.ts',
@@ -838,6 +841,7 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     }
     assert.equal((await plan(outside)).reason, 'references-outside-pr');
     assert.equal((await plan(multiline)).reason, 'unsupported-or-large-pr');
+    assert.equal((await plan(large)).reason, 'broad-or-contract-change');
     assert.equal((await plan(computed, computedBase)).reason, 'string-keyed-dependencies');
   } finally {
     rmSync(workspace, { recursive: true, force: true });

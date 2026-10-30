@@ -531,6 +531,7 @@ export async function planIncrementalReview(input: {
     );
     // A continuation line of a multiline value names no key to look up.
     if (keys.includes('')) return full('unsupported-or-large-pr');
+    if (edits.length + lines.length > 120) return full('broad-or-contract-change');
     // Files naming a pattern at the head, minus dotenv and prose, which read no value; no match is
     // git grep's exit 1.
     const grep = async (ref: string, ...args: string[]) =>
