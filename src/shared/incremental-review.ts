@@ -504,7 +504,7 @@ export async function planIncrementalReview(input: {
       if (broad()) return full('broad-or-empty-followup');
     }
     const dotenv = changed.filter((path) => DOTENV_FILE.test(path));
-    const keys = dotenv.length
+    const lines = dotenv.length
       ? (
           await git(
             '--literal-pathspecs',
@@ -519,27 +519,44 @@ export async function planIncrementalReview(input: {
           )
         )
           .split('\n')
-          .flatMap(
-            (line) => line.match(/^[+-](?![+-])\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/)?.[1] ?? [],
-          )
+          .filter((line) => /^[+-](?![+-])/.test(line) && !/^.\s*(#|$)/.test(line))
       : [];
-    const readers = keys.length
-      ? (
-          await git(
-            'grep',
-            '-l',
-            '-z',
-            '-w',
-            '-F',
-            ...keys.flatMap((key) => ['-e', key]),
-            input.head,
-            '--',
-          )
+    const keys = lines.map(
+      (line) => line.match(/^.\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/)?.[1] ?? '',
+    );
+    // A continuation line of a multiline value names no key to look up.
+    if (keys.includes('')) return full('unsupported-or-large-pr');
+    // Files naming a pattern at the head, minus dotenv and prose, which read no value; no match is
+    // git grep's exit 1.
+    const grep = async (ref: string, ...args: string[]) =>
+      (
+        await git('grep', '-l', '-z', ...args, ref, '--').catch((error) =>
+          error.code === 1 ? '' : Promise.reject(error),
         )
-          .split('\0')
-          .filter(Boolean)
-          .map((path) => path.slice(path.indexOf(':') + 1))
-          .filter((path) => !DOTENV_FILE.test(path))
+      )
+        .split('\0')
+        .filter(Boolean)
+        .map((path) => path.slice(path.indexOf(':') + 1))
+        .filter((path) => !DOTENV_FILE.test(path) && !PROSE_FILE.test(path));
+    // A computed key (env[name], env['A_' + b], env[`A_${b}`]) could be any changed key.
+    if (
+      keys.length &&
+      (
+        await grep(
+          input.head,
+          '-E',
+          '-e',
+          'env[[:space:]]*\\[[[:space:]]*[^]\'"`[:space:]]',
+          '-e',
+          'env[[:space:]]*\\[[[:space:]]*[\'"][^]]*\\+',
+          '-e',
+          'env[[:space:]]*\\[[[:space:]]*`[^`]*\\$\\{',
+        )
+      ).length
+    )
+      return full('string-keyed-dependencies');
+    const readers = keys.length
+      ? await grep(input.head, '-w', '-F', ...keys.flatMap((key) => ['-e', key]))
       : [];
     if (readers.some((path) => !paths.has(path))) return full('references-outside-pr');
     // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.

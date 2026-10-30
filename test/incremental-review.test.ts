@@ -797,7 +797,21 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     const head = commit();
     write('.env.production', 'VITE_URL=x\nVITE_FLAG=true\nVITE_OTHER=1\n');
     const outside = commit();
-    const plan = (at: string) =>
+    const edit = (text: string, from = reviewed) => {
+      git('checkout', '-q', '--detach', from);
+      write('.env.production', text);
+      return commit();
+    };
+    const unread = edit('VITE_URL=x\n# note\nVITE_UNUSED=1\n');
+    const multiline = edit('VITE_URL="x\ny"\n');
+    git('checkout', '-q', '--detach', reviewed);
+    write(
+      'lib/outside.ts',
+      "export const other = (name: string) => import.meta.env['VITE_' + name];\n",
+    );
+    const computedBase = commit();
+    const computed = edit('VITE_URL=y\n', computedBase);
+    const plan = (at: string, from = reviewed) =>
       planIncrementalReview({
         workspace,
         files: ['.env.production', 'src/env.ts', 'src/use.ts', 'other/a.ts'].map((filename) => ({
@@ -807,15 +821,22 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
         head: at,
         base,
         policy,
-        priorBodies: [body(reviewed, base)],
+        priorBodies: [body(from, base)],
         rulesChangedSince: async () => false,
       });
-    const result = await plan(head);
-    assert.deepEqual(
-      [result.mode, result.files.map((file) => file.filename)],
-      ['incremental', ['.env.production', 'src/env.ts']],
-    );
+    for (const [at, files] of [
+      [head, ['.env.production', 'src/env.ts']],
+      [unread, ['.env.production']],
+    ] as const) {
+      const result = await plan(at);
+      assert.deepEqual(
+        [result.mode, result.files.map((file) => file.filename)],
+        ['incremental', files],
+      );
+    }
     assert.equal((await plan(outside)).reason, 'references-outside-pr');
+    assert.equal((await plan(multiline)).reason, 'unsupported-or-large-pr');
+    assert.equal((await plan(computed, computedBase)).reason, 'string-keyed-dependencies');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

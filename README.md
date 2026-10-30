@@ -228,7 +228,7 @@ baseline, and the next follow-up re-reviews the files carrying those concerns; a
 review with an incomplete session or an unverified concern outside the PR sets
 none. The
 first version handles small modifications to existing JavaScript/TypeScript
-files in PRs whose other files are JavaScript/TypeScript, prose or dotenv (`.env*`). It expands the selected files
+files in PRs whose other files are JavaScript/TypeScript, prose or dotenv (`.env` and `.env.<name>`, not `.envrc`). It expands the selected files
 through declarations, references and their directories; a dotenv edit selects
 the file and the PR files naming its changed keys. It delivers each selected
 file's **complete PR patch**, not only its latest edit. It falls back to full
