@@ -789,6 +789,7 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     write('lib/outside.ts', 'export const other = import.meta.env.VITE_OTHER;\n');
     // Docs naming a key read no value.
     write('docs/flags.md', 'VITE_UNUSED is reserved.\n');
+    write('config/.env.ts', 'const port = 1;\n');
     const base = commit();
     write(
       'src/env.ts',
@@ -819,15 +820,21 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
       const from = commit();
       return [edit('VITE_URL=y\n', from), from] as const;
     });
+    git('checkout', '-q', '--detach', reviewed);
+    // A .env.ts module is code: an export edit there is a contract change.
+    write('config/.env.ts', 'export const port = 1;\n');
+    const module = commit();
     // Paths stay plain under a user's color.ui=always.
     git('config', 'color.ui', 'always');
     const plan = (at: string, from = reviewed) =>
       planIncrementalReview({
         workspace,
-        files: ['.env.production', 'src/env.ts', 'src/use.ts', 'other/a.ts'].map((filename) => ({
-          filename,
-          patch: '@@ -1 +1 @@\n-a\n+b',
-        })),
+        files: ['.env.production', 'src/env.ts', 'src/use.ts', 'other/a.ts', 'config/.env.ts'].map(
+          (filename) => ({
+            filename,
+            patch: '@@ -1 +1 @@\n-a\n+b',
+          }),
+        ),
         head: at,
         base,
         policy,
@@ -847,6 +854,7 @@ test('a dotenv edit re-reviews the file and the PR files reading its keys', asyn
     assert.equal((await plan(outside)).reason, 'references-outside-pr');
     assert.equal((await plan(multiline)).reason, 'unsupported-or-large-pr');
     assert.equal((await plan(large)).reason, 'broad-or-contract-change');
+    assert.equal((await plan(module)).reason, 'broad-or-contract-change');
     for (const [at, from] of computed)
       assert.equal((await plan(at, from)).reason, 'string-keyed-dependencies');
   } finally {

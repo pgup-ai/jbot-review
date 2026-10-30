@@ -247,6 +247,9 @@ export function impactedReviewFiles(
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
+// A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
+const isDotenv = (path: string) =>
+  DOTENV_FILE.test(path) && !JS_SOURCE.test(path) && !PROSE_FILE.test(path);
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
@@ -383,7 +386,7 @@ export async function planIncrementalReview(input: {
     if (changed.some(sensitive)) return full('sensitive-followup');
     // Dotenv edits (`export KEY=` included) are checked by key below. An empty pathspec would
     // diff every file.
-    const code = changed.filter((path) => !DOTENV_FILE.test(path));
+    const code = changed.filter((path) => !isDotenv(path));
     const patch = code.length
       ? await git(
           '--literal-pathspecs',
@@ -509,7 +512,7 @@ export async function planIncrementalReview(input: {
       }
       if (broad()) return full('broad-or-empty-followup');
     }
-    const dotenv = changed.filter((path) => DOTENV_FILE.test(path));
+    const dotenv = changed.filter(isDotenv);
     const lines = dotenv.length
       ? (
           await git(
@@ -545,7 +548,7 @@ export async function planIncrementalReview(input: {
         .split('\0')
         .filter(Boolean)
         .map((path) => path.slice(ref.length + 1));
-    const readsValue = (path: string) => !DOTENV_FILE.test(path) && !PROSE_FILE.test(path);
+    const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
     // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
     // { [name]: v } = process.env) could be any changed key.
     const access = 'env[[:space:]]*(\\?\\.)?[[:space:]]*\\[[[:space:]]*';
@@ -575,7 +578,7 @@ export async function planIncrementalReview(input: {
     // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.
     const files = impactedReviewFiles(
       input.files,
-      changed.filter((path) => !DOTENV_FILE.test(path)),
+      changed.filter((path) => !isDotenv(path)),
       sources,
     );
     const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
