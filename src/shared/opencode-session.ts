@@ -200,7 +200,8 @@ function rememberSession(
 export interface AssistantMessage {
   id: string;
   type: string;
-  time: { created: number; completed?: number };
+  /** streamed: provider response body ended, before tool settlement. */
+  time: { created: number; streamed?: number; completed?: number };
   content?: Array<
     | { type: 'text'; text: string }
     | { type: 'reasoning'; text: string }
@@ -890,16 +891,18 @@ function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
 }
 
 /**
- * Each token-reporting step's span minus the time its tools ran (overlaps
- * merged); undefined while such a step is unfinished or a finished tool lacks
- * its start, so tool time never counts as model time.
+ * Each token-reporting step's span up to its response end (`streamed`, else
+ * `completed`) minus overlapping tool runs (merged); undefined while such a step
+ * is unfinished or a finished tool lacks its start, so tool time never counts
+ * as model time.
  */
 export function generationMs(messages: AssistantMessage[]): number | undefined {
   if (messages.length === 0) return undefined;
   let total = 0;
   for (const { time, content, tokens } of messages) {
     if (!tokens) continue;
-    if (time.completed === undefined) return undefined;
+    const end = time.streamed ?? time.completed;
+    if (end === undefined) return undefined;
     const runs: Array<[number, number]> = [];
     for (const part of content ?? []) {
       if (part.type !== 'tool') continue;
@@ -908,8 +911,8 @@ export function generationMs(messages: AssistantMessage[]): number | undefined {
         return undefined;
       }
       const start = Math.max(time.created, part.time.ran);
-      // Still running when the step ended: it ran until at least the step's end.
-      const stop = Math.min(time.completed, part.time.completed ?? time.completed);
+      // Still running when the response ended: it ran until at least that end.
+      const stop = Math.min(end, part.time.completed ?? end);
       if (stop > start) runs.push([start, stop]);
     }
     runs.sort((a, b) => a[0] - b[0]);
@@ -920,7 +923,7 @@ export function generationMs(messages: AssistantMessage[]): number | undefined {
       busy += stop - Math.max(start, covered);
       covered = stop;
     }
-    total += time.completed - time.created - busy;
+    total += end - time.created - busy;
   }
   return total;
 }

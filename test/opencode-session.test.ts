@@ -563,5 +563,11 @@ describe('generationMs', () => {
     assert.equal(generationMs([step(0, 100, [unstarted])]), undefined);
     const unfinished = { ...tool(60, 0), time: { created: 55, ran: 60 } };
     assert.equal(generationMs([step(0, 100, [unfinished])]), 60);
+    // Settlement after the response body ended is not model time.
+    const streamedStep = step(0, 150, [tool(110, 140)]);
+    assert.equal(
+      generationMs([{ ...streamedStep, time: { ...streamedStep.time, streamed: 100 } }]),
+      100,
+    );
   });
 });
