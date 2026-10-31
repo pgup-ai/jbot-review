@@ -902,10 +902,14 @@ export function generationMs(messages: AssistantMessage[]): number | undefined {
     if (time.completed === undefined) return undefined;
     const runs: Array<[number, number]> = [];
     for (const part of content ?? []) {
-      if (part.type !== 'tool' || part.time.completed === undefined) continue;
-      if (part.time.ran === undefined) return undefined;
+      if (part.type !== 'tool') continue;
+      if (part.time.ran === undefined) {
+        if (part.time.completed === undefined) continue;
+        return undefined;
+      }
       const start = Math.max(time.created, part.time.ran);
-      const stop = Math.min(time.completed, part.time.completed);
+      // Still running when the step ended: it ran until at least the step's end.
+      const stop = Math.min(time.completed, part.time.completed ?? time.completed);
       if (stop > start) runs.push([start, stop]);
     }
     runs.sort((a, b) => a[0] - b[0]);

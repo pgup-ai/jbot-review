@@ -561,5 +561,7 @@ describe('generationMs', () => {
     assert.equal(generationMs([step(0, 100), { ...step(100, 400), tokens: undefined }]), 50);
     const unstarted = { ...tool(20, 50), time: { created: 15, completed: 50 } };
     assert.equal(generationMs([step(0, 100, [unstarted])]), undefined);
+    const unfinished = { ...tool(60, 0), time: { created: 55, ran: 60 } };
+    assert.equal(generationMs([step(0, 100, [unfinished])]), 60);
   });
 });
