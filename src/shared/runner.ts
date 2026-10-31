@@ -220,6 +220,7 @@ import {
   configureOpencodeTelemetry,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
+import { decodeTps } from './token-usage.ts';
 import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
 import { createDevinCliBackend } from './devin-cli.ts';
 import { resolveOpencodeApiKeys } from './opencode-usage.ts';
@@ -1210,6 +1211,9 @@ async function runReviewPipeline(params: {
       cacheReadTokens: usage.cacheRead,
       cacheWriteTokens: usage.cacheWrite,
       ...(usage.promptBytes !== undefined ? { promptBytes: usage.promptBytes } : {}),
+      ...(usage.generationMs !== undefined
+        ? { generationMs: usage.generationMs, decodeTps: decodeTps(usage) }
+        : {}),
       ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
       ...(isFiniteNumber(usage.estimatedCostUsd)
         ? { estimatedCostUsd: usage.estimatedCostUsd }
@@ -5529,6 +5533,8 @@ export interface ReviewTokenUsage {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  /** Per model: decoded tokens and API time, from sessions that reported timing. */
+  generation?: Record<string, { tokens: number; ms: number }>;
   costUsd?: number;
   estimatedCostUsd?: number;
   creditCost?: number;
@@ -5550,6 +5556,12 @@ function createReviewTokenUsageAccumulator(): {
       total.reasoning += usage.reasoning;
       total.cacheRead += usage.cacheRead;
       total.cacheWrite += usage.cacheWrite;
+      if (usage.generationMs && usage.generationMs > 0) {
+        total.generation ??= {};
+        const entry = (total.generation[model] ??= { tokens: 0, ms: 0 });
+        entry.tokens += usage.output + usage.reasoning;
+        entry.ms += usage.generationMs;
+      }
       if (isFiniteNumber(usage.costUsd)) {
         total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
       }
@@ -6187,6 +6199,10 @@ export function renderReviewMetadataBlock(
   const effort =
     reasoningEffort && /^[A-Za-z0-9._-]{1,32}$/.test(reasoningEffort) ? reasoningEffort : undefined;
   const models = uniqueModels(model, tokenUsage.models);
+  const tps = Object.entries(tokenUsage.generation ?? {}).flatMap(([usageModel, entry]) => {
+    const value = decodeTps({ output: entry.tokens, reasoning: 0, generationMs: entry.ms });
+    return value === undefined ? [] : [models.length === 1 ? `${value}` : `${usageModel} ${value}`];
+  });
   return [
     '',
     '<details>',
@@ -6200,6 +6216,7 @@ export function renderReviewMetadataBlock(
     `reasoning=${tokenUsage.reasoning}`,
     `cache read=${tokenUsage.cacheRead}`,
     `cache write=${tokenUsage.cacheWrite}`,
+    ...(tps.length > 0 ? [`decode tps=${tps.join(', ')}`] : []),
     ...(isFiniteNumber(tokenUsage.costUsd) ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`] : []),
     ...(isFiniteNumber(tokenUsage.estimatedCostUsd)
       ? [`estimated cost usd=${tokenUsage.estimatedCostUsd.toFixed(4)}`]

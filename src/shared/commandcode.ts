@@ -732,6 +732,7 @@ async function runCommandCodePrompt(
     runtime?.tools && repair ? mkdtempSync(join(runtime.home, 'repair-')) : undefined;
   const home = repairHome ?? runtime?.home;
   let benchmarkDir: string | undefined;
+  let apiMs: number | undefined;
   try {
     benchmarkDir = mkdtempSync(join(home ?? tmpdir(), 'benchmark-'));
     args.push('--benchmark-output', join(benchmarkDir, 'metrics.json'));
@@ -827,6 +828,7 @@ async function runCommandCodePrompt(
         log(
           `CommandCode benchmark (${label}): ${benchmark ? JSON.stringify(benchmark) : 'unavailable'}`,
         );
+        apiMs = benchmark?.turns.reduce((sum, turn) => sum + turn.apiMs, 0);
       } catch {
         log(`CommandCode benchmark (${label}): unavailable`);
       } finally {
@@ -846,7 +848,15 @@ async function runCommandCodePrompt(
       `CommandCode final progress (${label}): ${JSON.stringify(snapshot)}; usage=${usage ? 'available' : 'unavailable'}`,
     );
     runtime?.onProgress?.(label, model, snapshot);
-    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
+    onTokenUsage?.(
+      {
+        ...usage,
+        ...(usage && apiMs !== undefined ? { generationMs: apiMs } : {}),
+        promptBytes: Buffer.byteLength(input, 'utf8'),
+      },
+      model,
+      label,
+    );
   }
 }
 

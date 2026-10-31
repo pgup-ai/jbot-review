@@ -361,6 +361,26 @@ describe('renderReviewMetadataBlock', () => {
     assert.match(block, /acu cost=3/);
   });
 
+  it('renders decode tps per timed model, unlabelled for a single model', () => {
+    const usage = { input: 1, output: 300, reasoning: 100, cacheRead: 0, cacheWrite: 0 };
+    const single = renderReviewMetadataBlock('ds', {
+      ...usage,
+      models: ['ds'],
+      generation: { ds: { tokens: 400, ms: 5000 } },
+    }).join('\n');
+    assert.match(single, /\ndecode tps=80\n/);
+    const mixed = renderReviewMetadataBlock('ds', {
+      ...usage,
+      models: ['ds', 'aux'],
+      generation: { ds: { tokens: 400, ms: 5000 }, aux: { tokens: 0, ms: 0 } },
+    }).join('\n');
+    assert.match(mixed, /\ndecode tps=ds 80\n/);
+    assert.doesNotMatch(
+      renderReviewMetadataBlock('ds', { ...usage, models: ['ds'] }).join('\n'),
+      /tps/,
+    );
+  });
+
   it('labels aggregate totals with every model that contributed usage', () => {
     const block = renderReviewMetadataBlock('openai/gpt-5', {
       models: ['openai/gpt-5', 'opencode-go/minimax-m3'],

@@ -5,6 +5,7 @@ import {
   createReviewSession,
   configureOpencodeTelemetry,
   finalizeOpencodeSessionsByLabel,
+  generationMs,
   promptInSession,
   startProgressLogger,
 } from '../src/shared/opencode-session.ts';
@@ -533,6 +534,40 @@ describe('startProgressLogger', () => {
         'review provider retry 2: Rate limit exceeded.; not waiting it out',
         'lens provider retry 2: Rate limit exceeded.; not waiting it out',
       ],
+    );
+  });
+});
+
+describe('generationMs', () => {
+  it('subtracts merged tool execution and abstains when steps or tool starts are missing; skips token-less steps', () => {
+    const tool = (ran: number, completed: number) => ({
+      type: 'tool' as const,
+      id: `t${ran}`,
+      name: 'read',
+      state: { status: 'completed' },
+      time: { created: ran - 5, ran, completed },
+    });
+    const step = (created: number, completed?: number, content = [tool(20, 50), tool(40, 70)]) => ({
+      id: `m${created}`,
+      type: 'assistant',
+      time: { created, completed },
+      content,
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    // 100 ms span, overlapping tools busy 20→70 = 50 ms; second step has no tools.
+    assert.equal(generationMs([step(0, 100), step(100, 130, [])]), 80);
+    assert.equal(generationMs([step(0, 100), step(100)]), undefined);
+    // A step without token counts contributes no time either.
+    assert.equal(generationMs([step(0, 100), { ...step(100, 400), tokens: undefined }]), 50);
+    const unstarted = { ...tool(20, 50), time: { created: 15, completed: 50 } };
+    assert.equal(generationMs([step(0, 100, [unstarted])]), undefined);
+    const unfinished = { ...tool(60, 0), time: { created: 55, ran: 60 } };
+    assert.equal(generationMs([step(0, 100, [unfinished])]), 60);
+    // Settlement after the response body ended is not model time.
+    const streamedStep = step(0, 150, [tool(110, 140)]);
+    assert.equal(
+      generationMs([{ ...streamedStep, time: { ...streamedStep.time, streamed: 100 } }]),
+      100,
     );
   });
 });

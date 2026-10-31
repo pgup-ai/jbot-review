@@ -18,10 +18,22 @@ export interface PromptTokenUsage {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  /** Model API time, tool execution excluded: (output + reasoning) / this = decode TPS. */
+  generationMs?: number;
   costUsd?: number;
   estimatedCostUsd?: number;
   creditCost?: number;
   acuCost?: number;
+}
+
+/** Tokens per second of model API time; undefined when the backend reports no timing. */
+export function decodeTps(usage: {
+  output: number;
+  reasoning: number;
+  generationMs?: number;
+}): number | undefined {
+  if (!usage.generationMs || usage.generationMs <= 0) return undefined;
+  return Math.round(((usage.output + usage.reasoning) / usage.generationMs) * 10_000) / 10;
 }
 
 export type TokenUsageRecorder = (

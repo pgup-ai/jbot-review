@@ -200,7 +200,8 @@ function rememberSession(
 export interface AssistantMessage {
   id: string;
   type: string;
-  time: { created: number; completed?: number };
+  /** streamed: provider response body ended, before tool settlement. */
+  time: { created: number; streamed?: number; completed?: number };
   content?: Array<
     | { type: 'text'; text: string }
     | { type: 'reasoning'; text: string }
@@ -770,6 +771,8 @@ async function promptHoldingSlot(
       const turnUsage = sumUsage(turn);
       log(`${label} ${formatTokenUsage(turnUsage)}`);
       usage = extractPromptTokenUsage(turnUsage);
+      const ms = generationMs(turn);
+      if (usage && ms !== undefined) usage.generationMs = ms;
     };
     log(`Calling ${label} prompt (${spec.model})`);
     attempted = true;
@@ -885,6 +888,44 @@ function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
   }
   // No message reported tokens: leave usage unknown rather than record zeros.
   return { cost, tokens: counted ? tokens : undefined };
+}
+
+/**
+ * Each token-reporting step's span up to its response end (`streamed`, else
+ * `completed`) minus overlapping tool runs (merged); undefined while such a step
+ * is unfinished or a finished tool lacks its start, so tool time never counts
+ * as model time.
+ */
+export function generationMs(messages: AssistantMessage[]): number | undefined {
+  if (messages.length === 0) return undefined;
+  let total = 0;
+  for (const { time, content, tokens } of messages) {
+    if (!tokens) continue;
+    const end = time.streamed ?? time.completed;
+    if (end === undefined) return undefined;
+    const runs: Array<[number, number]> = [];
+    for (const part of content ?? []) {
+      if (part.type !== 'tool') continue;
+      if (part.time.ran === undefined) {
+        if (part.time.completed === undefined) continue;
+        return undefined;
+      }
+      const start = Math.max(time.created, part.time.ran);
+      // Still running when the response ended: it ran until at least that end.
+      const stop = Math.min(end, part.time.completed ?? end);
+      if (stop > start) runs.push([start, stop]);
+    }
+    runs.sort((a, b) => a[0] - b[0]);
+    let busy = 0;
+    let covered = time.created;
+    for (const [start, stop] of runs) {
+      if (stop <= covered) continue;
+      busy += stop - Math.max(start, covered);
+      covered = stop;
+    }
+    total += end - time.created - busy;
+  }
+  return total;
 }
 
 function formatUnknown(value: unknown): string {
