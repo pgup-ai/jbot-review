@@ -770,6 +770,8 @@ async function promptHoldingSlot(
       const turnUsage = sumUsage(turn);
       log(`${label} ${formatTokenUsage(turnUsage)}`);
       usage = extractPromptTokenUsage(turnUsage);
+      const ms = generationMs(turn);
+      if (usage && ms !== undefined) usage.generationMs = ms;
     };
     log(`Calling ${label} prompt (${spec.model})`);
     attempted = true;
@@ -885,6 +887,36 @@ function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
   }
   // No message reported tokens: leave usage unknown rather than record zeros.
   return { cost, tokens: counted ? tokens : undefined };
+}
+
+/**
+ * Each step's span minus the time its tools ran (overlaps merged); undefined
+ * while any step is unfinished so tokens and time cover the same steps.
+ */
+export function generationMs(messages: AssistantMessage[]): number | undefined {
+  if (messages.length === 0) return undefined;
+  let total = 0;
+  for (const { time, content } of messages) {
+    if (time.completed === undefined) return undefined;
+    const runs: Array<[number, number]> = [];
+    for (const part of content ?? []) {
+      if (part.type !== 'tool' || part.time.ran === undefined || part.time.completed === undefined)
+        continue;
+      const start = Math.max(time.created, part.time.ran);
+      const stop = Math.min(time.completed, part.time.completed);
+      if (stop > start) runs.push([start, stop]);
+    }
+    runs.sort((a, b) => a[0] - b[0]);
+    let busy = 0;
+    let covered = time.created;
+    for (const [start, stop] of runs) {
+      if (stop <= covered) continue;
+      busy += stop - Math.max(start, covered);
+      covered = stop;
+    }
+    total += time.completed - time.created - busy;
+  }
+  return total;
 }
 
 function formatUnknown(value: unknown): string {

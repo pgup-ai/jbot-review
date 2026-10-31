@@ -56,6 +56,8 @@ export interface SessionTelemetryRow {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   promptBytes?: number;
+  generationMs?: number;
+  decodeTps?: number;
   costUsd?: number;
   estimatedCostUsd?: number;
 }
