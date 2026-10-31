@@ -5556,7 +5556,7 @@ function createReviewTokenUsageAccumulator(): {
       total.reasoning += usage.reasoning;
       total.cacheRead += usage.cacheRead;
       total.cacheWrite += usage.cacheWrite;
-      if (usage.generationMs !== undefined) {
+      if (usage.generationMs && usage.generationMs > 0) {
         total.generation ??= {};
         const entry = (total.generation[model] ??= { tokens: 0, ms: 0 });
         entry.tokens += usage.output + usage.reasoning;

@@ -539,7 +539,7 @@ describe('startProgressLogger', () => {
 });
 
 describe('generationMs', () => {
-  it('subtracts merged tool execution and abstains when steps or tool starts are missing', () => {
+  it('subtracts merged tool execution and abstains when steps or tool starts are missing; skips token-less steps', () => {
     const tool = (ran: number, completed: number) => ({
       type: 'tool' as const,
       id: `t${ran}`,
@@ -552,10 +552,13 @@ describe('generationMs', () => {
       type: 'assistant',
       time: { created, completed },
       content,
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
     });
     // 100 ms span, overlapping tools busy 20→70 = 50 ms; second step has no tools.
     assert.equal(generationMs([step(0, 100), step(100, 130, [])]), 80);
     assert.equal(generationMs([step(0, 100), step(100)]), undefined);
+    // A step without token counts contributes no time either.
+    assert.equal(generationMs([step(0, 100), { ...step(100, 400), tokens: undefined }]), 50);
     const unstarted = { ...tool(20, 50), time: { created: 15, completed: 50 } };
     assert.equal(generationMs([step(0, 100, [unstarted])]), undefined);
   });

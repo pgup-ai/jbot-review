@@ -890,14 +890,15 @@ function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
 }
 
 /**
- * Each step's span minus the time its tools ran (overlaps merged); undefined
- * while any step is unfinished or a finished tool lacks its start, so tool
- * time never counts as model time.
+ * Each token-reporting step's span minus the time its tools ran (overlaps
+ * merged); undefined while such a step is unfinished or a finished tool lacks
+ * its start, so tool time never counts as model time.
  */
 export function generationMs(messages: AssistantMessage[]): number | undefined {
   if (messages.length === 0) return undefined;
   let total = 0;
-  for (const { time, content } of messages) {
+  for (const { time, content, tokens } of messages) {
+    if (!tokens) continue;
     if (time.completed === undefined) return undefined;
     const runs: Array<[number, number]> = [];
     for (const part of content ?? []) {
