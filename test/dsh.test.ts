@@ -38,7 +38,7 @@ describe('dsh engine', () => {
       [{}, '', usable, {}, /no dsh binary/],
       [{}, '/bin/dsh', broken, {}, /headless boot check; using the opencode engine/],
       [{}, '/bin/dsh', usable, { HTTPS_PROXY: 'http://u:p@proxy:8080' }, /HTTPS_PROXY carries/],
-      [{}, '/bin/dsh', usable, { https_proxy: 'u:p@proxy:8080' }, /https_proxy carries/],
+      [{}, '/bin/dsh', usable, { https_proxy: ' u:p@proxy:8080' }, /https_proxy carries/],
       [{ JBOT_SDK_ENGINE: 'pi-please' }, '/bin/dsh', usable, {}, /unknown JBOT_SDK_ENGINE/],
     ] as const) {
       const resolved = resolveSdkEngine(env, bin, unusable, network);
