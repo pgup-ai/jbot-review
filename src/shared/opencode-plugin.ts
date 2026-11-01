@@ -28,7 +28,7 @@ const pluginSource =
 import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute']);
+const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task', 'webfetch', 'websearch', 'execute', 'image_generate', 'experimental_image_generate']);
 const TOOL_LESS_AGENTS = new Set(['jbot-plain']);
 // A runaway or prompt-injected page must not grow its journal without bound.
 const REPORTED_FINDINGS_MAX_BYTES = 1024 * 1024;

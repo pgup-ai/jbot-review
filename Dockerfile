@@ -28,13 +28,33 @@ WORKDIR /app
 EXPOSE 3000
 ENTRYPOINT ["node", "/app/dist/app/server.js"]
 
+# DeepSeek Harness, the engine for opencode/opencode-go DeepSeek models. The
+# prune drops office preview, speech, images, telemetry, MCP/ACP, the PTY
+# terminal, the web UI and other providers' SDKs, none of which the headless
+# review profile loads (@vscode holds the ripgrep behind grep and stays); 49
+# identical nested zod copies become links to one. ~850MB -> ~140MB.
+FROM base AS dsh-tools
+RUN npm install -g @deepseek-ai/dsh@0.2.1-rc.5 \
+  && npm cache clean --force \
+  && cd /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules \
+  && rm -rf @deepseek-ai/libreoffice-kit* @deepseek-ai/dsh-client-ui-* @deepseek-ai/dsh-web-frontend \
+    @deepseek-ai/dsh-experimental-inspector sherpa-onnx* @img sharp @opentelemetry protobufjs node-pty \
+    @xterm @anthropic-ai @google @smithy @aws-sdk @mixmark-io @modelcontextprotocol @agentclientprotocol fontkit \
+  && keep="" \
+  && for dir in $(find "$PWD" -mindepth 3 -path '*/node_modules/zod' -type d); do \
+    if [ -z "$keep" ]; then keep="$dir"; else rm -rf "$dir" && ln -s "$keep" "$dir"; fi; \
+  done \
+  && dsh --version
+
 FROM base AS runtime
+COPY --from=dsh-tools /usr/local/lib/node_modules/@deepseek-ai /usr/local/lib/node_modules/@deepseek-ai
+RUN ln -s ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin/dsh && dsh --version
 
 # opencode's npm package installs both the glibc and musl binaries (~190MB each);
 # this Debian image only runs the glibc one.
 # command-code's ^1.30.0 range pulls semantic-conventions 1.44.0, which drops the
 # default export it imports; swap in 1.43.0 (npm can't override a global's deps).
-RUN npm install -g @opencode/cli@2.1.3 command-code@1.87.3 \
+RUN npm install -g @opencode/cli@2.2.5 command-code@1.87.3 \
   && cd /tmp && semconv=/usr/local/lib/node_modules/command-code/node_modules/@opentelemetry/semantic-conventions \
   && rm -rf "$semconv" && mkdir "$semconv" \
   && tar -xzf "$(npm pack --silent @opentelemetry/semantic-conventions@1.43.0)" -C "$semconv" --strip-components=1 \
@@ -109,8 +129,10 @@ RUN ln -s /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
   && env PATH=/usr/local/bin:/usr/bin:/bin cursor-agent --help >/dev/null
 
 FROM base AS opencode-tools
+COPY --from=dsh-tools /usr/local/lib/node_modules/@deepseek-ai /usr/local/lib/node_modules/@deepseek-ai
+RUN ln -s ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin/dsh && dsh --version
 # Use the amd64 baseline binary so runners without AVX2 work too.
-RUN npm install -g @opencode/cli-linux-x64-baseline@2.1.3 \
+RUN npm install -g @opencode/cli-linux-x64-baseline@2.2.5 \
   && ln -s /usr/local/lib/node_modules/@opencode/cli-linux-x64-baseline/bin/opencode /usr/local/bin/opencode \
   && npm cache clean --force \
   && opencode --version

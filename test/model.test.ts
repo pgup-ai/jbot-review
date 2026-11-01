@@ -79,11 +79,13 @@ describe('resolveModelSelection', () => {
   });
 
   it('falls back to the default provider for a ref that names none', () => {
-    assert.deepEqual(resolveModelSelection('deepseek-v4-flash'), ['opencode/deepseek-v4-flash']);
+    assert.deepEqual(resolveModelSelection('deepseek-v4.1-flash'), [
+      'opencode/deepseek-v4.1-flash',
+    ]);
   });
 
   it('uses the provider catalog default when no model is given', () => {
-    assert.deepEqual(resolveModelSelection(), ['opencode/deepseek-v4-flash']);
+    assert.deepEqual(resolveModelSelection(), ['opencode/deepseek-v4.1-flash']);
     assert.deepEqual(resolveModelSelection('', 'opencode-go'), ['opencode-go/deepseek-v4.1-flash']);
     assert.deepEqual(resolveModelSelection('', 'devin'), ['devin/default']);
     assert.throws(

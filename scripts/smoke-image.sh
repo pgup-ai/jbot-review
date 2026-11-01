@@ -30,6 +30,7 @@ if output=$(timeout 30s env -u GITHUB_APP_ID MODEL=opencode/smoke PROVIDER=openc
 fi
 printf '%s\n' "$output" | grep -q 'Error: Missing required env var: GITHUB_APP_ID'
 opencode --version
+dsh --version
 if [ "$variant" = opencode ]; then
   node --input-type=module -e '
     import { createRequire } from "node:module";

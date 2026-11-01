@@ -15,6 +15,7 @@ import {
 } from '@symma/protocol';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from '@symma/protocol';
+import { dshServesModel, type DshCatalog } from './dsh.ts';
 import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
@@ -36,6 +37,8 @@ export interface ReviewBackendSelectionInput {
   auxProviderID: string;
   auxModelID: string;
   auxApiKey: string;
+  /** dsh's model catalog when the engine is usable (see resolveSdkEngine). */
+  dshCatalog?: DshCatalog;
 }
 
 export function backendRequiresCompleteEmbeddedDiff(
@@ -65,8 +68,8 @@ export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;
   /** Present only when the role bypasses the OpenCode server. */
-  mainSdkEngine?: 'poolside';
-  auxSdkEngine?: 'poolside';
+  mainSdkEngine?: 'dsh' | 'poolside';
+  auxSdkEngine?: 'dsh' | 'poolside';
   needsOpencode: boolean;
   devinApiKey: string;
   commandCodeAccessKey: string;
@@ -80,6 +83,8 @@ export interface ReviewBackendSelection {
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
+  /** dsh engine init config (main role wins), present only when a role runs on dsh. */
+  dsh?: { providerID: string; modelID: string; apiKey: string };
 }
 
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
@@ -87,8 +92,12 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
   const mainPoolside = !mainCliBackend && isPoolsideProvider(input.providerID);
   const auxPoolside = !auxCliBackend && isPoolsideProvider(input.auxProviderID);
-  const mainOpencode = !mainCliBackend && !mainPoolside;
-  const auxOpencode = !auxCliBackend && !auxPoolside;
+  const mainDsh =
+    !mainCliBackend && dshServesModel(input.dshCatalog, input.providerID, input.modelID);
+  const auxDsh =
+    !auxCliBackend && dshServesModel(input.dshCatalog, input.auxProviderID, input.auxModelID);
+  const mainOpencode = !mainCliBackend && !mainPoolside && !mainDsh;
+  const auxOpencode = !auxCliBackend && !auxPoolside && !auxDsh;
   const needsOpencode = mainOpencode || auxOpencode;
   const opencodeApiKey = mainOpencode
     ? input.apiKey
@@ -105,7 +114,9 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     ...(mainCliBackend ? { mainCliBackend } : {}),
     ...(auxCliBackend ? { auxCliBackend } : {}),
     ...(mainPoolside ? { mainSdkEngine: 'poolside' as const } : {}),
+    ...(mainDsh ? { mainSdkEngine: 'dsh' as const } : {}),
     ...(auxPoolside ? { auxSdkEngine: 'poolside' as const } : {}),
+    ...(auxDsh ? { auxSdkEngine: 'dsh' as const } : {}),
     needsOpencode,
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
     commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),
@@ -119,10 +130,21 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
       ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
       : {}),
     // The opencode server boots with the config of the role it serves: main
-    // when main is on opencode, else aux (a CLI or Poolside main defers to aux).
+    // when main is on opencode, else aux (a CLI, Poolside or dsh main defers to aux).
     opencodeProviderID: mainOpencode ? input.providerID : input.auxProviderID,
     opencodeModelID: mainOpencode ? input.modelID : input.auxModelID,
     opencodeApiKey,
+    ...(mainDsh || auxDsh
+      ? {
+          dsh: {
+            providerID: mainDsh ? input.providerID : input.auxProviderID,
+            modelID: mainDsh ? input.modelID : input.auxModelID,
+            apiKey: mainDsh
+              ? input.apiKey
+              : input.auxApiKey || (input.auxProviderID === input.providerID ? input.apiKey : ''),
+          },
+        }
+      : {}),
   };
 }
 

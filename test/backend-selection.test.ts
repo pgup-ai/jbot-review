@@ -794,6 +794,30 @@ describe('selectReviewBackends', () => {
     );
   });
 
+  it('routes catalogued gateway DeepSeek roles to dsh and leaves other models on OpenCode', () => {
+    const limits = { contextTokens: 1, outputTokens: 1 };
+    const selection = selectReviewBackends({
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4.1-flash',
+      apiKey: 'go-key',
+      auxProviderID: 'opencode-go',
+      auxModelID: 'muse-spark-1.3-contributor',
+      auxApiKey: '',
+      dshCatalog: {
+        'opencode-go': { 'deepseek-v4.1-flash': limits, 'muse-spark-1.3-contributor': limits },
+      },
+    });
+    assert.equal(selection.mainSdkEngine, 'dsh');
+    assert.equal(selection.auxSdkEngine, undefined);
+    assert.equal(selection.needsOpencode, true);
+    assert.equal(selection.opencodeModelID, 'muse-spark-1.3-contributor');
+    assert.deepEqual(selection.dsh, {
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4.1-flash',
+      apiKey: 'go-key',
+    });
+  });
+
   it('requires complete embedded diffs for Poolside and shell-free CLI backends', () => {
     assert.equal(backendRequiresCompleteEmbeddedDiff('poolside', undefined), true);
     for (const backend of ['commandcode', 'grok', 'qoder'] as const) {
