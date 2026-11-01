@@ -318,7 +318,8 @@ export function resolveSdkEngine(
   }
   // dsh hands its launch env to the shell tool, where a model could read the userinfo.
   const credentialed = DSH_NETWORK_ENV.find((name) =>
-    /^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i.test(networkEnv[name] ?? ''),
+    // Proxies are often set without a scheme (`user:pass@host:port`); userinfo is any `@` before the first `/`.
+    /^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/@\s]*@/i.test(networkEnv[name] ?? ''),
   );
   if (credentialed) {
     return { reason: `${credentialed} carries credentials; using the opencode engine` };
