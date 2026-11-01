@@ -34,6 +34,13 @@ await esbuild.build({
   outfile: 'dist/review-retrieval.js',
 });
 
+// The image smoke runs dsh's engine probe from this bundle.
+await esbuild.build({
+  ...shared,
+  entryPoints: ['src/shared/dsh.ts'],
+  outfile: 'dist/dsh.js',
+});
+
 await esbuild.build({
   ...shared,
   entryPoints: ['src/shared/cline-sdk-worker.ts'],
