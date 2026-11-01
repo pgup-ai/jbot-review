@@ -288,7 +288,8 @@ function probeDsh(bin: string): DshProbe {
         reason: `dsh probe failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    probeByBin.set(key, probe);
+    // Only a pass is cached: a failure may be transient (a boot check timing out under load).
+    if ('catalog' in probe) probeByBin.set(key, probe);
   }
   return probe;
 }
