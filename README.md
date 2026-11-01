@@ -468,8 +468,11 @@ harness on DeepSeek in our screens at about the same cost. Its sessions call
 tools through PTC `run_code` programs, run under a read-only OS sandbox
 (Landlock or bwrap on Linux, Seatbelt on macOS) with web, skill, subagent and
 instruction-file features off, and launch outside the checkout so the
-repository's `.env` never loads. The sandbox covers file effects only, so a
-`run_code` program or shell command can reach the network. Without a dsh
+repository's `.env` never loads. The sandbox covers file effects only: reads
+are unconfined and a `run_code` program or shell command can reach the
+network, so a prompt injection in a reviewed PR could read secrets visible to
+the runner's user (including the GitHub token and provider keys) and send them
+out. Use `sdk-engine: opencode` on repositories that review untrusted PRs. Without a dsh
 binary, a usable sandbox or a passing boot check the run falls back to
 opencode and logs why. Every other non-CLI provider except Poolside runs on
 the opencode server. `sdk-engine: opencode` (or `JBOT_SDK_ENGINE=opencode`)

@@ -157,8 +157,11 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    `DSH_HOME`, an env holding only the key and credential-free network
    settings (dsh keeps the key out of tool env; a credentialed proxy routes to
    opencode), and a launch dir outside the checkout so the repo's `.env` never
-   loads. The sandbox governs file effects only: PTC programs and shell
-   commands can reach the network, an accepted gap.
+   loads. The sandbox governs file effects only: reads are unconfined and PTC
+   programs and shell commands can reach the network, so a prompt-injected
+   session could read same-user process environments (the jbot process's
+   GitHub token and provider keys) and send them out. Accepted for repos whose
+   PR authors are trusted; `sdk-engine: opencode` keeps a repo off dsh.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
