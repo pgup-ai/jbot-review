@@ -28,11 +28,8 @@ WORKDIR /app
 EXPOSE 3000
 ENTRYPOINT ["node", "/app/dist/app/server.js"]
 
-# DeepSeek Harness, the engine for opencode/opencode-go DeepSeek models. The
-# prune drops office preview, speech, images, telemetry, MCP/ACP, the PTY
-# terminal, the web UI and other providers' SDKs, none of which the headless
-# review profile loads (@vscode holds the ripgrep behind grep and stays); nested
-# zod copies of one version (49 of 4.4.3 today) become links to one. ~850MB -> ~140MB.
+# DeepSeek Harness for opencode DeepSeek models, pruned to what its headless review profile loads
+# (@vscode holds the ripgrep behind grep and stays); same-version nested zod copies become links.
 FROM base AS dsh-tools
 RUN npm install -g @deepseek-ai/dsh@0.2.1-rc.5 \
   && npm cache clean --force \
