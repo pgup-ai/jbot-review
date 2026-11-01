@@ -330,19 +330,25 @@ export function resolveSdkEngine(
 }
 
 /**
- * Catalogued gateway DeepSeek models, the only family where dsh beat opencode;
- * `-free` ones are excluded because Zen serves them only to the opencode client.
+ * Gateway DeepSeek models, the only family where dsh beat opencode; `-free`
+ * ones are excluded because Zen serves them only to the opencode client.
+ * Callers check this before probing, which spawns dsh.
  */
+export function dshCandidate(providerID: string, modelID: string): boolean {
+  return (
+    DSH_GATEWAYS.includes(providerID) &&
+    modelID.startsWith('deepseek-') &&
+    !modelID.endsWith('-free')
+  );
+}
+
+/** A dsh candidate its catalog actually lists. */
 export function dshServesModel(
   catalog: DshCatalog | undefined,
   providerID: string,
   modelID: string,
 ): boolean {
-  return (
-    modelID.startsWith('deepseek-') &&
-    !modelID.endsWith('-free') &&
-    Boolean(catalog?.[providerID]?.[modelID])
-  );
+  return dshCandidate(providerID, modelID) && Boolean(catalog?.[providerID]?.[modelID]);
 }
 
 /** dsh reports no spend; priced from the catalog's USD-per-million rates, input excluding cache reads. */
@@ -889,7 +895,7 @@ export function createDshBackend(runtime: DshRuntime): ReviewBackend {
         { contextFirst: options.contextFirst, contextPack: options.contextPack },
       );
       log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
-      return withDshSession(runtime, model, label, false, undefined, async (session) => {
+      return withDshSession(runtime, model, label, false, options.modelOptions, async (session) => {
         const { timeoutMs, onTokenUsage } = options;
         const raw = await promptDshSession(
           runtime,

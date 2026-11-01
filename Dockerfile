@@ -31,8 +31,8 @@ ENTRYPOINT ["node", "/app/dist/app/server.js"]
 # DeepSeek Harness, the engine for opencode/opencode-go DeepSeek models. The
 # prune drops office preview, speech, images, telemetry, MCP/ACP, the PTY
 # terminal, the web UI and other providers' SDKs, none of which the headless
-# review profile loads (@vscode holds the ripgrep behind grep and stays); 49
-# identical nested zod copies become links to one. ~850MB -> ~140MB.
+# review profile loads (@vscode holds the ripgrep behind grep and stays); nested
+# zod copies of one version (49 of 4.4.3 today) become links to one. ~850MB -> ~140MB.
 FROM base AS dsh-tools
 RUN npm install -g @deepseek-ai/dsh@0.2.1-rc.5 \
   && npm cache clean --force \
@@ -40,10 +40,11 @@ RUN npm install -g @deepseek-ai/dsh@0.2.1-rc.5 \
   && rm -rf @deepseek-ai/libreoffice-kit* @deepseek-ai/dsh-client-ui-* @deepseek-ai/dsh-web-frontend \
     @deepseek-ai/dsh-experimental-inspector sherpa-onnx* @img sharp @opentelemetry protobufjs node-pty \
     @xterm @anthropic-ai @google @smithy @aws-sdk @mixmark-io @modelcontextprotocol @agentclientprotocol fontkit \
-  && keep="" \
   && for dir in $(find "$PWD" -mindepth 3 -path '*/node_modules/zod' -type d); do \
-    if [ -z "$keep" ]; then keep="$dir"; else rm -rf "$dir" && ln -s "$keep" "$dir"; fi; \
+    first="/tmp/zod-$(node -p "require('$dir/package.json').version")"; \
+    if [ -L "$first" ]; then rm -rf "$dir" && ln -s "$(readlink "$first")" "$dir"; else ln -s "$dir" "$first"; fi; \
   done \
+  && rm -f /tmp/zod-* \
   && dsh --version
 
 FROM base AS runtime

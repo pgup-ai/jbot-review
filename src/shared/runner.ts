@@ -142,7 +142,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
-import { createDshBackend, resolveSdkEngine, startDsh } from './dsh.ts';
+import { createDshBackend, dshCandidate, resolveSdkEngine, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -1514,9 +1514,10 @@ async function runReviewPipeline(params: {
     }
   }
 
-  const sdkEngine = resolveSdkEngine(
-    options.sdkEngine ? { JBOT_SDK_ENGINE: options.sdkEngine } : process.env,
-  );
+  const sdkEngine =
+    dshCandidate(providerID, modelID) || dshCandidate(auxProviderID, auxModelID)
+      ? resolveSdkEngine(options.sdkEngine ? { JBOT_SDK_ENGINE: options.sdkEngine } : process.env)
+      : { reason: '' };
   if (sdkEngine.reason) log(`dsh engine disabled: ${sdkEngine.reason}`);
   // A comma-separated opencode key list resolves to the account with the most
   // weekly plan allowance left. Resolved before backend selection so the
@@ -2550,7 +2551,13 @@ async function runReviewPipeline(params: {
       opencodeBackend = createOpencodeBackend(opencodeRuntime, backendToolTelemetry);
     } catch (error) {
       if (mainOnOpencode) {
-        await dshRuntime?.stop();
+        await dshRuntime
+          ?.stop()
+          .catch((stopError: unknown) =>
+            log(
+              `dsh teardown failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`,
+            ),
+          );
         await cleanupCliHomes();
         throw error;
       }

@@ -48,7 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { resolveSdkEngine } from '../shared/dsh.ts';
+import { dshCandidate, resolveSdkEngine } from '../shared/dsh.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -628,9 +628,12 @@ async function review(
   // backends bring their own binary.
   const { providerID, modelID } = parseModelName(model);
   const aux = parseModelName(auxModel || model);
-  const sdkEngine = resolveSdkEngine(
-    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
-  );
+  const sdkEngine =
+    dshCandidate(providerID, modelID) || dshCandidate(aux.providerID, aux.modelID)
+      ? resolveSdkEngine(
+          comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
+        )
+      : { reason: '' };
   const selection = selectReviewBackends({
     providerID,
     modelID,
