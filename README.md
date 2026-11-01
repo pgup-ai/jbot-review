@@ -473,7 +473,8 @@ repository's `.env` never loads. The sandbox covers file effects only, so a
 binary, a usable sandbox or a passing boot check the run falls back to
 opencode and logs why. Every other non-CLI provider except Poolside runs on
 the opencode server. `sdk-engine: opencode` (or `JBOT_SDK_ENGINE=opencode`)
-pins opencode for every model; `auto`, the removed pi engine's value, now
+pins opencode for every SDK-routed model (CLI providers and Poolside keep
+their own backends); `auto`, the removed pi engine's value, now
 means `dsh`. dsh reports no spend, so its cost lines are estimates from its
 model catalog's list prices. OpenCode records provider-reported costs, which are $0
 for models on the OpenCode Go subscription. The provider catalog supplies each model's

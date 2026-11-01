@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ''
   sdk-engine:
-    description: 'SDK engine: dsh (default) runs opencode/opencode-go DeepSeek models on DeepSeek Harness and every other model on OpenCode; opencode pins OpenCode for all. Without a usable dsh the run falls back to OpenCode.'
+    description: 'SDK engine for models not served by a CLI provider or Poolside: dsh (default) runs opencode/opencode-go DeepSeek models on DeepSeek Harness and the rest on OpenCode; opencode pins OpenCode for all of them. Without a usable dsh the run falls back to OpenCode.'
     required: false
     default: ''
   opencode-proxy-url:

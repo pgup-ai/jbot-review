@@ -2453,12 +2453,10 @@ async function runReviewPipeline(params: {
       modelID: dshModelID,
       apiKey: dshApiKey,
     } = backendSelection.dsh;
-    if (!dshApiKey) {
-      await cleanupCliHomes();
-      throw new Error(`Missing API key for provider "${dshProviderID}".`);
-    }
-    log('Starting dsh engine');
     try {
+      // Inside the try, as for opencode below: an aux-only dsh fails open on a missing key too.
+      if (!dshApiKey) throw new Error(`Missing API key for provider "${dshProviderID}".`);
+      log('Starting dsh engine');
       dshRuntime = await startDsh(
         workspace,
         dshProviderID,

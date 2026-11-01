@@ -1007,7 +1007,7 @@ export function createDshBackend(runtime: DshRuntime): ReviewBackend {
             timeoutMs,
             onTokenUsage,
           );
-          return parseFindingVerdicts(repaired, findings.length, log);
+          return parseFindingVerdicts(repaired, findings.length, log, { strict: true });
         }
       });
     },
