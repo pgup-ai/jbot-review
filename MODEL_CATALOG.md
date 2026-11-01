@@ -28,8 +28,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      34 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
 | `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
-| `opencode`              | CLI snapshot         |      82 | `opencode/deepseek-v4-flash`                                    |
-| `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4.1-flash`                               |
+| `opencode`              | CLI snapshot         |      80 | `opencode/deepseek-v4.1-flash`                                  |
+| `opencode-go`           | CLI snapshot         |      30 | `opencode-go/deepseek-v4.1-flash`                               |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
 | `commandcode`           | CLI snapshot         |      92 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     242 | `cursor/default`                                                |
@@ -793,11 +793,11 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.1.3`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.2.5`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-82 J-Bot model values:
+80 J-Bot model values:
 
 - `opencode/beam-free`
 - `opencode/big-pickle`
@@ -815,9 +815,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/claude-sonnet-4-6`
 - `opencode/claude-sonnet-5`
 - `opencode/claude-sonnet-5-5`
-- `opencode/deepseek-v4-flash` **(default)**
 - `opencode/deepseek-v4-pro`
-- `opencode/deepseek-v4.1-flash`
+- `opencode/deepseek-v4.1-flash` **(default)**
 - `opencode/deepseek-v4.1-flash-free`
 - `opencode/flint-40b-free`
 - `opencode/gemini-3-flash`
@@ -874,7 +873,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/muse-spark-1.2`
 - `opencode/muse-spark-1.3`
 - `opencode/muse-wonder-1.0`
-- `opencode/nemotron-3-ultra-free`
 - `opencode/nemotron-3.5-lightning-free`
 - `opencode/nemotron-3.5-super-vl-free`
 - `opencode/qwen3.5-plus`
@@ -884,17 +882,17 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.1.3`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.2.5`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-28 J-Bot model values:
+30 J-Bot model values:
 
 - `opencode-go/beam-free`
 - `opencode-go/claude-haiku-5-5`
 - `opencode-go/deepseek-v4-pro`
 - `opencode-go/deepseek-v4.1-flash` **(default)**
-- `opencode-go/gemini-4-argon-contributor`
+- `opencode-go/gemini-4-argon`
 - `opencode-go/glm-5.2`
 - `opencode-go/glm-5.3`
 - `opencode-go/glm-5.3-flash`
@@ -903,8 +901,10 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode-go/grok-4.7`
 - `opencode-go/hy3`
 - `opencode-go/hy4-preview`
+- `opencode-go/iceman-contributor-free`
 - `opencode-go/kimi-k2.7-code`
 - `opencode-go/kimi-k3`
+- `opencode-go/kimi-k3.1-pro`
 - `opencode-go/longcat-2.0`
 - `opencode-go/mimo-v2.5`
 - `opencode-go/mimo-v2.5-pro`

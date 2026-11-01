@@ -20,29 +20,30 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 
 ## Architecture
 
-| Module                              | Responsibility                                                                                                                                                                                                                                         |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/workflow/index.ts`             | GitHub Action entry: parse inputs → `runPrReview`                                                                                                                                                                                                      |
-| `src/app/*`                         | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                                                                                                                                  |
-| `src/local/*`                       | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                                                                                                                                           |
-| `src/shared/runner.ts`              | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                                                                                                                                            |
-| `src/shared/prompt.ts`              | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                                                                                                                                            |
-| `src/shared/opencode.ts`            | OpenCode V2 runners (review, aux checks, verification), JSON parsing (strict + repair), context7 MCP; boot lives in `opencode-server.ts`, session driving in `opencode-session.ts`, config in `opencode-config.ts`, the plugin in `opencode-plugin.ts` |
-| `@symma/protocol` (npm)             | ACP engine: framing, JSON-RPC peer, session driving, read-only permission floor, agent specs and their credential helpers, relay controls. Extracted from this repo; the local copies are gone                                                         |
-| `@symma/client` (npm)               | Drives one ACP prompt: local child-process lifecycle, timeouts, teardown, and the gateway transport. Extracted from this repo                                                                                                                          |
-| `src/shared/acp.ts`                 | ACP ReviewBackends over those runners: the shared backend surface both local and gateway-remote use, plus response parsing                                                                                                                             |
-| `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                                                                                                                                              |
-| `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                                                                                                                                          |
-| `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                                                                                                                                         |
-| `src/shared/context-pack.ts`        | Pure per-page context pack for `JBOT_REVIEW_EXPERIMENT=context-pack`: selects, ranks and byte-budgets surrounding code, used definitions, import-linked callers, other pages' diffs and a directory map via an injected provider                       |
-| `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                   |
-| `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                         |
-| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                        |
-| `src/shared/rule-checks.ts`         | Pure deterministic rule checks: parse the repo's committed checks, match added lines, shadow agreement with the guideline pass, compiler validation                                                                                                    |
-| `src/shared/benchmark-judge.ts`     | Pure port of AACR-Bench's comment matcher (path → side → line window → LLM same-concern) and official metrics; judge sessions run via `semantic-judge.ts`                                                                                              |
-| `src/shared/aacr-bench.ts`          | Pure AACR-Bench dataset model: official commit mapping, seeded per-language sample, finding → comment conversion                                                                                                                                       |
-| `src/shared/report.ts`              | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                                                                                                                                                |
-| `src/shared/github.ts`              | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                                                                                                                                      |
+| Module                              | Responsibility                                                                                                                                                                                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/workflow/index.ts`             | GitHub Action entry: parse inputs → `runPrReview`                                                                                                                                                                                                                |
+| `src/app/*`                         | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                                                                                                                                            |
+| `src/local/*`                       | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                                                                                                                                                     |
+| `src/shared/runner.ts`              | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                                                                                                                                                      |
+| `src/shared/prompt.ts`              | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                                                                                                                                                      |
+| `src/shared/dsh.ts`                 | DeepSeek Harness engine for catalogued opencode/opencode-go DeepSeek models: `dsh --profile headless --json` children with a per-session home, a read-only patch overlay and PTC tools; other SDK models stay on opencode, CLI and Poolside routes are unchanged |
+| `src/shared/opencode.ts`            | OpenCode V2 runners (review, aux checks, verification), JSON parsing (strict + repair), context7 MCP; boot lives in `opencode-server.ts`, session driving in `opencode-session.ts`, config in `opencode-config.ts`, the plugin in `opencode-plugin.ts`           |
+| `@symma/protocol` (npm)             | ACP engine: framing, JSON-RPC peer, session driving, read-only permission floor, agent specs and their credential helpers, relay controls. Extracted from this repo; the local copies are gone                                                                   |
+| `@symma/client` (npm)               | Drives one ACP prompt: local child-process lifecycle, timeouts, teardown, and the gateway transport. Extracted from this repo                                                                                                                                    |
+| `src/shared/acp.ts`                 | ACP ReviewBackends over those runners: the shared backend surface both local and gateway-remote use, plus response parsing                                                                                                                                       |
+| `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                                                                                                                                                        |
+| `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                                                                                                                                                    |
+| `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                                                                                                                                                   |
+| `src/shared/context-pack.ts`        | Pure per-page context pack for `JBOT_REVIEW_EXPERIMENT=context-pack`: selects, ranks and byte-budgets surrounding code, used definitions, import-linked callers, other pages' diffs and a directory map via an injected provider                                 |
+| `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                             |
+| `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                                   |
+| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                                  |
+| `src/shared/rule-checks.ts`         | Pure deterministic rule checks: parse the repo's committed checks, match added lines, shadow agreement with the guideline pass, compiler validation                                                                                                              |
+| `src/shared/benchmark-judge.ts`     | Pure port of AACR-Bench's comment matcher (path → side → line window → LLM same-concern) and official metrics; judge sessions run via `semantic-judge.ts`                                                                                                        |
+| `src/shared/aacr-bench.ts`          | Pure AACR-Bench dataset model: official commit mapping, seeded per-language sample, finding → comment conversion                                                                                                                                                 |
+| `src/shared/report.ts`              | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                                                                                                                                                          |
+| `src/shared/github.ts`              | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                                                                                                                                                |
 
 ## Invariants — do not break these
 
@@ -129,7 +130,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    operator's HOME or the reviewed repo, reaches a prompt), the jbot plugin's
    `context` hook (removes
    write/edit/patch/apply_patch/multiedit/question/subagent/task and the
-   webfetch/websearch/execute tools from every request and every tool for the
+   webfetch/websearch/execute/image-generation tools from every request and every tool for the
    single-shot agent, and drops the
    "Instructions from:" messages opencode's read tool injects for nested
    `AGENTS.md` files so repo text never reaches a session as instructions;
@@ -149,6 +150,18 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    bash stays allowed for git diff/log/grep. Scope is the model sessions — the
    local driver's opt-in, gitignored `.jbot-review/last-run.md` report is
    post-review output, not a session write.
+   dsh sessions get the equivalent from their `--patch` overlay: a read-only
+   OS sandbox (Landlock, bwrap or Seatbelt; no usable sandbox routes to
+   opencode) that also confines PTC `run_code` programs, approvals never, the
+   write/web/skill/subagent/instruction-file rows disabled, a per-session
+   `DSH_HOME`, an env holding only the key and credential-free network
+   settings (dsh keeps the key out of tool env; a credentialed proxy routes to
+   opencode), and a launch dir outside the checkout so the repo's `.env` never
+   loads. The sandbox governs file effects only: reads are unconfined and PTC
+   programs and shell commands can reach the network, so a prompt-injected
+   session could read same-user process environments (the jbot process's
+   GitHub token and provider keys) and send them out. Accepted for repos whose
+   PR authors are trusted; `sdk-engine: opencode` keeps a repo off dsh.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
@@ -172,7 +185,8 @@ plausibly moves review quality; when you skip it, say so in the PR.
   `src/shared/diff-context.ts`, `src/shared/review-context.ts`,
   `src/shared/fanout.ts`, `src/shared/context-trim.ts`,
   `src/shared/review-playbooks.ts`, `src/shared/exploration-policy.ts`,
-  session driving in `src/shared/opencode.ts` / `src/shared/acp.ts`, and
+  session driving in `src/shared/opencode.ts` / `src/shared/acp.ts` /
+  `src/shared/dsh.ts`, and
   model/provider defaults (`src/shared/config.ts`, `src/shared/model.ts`).
   When a change's effect on model inputs is unclear, prefer running it.
 - Touching a trigger path → **recommended** before merge: run the **core** subset, 3

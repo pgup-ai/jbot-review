@@ -5,6 +5,7 @@ import { backendCanReadWorkspace, cliBackendForProvider } from './backend-select
 import { modelSupportsAgenticTools } from './config.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 import { commandCodeSessionEffort } from './commandcode.ts';
+import { dshReasoningEffort } from './dsh.ts';
 import { poolsideReasoningEffort } from './poolside.ts';
 import type { ReviewRunOptions } from './runner.ts';
 
@@ -52,7 +53,7 @@ export function runConfiguration(
     ...Object.fromEntries(POLICY_KEYS.map((key) => [key, options[key]])),
     // Absent when off, so an opted-out run keeps the hash it had before the arm existed.
     ...(options.rulesOnlyTests ? { rulesOnlyTests: true } : {}),
-    sdkEngine: ['auto', 'opencode'].includes(options.sdkEngine ?? '')
+    sdkEngine: ['auto', 'dsh', 'opencode'].includes(options.sdkEngine ?? '')
       ? options.sdkEngine
       : 'unrecognized',
     shardCacheEnabled: Boolean(options.shardCachePath),
@@ -139,6 +140,7 @@ export function effectiveReasoningEffort(
 ): string | undefined {
   if (backend === 'commandcode')
     return commandCodeSessionEffort(model, override, commandCodeContext);
+  if (backend === 'dsh') return dshReasoningEffort(modelOptions);
   if (backend !== 'opencode' && backend !== 'poolside') return undefined;
   const effort = knownEffort(
     backend === 'poolside' ? poolsideReasoningEffort(modelOptions) : modelOptions?.reasoningEffort,

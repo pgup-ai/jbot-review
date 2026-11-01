@@ -288,7 +288,7 @@ const OPENCODE_ZEN_MODELS = {
 // such as Devin, CommandCode, and Cursor expose their own model lists.
 export const PROVIDERS: Record<string, ProviderConfig> = {
   opencode: {
-    defaultModel: 'opencode/deepseek-v4-flash',
+    defaultModel: 'opencode/deepseek-v4.1-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
     models: OPENCODE_ZEN_MODELS,

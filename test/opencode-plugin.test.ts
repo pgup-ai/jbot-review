@@ -61,6 +61,8 @@ const tools = () => ({
   webfetch: { description: 'fetch', input: { type: 'object', properties: {} } },
   websearch: { description: 'search', input: { type: 'object', properties: {} } },
   execute: { description: 'run code', input: { type: 'object', properties: {} } },
+  experimental_image_generate: { description: 'image', input: { type: 'object', properties: {} } },
+  image_generate: { description: 'image', input: { type: 'object', properties: {} } },
 });
 
 const temps: string[] = [];

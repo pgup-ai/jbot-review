@@ -30,6 +30,13 @@ if output=$(timeout 30s env -u GITHUB_APP_ID MODEL=opencode/smoke PROVIDER=openc
 fi
 printf '%s\n' "$output" | grep -q 'Error: Missing required env var: GITHUB_APP_ID'
 opencode --version
+dsh --version
+# jbot's own probe: sandbox, catalog, and a key-less headless boot under the review patch (catches a bad prune).
+node --input-type=module -e '
+  const { resolveSdkEngine } = await import("/app/dist/dsh.js");
+  const { dshBin, reason } = resolveSdkEngine({});
+  if (!dshBin) throw new Error(`dsh engine unusable: ${reason}`);
+'
 if [ "$variant" = opencode ]; then
   node --input-type=module -e '
     import { createRequire } from "node:module";

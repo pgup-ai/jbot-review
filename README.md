@@ -130,11 +130,11 @@ manage PR reviews, then pass it through `thread-resolution-token`.
 All variants include the same reviewer code. Review prompts,
 model selection and finding policy are identical for supported routes.
 
-| Image tag          | Included local CLIs          | Action entry point                       |
-| ------------------ | ---------------------------- | ---------------------------------------- |
-| `latest` (default) | All supported CLIs           | `pgup-ai/jbot-review-action@v0`          |
-| `latest-slim`      | OpenCode, CommandCode, Devin | `pgup-ai/jbot-review-action/slim@v0`     |
-| `latest-opencode`  | OpenCode                     | `pgup-ai/jbot-review-action/opencode@v0` |
+| Image tag          | Included local CLIs                            | Action entry point                       |
+| ------------------ | ---------------------------------------------- | ---------------------------------------- |
+| `latest` (default) | All supported CLIs                             | `pgup-ai/jbot-review-action@v0`          |
+| `latest-slim`      | OpenCode, DeepSeek Harness, CommandCode, Devin | `pgup-ai/jbot-review-action/slim@v0`     |
+| `latest-opencode`  | OpenCode, DeepSeek Harness                     | `pgup-ai/jbot-review-action/opencode@v0` |
 
 Use `:<commit-sha>`, `:<commit-sha>-slim` or `:<commit-sha>-opencode` to pin a
 published revision; the `latest` tags track successful builds of main. All
@@ -332,7 +332,7 @@ enumerable catalog command and is documented as that explicit boundary.
 
 | `provider`              | Default model                                                   | Action key input                | Secret/env var                       |
 | ----------------------- | --------------------------------------------------------------- | ------------------------------- | ------------------------------------ |
-| `opencode`              | `opencode/deepseek-v4-flash`                                    | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `opencode`              | `opencode/deepseek-v4.1-flash`                                  | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
 | `opencode-go`           | `opencode-go/deepseek-v4.1-flash`                               | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
 | `deepseek`              | `deepseek/deepseek-v4-flash`                                    | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
 | `openai`                | `openai/gpt-5.4-nano`                                           | `openai-api-key`                | `OPENAI_API_KEY`                     |
@@ -461,10 +461,27 @@ concurrency before wider use.
 
 #### Backend execution and limits
 
-**SDK engines.** Non-CLI providers other than Poolside run on the opencode
-server. The in-process pi SDK engine was removed: `sdk-engine: auto` (or
-`JBOT_SDK_ENGINE=auto`) now logs that and uses opencode. The provider catalog
-supplies each model's context window. Repository investigation has no
+**SDK engines.** `opencode`/`opencode-go` DeepSeek models (except `-free`
+ones) run on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+(`dsh`, shipped in every image), which found more known issues than opencode's
+harness on DeepSeek in our screens at about the same cost. Its sessions call
+tools through PTC `run_code` programs, run under a read-only OS sandbox
+(Landlock or bwrap on Linux, Seatbelt on macOS) with web, skill, subagent and
+instruction-file features off, and launch outside the checkout so the
+repository's `.env` never loads. The sandbox covers file effects only: reads
+are unconfined and a `run_code` program or shell command can reach the
+network, so a prompt injection in a reviewed PR could read secrets visible to
+the runner's user (including the GitHub token and provider keys) and send them
+out. Use `sdk-engine: opencode` on repositories that review untrusted PRs. Without a dsh
+binary, a usable sandbox or a passing boot check the run falls back to
+opencode and logs why. Every other non-CLI provider except Poolside runs on
+the opencode server. `sdk-engine: opencode` (or `JBOT_SDK_ENGINE=opencode`)
+pins opencode for every SDK-routed model (CLI providers and Poolside keep
+their own backends); `auto`, the removed pi engine's value, now
+means `dsh`. dsh reports no spend, so its cost lines are estimates from its
+model catalog's list prices. OpenCode records provider-reported costs, which are $0
+for models on the OpenCode Go subscription. The provider catalog supplies each model's
+context window. Repository investigation has no
 tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
 existing session deadlines and per-command process limits still apply.
 
@@ -629,7 +646,7 @@ it as `model`. For example, a pool using OpenCode and OpenRouter needs both keys
 ```yaml
 - uses: pgup-ai/jbot-review-action@v0
   with:
-    model: ${{ vars.JBOT_REVIEW_MODEL || 'opencode/deepseek-v4-flash' }}
+    model: ${{ vars.JBOT_REVIEW_MODEL || 'opencode/deepseek-v4.1-flash' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -646,7 +663,7 @@ the provider, its credential, and its base URL — so `provider` is no longer
 needed:
 
 ```yaml
-model: opencode/deepseek-v4-flash
+model: opencode/deepseek-v4.1-flash
 ```
 
 Only the **first** slash splits. Everything after it is the provider's own model
@@ -668,7 +685,7 @@ select different providers in the same run. Each provider's key is resolved
 separately, so a pool can mix them:
 
 ```yaml
-model: opencode/deepseek-v4-flash,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
+model: opencode/deepseek-v4.1-flash,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
 ```
 
 Every provider a pool draws on needs its own key, and all of them are resolved
@@ -731,7 +748,7 @@ matching provider-specific input, such as `opencode-api-key` for
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `opencode`            | Only `opencode` remains; `auto` (the removed pi engine) logs and uses opencode                                                                                                                                                                               |
+| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs opencode/opencode-go DeepSeek models on DeepSeek Harness and the rest on opencode; `opencode` pins opencode                                                                                                                                       |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |
@@ -816,7 +833,7 @@ npm ci
 Add your provider configuration to the gitignored `.env` in that directory:
 
 ```dotenv
-MODEL=opencode/deepseek-v4-flash
+MODEL=opencode/deepseek-v4.1-flash
 OPENCODE_API_KEY=your-api-key
 ```
 

@@ -31,6 +31,7 @@ import {
   reviewDelivery,
   uncoveredFiles,
   REVIEW_EVIDENCE_BYTES,
+  COMPLETE_DIFF_OPTIONS,
   type ReviewPromptBudget,
   type ShardPlan,
 } from './review-plan.ts';
@@ -141,6 +142,7 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
+import { createDshBackend, dshCandidate, resolveSdkEngine, startDsh } from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -897,7 +899,7 @@ function requireCliBackend(
 
 function requireSdkBackend(
   backend: ReviewBackend | undefined,
-  engine: 'opencode' | 'poolside',
+  engine: 'opencode' | 'dsh' | 'poolside',
   role: 'main' | 'aux',
 ): ReviewBackend {
   if (!backend) {
@@ -1226,7 +1228,7 @@ async function runReviewPipeline(params: {
       repository: `${owner}/${repo}`,
       identity: runIdentity(process.env),
       policy: runConfiguration(
-        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'opencode' },
+        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'dsh' },
         model,
       ),
       ...(baseSha ? { baseSha } : {}),
@@ -1512,17 +1514,14 @@ async function runReviewPipeline(params: {
     }
   }
 
-  const sdkEngine = options.sdkEngine || process.env.JBOT_SDK_ENGINE?.trim() || 'opencode';
-  if (sdkEngine !== 'opencode') {
-    log(
-      sdkEngine === 'auto'
-        ? 'The pi engine (JBOT_SDK_ENGINE=auto) was removed; using the opencode engine.'
-        : `Unknown JBOT_SDK_ENGINE value "${sdkEngine}"; using the opencode engine.`,
-    );
-  }
+  const sdkEngine =
+    dshCandidate(providerID, modelID) || dshCandidate(auxProviderID, auxModelID)
+      ? resolveSdkEngine(options.sdkEngine ? { JBOT_SDK_ENGINE: options.sdkEngine } : process.env)
+      : { reason: '' };
+  if (sdkEngine.reason) log(`dsh engine disabled: ${sdkEngine.reason}`);
   // A comma-separated opencode key list resolves to the account with the most
   // weekly plan allowance left. Resolved before backend selection so the
-  // opencode server and both roles receive the same single key.
+  // opencode server, dsh, and both roles receive the same single key.
   const { apiKey, auxApiKey } = await resolveOpencodeApiKeys(
     {
       providerID,
@@ -1539,6 +1538,7 @@ async function runReviewPipeline(params: {
     auxProviderID,
     auxModelID,
     auxApiKey,
+    dshCatalog: sdkEngine.catalog,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   // Backend selection owns the main-wins key policy; empty when no role
@@ -1568,10 +1568,12 @@ async function runReviewPipeline(params: {
     // The absence line keeps alpha-API drift visible instead of silent.
     log(planUsage ?? 'CommandCode plan usage unavailable.');
   }
+  const mainOnDsh = backendSelection.mainSdkEngine === 'dsh';
+  const auxOnDsh = backendSelection.auxSdkEngine === 'dsh';
   const mainOnPoolside = backendSelection.mainSdkEngine === 'poolside';
   const auxOnPoolside = backendSelection.auxSdkEngine === 'poolside';
-  const mainOnOpencode = !mainCliBackend && !mainOnPoolside;
-  const auxOnOpencode = !auxCliBackend && !auxOnPoolside;
+  const mainOnOpencode = !mainCliBackend && !mainOnDsh && !mainOnPoolside;
+  const auxOnOpencode = !auxCliBackend && !auxOnDsh && !auxOnPoolside;
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -1592,7 +1594,7 @@ async function runReviewPipeline(params: {
       `Prompt cache disabled for provider ${providerID} because aux model ${auxModel} does not support it; main model ${model} shares that provider config.`,
     );
   }
-  if (mainOnPoolside || auxOnPoolside) {
+  if (mainOnDsh || auxOnDsh || mainOnPoolside || auxOnPoolside) {
     log(
       `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
     );
@@ -2430,7 +2432,8 @@ async function runReviewPipeline(params: {
   // its own entry in that engine's credential map, so it MUST have its own key.
   // Falling back to the main key would hand the main provider's secret to a
   // different vendor's endpoint (and fail auth there anyway).
-  const auxNeedsOwnKey = auxProviderID !== providerID && mainOnOpencode && auxOnOpencode;
+  const auxNeedsOwnKey =
+    auxProviderID !== providerID && ((mainOnDsh && auxOnDsh) || (mainOnOpencode && auxOnOpencode));
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
@@ -2442,7 +2445,51 @@ async function runReviewPipeline(params: {
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
   }
 
-  let auxOpencodeBootError: unknown;
+  let auxBootError: unknown;
+  let dshRuntime: Awaited<ReturnType<typeof startDsh>> | undefined;
+  let dshBackend: ReviewBackend | undefined;
+  if (backendSelection.dsh && sdkEngine.dshBin) {
+    const {
+      providerID: dshProviderID,
+      modelID: dshModelID,
+      apiKey: dshApiKey,
+    } = backendSelection.dsh;
+    try {
+      // Inside the try, as for opencode below: an aux-only dsh fails open on a missing key too.
+      if (!dshApiKey) throw new Error(`Missing API key for provider "${dshProviderID}".`);
+      log('Starting dsh engine');
+      dshRuntime = await startDsh(
+        workspace,
+        dshProviderID,
+        dshModelID,
+        dshApiKey,
+        log,
+        sdkEngine.dshBin,
+        {
+          modelOptions: mainOnDsh ? options.modelOptions : auxModelOptions,
+          auxModelOptions,
+          reviewDiff: buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
+          toolTelemetry: backendToolTelemetry,
+          catalog: sdkEngine.catalog,
+          ...(mainOnDsh && auxOnDsh ? { auxKey: auxApiKey || dshApiKey } : {}),
+        },
+      );
+      dshBackend = createDshBackend(dshRuntime.runtime);
+    } catch (error) {
+      if (mainOnDsh) {
+        await cleanupCliHomes();
+        throw error;
+      }
+      // Invariant #3, as for an aux-only opencode boot below.
+      auxBootError = error;
+      recordCoverage({ session: 'aux-dsh-boot', state: 'failed', error });
+      log(
+        `Auxiliary dsh backend unavailable; auxiliary sessions are disabled for this run (fail-open): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
   void evidence.warm({
     log,
     onStats: (row) => telemetry.recordJevPrefetch(row),
@@ -2504,13 +2551,20 @@ async function runReviewPipeline(params: {
       opencodeBackend = createOpencodeBackend(opencodeRuntime, backendToolTelemetry);
     } catch (error) {
       if (mainOnOpencode) {
+        await dshRuntime
+          ?.stop()
+          .catch((stopError: unknown) =>
+            log(
+              `dsh teardown failed: ${stopError instanceof Error ? stopError.message : String(stopError)}`,
+            ),
+          );
         await cleanupCliHomes();
         throw error;
       }
       // Opencode serves only aux roles here — invariant #3: a broken aux
       // backend must never fail the run. The auxSessionsEnabled gate below
       // keeps every aux session off; main review continues.
-      auxOpencodeBootError = error;
+      auxBootError = error;
       recordCoverage({ session: 'aux-opencode-boot', state: 'failed', error });
       log(
         `Auxiliary opencode backend unavailable; lens/guideline/addressed/changes-since/verification sessions are disabled for this run (fail-open): ${
@@ -2540,22 +2594,28 @@ async function runReviewPipeline(params: {
   }
   const mainBaseBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
-    : mainOnPoolside
-      ? requireSdkBackend(mainPoolsideBackend, 'poolside', 'main')
-      : requireSdkBackend(opencodeBackend, 'opencode', 'main');
+    : mainOnDsh
+      ? requireSdkBackend(dshBackend, 'dsh', 'main')
+      : mainOnPoolside
+        ? requireSdkBackend(mainPoolsideBackend, 'poolside', 'main')
+        : requireSdkBackend(opencodeBackend, 'opencode', 'main');
   const auxBaseBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
     : auxOnPoolside
       ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
-      : auxOpencodeBootError
+      : auxBootError
         ? // Fail-open stand-in only: auxSessionsEnabled keeps it undispatched.
           mainBaseBackend
-        : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+        : auxOnDsh
+          ? requireSdkBackend(dshBackend, 'dsh', 'aux')
+          : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
     (mainBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${providerID}/${modelID}`]
-      : undefined) ??
+      : mainBaseBackend.name === 'dsh'
+        ? sdkEngine.catalog?.[providerID]?.[modelID]
+        : undefined) ??
       (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
       (providerID === COMMANDCODE_PROVIDER_ID
         ? COMMANDCODE_MODEL_LIMITS[modelID.toLowerCase()]
@@ -2565,7 +2625,9 @@ async function runReviewPipeline(params: {
     auxBaseBackend.name,
     (auxBaseBackend.name === 'opencode'
       ? opencodeRuntime?.modelLimits[`${auxProviderID}/${auxModelID}`]
-      : undefined) ??
+      : auxBaseBackend.name === 'dsh'
+        ? sdkEngine.catalog?.[auxProviderID]?.[auxModelID]
+        : undefined) ??
       (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
       (auxProviderID === COMMANDCODE_PROVIDER_ID
         ? COMMANDCODE_MODEL_LIMITS[auxModelID.toLowerCase()]
@@ -2639,7 +2701,7 @@ async function runReviewPipeline(params: {
         },
       )
     : auxRoleBackend;
-  const auxSessionsEnabled = !auxOpencodeBootError && !auxGatewayPreflightError;
+  const auxSessionsEnabled = !auxBootError && !auxGatewayPreflightError;
   const verificationEnabled = options.verifyFindings && auxSessionsEnabled;
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, verificationEnabled);
   if (finderTimeoutMs) {
@@ -2677,7 +2739,7 @@ async function runReviewPipeline(params: {
     // session there must be able to drive a tool loop. A single-shot model
     // (proxied Gemini) runs tool-free; a visible Context7 tool would let it make
     // the call that 400s on the thought_signature continuation, and it cannot
-    // use the tool anyway. Aux only counts when it runs on opencode (not CLI,
+    // use the tool anyway. Aux only counts when it runs on opencode (not dsh/CLI,
     // which never touch this client).
     const opencodeModelsAgentic =
       modelSupportsAgenticTools(providerID, modelID) &&
@@ -2691,7 +2753,7 @@ async function runReviewPipeline(params: {
         log('Context7 MCP skipped: a single-shot model runs the review without tools.');
       }
     } else if (context7.enabled) {
-      // CLI and Poolside backends run without Context7; framework-behavior
+      // dsh, CLI and Poolside backends run without Context7; framework-behavior
       // claims fall back to the abstention discipline.
       log(
         `Context7 MCP skipped: main review uses the ${mainBackend.name} backend (${context7.reason}).`,
@@ -3389,7 +3451,7 @@ async function runReviewPipeline(params: {
           backend: auxBackend,
           model: auxModel,
           workspace,
-          embedDiff: auxRequiresCompleteEmbeddedDiff,
+          embedDiff: auxOnDsh || auxRequiresCompleteEmbeddedDiff,
           // Summarize re-reviews even when finder prompts exclude prior comments.
           reviewedHead,
           headSha,
@@ -4215,6 +4277,11 @@ async function runReviewPipeline(params: {
     let teardownCompleted = false;
     try {
       stop();
+      await dshRuntime
+        ?.stop()
+        .catch((error: unknown) =>
+          log(`dsh teardown failed: ${error instanceof Error ? error.message : String(error)}`),
+        );
       await cleanupCliHomes();
       teardownCompleted = true;
     } finally {
