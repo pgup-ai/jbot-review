@@ -20,6 +20,7 @@ import {
   EvidenceStore,
   indexEvidenceSource,
   moduleSpecifiers,
+  opaqueModuleForms,
   changedEvidenceLines,
   resolveEvidenceImport,
   evidenceMode,
@@ -895,5 +896,34 @@ test('module specifiers come from syntax, not from strings or comments', () => {
     './barrel',
     './lazy',
     './legacy',
+  ]);
+});
+
+test('opaque module forms come from syntax, with computed and self forms marked', () => {
+  const text = [
+    "import { a } from './a';",
+    "import * as ns from './ns';",
+    "import './register';",
+    "import legacy = require('./legacy');",
+    "const loaded = module.require('./loaded');",
+    "export {} from './empty';",
+    'export { a };',
+    'export default a;',
+    'const lazy = (x: string) => import(x);',
+    "globalThis.eval('1');",
+    "window['eval']('2');",
+    "const title = 'integration import';",
+  ].join('\n');
+  assert.deepEqual(opaqueModuleForms('src/file.ts', text), [
+    './ns',
+    './register',
+    './legacy',
+    './loaded',
+    './empty',
+    undefined,
+    undefined,
+    '',
+    '',
+    '',
   ]);
 });

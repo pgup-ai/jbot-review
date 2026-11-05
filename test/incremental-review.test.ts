@@ -331,6 +331,47 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // An edited file's namespace import of a module outside the PR, relative or aliased, or
+    // `import'` in a string, reaches no PR file; one of a PR file does, as does an unchanged PR
+    // file loading the changed module through an alias that never names it.
+    git('checkout', '-q', '--detach', head);
+    write('util/format.ts', 'export function format(value: number) {\n  return value;\n}\n');
+    write(
+      'tsconfig.json',
+      '{"compilerOptions":{"paths":{"@fmt":["util/format.ts"],"@label":["other/label.ts"],"@svc":["core/limit.ts"]}}}',
+    );
+    const namespaced = (from: string, value: number) =>
+      `import * as fmt from '${from}';\nexport function limit() {\n  return fmt.format(${value});\n}\nexport const title = 'integration import';\n`;
+    for (const [from, reason, selected] of [
+      ['../util/format', 'bounded-followup', ['core/limit.ts', 'worker/job.ts']],
+      ['@fmt', 'bounded-followup', ['core/limit.ts', 'worker/job.ts']],
+      ['../other/label', 'unsupported-module-dependencies', files.map((file) => file.filename)],
+      ['@label', 'unsupported-module-dependencies', files.map((file) => file.filename)],
+    ] as const) {
+      write('core/limit.ts', namespaced(from, 7));
+      const prior = commit();
+      write('core/limit.ts', namespaced(from, 8));
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(prior, base)],
+      });
+      assert.deepEqual([plan.reason, plan.files.map((file) => file.filename)], [reason, selected]);
+    }
+    write('core/limit.ts', 'export function limit() {\n  return 7;\n}\n');
+    write('other/label.ts', "import * as svc from '@svc';\nexport const label = () => svc;\n");
+    const aliased = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 8;\n}\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(aliased, base)],
+        })
+      ).reason,
+      'unsupported-module-dependencies',
+    );
     // None of these block a follow-up: an unchanged listener whose key the change doesn't name,
     // imports of modules outside the PR or from packages, prose, and an added import line.
     git('checkout', '-q', '--detach', head);

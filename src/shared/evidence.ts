@@ -363,6 +363,47 @@ export function moduleSpecifiers(path: string, text: string): string[] {
   return found;
 }
 
+/**
+ * Module forms an impact graph of named imports cannot follow, by specifier: '' when computed
+ * (`import(x)`, `require(x)`, `eval`), undefined when the file itself is the opaque module
+ * (`export {…}`, `export default`). Parsed, so strings and comments never count.
+ */
+export function opaqueModuleForms(path: string, text: string): (string | undefined)[] {
+  const found: (string | undefined)[] = [];
+  const walk = (n: Ast) => {
+    const specifiers = n.specifiers as Ast[] | undefined;
+    if (n.type === 'ImportDeclaration') {
+      if (!specifiers!.length || specifiers!.some((s) => s.type === 'ImportNamespaceSpecifier'))
+        found.push(name(n.source));
+    } else if (n.type === 'ExportAllDeclaration') found.push(name(n.source));
+    else if (n.type === 'ExportNamedDeclaration' && n.source) found.push(name(n.source));
+    else if (n.type === 'ExportNamedDeclaration' && specifiers!.length) found.push(undefined);
+    else if (n.type === 'ExportDefaultDeclaration') found.push(undefined);
+    // `import x = require('./m')` is TypeScript's own require form.
+    else if (n.type === 'TSExternalModuleReference') found.push(name(n.expression));
+    else if (n.type === 'CallExpression') {
+      const callee = ast(n.callee);
+      const arg = ast((n.arguments as unknown[])[0]);
+      // Bare or member-qualified alike: `module.require('./m')`, `globalThis.eval(x)`.
+      const called =
+        callee?.type === 'MemberExpression' || callee?.type === 'OptionalMemberExpression'
+          ? keyName(callee.property, callee.computed)
+          : name(callee);
+      if (callee?.type === 'Import' || called === 'require')
+        found.push(arg?.type === 'StringLiteral' ? (arg.value as string) : '');
+      else if (called === 'eval') found.push('');
+    }
+    for (const [key, value] of Object.entries(n)) {
+      if (key === 'loc') continue;
+      if (Array.isArray(value)) {
+        for (const child of value) if (ast(child)?.type) walk(child as Ast);
+      } else if (ast(value)?.type) walk(value as Ast);
+    }
+  };
+  walk(parseSource(path, text) as unknown as Ast);
+  return found;
+}
+
 export function changedEvidenceLines(patch: string): number[] {
   const lines: number[] = [];
   let current = 0;
