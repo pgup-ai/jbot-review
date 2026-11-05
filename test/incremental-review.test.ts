@@ -471,9 +471,13 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // A fix's own tests do not count toward a broad follow-up.
+    // A fix's own tests and their Jest snapshots do not count toward a broad follow-up.
     git('checkout', '-q', '--detach', head);
-    const suites = ['alpha', 'bravo', 'charlie'].map((name) => `core/__tests__/${name}.test.ts`);
+    const names = ['alpha', 'bravo', 'charlie'];
+    const suites = [
+      ...names.map((name) => `core/${name}.test.ts`),
+      ...names.map((name) => `core/__snapshots__/${name}.test.ts.snap`),
+    ];
     const suite = (value: number) => `export function suite() {\n  return ${value};\n}\n`;
     for (const path of suites) write(path, suite(1));
     const untested = commit();

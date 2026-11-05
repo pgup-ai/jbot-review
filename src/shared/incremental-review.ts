@@ -246,8 +246,9 @@ export function impactedReviewFiles(
 
 // Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
-// Generated snapshots no code imports: MikroORM's schema snapshot and Jest's.
-const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$|(^|\/)__snapshots__\/[^/]+\.snap$/;
+// Generated snapshots no code imports: Jest's (its spec's expected output) and MikroORM's schema.
+const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
+const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
@@ -364,14 +365,15 @@ export async function planIncrementalReview(input: {
     for (const [status, path] of touched) {
       if (
         status === 'A' &&
-        /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)__snapshots__\/[^/]+\.snap$/i.test(path)
+        (/\.(test|spec)\.[cm]?[jt]sx?$/i.test(path) || JEST_SNAPSHOT.test(path))
       )
         added.push(path);
       else if (status !== 'M') return full('added-removed-or-renamed-file');
       changed.push(path);
     }
     // A fix's own tests don't make a follow-up broad.
-    const broad = () => changed.filter((path) => !TEST_FILE.test(path)).length > 3;
+    const broad = () =>
+      changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
     if (!changed.length || broad()) return full('broad-or-empty-followup');
     if (
       input.files.length > 80 ||
@@ -379,7 +381,7 @@ export async function planIncrementalReview(input: {
         (file) =>
           !file.patch ||
           // Rule docs such as the governance routing YAML steer the reviewer, not the code.
-          (![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE].some((pattern) =>
+          (![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE, JEST_SNAPSHOT].some((pattern) =>
             pattern.test(file.filename),
           ) &&
             !isGuidelineSource(file.filename)),
@@ -599,7 +601,7 @@ export async function planIncrementalReview(input: {
     // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.
     // An edited Jest snapshot is its spec's expected output, a link the import graph cannot see.
     const owners = changed.flatMap((path) => {
-      const spec = path.match(/^(.*\/)?__snapshots__\/([^/]+)\.snap$/);
+      const spec = path.match(JEST_SNAPSHOT);
       return spec ? [(spec[1] ?? '') + spec[2]] : [];
     });
     if (owners.some((spec) => !paths.has(spec))) return full('references-outside-pr');
