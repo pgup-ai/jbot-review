@@ -614,11 +614,16 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         path,
       );
     }
-    write('core/new.ts', 'export const value = 1;\n');
-    assert.equal(
-      (await planIncrementalReview({ ...input, head: commit() })).reason,
-      'added-removed-or-renamed-file',
-    );
+    // A helper under __tests__/ can be named by config, unlike a spec.
+    for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
+      git('checkout', '-q', '--detach', head);
+      write(path, 'export const value = 1;\n');
+      assert.equal(
+        (await planIncrementalReview({ ...input, head: commit() })).reason,
+        'added-removed-or-renamed-file',
+        path,
+      );
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
