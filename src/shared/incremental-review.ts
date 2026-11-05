@@ -592,9 +592,14 @@ export async function planIncrementalReview(input: {
       : [];
     if (readers.some((path) => !paths.has(path))) return full('references-outside-pr');
     // A reader's code is unchanged, so its own callers stay out of the graph: only the value moved.
+    // An edited Jest snapshot is its spec's expected output, a link the import graph cannot see.
+    const owners = changed.flatMap((path) => {
+      const spec = path.match(/^(.*\/)?__snapshots__\/([^/]+)\.snap$/);
+      return spec && paths.has((spec[1] ?? '') + spec[2]) ? [(spec[1] ?? '') + spec[2]] : [];
+    });
     const files = impactedReviewFiles(
       input.files,
-      changed.filter((path) => !isDotenv(path)),
+      [...changed.filter((path) => !isDotenv(path)), ...owners],
       sources,
     );
     const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);

@@ -568,6 +568,52 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [withSpec.reason, withSpec.files.map((file) => file.filename)],
       ['bounded-followup', ['core/limit.ts', 'worker/job.ts', 'core/limit.spec.ts']],
     );
+    // An edited Jest snapshot brings its spec and the code the spec covers; an edited
+    // migration snapshot is a schema change.
+    git('checkout', '-q', '--detach', head);
+    write(
+      'other/label.spec.ts',
+      "import { label } from './label';\nit('labels', () => label());\n",
+    );
+    write('other/__snapshots__/label.spec.ts.snap', 'exports[`labels 1`] = `"active"`;\n');
+    write('db/migrations/.snapshot-app.json', '{"tables":[]}\n');
+    const snapshots = commit();
+    const snapshotFiles = [
+      ...files,
+      ...[
+        'other/label.spec.ts',
+        'other/__snapshots__/label.spec.ts.snap',
+        'db/migrations/.snapshot-app.json',
+      ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+    ];
+    for (const [path, text, reason, selected] of [
+      [
+        'other/__snapshots__/label.spec.ts.snap',
+        'exports[`labels 1`] = `"idle"`;\n',
+        'bounded-followup',
+        ['other/label.ts', 'other/label.spec.ts', 'other/__snapshots__/label.spec.ts.snap'],
+      ],
+      [
+        'db/migrations/.snapshot-app.json',
+        '{"tables":["ledger"]}\n',
+        'sensitive-followup',
+        snapshotFiles.map((file) => file.filename),
+      ],
+    ] as const) {
+      git('checkout', '-q', '--detach', snapshots);
+      write(path, text);
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(snapshots, base)],
+        files: snapshotFiles,
+      });
+      assert.deepEqual(
+        [plan.reason, plan.files.map((file) => file.filename)],
+        [reason, selected],
+        path,
+      );
+    }
     write('core/new.ts', 'export const value = 1;\n');
     assert.equal(
       (await planIncrementalReview({ ...input, head: commit() })).reason,
