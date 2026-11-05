@@ -376,15 +376,22 @@ export function opaqueModuleForms(path: string, text: string): (string | undefin
       if (!specifiers!.length || specifiers!.some((s) => s.type === 'ImportNamespaceSpecifier'))
         found.push(name(n.source));
     } else if (n.type === 'ExportAllDeclaration') found.push(name(n.source));
-    else if (n.type === 'ExportNamedDeclaration' && specifiers!.length)
-      found.push(n.source ? name(n.source) : undefined);
+    else if (n.type === 'ExportNamedDeclaration' && n.source) found.push(name(n.source));
+    else if (n.type === 'ExportNamedDeclaration' && specifiers!.length) found.push(undefined);
     else if (n.type === 'ExportDefaultDeclaration') found.push(undefined);
+    // `import x = require('./m')` is TypeScript's own require form.
+    else if (n.type === 'TSExternalModuleReference') found.push(name(n.expression));
     else if (n.type === 'CallExpression') {
       const callee = ast(n.callee);
       const arg = ast((n.arguments as unknown[])[0]);
-      if (callee?.type === 'Import' || (callee?.type === 'Identifier' && callee.name === 'require'))
+      // `eval(x)`, `globalThis.eval(x)` and `window['eval'](x)` alike.
+      const called =
+        callee?.type === 'MemberExpression' || callee?.type === 'OptionalMemberExpression'
+          ? keyName(callee.property, callee.computed)
+          : name(callee);
+      if (callee?.type === 'Import' || (callee?.type === 'Identifier' && called === 'require'))
         found.push(arg?.type === 'StringLiteral' ? (arg.value as string) : '');
-      else if (callee?.type === 'Identifier' && callee.name === 'eval') found.push('');
+      else if (called === 'eval') found.push('');
     }
     for (const [key, value] of Object.entries(n)) {
       if (key === 'loc') continue;

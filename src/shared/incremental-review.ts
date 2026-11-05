@@ -447,16 +447,17 @@ export async function planIncrementalReview(input: {
       // These forms defeat the simple declaration/reference expansion, except one naming a repo
       // module outside the PR and the merge, which cannot carry this follow-up's change. An
       // unchanged file had its full review at the baseline, so it counts only when it may load a
-      // changed module: by name, or through a computed specifier or eval that could name anything.
+      // changed module: by name or resolved path (an alias need not name it), or through a
+      // computed specifier or eval that could name anything.
       const forms = texts.flatMap((text) => opaqueModuleForms(path, text));
-      const opaque = forms.filter((from) => {
-        const target = from && resolveEvidenceImport(path, from, repo, aliases);
-        return !target || paths.has(target) || !!merged?.has(target);
-      });
+      const targets = forms.map((from) => from && resolveEvidenceImport(path, from, repo, aliases));
       if (
-        opaque.length &&
+        targets.some((target) => !target || paths.has(target) || !!merged?.has(target)) &&
         (changed.includes(path) ||
           forms.includes('') ||
+          targets.some(
+            (target) => !!target && (changed.includes(target) || !!merged?.has(target)),
+          ) ||
           texts.some((text) => modules.some((name) => text.includes(name))))
       )
         return full('unsupported-module-dependencies');
