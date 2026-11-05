@@ -219,6 +219,22 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     }
     // A renamed reason must not silently stop the clean-run baseline refresh.
     for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
+    // Generated snapshots and the governance routing YAML load into no code.
+    const inert = await planIncrementalReview({
+      ...input,
+      files: [
+        ...files,
+        ...[
+          'db/migrations/.snapshot-app.json',
+          'core/__snapshots__/limit.spec.ts.snap',
+          '.pr-governance/review/rules-for-diff.yaml',
+        ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+      ],
+    });
+    assert.deepEqual(
+      [inert.reason, inert.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts', 'worker/job.ts']],
+    );
     write(
       'unchanged/wrapper.ts',
       'import { limit } from "../core/limit";\nexport const wrapper = () => limit();\n',
@@ -455,28 +471,38 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // A fix's own tests do not count toward a broad follow-up.
-    git('checkout', '-q', '--detach', head);
-    const suites = ['alpha', 'bravo', 'charlie'].map((name) => `core/__tests__/${name}.test.ts`);
+    // A fix's own tests do not count toward a broad follow-up: files under __tests__/ (named
+    // like modules here, so only the directory matches), and specs with their Jest snapshots.
+    const names = ['alpha', 'bravo', 'charlie'];
     const suite = (value: number) => `export function suite() {\n  return ${value};\n}\n`;
-    for (const path of suites) write(path, suite(1));
-    const untested = commit();
-    for (const path of suites) write(path, suite(2));
-    write('core/limit.ts', 'export function limit() {\n  return 4;\n}\n');
-    assert.equal(
-      (
-        await planIncrementalReview({
-          ...input,
-          head: commit(),
-          priorBodies: [body(untested, base)],
-          files: [
-            ...files,
-            ...suites.map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
-          ],
-        })
-      ).reason,
-      'bounded-followup',
-    );
+    for (const suites of [
+      names.map((name) => `core/__tests__/${name}.ts`),
+      [
+        ...names.map((name) => `core/${name}.test.ts`),
+        ...names.map((name) => `core/__snapshots__/${name}.test.ts.snap`),
+      ],
+    ]) {
+      git('checkout', '-q', '--detach', head);
+      for (const path of suites) write(path, suite(1));
+      const untested = commit();
+      for (const path of suites) write(path, suite(2));
+      write('core/limit.ts', 'export function limit() {\n  return 4;\n}\n');
+      assert.equal(
+        (
+          await planIncrementalReview({
+            ...input,
+            head: commit(),
+            priorBodies: [body(untested, base)],
+            files: [
+              ...files,
+              ...suites.map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+            ],
+          })
+        ).reason,
+        'bounded-followup',
+        suites[0],
+      );
+    }
     // A test under a sensitive directory is not itself sensitive.
     for (const [path, reason] of [
       ['api/__tests__/handler.test.ts', 'bounded-followup'],
@@ -499,6 +525,32 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       });
       assert.equal(plan.reason, reason, path);
     }
+    // A Jest snapshot under a sensitive directory is test output too, however many lines moved.
+    git('checkout', '-q', '--detach', head);
+    const output = (value: number) => `exports[\`case 1\`] = \`${value}\`;\n`.repeat(130);
+    write('api/handler.spec.ts', "it('handles', () => 1);\n");
+    write('api/__snapshots__/handler.spec.ts.snap', output(1));
+    const recorded = commit();
+    write('api/__snapshots__/handler.spec.ts.snap', output(2));
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(recorded, base)],
+          files: [
+            ...files,
+            ...['api/handler.spec.ts', 'api/__snapshots__/handler.spec.ts.snap'].map(
+              (filename) => ({
+                filename,
+                patch: '@@ -0,0 +1 @@\n+a',
+              }),
+            ),
+          ],
+        })
+      ).reason,
+      'bounded-followup',
+    );
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],
@@ -536,11 +588,107 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       (await planIncrementalReview({ ...input, head: commit() })).reason,
       'broad-or-contract-change',
     );
-    write('core/new.ts', 'export const value = 1;\n');
-    assert.equal(
-      (await planIncrementalReview({ ...input, head: commit() })).reason,
-      'added-removed-or-renamed-file',
+    // A new test file, even one longer than the edit cap, is reviewed with the fix it covers.
+    git('checkout', '-q', '--detach', head);
+    write('core/limit.ts', 'export function limit() {\n  return 11;\n}\n');
+    write(
+      'core/limit.spec.ts',
+      `import { limit } from './limit';\nexport const cases = 1;\n${"it('caps', () => limit());\n".repeat(130)}`,
     );
+    write('core/__snapshots__/limit.spec.ts.snap', 'exports[`caps 1`] = `11`;\n');
+    const withSpec = await planIncrementalReview({
+      ...input,
+      head: commit(),
+      files: [
+        ...files,
+        ...['core/limit.spec.ts', 'core/__snapshots__/limit.spec.ts.snap'].map((filename) => ({
+          filename,
+          patch: '@@ -0,0 +1 @@\n+a',
+        })),
+      ],
+    });
+    assert.deepEqual(
+      [withSpec.reason, withSpec.files.map((file) => file.filename)],
+      [
+        'bounded-followup',
+        [
+          'core/limit.ts',
+          'worker/job.ts',
+          'core/limit.spec.ts',
+          'core/__snapshots__/limit.spec.ts.snap',
+        ],
+      ],
+    );
+    // An edited Jest snapshot brings its spec and the code the spec covers; an edited
+    // migration snapshot is a schema change.
+    git('checkout', '-q', '--detach', head);
+    write(
+      'other/label.spec.ts',
+      "import { label } from './label';\nit('labels', () => label());\n",
+    );
+    write('other/__snapshots__/label.spec.ts.snap', 'exports[`labels 1`] = `"active"`;\n');
+    write('db/migrations/.snapshot-app.json', '{"tables":[]}\n');
+    const snapshots = commit();
+    const snapshotFiles = [
+      ...files,
+      ...[
+        'other/label.spec.ts',
+        'other/__snapshots__/label.spec.ts.snap',
+        'db/migrations/.snapshot-app.json',
+      ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+    ];
+    for (const [path, text, reason, selected] of [
+      [
+        'other/__snapshots__/label.spec.ts.snap',
+        'exports[`labels 1`] = `"idle"`;\n',
+        'bounded-followup',
+        ['other/label.ts', 'other/label.spec.ts', 'other/__snapshots__/label.spec.ts.snap'],
+      ],
+      [
+        'db/migrations/.snapshot-app.json',
+        '{"tables":["ledger"]}\n',
+        'sensitive-followup',
+        snapshotFiles.map((file) => file.filename),
+      ],
+    ] as const) {
+      git('checkout', '-q', '--detach', snapshots);
+      write(path, text);
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(snapshots, base)],
+        files: snapshotFiles,
+      });
+      assert.deepEqual(
+        [plan.reason, plan.files.map((file) => file.filename)],
+        [reason, selected],
+        path,
+      );
+    }
+    // Without its spec in the PR, the snapshot would be reviewed apart from the test it records.
+    git('checkout', '-q', '--detach', snapshots);
+    write('other/__snapshots__/label.spec.ts.snap', 'exports[`labels 1`] = `"idle"`;\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(snapshots, base)],
+          files: snapshotFiles.filter((file) => file.filename !== 'other/label.spec.ts'),
+        })
+      ).reason,
+      'references-outside-pr',
+    );
+    // A helper under __tests__/ can be named by config, unlike a spec.
+    for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
+      git('checkout', '-q', '--detach', head);
+      write(path, 'export const value = 1;\n');
+      assert.equal(
+        (await planIncrementalReview({ ...input, head: commit() })).reason,
+        'added-removed-or-renamed-file',
+        path,
+      );
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
