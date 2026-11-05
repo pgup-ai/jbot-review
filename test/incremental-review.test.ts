@@ -525,6 +525,32 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       });
       assert.equal(plan.reason, reason, path);
     }
+    // A Jest snapshot under a sensitive directory is test output too, however many lines moved.
+    git('checkout', '-q', '--detach', head);
+    const output = (value: number) => `exports[\`case 1\`] = \`${value}\`;\n`.repeat(130);
+    write('api/handler.spec.ts', "it('handles', () => 1);\n");
+    write('api/__snapshots__/handler.spec.ts.snap', output(1));
+    const recorded = commit();
+    write('api/__snapshots__/handler.spec.ts.snap', output(2));
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(recorded, base)],
+          files: [
+            ...files,
+            ...['api/handler.spec.ts', 'api/__snapshots__/handler.spec.ts.snap'].map(
+              (filename) => ({
+                filename,
+                patch: '@@ -0,0 +1 @@\n+a',
+              }),
+            ),
+          ],
+        })
+      ).reason,
+      'bounded-followup',
+    );
     for (const [decorator, tripped] of [
       ["@OnEvent('ledger.posted')", true],
       ["@MessagePattern({ cmd: 'sum' })", true],

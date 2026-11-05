@@ -393,6 +393,7 @@ export async function planIncrementalReview(input: {
     // app's own name (apps/api, apps/auth) says nothing about the file inside it.
     const sensitive = (path: string) =>
       !TEST_FILE.test(path) &&
+      !JEST_SNAPSHOT.test(path) &&
       [
         PATH_PATTERNS.security,
         PATH_PATTERNS.data,
@@ -401,9 +402,11 @@ export async function planIncrementalReview(input: {
         PATH_PATTERNS.tooling,
       ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
     if (changed.some(sensitive)) return full('sensitive-followup');
-    // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's lines are
-    // no contract change. An empty pathspec would diff every file.
-    const code = changed.filter((path) => !isDotenv(path) && !added.includes(path));
+    // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's or a Jest
+    // snapshot's lines are no contract change. An empty pathspec would diff every file.
+    const code = changed.filter(
+      (path) => !isDotenv(path) && !added.includes(path) && !JEST_SNAPSHOT.test(path),
+    );
     const patch = code.length
       ? await git(
           '--literal-pathspecs',
