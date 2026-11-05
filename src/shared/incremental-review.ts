@@ -358,11 +358,15 @@ export async function planIncrementalReview(input: {
     // The shadow's git time does not count against the real plan's budget.
     deadline += Date.now() - shadowStarted;
     const changed: string[] = [];
-    // A new test file is loaded by the runner's glob, never by an import; a helper or setup file
-    // under __tests__/ can be named by config, so only spec/test names count.
+    // A new test file is loaded by the runner's glob, never by an import, and its Jest snapshot is
+    // its output; a helper or setup file under __tests__/ can be named by config, so it does not count.
     const added: string[] = [];
     for (const [status, path] of touched) {
-      if (status === 'A' && /\.(test|spec)\.[cm]?[jt]sx?$/i.test(path)) added.push(path);
+      if (
+        status === 'A' &&
+        /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)__snapshots__\/[^/]+\.snap$/i.test(path)
+      )
+        added.push(path);
       else if (status !== 'M') return full('added-removed-or-renamed-file');
       changed.push(path);
     }

@@ -559,14 +559,29 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       'core/limit.spec.ts',
       `import { limit } from './limit';\nexport const cases = 1;\n${"it('caps', () => limit());\n".repeat(130)}`,
     );
+    write('core/__snapshots__/limit.spec.ts.snap', 'exports[`caps 1`] = `11`;\n');
     const withSpec = await planIncrementalReview({
       ...input,
       head: commit(),
-      files: [...files, { filename: 'core/limit.spec.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+      files: [
+        ...files,
+        ...['core/limit.spec.ts', 'core/__snapshots__/limit.spec.ts.snap'].map((filename) => ({
+          filename,
+          patch: '@@ -0,0 +1 @@\n+a',
+        })),
+      ],
     });
     assert.deepEqual(
       [withSpec.reason, withSpec.files.map((file) => file.filename)],
-      ['bounded-followup', ['core/limit.ts', 'worker/job.ts', 'core/limit.spec.ts']],
+      [
+        'bounded-followup',
+        [
+          'core/limit.ts',
+          'worker/job.ts',
+          'core/limit.spec.ts',
+          'core/__snapshots__/limit.spec.ts.snap',
+        ],
+      ],
     );
     // An edited Jest snapshot brings its spec and the code the spec covers; an edited
     // migration snapshot is a schema change.
