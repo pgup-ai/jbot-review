@@ -219,6 +219,22 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     }
     // A renamed reason must not silently stop the clean-run baseline refresh.
     for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
+    // Generated snapshots and the governance routing YAML load into no code.
+    const inert = await planIncrementalReview({
+      ...input,
+      files: [
+        ...files,
+        ...[
+          'db/migrations/.snapshot-app.json',
+          'core/__snapshots__/limit.spec.ts.snap',
+          '.pr-governance/review/rules-for-diff.yaml',
+        ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+      ],
+    });
+    assert.deepEqual(
+      [inert.reason, inert.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts', 'worker/job.ts']],
+    );
     write(
       'unchanged/wrapper.ts',
       'import { limit } from "../core/limit";\nexport const wrapper = () => limit();\n',
@@ -535,6 +551,22 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     assert.equal(
       (await planIncrementalReview({ ...input, head: commit() })).reason,
       'broad-or-contract-change',
+    );
+    // A new test file, even one longer than the edit cap, is reviewed with the fix it covers.
+    git('checkout', '-q', '--detach', head);
+    write('core/limit.ts', 'export function limit() {\n  return 11;\n}\n');
+    write(
+      'core/limit.spec.ts',
+      `import { limit } from './limit';\nexport const cases = 1;\n${"it('caps', () => limit());\n".repeat(130)}`,
+    );
+    const withSpec = await planIncrementalReview({
+      ...input,
+      head: commit(),
+      files: [...files, { filename: 'core/limit.spec.ts', patch: '@@ -0,0 +1 @@\n+a' }],
+    });
+    assert.deepEqual(
+      [withSpec.reason, withSpec.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts', 'worker/job.ts', 'core/limit.spec.ts']],
     );
     write('core/new.ts', 'export const value = 1;\n');
     assert.equal(

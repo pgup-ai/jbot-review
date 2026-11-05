@@ -246,6 +246,8 @@ export function impactedReviewFiles(
 
 // Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
+// Generated snapshots no code imports: MikroORM's schema snapshot and Jest's.
+const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$|(^|\/)__snapshots__\/[^/]+\.snap$/;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
@@ -356,8 +358,11 @@ export async function planIncrementalReview(input: {
     // The shadow's git time does not count against the real plan's budget.
     deadline += Date.now() - shadowStarted;
     const changed: string[] = [];
+    // A new test file is loaded by the runner's glob, never by an import.
+    const added: string[] = [];
     for (const [status, path] of touched) {
-      if (status !== 'M') return full('added-removed-or-renamed-file');
+      if (status === 'A' && TEST_FILE.test(path)) added.push(path);
+      else if (status !== 'M') return full('added-removed-or-renamed-file');
       changed.push(path);
     }
     // A fix's own tests don't make a follow-up broad.
@@ -368,7 +373,11 @@ export async function planIncrementalReview(input: {
       input.files.some(
         (file) =>
           !file.patch ||
-          ![JS_SOURCE, PROSE_FILE, DOTENV_FILE].some((pattern) => pattern.test(file.filename)),
+          // Rule docs such as the governance routing YAML steer the reviewer, not the code.
+          (![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE].some((pattern) =>
+            pattern.test(file.filename),
+          ) &&
+            !isGuidelineSource(file.filename)),
       )
     )
       return full('unsupported-or-large-pr');
@@ -385,9 +394,9 @@ export async function planIncrementalReview(input: {
         PATH_PATTERNS.tooling,
       ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
     if (changed.some(sensitive)) return full('sensitive-followup');
-    // Dotenv edits (`export KEY=` included) are checked by key below. An empty pathspec would
-    // diff every file.
-    const code = changed.filter((path) => !isDotenv(path));
+    // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's lines are
+    // no contract change. An empty pathspec would diff every file.
+    const code = changed.filter((path) => !isDotenv(path) && !added.includes(path));
     const patch = code.length
       ? await git(
           '--literal-pathspecs',
@@ -426,7 +435,11 @@ export async function planIncrementalReview(input: {
         continue;
       }
       const texts = await Promise.all(
-        [baseline.head, input.head].map((ref) => git('show', `${ref}:${file.filename}`)),
+        [baseline.head, input.head].map((ref) =>
+          ref === baseline.head && added.includes(file.filename)
+            ? ''
+            : git('show', `${ref}:${file.filename}`),
+        ),
       );
       bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
