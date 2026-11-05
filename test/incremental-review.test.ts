@@ -331,6 +331,31 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-module-dependencies',
     );
+    // An edited file's namespace import of a module outside the PR, or `import'` in a string,
+    // reaches no PR file; a namespace import of a PR file does.
+    git('checkout', '-q', '--detach', head);
+    write('util/format.ts', 'export function format(value: number) {\n  return value;\n}\n');
+    const namespaced = (from: string, value: number) =>
+      `import * as fmt from '${from}';\nexport function limit() {\n  return fmt.format(${value});\n}\nexport const title = 'integration import';\n`;
+    for (const [from, reason] of [
+      ['../util/format', 'bounded-followup'],
+      ['../other/label', 'unsupported-module-dependencies'],
+    ]) {
+      write('core/limit.ts', namespaced(from, 7));
+      const prior = commit();
+      write('core/limit.ts', namespaced(from, 8));
+      assert.equal(
+        (
+          await planIncrementalReview({
+            ...input,
+            head: commit(),
+            priorBodies: [body(prior, base)],
+          })
+        ).reason,
+        reason,
+        from,
+      );
+    }
     // None of these block a follow-up: an unchanged listener whose key the change doesn't name,
     // imports of modules outside the PR or from packages, prose, and an added import line.
     git('checkout', '-q', '--detach', head);

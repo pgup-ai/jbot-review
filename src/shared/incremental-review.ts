@@ -6,6 +6,7 @@ import {
   indexEvidenceSource,
   loadPathAliases,
   moduleSpecifiers,
+  opaqueModuleForms,
   resolveEvidenceImport,
   JS_SOURCE,
   JS_GLOBS,
@@ -443,19 +444,20 @@ export async function planIncrementalReview(input: {
     const repo = new Set(listing.split('\0').filter(Boolean));
     const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
     for (const [path, texts] of sources) {
-      // These forms defeat the simple declaration/reference expansion. An unchanged file had its
-      // full review at the baseline, so it counts only when it may load a changed module: by name,
-      // or through a computed specifier or eval that could name anything.
+      // These forms defeat the simple declaration/reference expansion, except one naming a repo
+      // module outside the PR and the merge, which cannot carry this follow-up's change. An
+      // unchanged file had its full review at the baseline, so it counts only when it may load a
+      // changed module: by name, or through a computed specifier or eval that could name anything.
+      const forms = texts.flatMap((text) => opaqueModuleForms(path, text));
+      const opaque = forms.filter((from) => {
+        const target = from && resolveEvidenceImport(path, from, repo, aliases);
+        return !target || paths.has(target) || !!merged?.has(target);
+      });
       if (
-        texts.some(
-          (text) =>
-            /\b(?:require\s*\(|import\s*(?:\(|['"]|\*)|export\s*(?:[*{]|\bdefault\b)|eval\s*\()/.test(
-              text,
-            ) &&
-            (changed.includes(path) ||
-              /\b(?:require|import)\s*\(\s*(?!['"])|\beval\s*\(/.test(text) ||
-              modules.some((name) => text.includes(name))),
-        )
+        opaque.length &&
+        (changed.includes(path) ||
+          forms.includes('') ||
+          texts.some((text) => modules.some((name) => text.includes(name))))
       )
         return full('unsupported-module-dependencies');
       // String-keyed wiring (events, queues, DI tokens) is invisible to the symbol graph. An
