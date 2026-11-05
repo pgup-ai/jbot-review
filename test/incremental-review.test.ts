@@ -629,6 +629,20 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         path,
       );
     }
+    // Without its spec in the PR, the snapshot would be reviewed apart from the test it records.
+    git('checkout', '-q', '--detach', snapshots);
+    write('other/__snapshots__/label.spec.ts.snap', 'exports[`labels 1`] = `"idle"`;\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          head: commit(),
+          priorBodies: [body(snapshots, base)],
+          files: snapshotFiles.filter((file) => file.filename !== 'other/label.spec.ts'),
+        })
+      ).reason,
+      'references-outside-pr',
+    );
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
       git('checkout', '-q', '--detach', head);

@@ -600,8 +600,9 @@ export async function planIncrementalReview(input: {
     // An edited Jest snapshot is its spec's expected output, a link the import graph cannot see.
     const owners = changed.flatMap((path) => {
       const spec = path.match(/^(.*\/)?__snapshots__\/([^/]+)\.snap$/);
-      return spec && paths.has((spec[1] ?? '') + spec[2]) ? [(spec[1] ?? '') + spec[2]] : [];
+      return spec ? [(spec[1] ?? '') + spec[2]] : [];
     });
+    if (owners.some((spec) => !paths.has(spec))) return full('references-outside-pr');
     const files = impactedReviewFiles(
       input.files,
       [...changed.filter((path) => !isDotenv(path)), ...owners],
