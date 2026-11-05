@@ -384,12 +384,12 @@ export function opaqueModuleForms(path: string, text: string): (string | undefin
     else if (n.type === 'CallExpression') {
       const callee = ast(n.callee);
       const arg = ast((n.arguments as unknown[])[0]);
-      // `eval(x)`, `globalThis.eval(x)` and `window['eval'](x)` alike.
+      // Bare or member-qualified alike: `module.require('./m')`, `globalThis.eval(x)`.
       const called =
         callee?.type === 'MemberExpression' || callee?.type === 'OptionalMemberExpression'
           ? keyName(callee.property, callee.computed)
           : name(callee);
-      if (callee?.type === 'Import' || (callee?.type === 'Identifier' && called === 'require'))
+      if (callee?.type === 'Import' || called === 'require')
         found.push(arg?.type === 'StringLiteral' ? (arg.value as string) : '');
       else if (called === 'eval') found.push('');
     }
