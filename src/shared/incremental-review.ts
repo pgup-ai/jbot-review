@@ -297,8 +297,8 @@ export async function planIncrementalReview(input: {
   try {
     if (input.worktree && (await git('status', '--porcelain')).trim())
       return full('uncommitted-changes');
-    await git('merge-base', '--is-ancestor', baseline.head, input.head);
-    // A base-branch merge puts its commits in the head delta; only their edits to PR files count.
+    // A base-branch merge or a rebase puts base commits in the head delta; only their edits to PR
+    // files count. The tree diff below needs no ancestry, so an amend or a rebase is a follow-up too.
     // Compare merge bases, not base SHAs: a head reviewed behind an unchanged base can merge it later.
     const forks = await Promise.all(
       [
@@ -437,10 +437,20 @@ export async function planIncrementalReview(input: {
         return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
       })
       .filter(Boolean);
+    // The tree listing outgrows the default buffer in large monorepos.
+    const listing = await gitWithin(input.workspace, () => deadline, 64 * 1024 * 1024)(
+      'ls-tree',
+      '-r',
+      '--name-only',
+      '-z',
+      input.head,
+    );
+    const repo = new Set(listing.split('\0').filter(Boolean));
     let bytes = 0;
     for (const file of input.files) {
-      // Prose and dotenv files carry no imports or wiring for the graph to follow.
-      if (!JS_SOURCE.test(file.filename)) {
+      // Prose and dotenv files carry no imports or wiring for the graph to follow, and a file the
+      // PR deletes has none left: had the baseline kept it, the delta check above went full.
+      if (!JS_SOURCE.test(file.filename) || !repo.has(file.filename)) {
         sources.set(file.filename, ['', '']);
         continue;
       }
@@ -456,15 +466,6 @@ export async function planIncrementalReview(input: {
       sources.set(file.filename, texts);
     }
     const edited = changed.flatMap((path) => sources.get(path)!);
-    // The tree listing outgrows the default buffer in large monorepos.
-    const listing = await gitWithin(input.workspace, () => deadline, 64 * 1024 * 1024)(
-      'ls-tree',
-      '-r',
-      '--name-only',
-      '-z',
-      input.head,
-    );
-    const repo = new Set(listing.split('\0').filter(Boolean));
     const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));
     for (const [path, texts] of sources) {
       // These forms defeat the simple declaration/reference expansion, except one naming a repo
@@ -649,6 +650,40 @@ export async function planIncrementalReview(input: {
     };
   } catch {
     return full('history-or-impact-unavailable');
+  }
+}
+
+/** Fetch a commit the checkout lacks, such as a reviewed head a force-push left behind. */
+export async function fetchMissingCommit(
+  workspace: string,
+  sha: string,
+  url: string,
+  token: string,
+): Promise<void> {
+  const git = (...args: string[]) =>
+    exec('git', ['-c', 'credential.helper=', ...args], {
+      cwd: workspace,
+      timeout: 30_000,
+      // The token rides in the environment, never in argv or the checkout's config.
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'http.extraheader',
+        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+      },
+    });
+  const present = await git('cat-file', '-e', `${sha}^{commit}`).then(
+    () => true,
+    () => false,
+  );
+  if (present) return;
+  try {
+    // Deepening a shallow clone without a limit would fetch the whole history.
+    const shallow = (await git('rev-parse', '--is-shallow-repository')).stdout.trim() === 'true';
+    await git('fetch', '-q', '--no-tags', ...(shallow ? ['--depth=50'] : []), url, sha);
+  } catch {
+    // Fails open: the planner then treats the follow-up as having no readable history.
   }
 }
 

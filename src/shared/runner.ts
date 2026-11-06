@@ -1,7 +1,9 @@
 import { VerificationEvidence } from './verification-evidence.ts';
 import {
   BASELINE_REFRESH_REASONS,
+  fetchMissingCommit,
   planIncrementalReview,
+  reviewBaseline,
   ruleDocsChanged,
   withReviewBaseline,
   type ReviewBaseline,
@@ -1472,6 +1474,26 @@ async function runReviewPipeline(params: {
       ruleChanges.set(reviewed, ruleDocsChanged(workspace, rules, reviewed, headSha ?? 'HEAD'));
     return ruleChanges.get(reviewed)!;
   };
+  // A force-push leaves the reviewed head out of the checkout, and without it every check against
+  // that head reads as changed and the follow-up runs in full.
+  const reviewedHeads = new Set(
+    [
+      completedReviewHead(priorJbotReviewGroups.at(-1)?.body ?? ''),
+      priorJbotReviewGroups
+        .map((group) => reviewBaseline(group.body))
+        .reverse()
+        .find(Boolean)?.head,
+    ].filter((sha) => sha !== undefined),
+  );
+  if (!localDiff && reviewedHeads.size) {
+    // Fails open like the fetch: without the old head the follow-up is reviewed in full.
+    const { token } = (await octokit.auth({ type: 'installation' }).catch(() => ({}))) as {
+      token?: string;
+    };
+    const url = `${process.env.GITHUB_SERVER_URL ?? 'https://github.com'}/${owner}/${repo}.git`;
+    if (token)
+      for (const sha of reviewedHeads) await fetchMissingCommit(workspace, sha, url, token);
+  }
 
   // Unchanged-diff gate (contract on `skipUnchanged`): nothing new for the
   // model at this exact content, so skip before any server boot or LLM session.

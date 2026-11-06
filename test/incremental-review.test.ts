@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -12,6 +12,7 @@ import {
 } from '../src/shared/github.ts';
 import {
   BASELINE_REFRESH_REASONS,
+  fetchMissingCommit,
   impactedReviewFiles,
   planIncrementalReview,
   reviewBaseline,
@@ -205,7 +206,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ policy: 'd'.repeat(64) }, 'policy-changed'],
       [{ head: reviewed }, 'same-head-rerun'],
       [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
-      [{ head: base }, 'history-or-impact-unavailable'],
+      [{ head: 'f'.repeat(40) }, 'history-or-impact-unavailable'],
       [
         { files: [...files, { filename: 'config.json', patch: 'patch' }] },
         'unsupported-or-large-pr',
@@ -964,6 +965,80 @@ test('a merge from the base branch re-reviews only the PR files it or the author
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('an amend or a rebase re-reviews only the PR files it or the author touched', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-rebase-');
+  const source = (name: string, value: number) =>
+    `export function ${name}() {\n  return ${value};\n}\n`;
+  try {
+    git('init', '-q', '-b', 'main');
+    write('a/alpha.ts', source('alpha', 1));
+    write('b/beta.ts', source('beta', 2));
+    write('docs/notes.ts', 'export const notes = 0;\n');
+    const base = commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('a/alpha.ts', source('alpha', 10));
+    write('b/beta.ts', source('beta', 20));
+    const reviewed = commit();
+    const files = ['a/alpha.ts', 'b/beta.ts'].map((filename) => ({
+      filename,
+      patch: '@@ -1 +1 @@\n-a\n+b',
+    }));
+    const scope = async (head: string, mainTip: string) => {
+      const plan = await planIncrementalReview({
+        workspace,
+        files,
+        head,
+        base: mainTip,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      });
+      return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
+    };
+    write('a/alpha.ts', source('alpha', 11));
+    git('commit', '-qa', '--amend', '--no-edit');
+    assert.deepEqual(await scope(git('rev-parse', 'HEAD'), base), [
+      'incremental',
+      'bounded-followup',
+      ['a/alpha.ts'],
+    ]);
+    git('checkout', '-q', 'main');
+    write('docs/notes.ts', 'export const notes = 1;\n');
+    const tip = commit();
+    git('checkout', '-q', 'pr');
+    git('rebase', '-q', 'main');
+    assert.deepEqual(await scope(git('rev-parse', 'HEAD'), tip), [
+      'incremental',
+      'bounded-base-merge',
+      ['a/alpha.ts'],
+    ]);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a reviewed head missing from the checkout is fetched without storing the token', async () => {
+  const origin = gitRepo('jbot-fetch-origin-');
+  const clone = mkdtempSync(join(tmpdir(), 'jbot-fetch-clone-'));
+  try {
+    origin.git('init', '-q', '-b', 'main');
+    origin.write('a.ts', 'export const a = 1;\n');
+    origin.commit();
+    execFileSync('git', ['clone', '-q', origin.workspace, clone]);
+    origin.write('a.ts', 'export const a = 2;\n');
+    const missing = origin.commit();
+    await fetchMissingCommit(clone, missing, origin.workspace, 'secret-token');
+    execFileSync('git', ['cat-file', '-e', `${missing}^{commit}`], { cwd: clone });
+    assert.doesNotMatch(
+      readFileSync(join(clone, '.git', 'config'), 'utf8'),
+      /secret-token|extraheader/,
+    );
+  } finally {
+    rmSync(origin.workspace, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
   }
 });
 

@@ -64,7 +64,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    PR does not itself edit, a base tip the PR has not merged, uncertain
    dependencies and explicit reruns require a full review. Policies
    hash options and a single model, not a pool's members, the jbot build or rule text: discovery follows
-   the diff, and a rule document the PR edits is reviewed as a changed file. A merge from the base branch does not: the follow-up selects the PR files
+   the diff, and a rule document the PR edits is reviewed as a changed file. A merge from the base branch, or a rebase or amend whose reviewed head can still be fetched, does not: the follow-up selects the PR files
    the author or the merged commits edited, plus PR files importing a module they
    changed. Never silently narrow
    scope via summary instructions. Incremental scope must be visible in the report
