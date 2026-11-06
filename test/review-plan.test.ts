@@ -710,11 +710,13 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
   );
 });
 
-test('a page whose pack deadline expired keeps collected code and logs a fallback as timeout', async (t) => {
-  t.mock.method(AbortSignal, 'timeout', () => AbortSignal.abort(new Error('expired')));
+test('a page whose pack deadline expired keeps collected code and logs only deadline fallbacks as timeout', async (t) => {
+  t.mock.method(AbortSignal, 'timeout', () =>
+    AbortSignal.abort(new DOMException('expired', 'TimeoutError')),
+  );
   const budget = reviewPromptBudget('opencode', { contextTokens: 200_000 });
   const file = { filename: 'money.ts', patch: '@@ -1 +1 @@\n-old\n+new' };
-  const plans = [0, 1].map(
+  const plans = [0, 1, 2, 3].map(
     () =>
       buildShardPlans({
         coreContext: '## Pull request',
@@ -735,8 +737,12 @@ test('a page whose pack deadline expired keeps collected code and logs a fallbac
   });
   const results = await addContextPack({
     plans,
-    build: async (plan) =>
-      plan === plans[0] ? pack({ surrounding: { items: 1, bytes: 1 } }) : pack({}),
+    build: async (plan, _budgetBytes, signal) => {
+      if (plan === plans[0]) return pack({ surrounding: { items: 1, bytes: 1 } });
+      if (plan === plans[2]) throw signal.reason;
+      if (plan === plans[3]) throw new Error('boom');
+      return pack({});
+    },
     renderPrompt: (context) =>
       assembleReviewPrompt(context, '', '', false, true, { contextPack: true }),
     budget,
@@ -747,6 +753,8 @@ test('a page whose pack deadline expired keeps collected code and logs a fallbac
     [
       ['complete', undefined],
       ['fallback', 'timeout'],
+      ['fallback', 'timeout'],
+      ['fallback', 'error'],
     ],
   );
 });

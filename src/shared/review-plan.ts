@@ -719,20 +719,26 @@ export async function addContextPack(params: {
             Buffer.byteLength(renderPrompt(plan.context, plan.guidelines)) -
             1024,
         );
+        let failure: unknown;
         const pack = await params
           .build(plan, Math.min(CONTEXT_PACK_MAX_BYTES, roomBytes), signal)
-          .catch(() => undefined);
+          .catch((error: unknown) => {
+            failure = error;
+            return undefined;
+          });
         // A directory map alone would cost the page its caller evidence for no code, and a
         // partial pack is missing a changed file's own code, so both keep today's evidence.
         let reason: ContextPackResult['row']['reason'] = !pack
-          ? 'error'
+          ? failure instanceof Error && ['TimeoutError', 'AbortError'].includes(failure.name)
+            ? 'timeout'
+            : 'error'
           : pack.state === 'partial'
             ? 'partial'
             : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
               ? undefined
               : 'empty';
         // A build cut off by its deadline returns what it collected; only its fallback is a timeout.
-        if (reason && signal.aborted) reason = 'timeout';
+        if (pack && reason && signal.aborted) reason = 'timeout';
         if (pack && !reason) {
           const previous = { context: plan.context, baseContext: plan.baseContext };
           plan.context = withContextPack(plan.context, plan.diffText, pack.text);
