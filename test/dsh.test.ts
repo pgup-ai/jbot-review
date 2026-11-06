@@ -13,6 +13,7 @@ import {
   dshSandboxUsable,
   dshBootSucceeded,
   dshEstimatedCost,
+  dshEventTiming,
   parseDshTurn,
   readDshCatalog,
   resolveSdkEngine,
@@ -239,6 +240,23 @@ describe('dsh engine', () => {
       parseDshTurn({ stdout: '{"type":"final","text":"{}"}', stderr: 'boom\n', exitCode: 1 }).error,
       'exit 1: boom',
     );
+  });
+
+  it('times steps and the silences between events, including the trailing stall', () => {
+    const timing = dshEventTiming(0);
+    timing.feed('{"type":"status","phase":"step_start"}\n', 1_000);
+    // A line split across chunks counts when it completes.
+    timing.feed('{"type":"thinking","text":"lo', 2_000);
+    timing.feed('ng"}\n{"type":"status","phase":"step_end"}\n', 61_000);
+    timing.feed('{"type": "status", "phase": "step_start"}\n', 62_000);
+    timing.feed('{"type":"status","phase":"step_end"}\n', 72_000);
+    assert.deepEqual(timing.snapshot(372_000), {
+      steps: 2,
+      firstStepMs: 60_000,
+      maxStepMs: 60_000,
+      maxSilenceMs: 60_000,
+      tailSilenceMs: 300_000,
+    });
   });
 
   it('repairs malformed verification JSON in the same session', async () => {

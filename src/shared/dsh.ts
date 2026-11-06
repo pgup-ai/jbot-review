@@ -444,6 +444,42 @@ interface DshTurn {
   tools: Array<{ name: string; input: unknown; result?: unknown; ok?: boolean }>;
 }
 
+/**
+ * Event timing of one dsh prompt. `--json` writes whole messages, not deltas, so a long model step
+ * is as silent as a stalled request: these numbers are what a no-output cutoff would have to clear.
+ */
+export function dshEventTiming(start = Date.now()) {
+  let pending = '';
+  let last = start;
+  let stepStart: number | undefined;
+  const timing = { steps: 0, firstStepMs: 0, maxStepMs: 0, maxSilenceMs: 0 };
+  return {
+    feed(chunk: string, now = Date.now()) {
+      const lines = (pending + chunk).split('\n');
+      pending = lines.pop()!;
+      for (const line of lines) {
+        timing.maxSilenceMs = Math.max(timing.maxSilenceMs, now - last);
+        last = now;
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!isRecord(event) || event.type !== 'status') continue;
+        if (event.phase === 'step_start') stepStart = now;
+        else if (event.phase === 'step_end' && stepStart !== undefined) {
+          const ms = now - stepStart;
+          if (!timing.steps++) timing.firstStepMs = ms;
+          timing.maxStepMs = Math.max(timing.maxStepMs, ms);
+        }
+      }
+    },
+    // The trailing silence is the stall a timeout ends on.
+    snapshot: (now = Date.now()) => ({ ...timing, tailSilenceMs: now - last }),
+  };
+}
+
 /** Folds one turn's `--json` events and exit; malformed lines are skipped, not fatal. */
 export function parseDshTurn({
   stdout,
@@ -720,6 +756,7 @@ async function promptDshSession(
       turnCount: steps,
     });
   let result: Awaited<ReturnType<typeof runCliProcess>>;
+  const timing = dshEventTiming();
   try {
     // Labelled by the session, so the runner's grace abort reaches repair turns too.
     result = await runtime.scope.run(session.label, () =>
@@ -729,12 +766,15 @@ async function promptDshSession(
         input: prompt,
         timeoutMs,
         timeoutMessage: `dsh ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
+        onStdout: (chunk) => timing.feed(chunk),
       }),
     );
   } catch (error) {
     telemetry(error, 0);
     onTokenUsage?.({ promptBytes }, session.model, label);
     throw error;
+  } finally {
+    log(`${label} dsh timing: ${JSON.stringify(timing.snapshot())}`);
   }
   const turn = parseDshTurn(result);
   session.sessionId ??= turn.sessionId;
