@@ -243,6 +243,7 @@ describe('CommandCode CLI provider helpers', () => {
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).permissions, {
         defaultMode: 'plan',
         additionalDirectories: ['/github/workspace'],
+        deny: ['web_search', 'web_fetch'],
       });
     } finally {
       rmSync(home, { recursive: true, force: true });

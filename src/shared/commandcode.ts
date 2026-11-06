@@ -131,7 +131,8 @@ export function writeCommandCodeReadOnlySettings(home: string, workspace?: strin
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(
     path,
-    `${JSON.stringify({ tasteLearning: false, permissions: workspace ? { defaultMode: 'plan', additionalDirectories: [workspace] } : { deny: ['*'] } }, null, 2)}\n`,
+    // Plan mode still allows the web tools; a deny rule refuses them without ending the session.
+    `${JSON.stringify({ tasteLearning: false, permissions: workspace ? { defaultMode: 'plan', additionalDirectories: [workspace], deny: ['web_search', 'web_fetch'] } : { deny: ['*'] } }, null, 2)}\n`,
     {
       mode: 0o600,
     },
