@@ -725,14 +725,14 @@ export async function addContextPack(params: {
         // A directory map alone would cost the page its caller evidence for no code, and a
         // partial pack is missing a changed file's own code, so both keep today's evidence.
         let reason: ContextPackResult['row']['reason'] = !pack
-          ? signal.aborted
-            ? 'timeout'
-            : 'error'
+          ? 'error'
           : pack.state === 'partial'
             ? 'partial'
             : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers
               ? undefined
               : 'empty';
+        // A build cut off by its deadline returns what it collected; only its fallback is a timeout.
+        if (reason && signal.aborted) reason = 'timeout';
         if (pack && !reason) {
           const previous = { context: plan.context, baseContext: plan.baseContext };
           plan.context = withContextPack(plan.context, plan.diffText, pack.text);
