@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { createCliProcessScope, runCliProcess } from './cli-process.ts';
+import { supportedModelOptions } from './config.ts';
 import {
   formatTokenUsage,
   parseChangesSinceLastReviewSummary,
@@ -709,8 +710,12 @@ function createDshSession(
       systemPrompt: toolLess ? DSH_TOOL_LESS_SYSTEM_PROMPT : runtime.systemPrompt,
       routingSession: `jbot-${randomUUID()}`,
       reasoningEffort: dshReasoningEffort(
-        modelOptions ??
-          (model === runtime.mainModel ? runtime.modelOptions : runtime.auxModelOptions),
+        supportedModelOptions(
+          providerID,
+          modelID,
+          modelOptions ??
+            (model === runtime.mainModel ? runtime.modelOptions : runtime.auxModelOptions),
+        ),
       ),
       toolLess,
     }),
