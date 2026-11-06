@@ -678,7 +678,9 @@ export function supportedModelOptions(
   const supported = modelConfigFor(providerID, modelID)?.reasoningEfforts;
   const effort = modelOptions?.reasoningEffort;
   if (!supported || typeof effort !== 'string' || supported.includes(effort)) return modelOptions;
-  const clamped = clampReasoningEffort(effort, supported, ties);
+  // A single-tier ladder pins the effort, `none` included.
+  const clamped =
+    supported.length === 1 ? supported[0] : clampReasoningEffort(effort, supported, ties);
   const { reasoningEffort: _dropped, ...rest } = modelOptions!;
   return clamped ? { ...rest, reasoningEffort: clamped } : rest;
 }

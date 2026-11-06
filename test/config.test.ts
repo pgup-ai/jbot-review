@@ -89,6 +89,7 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     for (const [provider, model, options, ties] of [
       ['opencode-go', 'deepseek-v4.1-flash', verifier, 'down'],
       ['opencode', 'deepseek-v4-flash-free', { reasoningEffort: 'high' }, 'up'],
+      ['opencode-go', 'deepseek-v4-pro', { reasoningEffort: 'none' }, 'up'],
     ] as const)
       assert.deepEqual(supportedModelOptions(provider, model, options, ties), {
         reasoningEffort: 'low',
