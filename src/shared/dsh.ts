@@ -460,8 +460,15 @@ export function dshEventTiming(start = Date.now()) {
       for (const line of lines) {
         timing.maxSilenceMs = Math.max(timing.maxSilenceMs, now - last);
         last = now;
-        if (line.includes('"phase":"step_start"')) stepStart = now;
-        else if (line.includes('"phase":"step_end"') && stepStart !== undefined) {
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!isRecord(event) || event.type !== 'status') continue;
+        if (event.phase === 'step_start') stepStart = now;
+        else if (event.phase === 'step_end' && stepStart !== undefined) {
           const ms = now - stepStart;
           if (!timing.steps++) timing.firstStepMs = ms;
           timing.maxStepMs = Math.max(timing.maxStepMs, ms);

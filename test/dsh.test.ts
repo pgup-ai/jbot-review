@@ -248,7 +248,7 @@ describe('dsh engine', () => {
     // A line split across chunks counts when it completes.
     timing.feed('{"type":"thinking","text":"lo', 2_000);
     timing.feed('ng"}\n{"type":"status","phase":"step_end"}\n', 61_000);
-    timing.feed('{"type":"status","phase":"step_start"}\n', 62_000);
+    timing.feed('{"type": "status", "phase": "step_start"}\n', 62_000);
     timing.feed('{"type":"status","phase":"step_end"}\n', 72_000);
     assert.deepEqual(timing.snapshot(372_000), {
       steps: 2,
