@@ -314,7 +314,8 @@ export async function planIncrementalReview(input: {
       forks[0] !== forks[1] &&
       !(await git('merge-base', '--is-ancestor', forks[0], forks[1]).then(
         () => true,
-        () => false,
+        // Exit 1 means not an ancestor; any other failure is unreadable history.
+        (error) => (error.code === 1 ? false : Promise.reject(error)),
       ))
     )
       return full('base-changed');
@@ -458,15 +459,17 @@ export async function planIncrementalReview(input: {
     const repo = new Set(listing.split('\0').filter(Boolean));
     let bytes = 0;
     for (const file of input.files) {
-      // Prose and dotenv files carry no imports or wiring for the graph to follow, and a file the
-      // PR deletes has none left: had the baseline kept it, the delta check above went full.
-      if (!JS_SOURCE.test(file.filename) || !repo.has(file.filename)) {
+      // Prose and dotenv files carry no imports or wiring for the graph to follow.
+      if (!JS_SOURCE.test(file.filename)) {
         sources.set(file.filename, ['', '']);
         continue;
       }
+      // A file the PR deletes is read as the base has it, so links to what it removed still count.
+      // Had the baseline kept it, the delta check above went full.
+      const deleted = !repo.has(file.filename);
       const texts = await Promise.all(
-        [baseline.head, input.head].map((ref) =>
-          ref === baseline.head && added.includes(file.filename)
+        (deleted ? [forks[1], forks[1]] : [baseline.head, input.head]).map((ref) =>
+          !deleted && ref === baseline.head && added.includes(file.filename)
             ? ''
             : git('show', `${ref}:${file.filename}`),
         ),
