@@ -1072,6 +1072,7 @@ describe('runPrReview local mode and early exits', () => {
     const logs: string[] = [];
     let commitFetches = 0;
     const octokit = {
+      auth: async () => ({}),
       rest: { pulls: { listFiles: 'files', listReviews: 'reviews', listCommits: 'commits' } },
       paginate: async (endpoint: string) => {
         if (endpoint === 'files') return [{ filename: 'a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
@@ -1140,6 +1141,7 @@ describe('runPrReview local mode and early exits', () => {
     const sentinel = new Error('commits unavailable');
     const started: string[] = [];
     const octokit = {
+      auth: async () => ({}),
       rest: {
         pulls: {
           get: async () => ({ data: { state: 'open', merged: false, head: { sha: 'head' } } }),
