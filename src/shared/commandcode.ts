@@ -785,20 +785,27 @@ async function runCommandCodePrompt(
       }
       // An out-of-repository call ends the whole session; resuming keeps its work, a fresh retry redoes it.
       const remainingMs = timeoutMs - (Date.now() - startedAt);
-      if (sessionId && !resumeSessionId && remainingMs > 0) {
+      if (sessionId && !resumeSessionId && !repair && remainingMs > 0) {
         log(`${label}: a tool call outside the repository was denied; resuming the session once.`);
-        return await runCommandCodePrompt(
-          workspace,
-          model,
-          COMMANDCODE_DENIED_RESUME_PROMPT,
-          `${label}-resume`,
-          log,
-          remainingMs,
-          onTokenUsage,
-          runtime,
-          effort,
-          sessionId,
-        );
+        try {
+          return await runCommandCodePrompt(
+            workspace,
+            model,
+            COMMANDCODE_DENIED_RESUME_PROMPT,
+            `${label}-resume`,
+            log,
+            remainingMs,
+            onTokenUsage,
+            runtime,
+            effort,
+            sessionId,
+          );
+        } catch (error) {
+          throw new IncompleteReviewError(error instanceof Error ? error.message : String(error), [
+            ...findings,
+            ...(error instanceof IncompleteReviewError ? error.findings : []),
+          ]);
+        }
       }
       throw new IncompleteReviewError(
         `commandcode ${label}: native tool permission denied; check workspace permissions.`,
@@ -815,8 +822,9 @@ async function runCommandCodePrompt(
       throw new Error('CommandCode resumed a different session.');
     if (runtime?.tools)
       log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
+    // A denial resume prices the whole session: the denied attempt reported no cost.
     const estimatedCostUsd =
-      runtime && parsed.sessionId && !resumeSessionId
+      runtime && parsed.sessionId && (!resumeSessionId || label.endsWith('-resume'))
         ? await commandCodeSessionEstimatedCost(home!, parsed.sessionId)
         : undefined;
     usage = parsed.usage

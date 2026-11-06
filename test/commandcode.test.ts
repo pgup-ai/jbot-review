@@ -810,12 +810,12 @@ process.stdin.on('end', async () => {
     setInterval(() => {}, 1000);
     return;
   }
-  if (model.startsWith('denied') && !resume) {
+  if (model.startsWith('denied') && (!resume || model === 'denied-twice')) {
     console.error('Reasoning effort set to low for model.');
-    const finalText = model === 'denied-findings'
-      ? JSON.stringify({findings:[{path:'a.ts',line:1,severity:'P1',title:'Bug',body:'Concrete defect'}]})
+    const finalText = model === 'denied-findings' || model === 'denied-twice'
+      ? JSON.stringify({findings:[{path:resume ? 'c.ts' : 'a.ts',line:1,severity:'P1',title:'Bug',body:'Concrete defect'}]})
       : 'I will review.';
-    const sessionId = model === 'denied-resumable' ? 'denied-session' : undefined;
+    const sessionId = model === 'denied-resumable' || model === 'denied-twice' ? 'denied-session' : undefined;
     console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText,sessionId}));
     process.exitCode = model === 'denied' ? 9 : 0;
     return;
@@ -862,14 +862,34 @@ process.stdin.on('end', async () => {
         },
       );
     }
+    await assert.rejects(
+      runCommandCodeReview(home, 'commandcode/denied-twice', 'FULL_DIFF', '', () => {}, {
+        runtime: { home, tools: true },
+        timeoutMs: 5000,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteReviewError);
+        assert.deepEqual(
+          error.findings.map((finding) => finding.path),
+          ['a.ts', 'c.ts'],
+        );
+        return true;
+      },
+    );
+    const costs: (number | undefined)[] = [];
     const resumed = await runCommandCodeReview(
       home,
       'commandcode/denied-resumable',
       'FULL_DIFF',
       '',
       () => {},
-      { runtime: { home, tools: true }, timeoutMs: 5000 },
+      {
+        runtime: { home, tools: true },
+        timeoutMs: 5000,
+        onTokenUsage: (usage) => costs.push(usage.estimatedCostUsd),
+      },
     );
+    assert.deepEqual(costs, [0.125, undefined]);
     assert.deepEqual(
       resumed.findings.map((finding) => finding.path),
       ['b.ts'],
