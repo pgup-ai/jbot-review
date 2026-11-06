@@ -842,7 +842,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         head,
         base: mainTip,
         policy,
-        priorBodies: [body(reviewed, base)],
+        priorBodies: [body(prior, priorBase)],
         rulesChangedSince: async () => false,
       });
       return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
