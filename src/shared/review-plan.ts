@@ -703,7 +703,6 @@ export async function addContextPack(params: {
   log: (message: string) => void;
 }): Promise<ContextPackResult[]> {
   const { plans, renderPrompt, budget } = params;
-  const signal = AbortSignal.timeout(5000);
   const results: ContextPackResult[] = [];
   let next = 0;
   await Promise.all(
@@ -712,6 +711,8 @@ export async function addContextPack(params: {
         const index = next++;
         const plan = plans[index];
         const started = Date.now();
+        // Per page: one shared deadline starved every page after the first few on big PRs.
+        const signal = AbortSignal.timeout(5000);
         const roomBytes = Math.max(
           0,
           inputCapacity(budget) -
@@ -724,7 +725,9 @@ export async function addContextPack(params: {
         // A directory map alone would cost the page its caller evidence for no code, and a
         // partial pack is missing a changed file's own code, so both keep today's evidence.
         let reason: ContextPackResult['row']['reason'] = !pack
-          ? 'error'
+          ? signal.aborted
+            ? 'timeout'
+            : 'error'
           : pack.state === 'partial'
             ? 'partial'
             : pack.slices.surrounding || pack.slices.definitions || pack.slices.callers

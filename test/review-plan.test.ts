@@ -670,9 +670,11 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
   };
   const plans = [page(), page(), page(), page(), page()];
   const before = { context: plans[3].context, baseContext: plans[3].baseContext };
+  const signals = new Set<AbortSignal>();
   const results = await addContextPack({
     plans,
-    build: async (plan) => {
+    build: async (plan, _budgetBytes, signal) => {
+      signals.add(signal);
       if (plan === plans[1])
         return { ...pack, uncollected: 2, slices: { directories: { items: 1, bytes: 10 } } };
       if (plan === plans[2]) throw new Error('boom');
@@ -696,6 +698,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     ],
   );
   assert.equal(results[1].row.uncollected, 2);
+  assert.equal(signals.size, plans.length);
   assert.match(plans[0].context, /PACKED\n\n## Diff hunks\n[\s\S]*\n2 \+  return n \* 100;\n/);
   assert.ok(plans[0].baseContext.includes('PACKED'));
   assert.ok(!plans[1].context.includes('PACKED'));

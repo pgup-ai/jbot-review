@@ -145,7 +145,7 @@ export interface ContextPackTelemetryRow {
   kind: 'context-pack';
   session: string;
   state: 'complete' | 'partial' | 'fallback';
-  reason?: 'empty' | 'error' | 'overflow' | 'partial';
+  reason?: 'empty' | 'error' | 'overflow' | 'partial' | 'timeout';
   buildMs: number;
   roomBytes: number;
   bytes: number;
