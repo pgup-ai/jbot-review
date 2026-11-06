@@ -1043,6 +1043,7 @@ test('an amend or a rebase re-reviews only the PR files it or the author touched
 test('a reviewed head missing from the checkout is fetched without storing the token', async () => {
   const origin = gitRepo('jbot-fetch-origin-');
   const clone = mkdtempSync(join(tmpdir(), 'jbot-fetch-clone-'));
+  const shallow = join(mkdtempSync(join(tmpdir(), 'jbot-fetch-shallow-')), 'repo');
   try {
     origin.git('init', '-q', '-b', 'main');
     origin.write('a.ts', 'export const a = 1;\n');
@@ -1056,9 +1057,18 @@ test('a reviewed head missing from the checkout is fetched without storing the t
       readFileSync(join(clone, '.git', 'config'), 'utf8'),
       /secret-token|extraheader/,
     );
+    // A shallow clone takes the depth-limited fetch.
+    execFileSync('git', ['clone', '-q', '--depth=1', `file://${origin.workspace}`, shallow]);
+    origin.write('a.ts', 'export const a = 3;\n');
+    const later = origin.commit();
+    await fetchMissingCommit(shallow, later, `file://${origin.workspace}`, 'secret-token');
+    execFileSync('git', ['cat-file', '-e', `${later}^{commit}`], { cwd: shallow });
+    // A failed fetch fails open, leaving the planner to review in full.
+    await fetchMissingCommit(clone, 'e'.repeat(40), join(clone, 'missing'), 'secret-token');
   } finally {
     rmSync(origin.workspace, { recursive: true, force: true });
     rmSync(clone, { recursive: true, force: true });
+    rmSync(shallow, { recursive: true, force: true });
   }
 });
 
