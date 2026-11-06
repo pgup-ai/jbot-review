@@ -33,6 +33,7 @@ import {
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  COMMANDCODE_DENIED_RESUME_PROMPT,
   withNoToolsReviewDirective,
   withCommandCodeToolsDirective,
   type VerifiableFinding,
@@ -761,6 +762,7 @@ async function runCommandCodePrompt(
       writeCommandCodeReadOnlySettings(repairHome);
       copyFileSync(commandCodeAuthPath(runtime!.home), commandCodeAuthPath(repairHome));
     }
+    const startedAt = Date.now();
     const result = await runCliProcess(COMMANDCODE_CLI_BIN, args, {
       cwd: home ? join(home, 'launch') : workspace,
       input,
@@ -772,11 +774,30 @@ async function runCommandCodePrompt(
     progress.finish();
     if (progress.snapshot().stopReason === 'permission_denied') {
       let findings: Finding[] = [];
+      let sessionId: string | undefined;
       try {
         const parsed = parseCommandCodeJsonOutput(result.stdout);
+        sessionId = parsed.sessionId;
         findings = parseReview(parsed.finalText, label, log, { strict: true }).findings;
       } catch {
         // A denied run often ends with prose; never repair it into findings.
+      }
+      // An out-of-repository call ends the whole session; resuming keeps its work, a fresh retry redoes it.
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      if (sessionId && !resumeSessionId && remainingMs > 0) {
+        log(`${label}: a tool call outside the repository was denied; resuming the session once.`);
+        return await runCommandCodePrompt(
+          workspace,
+          model,
+          COMMANDCODE_DENIED_RESUME_PROMPT,
+          `${label}-resume`,
+          log,
+          remainingMs,
+          onTokenUsage,
+          runtime,
+          effort,
+          sessionId,
+        );
       }
       throw new IncompleteReviewError(
         `commandcode ${label}: native tool permission denied; check workspace permissions.`,

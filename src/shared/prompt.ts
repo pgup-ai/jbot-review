@@ -707,6 +707,8 @@ The reviewed repository is at ${JSON.stringify(workspace)}. Use your native read
 ${prompt}`;
 }
 
+export const COMMANDCODE_DENIED_RESUME_PROMPT = `A tool call outside the reviewed repository was denied, so none of the calls in that batch ran. Stay inside the repository, rerun the calls you still need, and finish the task with the required JSON.`;
+
 /** System prompt for dsh sessions; task and schema live in the per-session user prompts. */
 export const DSH_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
 Investigate with run_code: its program calls tools.glob, tools.grep and tools.bash with read-only commands (cat -n, sed -n with line ranges, git diff, git log). Put independent reads in one program instead of one call each. Stay inside the reviewed repository. The complete assigned diff is supplied in the user message. Use small line ranges and follow callers or imports when needed.
