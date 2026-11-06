@@ -1043,7 +1043,7 @@ test('an amend or a rebase re-reviews only the PR files it or the author touched
 test('a reviewed head missing from the checkout is fetched without storing the token', async () => {
   const origin = gitRepo('jbot-fetch-origin-');
   const clone = mkdtempSync(join(tmpdir(), 'jbot-fetch-clone-'));
-  const shallow = join(mkdtempSync(join(tmpdir(), 'jbot-fetch-shallow-')), 'repo');
+  const shallow = mkdtempSync(join(tmpdir(), 'jbot-fetch-shallow-'));
   try {
     origin.git('init', '-q', '-b', 'main');
     origin.write('a.ts', 'export const a = 1;\n');
