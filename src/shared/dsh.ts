@@ -444,7 +444,6 @@ interface DshTurn {
   tools: Array<{ name: string; input: unknown; result?: unknown; ok?: boolean }>;
 }
 
-/** Folds one turn's `--json` events and exit; malformed lines are skipped, not fatal. */
 /**
  * Event timing of one dsh prompt. `--json` writes whole messages, not deltas, so a long model step
  * is as silent as a stalled request: these numbers are what a no-output cutoff would have to clear.
@@ -474,6 +473,7 @@ export function dshEventTiming(start = Date.now()) {
   };
 }
 
+/** Folds one turn's `--json` events and exit; malformed lines are skipped, not fatal. */
 export function parseDshTurn({
   stdout,
   stderr,
