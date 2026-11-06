@@ -133,11 +133,20 @@ describe('dsh engine', () => {
   });
 
   it('passes pi-ai thinking levels through and leaves the rest to the provider', () => {
-    assert.equal(dshReasoningEffort({ reasoningEffort: 'low' }), 'low');
-    assert.equal(dshReasoningEffort({ reasoningEffort: 'xhigh' }), 'xhigh');
-    assert.equal(dshReasoningEffort({ reasoningEffort: 'none' }), 'off');
+    const GLM = 'opencode-go/glm-5.3-flash';
+    assert.equal(dshReasoningEffort(GLM, { reasoningEffort: 'low' }), 'low');
+    assert.equal(dshReasoningEffort(GLM, { reasoningEffort: 'xhigh' }), 'xhigh');
+    assert.equal(dshReasoningEffort(GLM, { reasoningEffort: 'none' }), 'off');
     for (const reasoningEffort of [undefined, 'default', 'turbo', 3])
-      assert.equal(dshReasoningEffort({ reasoningEffort }), undefined);
+      assert.equal(dshReasoningEffort(GLM, { reasoningEffort }), undefined);
+  });
+
+  it('pins DeepSeek to low, an explicit none included', () => {
+    for (const reasoningEffort of ['none', 'medium', 'high'])
+      assert.equal(
+        dshReasoningEffort('opencode-go/deepseek-v4.1-flash', { reasoningEffort }),
+        'low',
+      );
   });
 
   it('serves only catalogued gateway DeepSeek models, never Zen free-tier ones', () => {

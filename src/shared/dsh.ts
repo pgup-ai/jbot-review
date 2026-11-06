@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { createCliProcessScope, runCliProcess } from './cli-process.ts';
+import { supportedModelOptions } from './config.ts';
 import {
   formatTokenUsage,
   parseChangesSinceLastReviewSummary,
@@ -370,8 +371,13 @@ export function dshEstimatedCost(
 const DSH_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 /** pi-ai's thinking levels, which it maps per model; `default` leaves the provider's own. */
-export function dshReasoningEffort(modelOptions?: Record<string, unknown>): string | undefined {
-  const effort = modelOptions?.reasoningEffort === 'none' ? 'off' : modelOptions?.reasoningEffort;
+export function dshReasoningEffort(
+  model: string,
+  modelOptions?: Record<string, unknown>,
+): string | undefined {
+  const { providerID, modelID } = parseModelName(model);
+  const requested = supportedModelOptions(providerID, modelID, modelOptions)?.reasoningEffort;
+  const effort = requested === 'none' ? 'off' : requested;
   return typeof effort === 'string' && DSH_THINKING_LEVELS.has(effort) ? effort : undefined;
 }
 
@@ -709,6 +715,7 @@ function createDshSession(
       systemPrompt: toolLess ? DSH_TOOL_LESS_SYSTEM_PROMPT : runtime.systemPrompt,
       routingSession: `jbot-${randomUUID()}`,
       reasoningEffort: dshReasoningEffort(
+        model,
         modelOptions ??
           (model === runtime.mainModel ? runtime.modelOptions : runtime.auxModelOptions),
       ),

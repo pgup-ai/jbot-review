@@ -80,6 +80,22 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal(modelSupportsPromptCache('opencode', 'glm-5-free'), false);
   });
 
+  it('pins DeepSeek to low in every role', () => {
+    // A verifier one tier below a `high` muse main asked dsh's pi-ai for `medium`, which it rejects.
+    const verifier = verificationModelOptions(
+      { reasoningEffort: 'high' },
+      { reasoningEffort: 'low' },
+    );
+    for (const [provider, model, options, ties] of [
+      ['opencode-go', 'deepseek-v4.1-flash', verifier, 'down'],
+      ['opencode', 'deepseek-v4-flash-free', { reasoningEffort: 'high' }, 'up'],
+      ['opencode-go', 'deepseek-v4-pro', { reasoningEffort: 'none' }, 'up'],
+    ] as const)
+      assert.deepEqual(supportedModelOptions(provider, model, options, ties), {
+        reasoningEffort: 'low',
+      });
+  });
+
   it('clamps a reasoning effort the model would reject to the nearest tier', () => {
     // The provider 400s non-retryably on unsupported efforts; ties resolve UP
     // so a ladder without `medium` cannot quietly reinstate a lower tier.

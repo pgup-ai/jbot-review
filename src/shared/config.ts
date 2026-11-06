@@ -258,6 +258,11 @@ const EFFORT_RESTRICTED_MODELS = {
   'ox-alpha': { reasoningEfforts: ['low', 'high', 'max'] },
   'omen-alpha': { reasoningEfforts: ['low', 'high', 'max'] },
   'mimo-v2.5': { reasoningEfforts: ['medium', 'high'] },
+  // DeepSeek runs at `low` in every role, including a verifier derived from a `high`
+  // main; dsh's pi-ai catalog rejects `medium` outright.
+  'deepseek-v4.1-flash': { reasoningEfforts: ['low'] },
+  'deepseek-v4-flash': { reasoningEfforts: ['low'] },
+  'deepseek-v4-pro': { reasoningEfforts: ['low'] },
 } satisfies Record<string, ModelConfig>;
 
 // "only `"auto"` is supported for `tool_choice`" (opencode-go and Zen free, 2026-09-24; 1.2 on opencode-go, 2026-09-25).
@@ -673,7 +678,9 @@ export function supportedModelOptions(
   const supported = modelConfigFor(providerID, modelID)?.reasoningEfforts;
   const effort = modelOptions?.reasoningEffort;
   if (!supported || typeof effort !== 'string' || supported.includes(effort)) return modelOptions;
-  const clamped = clampReasoningEffort(effort, supported, ties);
+  // A single-tier ladder pins the effort, `none` included.
+  const clamped =
+    supported.length === 1 ? supported[0] : clampReasoningEffort(effort, supported, ties);
   const { reasoningEffort: _dropped, ...rest } = modelOptions!;
   return clamped ? { ...rest, reasoningEffort: clamped } : rest;
 }
