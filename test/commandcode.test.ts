@@ -243,6 +243,7 @@ describe('CommandCode CLI provider helpers', () => {
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).permissions, {
         defaultMode: 'plan',
         additionalDirectories: ['/github/workspace'],
+        deny: ['web_search', 'web_fetch'],
       });
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -809,12 +810,13 @@ process.stdin.on('end', async () => {
     setInterval(() => {}, 1000);
     return;
   }
-  if (model.startsWith('denied')) {
+  if (model.startsWith('denied') && (!resume || model === 'denied-twice')) {
     console.error('Reasoning effort set to low for model.');
-    const finalText = model === 'denied-findings'
-      ? JSON.stringify({findings:[{path:'a.ts',line:1,severity:'P1',title:'Bug',body:'Concrete defect'}]})
+    const finalText = model === 'denied-findings' || model === 'denied-twice'
+      ? JSON.stringify({findings:[{path:resume ? 'c.ts' : 'a.ts',line:1,severity:'P1',title:'Bug',body:'Concrete defect'}]})
       : 'I will review.';
-    console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText}));
+    const sessionId = model === 'denied-resumable' || model === 'denied-twice' ? 'denied-session' : undefined;
+    console.log(JSON.stringify({type:'result',subtype:'success',stopReason:'permission_denied',finalText,sessionId}));
     process.exitCode = model === 'denied' ? 9 : 0;
     return;
   }
@@ -860,6 +862,45 @@ process.stdin.on('end', async () => {
         },
       );
     }
+    await assert.rejects(
+      runCommandCodeReview(home, 'commandcode/denied-twice', 'FULL_DIFF', '', () => {}, {
+        runtime: { home, tools: true },
+        timeoutMs: 5000,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof IncompleteReviewError);
+        assert.deepEqual(
+          error.findings.map((finding) => finding.path),
+          ['a.ts', 'c.ts'],
+        );
+        return true;
+      },
+    );
+    const costs: (number | undefined)[] = [];
+    const resumed = await runCommandCodeReview(
+      home,
+      'commandcode/denied-resumable',
+      'FULL_DIFF',
+      '',
+      () => {},
+      {
+        runtime: { home, tools: true },
+        timeoutMs: 5000,
+        onTokenUsage: (usage) => costs.push(usage.estimatedCostUsd),
+      },
+    );
+    assert.deepEqual(costs, [0.125, undefined]);
+    assert.deepEqual(
+      resumed.findings.map((finding) => finding.path),
+      ['b.ts'],
+    );
+    const resumeCall = readFileSync(join(home, 'calls.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((call) => call.model === 'denied-resumable');
+    assert.equal(resumeCall.resume, 'denied-session');
+    assert.match(resumeCall.input, /outside the reviewed repository was denied/);
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
         const observed: string[] = [];
@@ -945,7 +986,7 @@ process.stdin.on('end', async () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 17);
+    assert.equal(calls.length, 18);
     const lensCall = calls.find((call) => call.input.includes('LENS_CTX'));
     assert.match(lensCall.input, /Tool use disabled/);
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
@@ -971,7 +1012,7 @@ process.stdin.on('end', async () => {
       if (call.model === 'meta/muse-spark-1.3-contributor') {
         assert.equal(call.args[call.args.indexOf('--effort') + 1], call.resume ? 'low' : 'high');
       }
-      if (call.resume) {
+      if (call.resume && call.model !== 'denied-resumable') {
         assert.equal(call.resume, encodeURIComponent(call.model) + '-session');
         assert.match(call.input, /FULL_GUIDELINES/);
       }

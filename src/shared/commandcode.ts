@@ -33,6 +33,7 @@ import {
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  COMMANDCODE_DENIED_RESUME_PROMPT,
   withNoToolsReviewDirective,
   withCommandCodeToolsDirective,
   type VerifiableFinding,
@@ -130,7 +131,8 @@ export function writeCommandCodeReadOnlySettings(home: string, workspace?: strin
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(
     path,
-    `${JSON.stringify({ tasteLearning: false, permissions: workspace ? { defaultMode: 'plan', additionalDirectories: [workspace] } : { deny: ['*'] } }, null, 2)}\n`,
+    // Plan mode still allows the web tools; a deny rule refuses them without ending the session.
+    `${JSON.stringify({ tasteLearning: false, permissions: workspace ? { defaultMode: 'plan', additionalDirectories: [workspace], deny: ['web_search', 'web_fetch'] } : { deny: ['*'] } }, null, 2)}\n`,
     {
       mode: 0o600,
     },
@@ -761,6 +763,7 @@ async function runCommandCodePrompt(
       writeCommandCodeReadOnlySettings(repairHome);
       copyFileSync(commandCodeAuthPath(runtime!.home), commandCodeAuthPath(repairHome));
     }
+    const startedAt = Date.now();
     const result = await runCliProcess(COMMANDCODE_CLI_BIN, args, {
       cwd: home ? join(home, 'launch') : workspace,
       input,
@@ -772,11 +775,37 @@ async function runCommandCodePrompt(
     progress.finish();
     if (progress.snapshot().stopReason === 'permission_denied') {
       let findings: Finding[] = [];
+      let sessionId: string | undefined;
       try {
         const parsed = parseCommandCodeJsonOutput(result.stdout);
+        sessionId = parsed.sessionId;
         findings = parseReview(parsed.finalText, label, log, { strict: true }).findings;
       } catch {
         // A denied run often ends with prose; never repair it into findings.
+      }
+      // An out-of-repository call ends the whole session; resuming keeps its work, a fresh retry redoes it.
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      if (sessionId && !resumeSessionId && !repair && remainingMs > 0) {
+        log(`${label}: a tool call outside the repository was denied; resuming the session once.`);
+        try {
+          return await runCommandCodePrompt(
+            workspace,
+            model,
+            COMMANDCODE_DENIED_RESUME_PROMPT,
+            `${label}-resume`,
+            log,
+            remainingMs,
+            onTokenUsage,
+            runtime,
+            effort,
+            sessionId,
+          );
+        } catch (error) {
+          throw new IncompleteReviewError(error instanceof Error ? error.message : String(error), [
+            ...findings,
+            ...(error instanceof IncompleteReviewError ? error.findings : []),
+          ]);
+        }
       }
       throw new IncompleteReviewError(
         `commandcode ${label}: native tool permission denied; check workspace permissions.`,
@@ -793,8 +822,9 @@ async function runCommandCodePrompt(
       throw new Error('CommandCode resumed a different session.');
     if (runtime?.tools)
       log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
+    // A denial resume prices the whole session: the denied attempt reported no cost.
     const estimatedCostUsd =
-      runtime && parsed.sessionId && !resumeSessionId
+      runtime && parsed.sessionId && (!resumeSessionId || label.endsWith('-resume'))
         ? await commandCodeSessionEstimatedCost(home!, parsed.sessionId)
         : undefined;
     usage = parsed.usage
