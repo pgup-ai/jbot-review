@@ -308,6 +308,16 @@ export async function planIncrementalReview(input: {
     );
     // A base tip the PR has not merged can change code its unchanged files depend on.
     if (input.base !== baseline.base && forks[1] !== input.base) return full('base-changed');
+    // A head rebuilt on an older base point turns base commits the review saw as base into PR
+    // changes that the head-to-head diff below never shows.
+    if (
+      forks[0] !== forks[1] &&
+      !(await git('merge-base', '--is-ancestor', forks[0], forks[1]).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return full('base-changed');
     const merged =
       forks[0] === forks[1]
         ? undefined

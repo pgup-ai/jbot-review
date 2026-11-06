@@ -1487,7 +1487,12 @@ async function runReviewPipeline(params: {
   );
   if (!localDiff && reviewedHeads.size) {
     // Fails open like the fetch: without the old head the follow-up is reviewed in full.
-    const { token } = (await octokit.auth({ type: 'installation' }).catch(() => ({}))) as {
+    const { token } = (await octokit.auth({ type: 'installation' }).catch((error: unknown) => {
+      log(
+        `Reviewed-head fetch skipped: no git token (${error instanceof Error ? error.message : String(error)}).`,
+      );
+      return {};
+    })) as {
       token?: string;
     };
     const url = `${process.env.GITHUB_SERVER_URL ?? 'https://github.com'}/${owner}/${repo}.git`;

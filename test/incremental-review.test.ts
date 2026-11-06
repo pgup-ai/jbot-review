@@ -842,7 +842,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
         head,
         base: mainTip,
         policy,
-        priorBodies: [body(prior, priorBase)],
+        priorBodies: [body(reviewed, base)],
         rulesChangedSince: async () => false,
       });
       return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
@@ -976,13 +976,16 @@ test('an amend or a rebase re-reviews only the PR files it or the author touched
     git('init', '-q', '-b', 'main');
     write('a/alpha.ts', source('alpha', 1));
     write('b/beta.ts', source('beta', 2));
+    write('c/charlie.ts', source('charlie', 3));
     write('docs/notes.ts', 'export const notes = 0;\n');
     const base = commit();
     git('checkout', '-q', '-b', 'pr');
     write('a/alpha.ts', source('alpha', 10));
     write('b/beta.ts', source('beta', 20));
+    // A source file the PR already deleted at the baseline has no text to read at either head.
+    git('rm', '-q', 'c/charlie.ts');
     const reviewed = commit();
-    const files = ['a/alpha.ts', 'b/beta.ts'].map((filename) => ({
+    const files = ['a/alpha.ts', 'b/beta.ts', 'c/charlie.ts'].map((filename) => ({
       filename,
       patch: '@@ -1 +1 @@\n-a\n+b',
     }));
@@ -1006,15 +1009,32 @@ test('an amend or a rebase re-reviews only the PR files it or the author touched
       ['a/alpha.ts'],
     ]);
     git('checkout', '-q', 'main');
-    write('docs/notes.ts', 'export const notes = 1;\n');
+    write('e/echo.ts', source('echo', 5));
     const tip = commit();
     git('checkout', '-q', 'pr');
     git('rebase', '-q', 'main');
-    assert.deepEqual(await scope(git('rev-parse', 'HEAD'), tip), [
+    const rebased = git('rev-parse', 'HEAD');
+    assert.deepEqual(await scope(rebased, tip), [
       'incremental',
       'bounded-base-merge',
       ['a/alpha.ts'],
     ]);
+    // Rebuilt on the older base point but keeping a file main added, the head's PR diff gains a
+    // file the review only saw as base, which the head-to-head diff does not show.
+    git('rebase', '-q', '--onto', base, tip);
+    git('checkout', tip, '--', 'e/echo.ts');
+    write('a/alpha.ts', source('alpha', 12));
+    const rebuilt = commit();
+    const plan = await planIncrementalReview({
+      workspace,
+      files: [...files, { filename: 'e/echo.ts', patch: '@@ -0,0 +1 @@\n+b' }],
+      head: rebuilt,
+      base: tip,
+      policy,
+      priorBodies: [body(rebased, tip)],
+      rulesChangedSince: async () => false,
+    });
+    assert.deepEqual([plan.mode, plan.reason], ['full', 'base-changed']);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
