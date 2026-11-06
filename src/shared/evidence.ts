@@ -645,7 +645,7 @@ export class EvidenceStore {
         signal.throwIfAborted();
         // A cap miss counts as uncollected, like a deadline miss.
         if (files >= 64 || bytes >= 2 * 1024 * 1024) throw new Error('context pack file cap');
-        const source = await this.read(path, signal, tracked);
+        const source = await waitForEvidence(this.read(path, signal, tracked), signal);
         // The tracked reader swallows aborts, so a deadline surfaces here as a rejection.
         signal.throwIfAborted();
         if (!source) return undefined;
