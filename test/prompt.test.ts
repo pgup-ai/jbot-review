@@ -5,6 +5,7 @@ import {
   CONTINUATION_NUDGE_PROMPT,
   WRAP_UP_PROMPT,
   isNoAttemptReply,
+  ADDRESSED_OUTPUT_REMINDER,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_DIFF_BUDGET,
@@ -13,12 +14,14 @@ import {
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT_PACK_REVIEW_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
+  ENGLISH_OUTPUT_RULE,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
   QODER_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
+  RULE_CHECK_COMPILER_OUTPUT_REMINDER,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
   UNTRUSTED_PR_CONTENT_NOTE,
@@ -1074,5 +1077,24 @@ describe('AACR-Bench semantic judge', () => {
     assert.equal(parseJudgeVerdict('No. Yes would overstate it'), false);
     // judge.py's quirk, kept for comparable scores: a "no" that mentions "same" still matches.
     assert.equal(parseJudgeVerdict('No, they are not the same concern'), true);
+  });
+});
+
+describe('ENGLISH_OUTPUT_RULE', () => {
+  it('ends every prompt that asks for PR-bound output', () => {
+    for (const reminder of [
+      REVIEW_OUTPUT_REMINDER,
+      WRAP_UP_PROMPT,
+      CONTINUATION_NUDGE_PROMPT,
+      GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
+      CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
+      ADDRESSED_OUTPUT_REMINDER,
+      VERIFICATION_OUTPUT_REMINDER,
+      RULE_CHECK_COMPILER_OUTPUT_REMINDER,
+    ]) {
+      assert.ok(reminder.endsWith(ENGLISH_OUTPUT_RULE));
+    }
+    assert.match(ENGLISH_OUTPUT_RULE, /in English/);
+    assert.match(ENGLISH_OUTPUT_RULE, /exactly as they appear/);
   });
 });
