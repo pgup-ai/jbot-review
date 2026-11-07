@@ -5,6 +5,7 @@ import {
   CONTINUATION_NUDGE_PROMPT,
   WRAP_UP_PROMPT,
   isNoAttemptReply,
+  ADDRESSED_OUTPUT_REMINDER,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_DIFF_BUDGET,
@@ -13,6 +14,7 @@ import {
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT_PACK_REVIEW_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
+  ENGLISH_OUTPUT_RULE,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
@@ -1074,5 +1076,21 @@ describe('AACR-Bench semantic judge', () => {
     assert.equal(parseJudgeVerdict('No. Yes would overstate it'), false);
     // judge.py's quirk, kept for comparable scores: a "no" that mentions "same" still matches.
     assert.equal(parseJudgeVerdict('No, they are not the same concern'), true);
+  });
+});
+
+describe('ENGLISH_OUTPUT_RULE', () => {
+  it('ends every output reminder whose strings reach the PR', () => {
+    for (const reminder of [
+      REVIEW_OUTPUT_REMINDER,
+      GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
+      CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
+      ADDRESSED_OUTPUT_REMINDER,
+      VERIFICATION_OUTPUT_REMINDER,
+    ]) {
+      assert.ok(reminder.endsWith(ENGLISH_OUTPUT_RULE));
+    }
+    assert.match(ENGLISH_OUTPUT_RULE, /in English/);
+    assert.match(ENGLISH_OUTPUT_RULE, /verbatim/);
   });
 });

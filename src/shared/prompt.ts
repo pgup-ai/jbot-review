@@ -653,6 +653,11 @@ one turn.`,
   `No repository reads are available: judge from the diff and the pack.`,
 );
 
+// Chinese-trained models drift into the language of the PR text or comments.
+export const ENGLISH_OUTPUT_RULE = `Write every JSON string value in English, even when the code, comments, PR
+description, or repository guidelines use another language. Quote identifiers,
+string literals, and source lines verbatim.`;
+
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with exactly two top-level keys,
@@ -662,7 +667,9 @@ allowed only inside JSON string values; escape newlines inside string values
 as \\n. Complete everything within this single turn — never end your turn with
 a plan or an announcement of work you have not done yet. Do not write a
 session recap, completion note, question, or "what would you like next"
-message.`;
+message.
+
+${ENGLISH_OUTPUT_RULE}`;
 
 // evidenceQuotes addendum, appended before the output reminder (invariant #5:
 // reminder stays last); absent when the flag is off so that prompt is unchanged.
@@ -1447,7 +1454,9 @@ ${CHANGES_SINCE_SHARED_RULES}`,
 
 export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
-Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.`;
+Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.
+
+${ENGLISH_OUTPUT_RULE}`;
 
 export function assembleChangesSinceLastReviewPrompt(
   deltaContext: string,
@@ -1550,7 +1559,9 @@ export const ADDRESSED_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with the single top-level key
 "addressedPriorComments", matching the schema above. Do not write any text
-before or after the JSON. Do not wrap it in markdown fences.`;
+before or after the JSON. Do not wrap it in markdown fences.
+
+${ENGLISH_OUTPUT_RULE}`;
 
 export function assembleAddressedPriorCommentsPrompt(prContext: string): string {
   return [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext, ADDRESSED_OUTPUT_REMINDER].join('\n\n');
@@ -1646,7 +1657,9 @@ Respond now with one raw JSON object with the single top-level key
 the JSON. Do not wrap it in markdown fences. Markdown is allowed only inside
 JSON string values; escape newlines inside string values as \\n. Do not write
 an audit recap, completion note, question, or "what would you like next"
-message.`;
+message.
+
+${ENGLISH_OUTPUT_RULE}`;
 
 /** context-pack compliance pages: appended to the page's PR context. */
 export const COMPLIANCE_PACK_NOTE = `## Page audit notes
@@ -2040,7 +2053,9 @@ export const VERIFICATION_OUTPUT_REMINDER = `## Final output reminder
 Respond now with one raw JSON object with the single top-level key
 "verdicts", matching the schema above. Every listed finding gets exactly one
 verdict. Do not write any text before or after the JSON. Do not wrap it in
-markdown fences.`;
+markdown fences.
+
+${ENGLISH_OUTPUT_RULE}`;
 
 export interface VerifiableFinding {
   path: string;
