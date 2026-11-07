@@ -1080,9 +1080,11 @@ describe('AACR-Bench semantic judge', () => {
 });
 
 describe('ENGLISH_OUTPUT_RULE', () => {
-  it('ends every output reminder whose strings reach the PR', () => {
+  it('ends every prompt that asks for PR-bound output', () => {
     for (const reminder of [
       REVIEW_OUTPUT_REMINDER,
+      WRAP_UP_PROMPT,
+      CONTINUATION_NUDGE_PROMPT,
       GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
       CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
       ADDRESSED_OUTPUT_REMINDER,
@@ -1091,6 +1093,6 @@ describe('ENGLISH_OUTPUT_RULE', () => {
       assert.ok(reminder.endsWith(ENGLISH_OUTPUT_RULE));
     }
     assert.match(ENGLISH_OUTPUT_RULE, /in English/);
-    assert.match(ENGLISH_OUTPUT_RULE, /verbatim/);
+    assert.match(ENGLISH_OUTPUT_RULE, /exactly as they appear/);
   });
 });
