@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { codexAuthPath, codexEnvForHome, isCodexProvider, writeCodexAuth } from '@symma/protocol';
+import {
+  codexAcpSpec,
+  codexAuthPath,
+  codexEnvForHome,
+  isCodexProvider,
+  writeCodexAuth,
+} from '@symma/protocol';
 
 describe('Codex CLI provider helpers', () => {
   it('matches only the explicit codex provider id', () => {
@@ -61,5 +67,25 @@ describe('Codex CLI provider helpers', () => {
 
   it('rejects a blank Codex home', () => {
     assert.throws(() => codexEnvForHome('   '), /Missing Codex home/);
+  });
+
+  it('passes a bracketed effort to Codex and leaves bare models on their default', () => {
+    const home = mkdtempSync(join(tmpdir(), 'jbot-codex-home-'));
+    const runHome = mkdtempSync(join(tmpdir(), 'jbot-codex-run-'));
+    try {
+      writeCodexAuth(JSON.stringify({ tokens: { access_token: 'a' } }), home);
+      const spec = codexAcpSpec(home, runHome);
+      const config = (model: string) => spec.env(model).env.CODEX_CONFIG;
+
+      assert.deepEqual(JSON.parse(config('codex/gpt-6-astra[high]')!), {
+        model: 'gpt-6-astra',
+        model_reasoning_effort: 'high',
+      });
+      assert.deepEqual(JSON.parse(config('codex/gpt-6-astra')!), { model: 'gpt-6-astra' });
+      assert.equal(config('codex/default'), undefined);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(runHome, { recursive: true, force: true });
+    }
   });
 });
