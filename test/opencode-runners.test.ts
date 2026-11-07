@@ -6,8 +6,6 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
   abortOpencodeSessionsByLabel,
-  disableContext7Mcp,
-  enableContext7Mcp,
   finalizeOpencodeSessionsByLabel,
   runAddressedPriorCommentsCheck,
   runFindingVerification,
@@ -776,17 +774,5 @@ describe('runFindingVerification on V2', () => {
     await runFindingVerification(rt2, 'openai/gpt-5', 'ctx', [finding], log);
     const second = [...retried.sessions.keys()][1];
     assert.equal([...retried.sessions.values()].find((s) => s.forkedFrom)?.forkedFrom, second);
-  });
-});
-
-describe('context7 MCP on V2', () => {
-  it('adds and connects the remote server, then disconnects it', async () => {
-    const fake = fakeOpencodeServer(() => ({ text: '' }));
-    const rt = runtime(fake);
-    assert.equal(await enableContext7Mcp(rt, 'ctx7-key', log), true);
-    await disableContext7Mcp(rt, log);
-    assert.ok(fake.calls.some((c) => /PUT .*\/mcp\/context7$/.test(c)));
-    assert.ok(fake.calls.some((c) => /POST .*\/mcp\/context7\/connect$/.test(c)));
-    assert.ok(fake.calls.some((c) => /POST .*\/mcp\/context7\/disconnect$/.test(c)));
   });
 });

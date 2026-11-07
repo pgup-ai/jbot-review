@@ -81,9 +81,7 @@ need a separate close-event job in the same PR group; see
 [this repository's workflow](.github/workflows/jbot-review.yml).
 
 Optionally add `AGENTS.md`, `REVIEW.md`, or another supported
-[guideline file](#project-guidelines) to customize the review. For external
-API and SDK changes, you can also add a
-[Context7 key](#context7-documentation-lookup).
+[guideline file](#project-guidelines) to customize the review.
 
 ### How it works
 
@@ -526,7 +524,7 @@ hunk counts as delivered only when every part completes. Partial main results
 fail the run. These counts establish delivery, not model comprehension. Shared maps and bounded caller/contract
 excerpts support cross-file checks; they cannot prove exhaustive dependency
 coverage. The opencode server engine keeps serving SDK providers directly — its ACP mode
-would drop per-session token usage, provider model listing, and Context7 MCP.
+would drop per-session token usage and provider model listing.
 
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed and Qoder sessions report token counters and cost from result
@@ -720,20 +718,14 @@ For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 `pull_request` runs use the variable values.
 
-### Context7 documentation lookup
+### Library behavior claims
 
-Set `enable-context7: auto` and pass `context7-api-key` from
-`secrets.CONTEXT7_API_KEY` to let the review agent verify current docs when the
-PR changes external API, SDK, framework, CLI, cloud-service, or GitHub Actions
-usage. In `auto` mode, Context7 is skipped for ordinary business-logic changes.
 Reviews are told not to search the web or download packages to check library
-behavior, and OpenCode sessions have no web or code-execution tools, so without
-Context7 an unconfirmed library claim stays advisory. Use `enable-context7: true` when the
-code reaches a library through in-house wrappers that `auto` does not detect.
-
-Context7 failures are non-blocking: if the MCP server cannot connect, rejects
-auth, or rate-limits, the action logs a warning and continues the review without
-documentation lookup.
+behavior, and OpenCode sessions have no web or code-execution tools. A finding
+that rests on how a third-party library behaves internally is confirmed only
+from that library's types or source in the repo; otherwise it stays advisory,
+and the verifier reports it under "Unverified concerns" rather than as an
+inline comment.
 
 ### Input reference
 
@@ -776,8 +768,6 @@ matching provider-specific input, such as `opencode-api-key` for
 | `grok-auth`                  | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected                                                                                                                                                                                      |
 | `kilo-auth`                  | No       | —                     | Used when the main or aux model names `kilo`                                                                                                                                                                                                                 |
 | `dim-auth`                   | No       | —                     | Used when the main or aux model names `dim`; bundle from `npm run dim:bundle`                                                                                                                                                                                |
-| `enable-context7`            | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`                                                                                                                                                                                   |
-| `context7-api-key`           | No       | —                     | Optional Context7 key for reliable CI docs lookup                                                                                                                                                                                                            |
 | `github-token`               | Yes      | `${{ github.token }}` | Token to read PR and post review                                                                                                                                                                                                                             |
 | `thread-resolution-token`    | No       | —                     | Optional token for resolving threads and minimizing completed reviews                                                                                                                                                                                        |
 | `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                                                                                                                                                                                             |
@@ -1147,7 +1137,7 @@ direct TypeScript runs report `unbundled`. The image variant is recorded separat
 pool, and requested reasoning effort. Its SHA-256 `configurationHash` covers
 only those fields: arbitrary model options, endpoints, keys, and cache paths
 are excluded. `execution` records resolved role engines, supported effort,
-workspace access, effective shards/lenses, Context7 activation, and session limits.
+workspace access, effective shards/lenses, and session limits.
 Coverage rows show which sessions actually completed or failed. Early exits can
 have a policy header without execution metadata.
 

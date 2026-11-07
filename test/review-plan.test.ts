@@ -49,7 +49,6 @@ const renderPrompt = (context: string) => assembleReviewPrompt(context, 'Reposit
 const budget = reviewPromptBudget('cline');
 const base = {
   coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\nCORE`,
-  context7Block: 'C7',
   renderPrompt,
   budget,
 };
@@ -332,7 +331,6 @@ test('all assigned hunks are embedded; batched reads are supporting cross-shard 
   assert.equal(plans.length, 2);
   for (const [i, plan] of plans.entries()) {
     assert.ok(plan.context.includes(shards[i][0].patch));
-    assert.ok(plan.baseContext.includes(shards[i][0].patch));
     assert.ok(plan.context.includes(`'${shards[1 - i][0].filename}'`));
     assert.match(plan.context, /Shared change map/);
   }
@@ -348,18 +346,17 @@ test('single-page diff-first keeps the trust boundary before author-controlled c
     diffFirst: true,
     shards: shards.slice(0, 1),
   });
-  for (const context of [plans[0].context, plans[0].baseContext]) {
-    assert.ok(context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
-    assert.equal(context.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2);
-    assert.ok(context.indexOf('## Diff hunks') < context.indexOf('CORE'));
-  }
+  const { context } = plans[0];
+  assert.ok(context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
+  assert.equal(context.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2);
+  assert.ok(context.indexOf('## Diff hunks') < context.indexOf('CORE'));
   const paged = buildShardPlans({ ...base, diffFirst: true, shards });
   assert.equal(
     paged[0].context.split('## Your assigned files')[0],
     paged[1].context.split('## Your assigned files')[0],
   );
   const prefix = paged[0].context.split('## Your assigned files')[0];
-  assert.ok(prefix.includes('CORE') && prefix.includes('C7'));
+  assert.ok(prefix.includes('CORE'));
   assert.ok(paged[0].context.indexOf('CORE') < paged[0].context.indexOf('## Diff hunks'));
   assert.doesNotMatch(prefix, /reviewer [12]\b/);
 });
@@ -398,8 +395,6 @@ test('queued pages respect session concurrency and only a cut-off page posts sho
       guidelinesForPrompt: '',
       shardPlans: plans,
       changedFiles: shards.flat().map((f) => f.filename),
-      context7Active: false,
-      context7ApiKey: '',
       log: () => {},
       onCoverage: (row) => rows.push(row),
     });
@@ -465,7 +460,7 @@ test('late diff pages receive actual unchanged caller code and verifier selectio
   const store = new EvidenceStore(workspace, all);
   await addReviewEvidence(plans, store, renderPrompt, budget, () => {}, usage);
   assert.match(plans[0].context, /charge = amount\(1\) \* 100/);
-  assert.ok(plans[0].context.endsWith(usage) && plans[0].baseContext.endsWith(usage));
+  assert.ok(plans[0].context.endsWith(usage));
   assert.ok(measureReviewPrompt(renderPrompt(plans[0].context), budget).fits);
   const other = buildShardPlans({ ...base, shards: [filler] });
   assert.match(
@@ -649,7 +644,6 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
   const page = () =>
     buildShardPlans({
       coreContext: '## Pull request\nTitle: money',
-      context7Block: '',
       shards: [[file]],
       renderPrompt: (context) => assembleReviewPrompt(context, '', '', false, true),
       budget,
@@ -670,7 +664,7 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
     slices: { surrounding: { items: 1, bytes: 1 } },
   };
   const plans = [page(), page(), page(), page(), page()];
-  const before = { context: plans[3].context, baseContext: plans[3].baseContext };
+  const before = plans[3].context;
   const signals = new Set<AbortSignal>();
   const results = await addContextPack({
     plans,
@@ -701,9 +695,8 @@ test('the context pack sits before the page diff, and pages it cannot serve fall
   assert.equal(results[1].row.uncollected, 2);
   assert.equal(signals.size, plans.length);
   assert.match(plans[0].context, /PACKED\n\n## Diff hunks\n[\s\S]*\n2 \+  return n \* 100;\n/);
-  assert.ok(plans[0].baseContext.includes('PACKED'));
   assert.ok(!plans[1].context.includes('PACKED'));
-  assert.deepEqual({ context: plans[3].context, baseContext: plans[3].baseContext }, before);
+  assert.equal(plans[3].context, before);
   assert.deepEqual(
     plans.map((plan) => plan.contextPack),
     [true, undefined, undefined, undefined, undefined],
@@ -720,7 +713,6 @@ test('a page whose pack deadline expired keeps collected code and logs only dead
     () =>
       buildShardPlans({
         coreContext: '## Pull request',
-        context7Block: '',
         shards: [[file]],
         renderPrompt: (context) => assembleReviewPrompt(context, '', '', false, true),
         budget,
@@ -779,8 +771,6 @@ test('only the page that got a context pack asks its backend for the pack prompt
     guidelinesForPrompt: '',
     shardPlans: plans,
     changedFiles: shards.flat().map((f) => f.filename),
-    context7Active: false,
-    context7ApiKey: '',
     log: () => {},
   });
   assert.deepEqual(

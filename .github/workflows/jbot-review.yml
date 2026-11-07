@@ -33,10 +33,6 @@ on:
         description: Include prior PR review comments in context
         required: false
         default: 'true'
-      enable-context7:
-        description: 'Use Context7 MCP for external API/SDK/framework/workflow changes: auto, true, or false'
-        required: false
-        default: auto
       fail-on-error:
         description: Fail the workflow when review cannot complete
         required: false
@@ -310,7 +306,6 @@ jobs:
           max-concurrent-sessions: ${{ vars.JBOT_MAX_CONCURRENT_SESSIONS || '0' }}
           review-telemetry: ${{ vars.JBOT_REVIEW_TELEMETRY || 'true' }}
           evidence-quotes: ${{ vars.JBOT_EVIDENCE_QUOTES || 'true' }}
-          enable-context7: ${{ inputs['enable-context7'] || 'auto' }}
           fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -336,7 +331,6 @@ jobs:
           grok-auth: ${{ secrets.GROK_AUTH_JSON }}
           kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
           dim-auth: ${{ secrets.DIM_AUTH_BUNDLE }}
-          context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
       - name: Upload review telemetry

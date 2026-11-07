@@ -189,7 +189,6 @@ import {
   SUPPLEMENTARY_BLOCK_NAMES,
   UNTRUSTED_PR_CONTENT_NOTE,
   buildAddressedPriorCommentsContext,
-  buildContext7PromptBlock,
   buildContextTrimNotice,
   compactReviewPageContexts,
   buildReviewFocusBlock,
@@ -216,9 +215,6 @@ import {
   runFindingVerification as runOpencodeFindingVerification,
   runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
   runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
-  enableContext7Mcp,
-  disableContext7Mcp,
-  formatContext7Error,
   Semaphore,
   OPENCODE_TELEMETRY_CAPABILITY,
   configureOpencodeTelemetry,
@@ -316,7 +312,6 @@ import {
   type ReviewCommit,
 } from './review-context.ts';
 import { planReviewFanout } from './fanout.ts';
-import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   completedReviewHead,
   withReviewCoverage,
@@ -942,8 +937,6 @@ export interface ReviewRunOptions {
   maxFindings?: number;
   minSeverity?: Severity;
   includePriorComments?: boolean;
-  context7Mode?: Context7Mode;
-  context7ApiKey?: string;
   guidelinePass?: boolean;
   guidelineSweep?: boolean;
   /**
@@ -2010,7 +2003,7 @@ async function runReviewPipeline(params: {
       linkedIssuesOmitted,
     });
     // Kept separate so the trim can rebuild without them once the real guideline
-    // slice and Context7 block are known; this full form is what aux sessions get.
+    // slice is known; this full form is what aux sessions get.
     supplementaryBlocks = buildSupplementaryBlocks({
       summaryScope: summaryScopeBlock,
       reviewFocus: reviewFocusBlock,
@@ -2755,40 +2748,6 @@ async function runReviewPipeline(params: {
   };
   teardownPending = true;
   try {
-    const context7 = decideContext7Mode({
-      mode: options.context7Mode,
-      files,
-      apiKey: options.context7ApiKey,
-    });
-    let context7Active = false;
-    let context7Block = '';
-    // Context7 is added at the opencode client, so every model that runs a
-    // session there must be able to drive a tool loop. A single-shot model
-    // (proxied Gemini) runs tool-free; a visible Context7 tool would let it make
-    // the call that 400s on the thought_signature continuation, and it cannot
-    // use the tool anyway. Aux only counts when it runs on opencode (not dsh/CLI,
-    // which never touch this client).
-    const opencodeModelsAgentic =
-      modelSupportsAgenticTools(providerID, modelID) &&
-      (!auxOnOpencode || modelSupportsAgenticTools(auxProviderID, auxModelID));
-    if (context7.enabled && opencodeRuntime && mainBackend.name === 'opencode') {
-      if (opencodeModelsAgentic) {
-        log(`Context7 MCP requested: ${context7.reason}`);
-        context7Active = await enableContext7Mcp(opencodeRuntime, options.context7ApiKey, log);
-        if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
-      } else {
-        log('Context7 MCP skipped: a single-shot model runs the review without tools.');
-      }
-    } else if (context7.enabled) {
-      // dsh, CLI and Poolside backends run without Context7; framework-behavior
-      // claims fall back to the abstention discipline.
-      log(
-        `Context7 MCP skipped: main review uses the ${mainBackend.name} backend (${context7.reason}).`,
-      );
-    } else {
-      log(`Context7 MCP skipped: ${context7.reason}.`);
-    }
-
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     let guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
@@ -2999,7 +2958,6 @@ async function runReviewPipeline(params: {
     const trimBudget = options.contextTrim
       ? ASSEMBLED_CONTEXT_WARN_BYTES -
         Buffer.byteLength(guidelinesForPrompt, 'utf8') -
-        Buffer.byteLength(context7Block, 'utf8') -
         Buffer.byteLength(UNTRUSTED_PR_CONTENT_NOTE, 'utf8') -
         // The notice at its widest, so the reserve holds whatever gets dropped.
         Buffer.byteLength(
@@ -3130,7 +3088,6 @@ async function runReviewPipeline(params: {
     );
     const shardPlans = buildShardPlans({
       coreContext: mainCoreContext,
-      context7Block,
       shards,
       renderPrompt: renderMainPrompt,
       budget: mainPromptBudget,
@@ -3206,7 +3163,6 @@ async function runReviewPipeline(params: {
         reviewShards: shardPlans.length,
         lensKeys: candidateLensKeys,
         guidelinePass: guidelineCandidate,
-        context7Active,
         auxSessionsEnabled,
         maxConcurrentSessions: sessionCap,
         providerConcurrency: providerLimiters.configured,
@@ -3241,9 +3197,7 @@ async function runReviewPipeline(params: {
     // shard and skip review entirely — resolveShardCacheDir enforces that
     // even for a misconfigured path. Local mode also has no headSha (the
     // right side is a worktree), so exact content-addressing is off there.
-    // Fingerprints hash the shard's full prompt payload and are computed per
-    // ATTEMPT in runShardedReview: the Context7-stripped retry produces a
-    // different prompt and must never be cached under the primary key.
+    // Fingerprints hash the shard's full prompt payload.
     const shardCacheDir =
       headSha && options.shardCachePath
         ? resolveShardCacheDir(options.shardCachePath, workspace)
@@ -3276,7 +3230,6 @@ async function runReviewPipeline(params: {
       formatContextBudget([
         { name: 'guidelines', text: guidelinesForPrompt },
         { name: 'core', text: mainCoreContext },
-        { name: 'context7', text: context7Block },
       ]),
     );
     log(`Running review (${shardPlans.length} shard(s))`);
@@ -3301,11 +3254,6 @@ async function runReviewPipeline(params: {
       changedFiles: changedFiles.filter((path) => !rulesOnly.has(path)),
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
-      context7Active,
-      context7ApiKey: options.context7ApiKey,
-      disableContext7: opencodeRuntime
-        ? () => disableContext7Mcp(opencodeRuntime!, log)
-        : undefined,
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       contextFirst: options.sharedPrefixPrompt,
@@ -3429,7 +3377,6 @@ async function runReviewPipeline(params: {
               packPages ? COMPLIANCE_PACK_NOTE : '',
               recheckFiles?.length ? COMPLIANCE_RECHECK_NOTE : '',
             ),
-        context7Block: '',
         shards: lens ? shards : complianceShards,
         budget: auxPromptBudget,
         renderPrompt: render,
@@ -3498,10 +3445,7 @@ async function runReviewPipeline(params: {
 
     if (jointGuidelines)
       log(`Guideline compliance shares review-${candidateLensKeys[0]} pages and evidence.`);
-    // Lens passes run on the aux model (recall supplement, not the deep
-    // pass) and use the aux context (no Context7 block): they have no
-    // Context7 retry path, so a Context7 hiccup must not be able to zero a
-    // pass's findings.
+    // Lens passes run on the aux model (recall supplement, not the deep pass).
     const lensPasses = startLensPasses({
       backend: auxBackend,
       model: auxModel,
@@ -4498,8 +4442,6 @@ export function normalizeOptions(
     maxFindings: options?.maxFindings ?? 0,
     minSeverity: options?.minSeverity ?? 'nit',
     includePriorComments: options?.includePriorComments ?? true,
-    context7Mode: options?.context7Mode ?? 'auto',
-    context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
     guidelineSweep: (options?.guidelineSweep ?? false) && (options?.guidelinePass ?? true),
     shardCachePath: options?.shardCachePath ?? '',
@@ -5272,9 +5214,6 @@ export async function runShardedReview(params: {
   timeoutMs?: number;
   /** Absolute run deadline (budget minus posting reserve); bounds retries. */
   deadlineAt?: number;
-  context7Active: boolean;
-  context7ApiKey: string;
-  disableContext7?: () => Promise<void>;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
   contextFirst?: boolean;
@@ -5294,12 +5233,6 @@ export async function runShardedReview(params: {
   const sharded = shardPlans.length > 1;
   const changed = new Set(params.changedFiles);
 
-  let context7Disabled = false;
-  const disableContext7Once = async () => {
-    if (context7Disabled) return;
-    context7Disabled = true;
-    await params.disableContext7?.();
-  };
   // Simultaneous shard failures share one freshness fetch, but a LATER
   // failure re-checks: a head that moved after an earlier "fresh" answer must
   // still cancel the retry. A broken fetch fails open (never blocks a retry).
@@ -5341,32 +5274,25 @@ export async function runShardedReview(params: {
           promptBytes,
           diff: plan.diffCoverage,
         });
-      // Keyed by the exact prompt DELIVERED: the retry uses baseContext (no
-      // Context7 block), a different prompt, so its result must never be
-      // stored or found under the primary key.
-      const fingerprintFor = (context: string) =>
-        params.cache
-          ? shardFingerprint({
-              headSha: params.cache.headSha,
-              model,
-              context,
-              guidelines: guidelinesForPrompt,
-              evidenceQuotes: !!params.evidenceQuotes,
-              config: params.sweepGuidelines
-                ? JSON.stringify({
-                    config: params.cache.config,
-                    sweepGuidelines: params.sweepGuidelines,
-                  })
-                : params.cache.config,
-            })
-          : undefined;
-      const primaryFingerprint = fingerprintFor(plan.context);
-      if (params.cache && primaryFingerprint) {
-        const cached = loadCachedShardResult(params.cache.dir, primaryFingerprint);
+      const fingerprint = params.cache
+        ? shardFingerprint({
+            headSha: params.cache.headSha,
+            model,
+            context: plan.context,
+            guidelines: guidelinesForPrompt,
+            evidenceQuotes: !!params.evidenceQuotes,
+            config: params.sweepGuidelines
+              ? JSON.stringify({
+                  config: params.cache.config,
+                  sweepGuidelines: params.sweepGuidelines,
+                })
+              : params.cache.config,
+          })
+        : undefined;
+      if (params.cache && fingerprint) {
+        const cached = loadCachedShardResult(params.cache.dir, fingerprint);
         if (cached) {
-          log(
-            `${plan.label}: reusing cached result for identical content (${primaryFingerprint}).`,
-          );
+          log(`${plan.label}: reusing cached result for identical content (${fingerprint}).`);
           params.onCoverage?.({
             session: plan.label,
             state: 'reused',
@@ -5409,61 +5335,20 @@ export async function runShardedReview(params: {
           contextFirst: params.contextFirst,
           contextPack: plan.contextPack,
         });
-        if (!result.partial) persist(result, primaryFingerprint);
+        if (!result.partial) persist(result, fingerprint);
         cover(result.partial ? 'partial' : 'completed');
         return { plan, result };
       } catch (error) {
         // One retry per shard in a fresh session, for ANY failure: upstream
         // streams drop ("Upstream idle timeout exceeded"), providers blip,
-        // and a shard that died early still has budget left. Context7 is a
-        // possible culprit, so the retry always uses the base context.
+        // and a shard that died early still has budget left.
         // The failed primary attempt gets its row HERE, once for every
-        // sub-path below — a later reuse/complete must not erase its trace.
+        // sub-path below — a later complete must not erase its trace.
         cover('failed', error);
-        if (params.context7Active) await disableContext7Once();
-        // The retry is its own attempt: its rows carry the -retry session
-        // label (matching its token-usage rows), the base-context prompt
-        // size, and a duration clocked from the retry itself.
-        const retryPromptBytes = Buffer.byteLength(
-          assembleReviewPrompt(
-            plan.baseContext,
-            guidelinesForPrompt,
-            '',
-            params.evidenceQuotes,
-            params.embeddedFirstPrompt,
-            { contextFirst: params.contextFirst, contextPack: plan.contextPack },
-          ),
-        );
-        // A prior run's successful retry was saved under the base-context
-        // key; the lookup costs no model time, so it runs even with no
-        // retry budget left.
-        const retryFingerprint = fingerprintFor(plan.baseContext);
-        if (params.cache && retryFingerprint) {
-          const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
-          if (cached) {
-            // Unconditional, unlike the live retry's 60s gate (TASK-155's
-            // spec guards a model-window spend): the entry may come from a
-            // prior run, this costs one fail-open GET, and posting it against
-            // a merged, closed, or moved PR is as pointless as a live retry.
-            const stale = await checkStale();
-            if (stale) throw stale;
-            log(`${plan.label}: reusing cached retry result (${retryFingerprint}).`);
-            params.onCoverage?.({
-              session: `${plan.label}-retry`,
-              state: 'reused',
-              promptBytes: retryPromptBytes,
-              diff: plan.diffCoverage,
-            });
-            return { plan, result: cached };
-          }
-        }
         // TASK-150: a deterministic failure re-buys the identical error for up
         // to another finder window; only plausibly-transient classes retry.
-        // Exception: the retry DIFFERS when Context7 was active (baseContext
-        // strips the block), so a context-length failure may fit there.
         const { failureClass, retryable } = classifyMainShardFailure(error);
-        const retryPromptDiffers = params.context7Active;
-        if (!retryable && !(failureClass === 'context-length' && retryPromptDiffers)) {
+        if (!retryable) {
           log(
             `${plan.label} failed with a non-retryable ${failureClass} error; skipping the retry.`,
           );
@@ -5478,18 +5363,12 @@ export async function runShardedReview(params: {
         const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);
         if (retryTimeoutMs === 0) {
           log(
-            `${plan.label} failed with no budget left for a retry: ${formatContext7Error(
-              error,
-              params.context7ApiKey,
-            )}`,
+            `${plan.label} failed with no budget left for a retry: ${error instanceof Error ? error.message : String(error)}`,
           );
           return { plan, error };
         }
         log(
-          `${plan.label} failed; retrying once in a fresh session: ${formatContext7Error(
-            error,
-            params.context7ApiKey,
-          )}`,
+          `${plan.label} failed; retrying once in a fresh session: ${error instanceof Error ? error.message : String(error)}`,
         );
         const retryStartedAt = Date.now();
         const coverRetry = (state: 'completed' | 'partial' | 'failed', retryError?: unknown) =>
@@ -5498,29 +5377,23 @@ export async function runShardedReview(params: {
             state,
             ...(retryError !== undefined ? { error: retryError } : {}),
             durationMs: Date.now() - retryStartedAt,
-            promptBytes: retryPromptBytes,
+            promptBytes,
             diff: plan.diffCoverage,
           });
         try {
-          const result = await backend.runReview(
-            model,
-            plan.baseContext,
-            guidelinesForPrompt,
-            log,
-            {
-              label: `${plan.label}-retry`,
-              modelOptions: params.modelOptions,
-              guidelineSweep,
-              deadlineAt: params.deadlineAt,
-              timeoutMs: retryTimeoutMs,
-              onTokenUsage: params.onTokenUsage,
-              evidenceQuotes: params.evidenceQuotes,
-              embeddedFirstPrompt: params.embeddedFirstPrompt,
-              contextFirst: params.contextFirst,
-              contextPack: plan.contextPack,
-            },
-          );
-          if (!result.partial) persist(result, retryFingerprint);
+          const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
+            label: `${plan.label}-retry`,
+            modelOptions: params.modelOptions,
+            guidelineSweep,
+            deadlineAt: params.deadlineAt,
+            timeoutMs: retryTimeoutMs,
+            onTokenUsage: params.onTokenUsage,
+            evidenceQuotes: params.evidenceQuotes,
+            embeddedFirstPrompt: params.embeddedFirstPrompt,
+            contextFirst: params.contextFirst,
+            contextPack: plan.contextPack,
+          });
+          if (!result.partial) persist(result, fingerprint);
           coverRetry(result.partial ? 'partial' : 'completed');
           return { plan, result };
         } catch (retryError) {

@@ -40,7 +40,6 @@ import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { ModelRejectedError } from '../src/shared/model-fallback.ts';
-import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import {
   limitReviewBackendSessions,
   type ReviewBackend,
@@ -504,7 +503,6 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
   const shardPlan = {
     label: 'review',
     context: 'ctx',
-    baseContext: 'base',
     assignedFiles: ['a.ts'],
     diffCoverage: {
       assignedFiles: 1,
@@ -541,8 +539,6 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
       guidelinesForPrompt: '',
       shardPlans: [shardPlan],
       changedFiles: ['a.ts'],
-      context7Active: false,
-      context7ApiKey: '',
       log: () => {},
       ...(staleCheck ? { staleCheck } : {}),
     });
@@ -576,8 +572,6 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
         sweepGuidelines,
         shardPlans: [shardPlan],
         changedFiles: ['a.ts'],
-        context7Active: false,
-        context7ApiKey: '',
         log: () => {},
         cache: { dir, headSha: 'abc', config: 'same' },
       });
@@ -646,83 +640,17 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
       findings: [],
       coverageGap: { label: 'review', reason: '1 of 1 page cut off or timed out' },
     });
-    assert.deepEqual(calls, ['ctx', 'base']);
+    assert.deepEqual(calls, ['ctx', 'ctx']);
   });
 
-  it('keeps the Context7-stripped retry for context-length failures', async () => {
-    // The retry deliberately differs when Context7 was active (baseContext
-    // strips the block), so a context-length failure can succeed there —
-    // blanket non-retryability would kill that designed recovery.
-    const withContext7: string[] = [];
-    await runShardedReview({
-      backend: backendThrowingOnce('maximum context length exceeded', withContext7),
-      modelOptions: { reasoningEffort: 'medium' },
-      deadlineAt: 9_000_000_000_000,
-      model: 'fake/model',
-      guidelinesForPrompt: '',
-      shardPlans: [shardPlan],
-      changedFiles: ['a.ts'],
-      context7Active: true,
-      context7ApiKey: '',
-      log: () => {},
-    });
-    assert.deepEqual(withContext7, ['ctx', 'base']);
-
-    // Identical-prompt retries stay skipped.
-    const withoutContext7: string[] = [];
+  it('skips the identical-prompt retry for context-length failures', async () => {
+    const calls: string[] = [];
     await assert.rejects(
-      run(backendThrowingOnce('maximum context length exceeded', withoutContext7)),
+      run(backendThrowingOnce('maximum context length exceeded', calls)),
       /refusing to post partial review coverage/,
     );
-    assert.equal(withoutContext7.length, 1);
+    assert.equal(calls.length, 1);
   });
-
-  it('checks PR freshness before reusing a cached retry result, even after a short attempt', async () => {
-    // The cache entry may come from a PRIOR run (e.g. a workflow re-run on an
-    // already-merged PR), so the live retry's 60s attempt gate is no proxy
-    // for its staleness.
-    const dir = mkdtempSync(join(tmpdir(), 'jbot-shard-cache-'));
-    try {
-      const cache = { dir, headSha: 'head1234', config: 'cfg' };
-      saveShardResult(
-        dir,
-        shardFingerprint({
-          headSha: cache.headSha,
-          model: 'fake/model',
-          context: shardPlan.baseContext,
-          guidelines: '',
-          evidenceQuotes: false,
-          config: cache.config,
-        }),
-        { summary: 'stale cached retry', findings: [] },
-      );
-      const backend = {
-        name: 'fake',
-        runReview: async () => {
-          throw new Error('socket hang up');
-        },
-      } as unknown as ReviewBackend;
-
-      await assert.rejects(
-        runShardedReview({
-          backend,
-          model: 'fake/model',
-          guidelinesForPrompt: '',
-          shardPlans: [shardPlan],
-          changedFiles: ['a.ts'],
-          context7Active: false,
-          context7ApiKey: '',
-          cache,
-          staleCheck: async () => new StaleReviewError('merged'),
-          log: () => {},
-        }),
-        (error: unknown) => error instanceof StaleReviewError,
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   it('checks PR freshness before a retry of a long attempt and aborts stale runs', async (t) => {
     t.mock.timers.enable({ apis: ['Date'] });
     const staleCalls: string[] = [];
@@ -1585,7 +1513,6 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
       ['ready', 'pending', 'failed', 'denied'].map((context) => ({
         label: context,
         context,
-        baseContext: context,
         assignedFiles: ['a.ts'],
         diffCoverage: {
           assignedFiles: 1,
@@ -1718,7 +1645,6 @@ it('dispatches each auxiliary page with its planned guidelines', async () => {
         ['part one', 'part two'].map((guidelines) => ({
           label: guidelines,
           context: 'complete diff',
-          baseContext: '',
           assignedFiles: [guidelines],
           guidelines,
           diffCoverage: { totalFiles: 0, completeFiles: 0, truncatedFiles: 0, omittedFiles: 0 },
@@ -1761,7 +1687,6 @@ it('retains and clamps denied guideline candidates without claiming completed co
       ['a.ts', 'b.ts'].map((path) => ({
         label: path,
         context: path,
-        baseContext: path,
         assignedFiles: [path],
         diffCoverage: {
           assignedFiles: 1,
@@ -1832,7 +1757,6 @@ it('runs compliance on its own options and drops findings on PR files left to an
       {
         label: 'a.ts',
         context: 'a.ts',
-        baseContext: 'a.ts',
         assignedFiles: ['a.ts'],
         diffCoverage: {
           assignedFiles: 1,
@@ -2543,7 +2467,6 @@ it('queues finder pages before bookkeeping without waiting for finder results', 
           {
             label: 'page',
             context: 'diff',
-            baseContext: 'diff',
             assignedFiles: ['a.ts'],
             diffCoverage: {
               assignedFiles: 1,

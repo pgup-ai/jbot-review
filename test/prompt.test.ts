@@ -11,7 +11,6 @@ import {
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
-  CONTEXT7_REASON_BUDGET,
   CONTEXT_PACK_REVIEW_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
@@ -31,7 +30,6 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildChangesSinceContextBlock,
-  buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
   buildRulesOnlyTestsContext,
@@ -575,33 +573,6 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /load-bearing premise/);
     assert.match(FINDING_VERIFICATION_PROMPT, /library\/framework behaves internally/);
     assert.match(FINDING_VERIFICATION_PROMPT, /do not "confirm" such a finding from priors/);
-  });
-});
-
-describe('buildContext7PromptBlock', () => {
-  it('aims the docs tool at framework-behavior verification, with abstention fallback', () => {
-    const block = buildContext7PromptBlock('external contract change detected in src/db.ts');
-    assert.match(block, /## Context7 documentation lookup/);
-    assert.match(block, /external contract change detected in src\/db\.ts/);
-    assert.match(block, /before asserting framework-internal behavior/);
-    assert.match(block, /Missing documentation alone does not justify an advisory/);
-    // credit-exhaustion / error fallback: no retry loop, no asserting from memory
-    assert.match(block, /out of credit/);
-    assert.match(block, /do not retry it repeatedly/);
-  });
-
-  it('caps the interpolated reason within the byte budget, ellipsis included', () => {
-    const huge = `external contract change detected in ${'nested/'.repeat(5000)}file.ts`;
-    const block = buildContext7PromptBlock(huge);
-    const reason = block.match(/because (.+)\.\nUse it to verify/)?.[1] ?? '';
-    assert.ok(reason.endsWith('…'), 'a truncated reason should end with the ellipsis');
-    // invariant #4: the interpolated reason — ellipsis included — stays within the cap
-    assert.ok(
-      Buffer.byteLength(reason, 'utf8') <= CONTEXT7_REASON_BUDGET,
-      `reason was ${Buffer.byteLength(reason, 'utf8')} bytes`,
-    );
-    // a normal short reason passes through untouched
-    assert.doesNotMatch(buildContext7PromptBlock('enabled by configuration'), /…/);
   });
 });
 

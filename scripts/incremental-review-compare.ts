@@ -137,7 +137,6 @@ async function review(name: string, incremental: boolean, priorReview?: string) 
       reviewShards: 1,
       verifyFindings: true,
       enhancedContext: true,
-      context7Mode: 'off',
       maxConcurrentSessions: 3,
       timeBudgetMinutes: 5,
       modelOptions: { reasoningEffort: 'low' },
