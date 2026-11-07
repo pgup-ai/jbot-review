@@ -421,7 +421,12 @@ export function buildDshPatch(input: {
     },
     { id: 'sandbox-policy', config: { mode: 'read-only', workspaceRoot: input.workspace } },
     // One `run_code` program can batch reads; PTC cut tool calls 2-3x against native.
-    ...(input.toolLess ? [] : [{ id: 'tools', config: { mode: 'ptc' } }]),
+    ...(input.toolLess
+      ? []
+      : [
+          { id: 'tool-executor-native', disabled: true },
+          { id: 'tool-executor-ptc', disabled: false },
+        ]),
     // Sessions work in the checkout while dsh itself launches from a jbot-owned
     // dir: it applies the launch dir's `.env` and refuses to start on bootstrap names.
     { id: 'fs-sandbox', config: { cwd: input.workspace } },
@@ -453,12 +458,17 @@ interface DshTurn {
 /**
  * Event timing of one dsh prompt. `--json` writes whole messages, not deltas, so a long model step
  * is as silent as a stalled request: these numbers are what a no-output cutoff would have to clear.
+ * A step writes nothing until its model call commits, so step start to the step's next line is
+ * model time; `generationMs` sums it over usage-reporting steps, tool execution excluded.
  */
 export function dshEventTiming(start = Date.now()) {
   let pending = '';
   let last = start;
   let stepStart: number | undefined;
-  const timing = { steps: 0, firstStepMs: 0, maxStepMs: 0, maxSilenceMs: 0 };
+  let modelEnd: number | undefined;
+  // A step whose start and next line arrive in one chunk has no measurable model time.
+  let untimed = false;
+  const timing = { steps: 0, firstStepMs: 0, maxStepMs: 0, maxSilenceMs: 0, generationMs: 0 };
   return {
     feed(chunk: string, now = Date.now()) {
       const lines = (pending + chunk).split('\n');
@@ -472,17 +482,32 @@ export function dshEventTiming(start = Date.now()) {
         } catch {
           continue;
         }
-        if (!isRecord(event) || event.type !== 'status') continue;
-        if (event.phase === 'step_start') stepStart = now;
-        else if (event.phase === 'step_end' && stepStart !== undefined) {
+        if (!isRecord(event)) continue;
+        if (event.type === 'status' && event.phase === 'step_start') {
+          stepStart = now;
+          modelEnd = undefined;
+          continue;
+        }
+        if (stepStart === undefined) continue;
+        modelEnd ??= now;
+        if (event.type === 'status' && event.phase === 'step_end') {
           const ms = now - stepStart;
           if (!timing.steps++) timing.firstStepMs = ms;
           timing.maxStepMs = Math.max(timing.maxStepMs, ms);
+          if (isRecord(event.usage)) {
+            if (modelEnd > stepStart) timing.generationMs += modelEnd - stepStart;
+            else untimed = true;
+          }
+          stepStart = undefined;
         }
       }
     },
     // The trailing silence is the stall a timeout ends on.
-    snapshot: (now = Date.now()) => ({ ...timing, tailSilenceMs: now - last }),
+    snapshot: (now = Date.now()) => ({
+      ...timing,
+      generationMs: untimed ? 0 : timing.generationMs,
+      tailSilenceMs: now - last,
+    }),
   };
 }
 
@@ -785,6 +810,8 @@ async function promptDshSession(
   }
   const turn = parseDshTurn(result);
   session.sessionId ??= turn.sessionId;
+  const { generationMs } = timing.snapshot();
+  if (turn.usage && generationMs > 0) turn.usage.generationMs = generationMs;
   for (const tool of turn.tools) {
     const toolClass = classifyReadonlyTool(tool.name, tool.input);
     runtime.toolTelemetry?.startTool({

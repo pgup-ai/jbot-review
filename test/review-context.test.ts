@@ -310,7 +310,6 @@ describe('formatContextBudget', () => {
     const line = formatContextBudget([
       { name: 'guidelines', text: 'x'.repeat(100) },
       { name: 'diff', text: 'y'.repeat(250) },
-      { name: 'context7', text: '' },
     ]);
     assert.equal(line, 'Context budget (bytes): diff=250 guidelines=100 total=350');
   });

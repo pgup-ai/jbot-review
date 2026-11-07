@@ -145,8 +145,6 @@ describe('phase and tool telemetry', () => {
   it('classifies native tools and prioritizes external documentation over searches', () => {
     assert.equal(classifyReadonlyTool('ls'), 'list');
     assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
-    assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');
-    assert.equal(classifyReadonlyTool('context7_read_doc'), 'external-docs');
     assert.equal(
       classifyReadonlyTool('bash', { command: 'git diff main...HEAD' }),
       'diff-recovery',
@@ -677,7 +675,6 @@ describe('run and coverage telemetry', () => {
       reviewShards: 1,
       lensKeys: ['interactions'],
       guidelinePass: true,
-      context7Active: false,
       auxSessionsEnabled: true,
       maxConcurrentSessions: 3,
       providerConcurrency: [],

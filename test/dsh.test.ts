@@ -199,10 +199,11 @@ describe('dsh engine', () => {
     assert.deepEqual(byId.get('fs-sandbox')?.config, { cwd: '/repo' });
     for (const id of ['tool-fs', 'tool-web', 'agent-instructions', 'skill-filesystem', 'tool-bash'])
       assert.equal(byId.get(id)?.disabled, true, id);
-    assert.equal(byId.get('tools'), undefined);
+    assert.equal(byId.get('tool-executor-ptc'), undefined);
     const withTools = rowsFor(false);
     assert.equal(withTools.get('tool-bash'), undefined);
-    assert.deepEqual(withTools.get('tools')?.config, { mode: 'ptc' });
+    assert.equal(withTools.get('tool-executor-native')?.disabled, true);
+    assert.equal(withTools.get('tool-executor-ptc')?.disabled, false);
     for (const id of ['tool-subagent', 'tool-subagent-fork', 'web-fetch-http', 'tool-fs'])
       assert.equal(withTools.get(id)?.disabled, true, id);
   });
@@ -251,21 +252,30 @@ describe('dsh engine', () => {
     );
   });
 
-  it('times steps and the silences between events, including the trailing stall', () => {
+  it('times steps, model time and the silences between events, including the trailing stall', () => {
     const timing = dshEventTiming(0);
     timing.feed('{"type":"status","phase":"step_start"}\n', 1_000);
     // A line split across chunks counts when it completes.
     timing.feed('{"type":"thinking","text":"lo', 2_000);
-    timing.feed('ng"}\n{"type":"status","phase":"step_end"}\n', 61_000);
+    timing.feed('ng"}\n', 21_000);
+    // Tool execution after the model's commit is not model time.
+    timing.feed('{"type":"tool_call","callId":"c1"}\n', 22_000);
+    timing.feed('{"type":"status","phase":"step_end","usage":{"outputTokens":9}}\n', 61_000);
+    // A step without usage adds no model time: its tokens are not counted either.
     timing.feed('{"type": "status", "phase": "step_start"}\n', 62_000);
     timing.feed('{"type":"status","phase":"step_end"}\n', 72_000);
     assert.deepEqual(timing.snapshot(372_000), {
       steps: 2,
       firstStepMs: 60_000,
       maxStepMs: 60_000,
-      maxSilenceMs: 60_000,
+      maxSilenceMs: 39_000,
+      generationMs: 20_000,
       tailSilenceMs: 300_000,
     });
+    // A usage step with no measurable model time leaves the turn untimed, not too fast.
+    timing.feed('{"type":"status","phase":"step_start"}\n{"type":"text","text":"x"}\n', 380_000);
+    timing.feed('{"type":"status","phase":"step_end","usage":{"outputTokens":9}}\n', 381_000);
+    assert.equal(timing.snapshot().generationMs, 0);
   });
 
   it('repairs malformed verification JSON in the same session', async () => {

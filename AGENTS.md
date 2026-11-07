@@ -28,7 +28,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 | `src/shared/runner.ts`              | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                                                                                                                                                      |
 | `src/shared/prompt.ts`              | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                                                                                                                                                      |
 | `src/shared/dsh.ts`                 | DeepSeek Harness engine for catalogued opencode/opencode-go DeepSeek models: `dsh --profile headless --json` children with a per-session home, a read-only patch overlay and PTC tools; other SDK models stay on opencode, CLI and Poolside routes are unchanged |
-| `src/shared/opencode.ts`            | OpenCode V2 runners (review, aux checks, verification), JSON parsing (strict + repair), context7 MCP; boot lives in `opencode-server.ts`, session driving in `opencode-session.ts`, config in `opencode-config.ts`, the plugin in `opencode-plugin.ts`           |
+| `src/shared/opencode.ts`            | OpenCode V2 runners (review, aux checks, verification), JSON parsing (strict + repair); boot lives in `opencode-server.ts`, session driving in `opencode-session.ts`, config in `opencode-config.ts`, the plugin in `opencode-plugin.ts`                         |
 | `@symma/protocol` (npm)             | ACP engine: framing, JSON-RPC peer, session driving, read-only permission floor, agent specs and their credential helpers, relay controls. Extracted from this repo; the local copies are gone                                                                   |
 | `@symma/client` (npm)               | Drives one ACP prompt: local child-process lifecycle, timeouts, teardown, and the gateway transport. Extracted from this repo                                                                                                                                    |
 | `src/shared/acp.ts`                 | ACP ReviewBackends over those runners: the shared backend surface both local and gateway-remote use, plus response parsing                                                                                                                                       |
@@ -280,12 +280,6 @@ Keep the review stack tight. Use MCPs only when they provide a more authoritativ
 Use GitHub MCP as the primary live-state source for PR review workflows. Fetch PR review threads, flat issue comments, review submissions, commit checks, workflow runs, job steps, and logs before drawing conclusions about the current PR state.
 
 When fixing or validating review feedback, compare the current diff against the live GitHub state instead of relying only on local files. Re-query unresolved review threads after pushes or replies, and stop based on the live thread state.
-
-### Context7
-
-Use Context7 when a change adds or modifies usage of an external API, SDK, framework, CLI, or cloud service such as OpenAI, Anthropic, GitHub Actions, or Octokit. Treat it as a docs verifier for current API contracts, request/response shapes, auth expectations, deprecations, and version-specific behavior.
-
-Do not use Context7 as a general reviewer. If the code change does not touch an external contract, prefer local code inspection, tests, and repository patterns.
 
 ### GitHub Actions Logs
 

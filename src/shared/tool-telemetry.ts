@@ -283,11 +283,7 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     if (shellReadPath(input as Record<string, unknown>, '/')) return 'file-read';
     if (shellSearchPattern(command)) return 'search';
   }
-  if (
-    normalized.includes('web') ||
-    normalized.includes('context7') ||
-    normalized.includes('docs')
-  ) {
+  if (normalized.includes('web') || normalized.includes('docs')) {
     return 'external-docs';
   }
   if (normalized.includes('read')) return 'file-read';

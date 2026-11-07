@@ -188,8 +188,7 @@ alone cannot confirm such a claim, and priors about "native", "raw", or "bulk"
 methods are often wrong for a specific version.
 
 Before reporting a finding that rests on framework-internal behavior, confirm
-that behavior against an authoritative source: Context7 documentation when it
-is available, or the library's types/source in the repo. Do not search the web
+that behavior against the library's types/source in the repo. Do not search the web
 or download packages to confirm it. If you cannot confirm it, set "kind" to
 "investigate", keep severity advisory, and phrase the unresolved behavior as a
 question with the concrete potential failure to verify. Never state an
@@ -1524,38 +1523,6 @@ export function assembleReviewPrompt(
   return parts.join('\n\n');
 }
 
-/**
- * Optional block injected into the review context ONLY when the Context7 docs
- * MCP is active. Points the model at the tool for its highest-value use:
- * confirming third-party framework behavior a finding depends on, rather than
- * asserting it from priors (see "Claims about external framework behavior" in
- * REVIEW_PROMPT). Kept here so all prompt text lives in this module.
- */
-export const CONTEXT7_REASON_BUDGET = 200;
-const CONTEXT7_REASON_ELLIPSIS = '…';
-
-export function buildContext7PromptBlock(reason: string): string {
-  // `reason` is the only variable part (it can carry a changed-file path), so
-  // cap it to keep this injected block within a hard byte budget (invariant #4).
-  // Reserve room for the ellipsis so the truncated result still fits the cap.
-  let safeReason = reason;
-  if (Buffer.byteLength(reason, 'utf8') > CONTEXT7_REASON_BUDGET) {
-    const limit = CONTEXT7_REASON_BUDGET - Buffer.byteLength(CONTEXT7_REASON_ELLIPSIS, 'utf8');
-    let end = Math.min(reason.length, limit);
-    while (end > 0 && Buffer.byteLength(reason.slice(0, end), 'utf8') > limit) {
-      end -= 1;
-    }
-    safeReason = `${reason.slice(0, end)}${CONTEXT7_REASON_ELLIPSIS}`;
-  }
-  return [
-    '## Context7 documentation lookup',
-    `A Context7 documentation tool is available for this run because ${safeReason}.`,
-    'Use it to verify how a changed external API, SDK, framework, ORM, CLI, or cloud service actually behaves — especially before asserting framework-internal behavior a finding depends on (whether an ORM method applies global filters, whether a call retries, what a default option does). Confirm such behavior in the docs rather than from memory.',
-    'Do not use it for ordinary business-logic review.',
-    'If a Context7 lookup fails, errors, is out of credit, is rate-limited, or returns nothing relevant, do not retry it repeatedly and do not fall back to memory: treat the behavior as unconfirmed and apply the framework-behavior rule. Missing documentation alone does not justify an advisory.',
-  ].join('\n');
-}
-
 export const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
 Verify each prior thread against the embedded evidence. When tools are available, use the checked-out repo, git diff, and git log to resolve gaps. ${BATCHED_READS_RULE}
@@ -1875,9 +1842,8 @@ ${VERIFICATION_CLAIM_CHECK}
   library/framework behaves internally (e.g. whether an ORM method applies the
   global soft-delete filter). A call site or type shows USAGE, not the library's
   internal semantics, so do not "confirm" such a finding from priors; verify it
-  against the library's documentation if a docs lookup succeeds, otherwise
-  return "uncertain" (a failed or out-of-credit lookup does not count as
-  confirmation). Uncertain findings remain in run diagnostics, withheld from PR comments.
+  against the library's types or source in the repo when present, otherwise
+  return "uncertain". Uncertain findings remain in run diagnostics, withheld from PR comments.
   Use this verdict rather than guessing.
 
 ## Output

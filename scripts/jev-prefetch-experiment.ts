@@ -119,7 +119,6 @@ const config = {
   JBOT_ACP_GATEWAY_URL: '',
   JBOT_LOCAL_REPORT: 'true',
   JBOT_BENCHMARK_DRY_RUN: 'true',
-  CONTEXT7_API_KEY: '',
 };
 const arms: Arm[] =
   plan.experiment === 'phases'

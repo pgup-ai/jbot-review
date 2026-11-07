@@ -34,7 +34,6 @@ export interface ComparisonReviewConfigV1 {
   maxFindings: 0;
   minSeverity: 'nit';
   includePriorComments: false;
-  context7Mode: 'auto' | 'always' | 'off';
   guidelinePass: boolean;
   shardCache: false;
   scrubSessionEnv: true;
@@ -233,11 +232,6 @@ function validateReviewConfig(value: unknown): ComparisonReviewConfigV1 {
       config.includePriorComments,
       false,
       'reviewConfig.includePriorComments',
-    ),
-    context7Mode: requireEnum(
-      config.context7Mode,
-      ['auto', 'always', 'off'],
-      'reviewConfig.context7Mode',
     ),
     guidelinePass: requireBoolean(config.guidelinePass, 'reviewConfig.guidelinePass'),
     shardCache: requireLiteral(config.shardCache, false, 'reviewConfig.shardCache'),

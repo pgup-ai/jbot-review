@@ -31,7 +31,7 @@ ENTRYPOINT ["node", "/app/dist/app/server.js"]
 # DeepSeek Harness for opencode DeepSeek models, pruned to what its headless review profile loads
 # (@vscode holds the ripgrep behind grep and stays); same-version nested zod copies become links.
 FROM base AS dsh-tools
-RUN npm install -g @deepseek-ai/dsh@0.2.1-rc.5 \
+RUN npm install -g @deepseek-ai/dsh@0.2.2-rc.1 \
   && npm cache clean --force \
   && cd /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules \
   && rm -rf @deepseek-ai/libreoffice-kit* @deepseek-ai/dsh-client-ui-* @deepseek-ai/dsh-web-frontend \

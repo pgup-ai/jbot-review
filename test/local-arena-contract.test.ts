@@ -71,7 +71,6 @@ function manifest(): ComparisonManifestV1 {
       maxFindings: 0,
       minSeverity: 'nit',
       includePriorComments: false,
-      context7Mode: 'auto',
       guidelinePass: true,
       shardCache: false,
       scrubSessionEnv: true,

@@ -250,7 +250,6 @@ export interface RunExecutionTelemetry {
   reviewShards: number;
   lensKeys: string[];
   guidelinePass: boolean;
-  context7Active: boolean;
   auxSessionsEnabled: boolean;
   maxConcurrentSessions: number;
   providerConcurrency: { providerID: string; limit: number }[];

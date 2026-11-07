@@ -16,7 +16,6 @@ import {
   assertImageSupportsModels,
   swallowedProviderWarnings,
 } from '../shared/backend-selection.ts';
-import { parseContext7Mode } from '../shared/context7.ts';
 import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { takeOpencodeProxyEnv } from '../shared/opencode.ts';
 import {
@@ -59,8 +58,6 @@ async function main(): Promise<void> {
     maxFindings: parseNumberInput('max-findings', 0),
     minSeverity: parseSeverityInput('min-severity', 'nit'),
     includePriorComments: parseBooleanInput('include-prior-comments', true),
-    context7Mode: parseContext7Mode(core.getInput('enable-context7')),
-    context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
     reviewPasses: parseNumberInput('review-passes', 1),
     verifyFindings: parseBooleanInput('verify-findings', true),
@@ -119,7 +116,7 @@ async function main(): Promise<void> {
     );
     options.sdkEngine = sdkEngineForProxy(options.sdkEngine, options.opencodeProxyEnv);
     core.info(
-      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} skipUnchanged=${options.skipUnchanged} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
+      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} skipUnchanged=${options.skipUnchanged} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
     );
 
     const { model, auxModel } = pickReviewModels(

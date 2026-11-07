@@ -36,7 +36,7 @@ the worker executes untrusted PR code via opencode's `bash`.)
   **opencode** (`npm i -g @opencode/cli@2.2.5`). The existing CloudCone box
   (`ssh jbot-vps`, `/opt/jbot-review`) has git and opencode; check `node -v`
   against the floor before deploying.
-- **dsh** (`npm i -g @deepseek-ai/dsh@0.2.1-rc.5`) to run opencode/opencode-go
+- **dsh** (`npm i -g @deepseek-ai/dsh@0.2.2-rc.1`, which needs **Node 24.9+**) to run opencode/opencode-go
   DeepSeek models on DeepSeek Harness, the default engine for them; without it,
   or without Landlock or bwrap on the host, those reviews fall back to opencode
   and log why.

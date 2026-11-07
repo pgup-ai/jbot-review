@@ -565,7 +565,6 @@ async function review(
     const { providerID } = parseModelName(model);
     const plans = buildShardPlans({
       coreContext: '',
-      context7Block: '',
       shards,
       budget: reviewPromptBudget(cliBackendForProvider(providerID) ?? 'opencode'),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
@@ -718,7 +717,6 @@ async function review(
       maxFindings: config?.maxFindings ?? 0,
       minSeverity: config?.minSeverity ?? 'nit',
       includePriorComments: config?.includePriorComments ?? true,
-      context7Mode: config?.context7Mode ?? 'auto',
       guidelinePass: config?.guidelinePass ?? true,
       guidelineSweep: !comparison && parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
       shardCachePath: '',

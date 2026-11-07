@@ -19,7 +19,6 @@ const POLICY_KEYS = [
   'maxFindings',
   'minSeverity',
   'includePriorComments',
-  'context7Mode',
   'guidelinePass',
   'guidelineSweep',
   'contextTrim',

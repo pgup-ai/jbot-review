@@ -89,7 +89,6 @@ export interface DiffUnit {
 export interface ShardPlan {
   label: string;
   context: string;
-  baseContext: string;
   assignedFiles: string[];
   diffCoverage: ReturnType<typeof diffHunksCoverage> & { pagedFiles?: number };
   units?: DiffUnit[];
@@ -208,7 +207,6 @@ interface Page {
 
 export function buildShardPlans(params: {
   coreContext: string;
-  context7Block: string;
   shards: PrFile[][];
   renderPrompt: (context: string) => string;
   budget: ReviewPromptBudget;
@@ -280,21 +278,17 @@ export function buildShardPlans(params: {
         ? [UNTRUSTED_PR_CONTENT_NOTE, diff.text, core, map, assignment, recovery]
         : [UNTRUSTED_PR_CONTENT_NOTE, core, map, assignment, diff.text, recovery];
     parts.push(buildAdjacentDiffContext(units.flatMap((unit) => unit.adjacent ?? [])));
-    const baseContext = parts.filter(Boolean).join('\n\n');
-    const contextParts = [...parts];
-    contextParts.splice(contextParts.indexOf(assignment), 0, params.context7Block);
-    const context = contextParts.filter(Boolean).join('\n\n');
-    return { assignedFiles, page, diff, baseContext, context };
+    const context = parts.filter(Boolean).join('\n\n');
+    return { assignedFiles, page, diff, context };
   };
   const unitsByFile = groupBy(originals.flat(), (unit) => unit.file.filename);
   const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
-    const { assignedFiles, page, diff, baseContext, context } = assemble(units, index, count);
+    const { assignedFiles, page, diff, context } = assemble(units, index, count);
     const ids = new Set(units.map((part) => part.id));
     const whole = (path: string) => unitsByFile.get(path)!.every((u) => ids.has(u.id));
     return {
       label: count === 1 ? 'review' : `review-shard-${index + 1}`,
       context,
-      baseContext,
       assignedFiles,
       diffText: diff.text,
       diffCoverage: {
@@ -339,10 +333,7 @@ export function buildShardPlans(params: {
   // Joined parts cost their bytes plus a blank line each; the whole has one blank line fewer.
   const cost = (part: string) => (part ? Buffer.byteLength(part) + 2 : 0);
   const fixedCost =
-    [UNTRUSTED_PR_CONTENT_NOTE, core, map, params.context7Block].reduce(
-      (sum, part) => sum + cost(part),
-      0,
-    ) - 2;
+    [UNTRUSTED_PR_CONTENT_NOTE, core, map].reduce((sum, part) => sum + cost(part), 0) - 2;
   const assignmentBlock = (names: string[]) =>
     buildShardAssignmentBlock(names, 999999, 1000000, params.embeddedFirstPrompt);
   const emptyAssignmentCost = cost(assignmentBlock([]));
@@ -672,7 +663,6 @@ export async function addReviewEvidence(
         );
         const addition = trailer ? `${block}\n\n${trailer}` : block;
         plan.context += `\n\n${addition}`;
-        plan.baseContext += `\n\n${addition}`;
         const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
         if (!measured.fits)
           throw new Error(
@@ -740,9 +730,8 @@ export async function addContextPack(params: {
         // A build cut off by its deadline returns what it collected; only its fallback is a timeout.
         if (pack && reason && signal.aborted) reason = 'timeout';
         if (pack && !reason) {
-          const previous = { context: plan.context, baseContext: plan.baseContext };
+          const previous = { context: plan.context };
           plan.context = withContextPack(plan.context, plan.diffText, pack.text);
-          plan.baseContext = withContextPack(plan.baseContext, plan.diffText, pack.text);
           const measured = measureReviewPrompt(renderPrompt(plan.context, plan.guidelines), budget);
           if (measured.fits) {
             plan.promptBytes = measured.promptBytes;
