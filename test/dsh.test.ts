@@ -251,19 +251,24 @@ describe('dsh engine', () => {
     );
   });
 
-  it('times steps and the silences between events, including the trailing stall', () => {
+  it('times steps, model time and the silences between events, including the trailing stall', () => {
     const timing = dshEventTiming(0);
     timing.feed('{"type":"status","phase":"step_start"}\n', 1_000);
     // A line split across chunks counts when it completes.
     timing.feed('{"type":"thinking","text":"lo', 2_000);
-    timing.feed('ng"}\n{"type":"status","phase":"step_end"}\n', 61_000);
+    timing.feed('ng"}\n', 21_000);
+    // Tool execution after the model's commit is not model time.
+    timing.feed('{"type":"tool_call","callId":"c1"}\n', 22_000);
+    timing.feed('{"type":"status","phase":"step_end","usage":{"outputTokens":9}}\n', 61_000);
+    // A step without usage adds no model time: its tokens are not counted either.
     timing.feed('{"type": "status", "phase": "step_start"}\n', 62_000);
     timing.feed('{"type":"status","phase":"step_end"}\n', 72_000);
     assert.deepEqual(timing.snapshot(372_000), {
       steps: 2,
       firstStepMs: 60_000,
       maxStepMs: 60_000,
-      maxSilenceMs: 60_000,
+      maxSilenceMs: 39_000,
+      generationMs: 20_000,
       tailSilenceMs: 300_000,
     });
   });
