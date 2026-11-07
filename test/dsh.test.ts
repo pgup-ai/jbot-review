@@ -199,10 +199,11 @@ describe('dsh engine', () => {
     assert.deepEqual(byId.get('fs-sandbox')?.config, { cwd: '/repo' });
     for (const id of ['tool-fs', 'tool-web', 'agent-instructions', 'skill-filesystem', 'tool-bash'])
       assert.equal(byId.get(id)?.disabled, true, id);
-    assert.equal(byId.get('tools'), undefined);
+    assert.equal(byId.get('tool-executor-ptc'), undefined);
     const withTools = rowsFor(false);
     assert.equal(withTools.get('tool-bash'), undefined);
-    assert.deepEqual(withTools.get('tools')?.config, { mode: 'ptc' });
+    assert.equal(withTools.get('tool-executor-native')?.disabled, true);
+    assert.equal(withTools.get('tool-executor-ptc')?.disabled, false);
     for (const id of ['tool-subagent', 'tool-subagent-fork', 'web-fetch-http', 'tool-fs'])
       assert.equal(withTools.get(id)?.disabled, true, id);
   });

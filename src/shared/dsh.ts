@@ -421,7 +421,12 @@ export function buildDshPatch(input: {
     },
     { id: 'sandbox-policy', config: { mode: 'read-only', workspaceRoot: input.workspace } },
     // One `run_code` program can batch reads; PTC cut tool calls 2-3x against native.
-    ...(input.toolLess ? [] : [{ id: 'tools', config: { mode: 'ptc' } }]),
+    ...(input.toolLess
+      ? []
+      : [
+          { id: 'tool-executor-native', disabled: true },
+          { id: 'tool-executor-ptc', disabled: false },
+        ]),
     // Sessions work in the checkout while dsh itself launches from a jbot-owned
     // dir: it applies the launch dir's `.env` and refuses to start on bootstrap names.
     { id: 'fs-sandbox', config: { cwd: input.workspace } },
