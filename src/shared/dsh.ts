@@ -466,6 +466,8 @@ export function dshEventTiming(start = Date.now()) {
   let last = start;
   let stepStart: number | undefined;
   let modelEnd: number | undefined;
+  // A step whose start and next line arrive in one chunk has no measurable model time.
+  let untimed = false;
   const timing = { steps: 0, firstStepMs: 0, maxStepMs: 0, maxSilenceMs: 0, generationMs: 0 };
   return {
     feed(chunk: string, now = Date.now()) {
@@ -492,13 +494,20 @@ export function dshEventTiming(start = Date.now()) {
           const ms = now - stepStart;
           if (!timing.steps++) timing.firstStepMs = ms;
           timing.maxStepMs = Math.max(timing.maxStepMs, ms);
-          if (isRecord(event.usage)) timing.generationMs += modelEnd - stepStart;
+          if (isRecord(event.usage)) {
+            if (modelEnd > stepStart) timing.generationMs += modelEnd - stepStart;
+            else untimed = true;
+          }
           stepStart = undefined;
         }
       }
     },
     // The trailing silence is the stall a timeout ends on.
-    snapshot: (now = Date.now()) => ({ ...timing, tailSilenceMs: now - last }),
+    snapshot: (now = Date.now()) => ({
+      ...timing,
+      generationMs: untimed ? 0 : timing.generationMs,
+      tailSilenceMs: now - last,
+    }),
   };
 }
 

@@ -272,6 +272,10 @@ describe('dsh engine', () => {
       generationMs: 20_000,
       tailSilenceMs: 300_000,
     });
+    // A usage step with no measurable model time leaves the turn untimed, not too fast.
+    timing.feed('{"type":"status","phase":"step_start"}\n{"type":"text","text":"x"}\n', 380_000);
+    timing.feed('{"type":"status","phase":"step_end","usage":{"outputTokens":9}}\n', 381_000);
+    assert.equal(timing.snapshot().generationMs, 0);
   });
 
   it('repairs malformed verification JSON in the same session', async () => {
