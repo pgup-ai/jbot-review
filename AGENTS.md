@@ -281,12 +281,6 @@ Use GitHub MCP as the primary live-state source for PR review workflows. Fetch P
 
 When fixing or validating review feedback, compare the current diff against the live GitHub state instead of relying only on local files. Re-query unresolved review threads after pushes or replies, and stop based on the live thread state.
 
-### Context7
-
-Use Context7 when a change adds or modifies usage of an external API, SDK, framework, CLI, or cloud service such as OpenAI, Anthropic, GitHub Actions, or Octokit. Treat it as a docs verifier for current API contracts, request/response shapes, auth expectations, deprecations, and version-specific behavior.
-
-Do not use Context7 as a general reviewer. If the code change does not touch an external contract, prefer local code inspection, tests, and repository patterns.
-
 ### GitHub Actions Logs
 
 For dogfooding and failed review runs, inspect the exact workflow run, job steps, and job logs before deciding whether the issue is a code regression, provider/API failure, auth or configuration problem, or transient infrastructure failure.
