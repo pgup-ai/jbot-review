@@ -1735,7 +1735,9 @@ Respond with one raw JSON object and nothing else, no markdown fences:
   ]
 }
 
-Return {"checks": []} when no rule qualifies.`;
+Return {"checks": []} when no rule qualifies.
+
+${ENGLISH_OUTPUT_RULE}`;
 
 export function assembleRuleCheckCompilerPrompt(guidelines: string): string {
   return [
