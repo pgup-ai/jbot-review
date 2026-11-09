@@ -400,18 +400,25 @@ describe('limitReviewBackendSessions', () => {
   it("counts a queued verification shard's wait against its timeout", async () => {
     const slots = new Semaphore(1);
     const observed: Array<number | undefined> = [];
+    let admittedAt = 0;
     const backend = makeBackend();
     backend.runFindingVerification = async (...args) => {
+      admittedAt = Date.now();
       observed.push(args[4]);
       return [];
     };
     const limited = limitReviewBackendSessions(backend, 'aux', slots);
     let release = await slots.acquire();
+    const calledAt = Date.now();
     const queued = limited.runFindingVerification('model', '', [], noLog, 1000);
     await new Promise((resolve) => setTimeout(resolve, 50));
     release();
     await queued;
-    assert.ok(observed[0]! <= 950, `queued shard kept ${observed[0]} ms`);
+    assert.ok(admittedAt - calledAt >= 40);
+    assert.ok(
+      observed[0]! <= 1000 - (admittedAt - calledAt),
+      `queued shard kept ${observed[0]} ms`,
+    );
     release = await slots.acquire();
     await assert.rejects(
       limited.runFindingVerification('model', '', [], noLog, 10),
