@@ -2282,7 +2282,7 @@ it('verifies every shard and preserves successful verdicts when another shard fa
     title: `finding ${i}`,
     body: 'claim',
   }));
-  for (const firstBatch of ['complete', 'failed', 'partial']) {
+  for (const middleShard of ['complete', 'failed', 'partial']) {
     const sizes: number[] = [];
     const coverage: string[] = [];
     let inFlight = 0;
@@ -2293,9 +2293,9 @@ it('verifies every shard and preserves successful verdicts when another shard fa
         peak = Math.max(peak, ++inFlight);
         await new Promise((resolve) => setImmediate(resolve));
         inFlight--;
-        if (targets.includes(findings[0])) {
-          if (firstBatch === 'failed') throw new Error('provider unavailable');
-          if (firstBatch === 'partial') return [{ index: 2, verdict: 'refuted' as const }];
+        if (targets.includes(findings[7])) {
+          if (middleShard === 'failed') throw new Error('provider unavailable');
+          if (middleShard === 'partial') return [{ index: 3, verdict: 'refuted' as const }];
         }
         return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
       },
@@ -2310,6 +2310,7 @@ it('verifies every shard and preserves successful verdicts when another shard fa
       log: () => {},
       onCoverage: (row) => coverage.push(row.state),
     });
+    const unverified = middleShard === 'failed' ? 4 : middleShard === 'partial' ? 3 : 0;
     assert.deepEqual(
       sizes.sort((a, b) => a - b),
       [3, 4, 4, 4, 4, 4],
@@ -2317,11 +2318,9 @@ it('verifies every shard and preserves successful verdicts when another shard fa
     assert.ok(peak > 1, 'shards run in parallel');
     assert.deepEqual(
       verdicts.filter((v) => !v.unavailable).map((v) => v.index),
-      findings
-        .map((_, i) => i)
-        .slice(firstBatch === 'failed' ? 3 : firstBatch === 'partial' ? 2 : 0),
+      findings.map((_, i) => i).filter((i) => i < 7 || i >= 7 + unverified),
     );
-    assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
+    assert.deepEqual(coverage, [middleShard === 'complete' ? 'completed' : 'failed']);
     const retained = applyFindingVerdicts(
       findings,
       selectFindingIndexes(findings),
@@ -2329,9 +2328,7 @@ it('verifies every shard and preserves successful verdicts when another shard fa
     ).findings;
     assert.deepEqual(
       retained.map((f) => f.line),
-      findings
-        .slice(0, firstBatch === 'failed' ? 3 : firstBatch === 'partial' ? 2 : 0)
-        .map((f) => f.line),
+      findings.slice(7, 7 + unverified).map((f) => f.line),
     );
     assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));
     assert.ok(retained.every((f) => f.verificationUnavailable));
