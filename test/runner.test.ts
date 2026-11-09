@@ -254,8 +254,8 @@ describe('session timeout budgeting', () => {
     assert.equal(computeVerificationTimeoutMs(6, 3 * 60_000), 150_000);
     // Nearly exhausted: skip signal (0), never a tiny unusable timeout.
     assert.equal(computeVerificationTimeoutMs(6, 6 * 60_000), 0);
-    // Huge budget: capped at 5 minutes.
-    assert.equal(computeVerificationTimeoutMs(120, 0), 5 * 60_000);
+    // Huge budget: capped at 10 minutes.
+    assert.equal(computeVerificationTimeoutMs(120, 0), 10 * 60_000);
     assert.equal(computeEvidenceTimeoutMs(undefined), 5000);
     assert.equal(computeEvidenceTimeoutMs(60_000), 5000);
     assert.equal(computeEvidenceTimeoutMs(47_000), 2000);
@@ -2274,7 +2274,7 @@ it('packs blind-verifier context only as far as the budget wrapper allows', asyn
   );
 });
 
-it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
+it('verifies every shard and preserves successful verdicts when another shard fails', async () => {
   const findings: Finding[] = Array.from({ length: 23 }, (_, i) => ({
     path: 'missing.ts',
     line: i + 1,
@@ -2282,15 +2282,20 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     title: `finding ${i}`,
     body: 'claim',
   }));
-  for (const firstBatch of ['complete', 'failed', 'partial']) {
+  for (const middleShard of ['complete', 'failed', 'partial']) {
     const sizes: number[] = [];
     const coverage: string[] = [];
+    let inFlight = 0;
+    let peak = 0;
     const backend = {
       async runFindingVerification(_model: string, _context: string, targets: Finding[]) {
         sizes.push(targets.length);
-        if (sizes.length === 1) {
-          if (firstBatch === 'failed') throw new Error('provider unavailable');
-          if (firstBatch === 'partial') return [{ index: 9, verdict: 'refuted' as const }];
+        peak = Math.max(peak, ++inFlight);
+        await new Promise((resolve) => setImmediate(resolve));
+        inFlight--;
+        if (targets.includes(findings[7])) {
+          if (middleShard === 'failed') throw new Error('provider unavailable');
+          if (middleShard === 'partial') return [{ index: 3, verdict: 'refuted' as const }];
         }
         return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
       },
@@ -2305,14 +2310,17 @@ it('verifies every batch and preserves successful verdicts when another batch fa
       log: () => {},
       onCoverage: (row) => coverage.push(row.state),
     });
-    assert.deepEqual(sizes, [10, 10, 3]);
+    const unverified = middleShard === 'failed' ? 4 : middleShard === 'partial' ? 3 : 0;
+    assert.deepEqual(
+      sizes.sort((a, b) => a - b),
+      [3, 4, 4, 4, 4, 4],
+    );
+    assert.ok(peak > 1, 'shards run in parallel');
     assert.deepEqual(
       verdicts.filter((v) => !v.unavailable).map((v) => v.index),
-      findings
-        .map((_, i) => i)
-        .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
+      findings.map((_, i) => i).filter((i) => i < 7 || i >= 7 + unverified),
     );
-    assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
+    assert.deepEqual(coverage, [middleShard === 'complete' ? 'completed' : 'failed']);
     const retained = applyFindingVerdicts(
       findings,
       selectFindingIndexes(findings),
@@ -2320,9 +2328,7 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     ).findings;
     assert.deepEqual(
       retained.map((f) => f.line),
-      findings
-        .slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0)
-        .map((f) => f.line),
+      findings.slice(7, 7 + unverified).map((f) => f.line),
     );
     assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));
     assert.ok(retained.every((f) => f.verificationUnavailable));

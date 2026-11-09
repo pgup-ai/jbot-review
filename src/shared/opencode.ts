@@ -6,6 +6,8 @@ import {
 } from './config.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import {
+  CLOSED_BOOK_AGENT,
+  PLAIN_AGENT,
   VERIFY_AGENT,
   VERIFY_STEPS,
   verificationAgent,
@@ -544,13 +546,14 @@ export async function runFindingVerification(
     failure = error;
   }
   const stepsLeft = VERIFY_STEPS - (stepsUsed ?? VERIFY_STEPS);
-  if (agent === VERIFY_AGENT && stepsLeft <= 0) {
-    log(
-      'Finding verification recovery skipped: step budget exhausted or unavailable; preserving existing verdicts.',
-    );
-    if (failure) throw failure;
-    return verdicts;
-  }
+  // Out of tool steps: still ask for the verdicts the collected evidence supports, with every tool denied.
+  const closedBook = agent === VERIFY_AGENT && stepsLeft <= 0;
+  const recoveryAgent = closedBook
+    ? CLOSED_BOOK_AGENT
+    : agent === VERIFY_AGENT
+      ? verificationAgent(stepsLeft)
+      : agent;
+  const toolLess = recoveryAgent === CLOSED_BOOK_AGENT || recoveryAgent === PLAIN_AGENT;
   if (deadline === undefined || deadline - Date.now() < 1000) {
     if (failure) throw failure;
     return verdicts;
@@ -558,14 +561,14 @@ export async function runFindingVerification(
   const started = Date.now();
   const recoveryDeadline = Math.min(deadline, started + (reserve || 60_000));
   log(
-    `Finding verification recovery: model=${model} reason=${failure ? 'interrupted' : 'unusable-output'} remainingMs=${recoveryDeadline - started}`,
+    `Finding verification recovery: model=${model} reason=${failure ? 'interrupted' : 'unusable-output'}${toolLess ? ' tools=off' : ''} remainingMs=${recoveryDeadline - started}`,
   );
   try {
     const recoverySession = await createReviewSession(runtime, {
       model,
       label: 'finding-verification-recovery',
       tier: modelOptions ? 'verify' : 'main',
-      agent: agent === VERIFY_AGENT ? verificationAgent(stepsLeft) : agent,
+      agent: recoveryAgent,
       deadline: recoveryDeadline,
       forkFrom: sessionID,
     });
@@ -573,7 +576,7 @@ export async function runFindingVerification(
     if (remaining <= 0) throw new Error('Finding verification recovery budget exhausted.');
     const raw = await promptInSession(runtime, recoverySession, {
       model,
-      text: buildVerificationRecoveryPrompt(findings.length),
+      text: buildVerificationRecoveryPrompt(findings.length, toolLess),
       label: 'finding-verification-recovery',
       log,
       timeoutMs: remaining,

@@ -397,6 +397,38 @@ describe('limitReviewBackendSessions', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 
+  it("counts a queued verification shard's wait against its timeout", async () => {
+    const slots = new Semaphore(1);
+    const observed: Array<number | undefined> = [];
+    let admittedAt = 0;
+    const backend = makeBackend();
+    backend.runFindingVerification = async (...args) => {
+      admittedAt = Date.now();
+      observed.push(args[4]);
+      return [];
+    };
+    const limited = limitReviewBackendSessions(backend, 'aux', slots);
+    let release = await slots.acquire();
+    const calledAt = Date.now();
+    const queued = limited.runFindingVerification('model', '', [], noLog, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    await queued;
+    assert.ok(admittedAt - calledAt >= 40);
+    assert.ok(
+      // The wrapper reads the clock a tick apart from the test.
+      observed[0]! <= 1000 - (admittedAt - calledAt) + 2,
+      `queued shard kept ${observed[0]} ms`,
+    );
+    release = await slots.acquire();
+    await assert.rejects(
+      limited.runFindingVerification('model', '', [], noLog, 10),
+      /deadline expired while queued/,
+    );
+    release();
+    assert.equal(observed.length, 1);
+  });
+
   it('emits complete queue/execution terminal rows on success and timeout', async () => {
     const recorder = createTelemetryRecorder(true);
     const telemetry = {
