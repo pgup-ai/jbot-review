@@ -416,7 +416,8 @@ describe('limitReviewBackendSessions', () => {
     await queued;
     assert.ok(admittedAt - calledAt >= 40);
     assert.ok(
-      observed[0]! <= 1000 - (admittedAt - calledAt),
+      // The wrapper reads the clock a tick apart from the test.
+      observed[0]! <= 1000 - (admittedAt - calledAt) + 2,
       `queued shard kept ${observed[0]} ms`,
     );
     release = await slots.acquire();
