@@ -12,7 +12,12 @@ import {
   runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
-import { permissionRules, verificationAgent, VERIFY_STEPS } from '../src/shared/opencode-config.ts';
+import {
+  CLOSED_BOOK_AGENT,
+  permissionRules,
+  verificationAgent,
+  VERIFY_STEPS,
+} from '../src/shared/opencode-config.ts';
 import {
   CONTINUATION_NUDGE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
@@ -368,7 +373,7 @@ describe('runFindingVerification on V2', () => {
     }
   });
 
-  it('shares the native step allowance across verification and recovery, excluding inherited review messages', async () => {
+  it('shares the native step allowance across verification and recovery, excluding inherited review messages and answering tool-less once steps run out', async () => {
     for (const steps of [1, 3, 5, 6]) {
       const fake = fakeOpencodeServer((session) =>
         session.agent === 'plan'
@@ -395,15 +400,17 @@ describe('runFindingVerification on V2', () => {
       );
       assert.deepEqual(
         result?.map((v) => v.verdict),
-        steps === VERIFY_STEPS ? ['refuted'] : ['refuted', 'uncertain'],
+        ['refuted', 'uncertain'],
       );
-      assert.equal(fake.prompts.length, steps === VERIFY_STEPS ? 2 : 3);
-      if (steps < VERIFY_STEPS) {
-        const sessions = [...fake.sessions.values()];
-        assert.equal(sessions.at(-1)?.agent, verificationAgent(VERIFY_STEPS - steps));
-        assert.equal(sessions.at(-1)?.forkedFrom, sessions[1].id);
-        assert.deepEqual(sessions.at(-1)?.permissions, permissionRules());
-      }
+      assert.equal(fake.prompts.length, 3);
+      const sessions = [...fake.sessions.values()];
+      // Spent steps still get one answer, with every tool denied.
+      assert.equal(
+        sessions.at(-1)?.agent,
+        steps === VERIFY_STEPS ? CLOSED_BOOK_AGENT : verificationAgent(VERIFY_STEPS - steps),
+      );
+      assert.equal(sessions.at(-1)?.forkedFrom, sessions[1].id);
+      assert.deepEqual(sessions.at(-1)?.permissions, permissionRules());
     }
   });
 
@@ -452,7 +459,8 @@ describe('runFindingVerification on V2', () => {
       undefined,
       'capped',
     );
-    assert.equal(fake.prompts.length, 1);
+    assert.equal(fake.prompts.length, 2);
+    assert.equal([...fake.sessions.values()].at(-1)?.agent, CLOSED_BOOK_AGENT);
     assert.deepEqual(
       result?.map((v) => v.verdict),
       ['refuted'],

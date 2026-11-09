@@ -2037,8 +2037,8 @@ export function formatStateEvidence(
 
 export const VERIFICATION_STEP_LIMIT_PROMPT = `The verification step budget is exhausted. Do not call tools. Finish from the evidence already collected. Return only the original verdicts JSON schema, with exactly one verdict per listed finding. Use uncertain for unfinished investigation or insufficient evidence; do not invent a trigger or promote a tentative claim. Preserve completed judgments and their evidence.`;
 
-export function buildVerificationRecoveryPrompt(findingCount: number): string {
-  return `Finish the verification from evidence already collected in this conversation. Reuse prior reads; use native read-only tools only to answer a concrete unresolved question needed for a verdict. Do not restart broad exploration. Return only the original verdicts JSON schema, with exactly one verdict for each index from 0 to ${findingCount - 1}.
+export function buildVerificationRecoveryPrompt(findingCount: number, toolLess = false): string {
+  return `Finish the verification from evidence already collected in this conversation. ${toolLess ? 'Tools are off: answer from prior reads only.' : 'Reuse prior reads; use native read-only tools only to answer a concrete unresolved question needed for a verdict. Do not restart broad exploration.'} Return only the original verdicts JSON schema, with exactly one verdict for each index from 0 to ${findingCount - 1}.
 Preserve completed judgments and their evidence. Use uncertain when investigation is unfinished, evidence is insufficient, or no judgment was reached. Never promote a tentative claim merely to complete the response. Do not omit unresolved candidates or replace them with an empty list.`;
 }
 
