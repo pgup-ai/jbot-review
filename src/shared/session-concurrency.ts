@@ -306,12 +306,24 @@ export function limitReviewBackendSessions(
         undefined,
         args[7],
       ),
-    runFindingVerification: (...args) =>
-      withSlots(
+    runFindingVerification: (model, context, findings, log, timeoutMs, ...rest) => {
+      // Parallel shards may queue: the timeout runs from the call, not from slot admission.
+      const deadlineAt = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+      return withSlots(
         'finding-verification',
-        () => backend.runFindingVerification(...args),
+        () =>
+          backend.runFindingVerification(
+            model,
+            context,
+            findings,
+            log,
+            deadlineAt === undefined ? undefined : Math.max(0, deadlineAt - Date.now()),
+            ...rest,
+          ),
         'verification',
-      ),
+        timeoutMs === undefined ? undefined : { timeoutMs, deadlineAt, log },
+      );
+    },
     runChangesSinceLastReview: (...args) =>
       withSlots(
         'changes-since-last-review',
