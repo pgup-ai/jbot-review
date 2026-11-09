@@ -411,6 +411,7 @@ describe('runFindingVerification on V2', () => {
       );
       assert.equal(sessions.at(-1)?.forkedFrom, sessions[1].id);
       assert.deepEqual(sessions.at(-1)?.permissions, permissionRules());
+      assert.equal(/Tools are off/.test(fake.prompts.at(-1)!.body.text), steps === VERIFY_STEPS);
     }
   });
 
