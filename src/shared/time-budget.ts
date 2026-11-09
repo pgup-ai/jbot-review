@@ -1,7 +1,9 @@
 const MAX_SESSION_TIMEOUT_MS = 30 * 60_000;
 const POSTING_RESERVE_MS = 30_000;
 const MIN_VERIFICATION_MS = 45_000;
-const MAX_VERIFICATION_MS = 5 * 60_000;
+// The finder deadline holds back only the reserve; verification itself may use more of what is left.
+const VERIFICATION_RESERVE_MS = 5 * 60_000;
+const MAX_VERIFICATION_MS = 10 * 60_000;
 
 export function computeFinderTimeoutMs(
   timeBudgetMinutes: number,
@@ -19,7 +21,7 @@ export function computeRunDeadline(
   if (timeBudgetMinutes <= 0) return undefined;
   const available = Math.max(0, timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS);
   const verificationReserve = verificationEnabled
-    ? Math.min(MAX_VERIFICATION_MS, available / 2)
+    ? Math.min(VERIFICATION_RESERVE_MS, available / 2)
     : 0;
   return runStartedAt + available - verificationReserve;
 }

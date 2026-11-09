@@ -378,7 +378,8 @@ import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 import { IncompleteReviewError } from './types.ts';
 
-const VERIFICATION_BATCH_SIZE = 10;
+// One verifier session works serially; shards of this size run in parallel so verify time tracks the slowest shard.
+const VERIFICATION_SHARD_SIZE = 4;
 
 function createOpencodeBackend(
   runtime: Awaited<ReturnType<typeof startOpencode>>,
@@ -4809,8 +4810,35 @@ async function verifyFindings(params: {
   return application.findings;
 }
 
-/** A failed batch must not discard verdicts from successful batches. */
-export async function requestFindingVerdicts(params: {
+/** A failed shard or batch must not discard verdicts from successful ones. */
+export async function requestFindingVerdicts(
+  params: VerificationRequest,
+): Promise<FindingVerdictList> {
+  const startedAt = Date.now();
+  const total = params.targets.length;
+  const count = Math.ceil(total / VERIFICATION_SHARD_SIZE);
+  const bounds = Array.from({ length: count + 1 }, (_, i) => Math.floor((i * total) / count));
+  if (count > 1) params.log(`Verifying ${total} finding(s) in ${count} parallel shard(s).`);
+  const shards = await Promise.all(
+    bounds
+      .slice(0, -1)
+      .map((start, i) =>
+        verifyShard({ ...params, targets: params.targets.slice(start, bounds[i + 1]) }),
+      ),
+  );
+  const failure = shards.find((shard) => shard.failure)?.failure;
+  params.onCoverage?.({
+    session: 'finding-verification',
+    state: failure ? 'failed' : 'completed',
+    ...(failure ? { error: failure } : {}),
+    durationMs: Date.now() - startedAt,
+  });
+  return shards.flatMap((shard, i) =>
+    shard.verdicts.map((verdict) => ({ ...verdict, index: verdict.index + bounds[i] })),
+  );
+}
+
+type VerificationRequest = {
   contextForTargets?: (targets: Finding[]) => string;
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
@@ -4832,8 +4860,11 @@ export async function requestFindingVerdicts(params: {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
-}): Promise<FindingVerdictList> {
-  const session = 'finding-verification';
+};
+
+async function verifyShard(
+  params: VerificationRequest,
+): Promise<{ verdicts: FindingVerdictList; failure?: Error }> {
   let evidence =
     params.verificationRetrieval || params.verificationProof
       ? new VerificationEvidence(params.workspace)
@@ -4841,7 +4872,7 @@ export async function requestFindingVerdicts(params: {
   const startedAt = Date.now();
   const verdicts: FindingVerdictList = [];
   let failure: Error | undefined;
-  let batchSize = VERIFICATION_BATCH_SIZE;
+  let batchSize = params.targets.length;
   for (let offset = 0; offset < params.targets.length;) {
     let size = Math.min(batchSize, params.targets.length - offset);
     let targets = params.targets.slice(offset, offset + size);
@@ -5115,13 +5146,7 @@ export async function requestFindingVerdicts(params: {
     }
     offset += size;
   }
-  params.onCoverage?.({
-    session,
-    state: failure ? 'failed' : 'completed',
-    ...(failure ? { error: failure } : {}),
-    durationMs: Date.now() - startedAt,
-  });
-  return verdicts;
+  return { verdicts, failure };
 }
 
 type FindingVerdictList = NonNullable<Awaited<ReturnType<ReviewBackend['runFindingVerification']>>>;
