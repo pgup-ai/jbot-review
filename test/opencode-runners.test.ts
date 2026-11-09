@@ -207,6 +207,23 @@ describe('runReview on V2', () => {
     assert.ok(fake.prompts[0]!.body.text.includes(NO_TOOLS_REVIEW_DIRECTIVE.split('\n')[0]!));
   });
 
+  it('tells a tool-less single-shot verifier that tools are off during recovery', async () => {
+    const fake = fakeOpencodeServer((session) =>
+      session.forkedFrom ? { text: verdicts } : { text: 'not json' },
+    );
+    const result = await runFindingVerification(
+      runtime(fake),
+      'openai-compatible/gemini-2.5-pro',
+      'ctx',
+      [finding],
+      log,
+      300_000,
+    );
+    assert.equal(result?.[0].verdict, 'confirmed');
+    assert.equal([...fake.sessions.values()].at(-1)?.agent, 'jbot-plain');
+    assert.match(fake.prompts.at(-1)!.body.text, /Tools are off/);
+  });
+
   it('runs tool-less passes closed-book and the capped re-check on jbot-verify unless tool_choice is auto-only', async () => {
     const lens = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
     await runReview(runtime(lens), 'openai/gpt-5', 'ctx', '', log, { toolLess: true });
