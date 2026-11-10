@@ -229,6 +229,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         ...[
           'db/migrations/.snapshot-app.json',
           'fixtures/limit.json',
+          'core/__fixtures__/limit.json',
           'core/__snapshots__/limit.spec.ts.snap',
           '.pr-governance/review/rules-for-diff.yaml',
         ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
