@@ -249,6 +249,8 @@ const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
 // Generated snapshots no code imports: Jest's (its spec's expected output) and MikroORM's schema.
 const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
 const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
+// Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
+const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
@@ -395,7 +397,9 @@ export async function planIncrementalReview(input: {
           (![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE, JEST_SNAPSHOT].some((pattern) =>
             pattern.test(file.filename),
           ) &&
-            !isGuidelineSource(file.filename)),
+            !isGuidelineSource(file.filename) &&
+            // An untouched fixture depends on no code; an edited one may be read by path.
+            !(JSON_FIXTURE.test(file.filename) && !changed.includes(file.filename))),
       )
     )
       return full('unsupported-or-large-pr');

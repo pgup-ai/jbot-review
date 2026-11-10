@@ -208,7 +208,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: 'f'.repeat(40) }, 'history-or-impact-unavailable'],
       [
-        { files: [...files, { filename: 'config.json', patch: 'patch' }] },
+        // A package.json can call changed code from a script, even inside a fixtures directory.
+        { files: [...files, { filename: 'fixtures/package.json', patch: 'patch' }] },
         'unsupported-or-large-pr',
       ],
     ] as const) {
@@ -220,13 +221,15 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     }
     // A renamed reason must not silently stop the clean-run baseline refresh.
     for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
-    // Generated snapshots and the governance routing YAML load into no code.
+    // Generated snapshots, the governance routing YAML and untouched JSON fixtures load into no code.
     const inert = await planIncrementalReview({
       ...input,
       files: [
         ...files,
         ...[
           'db/migrations/.snapshot-app.json',
+          'fixtures/limit.json',
+          'core/__fixtures__/limit.json',
           'core/__snapshots__/limit.spec.ts.snap',
           '.pr-governance/review/rules-for-diff.yaml',
         ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
@@ -679,6 +682,22 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         })
       ).reason,
       'references-outside-pr',
+    );
+    // An edited JSON fixture may be read by path, which the import graph cannot see.
+    git('checkout', '-q', '--detach', head);
+    write('fixtures/limit.json', '{ "limit": 0 }\n');
+    const fixtured = commit();
+    write('fixtures/limit.json', '{ "limit": 1 }\n');
+    assert.equal(
+      (
+        await planIncrementalReview({
+          ...input,
+          priorBodies: [body(fixtured, base)],
+          head: commit(),
+          files: [...files, { filename: 'fixtures/limit.json', patch: 'patch' }],
+        })
+      ).reason,
+      'unsupported-or-large-pr',
     );
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
@@ -1190,7 +1209,7 @@ test('the shadow scope selects edited files and their importers without changing
     const selected = prFiles('core/limit.ts', 'worker/job.ts', 'api/use.ts', 'boot/main.ts');
     const unrelated = prFiles(...['a', 'b', 'c', 'd', 'e'].map((name) => `other/${name}.ts`));
     const files = [...selected, ...unrelated];
-    const result = await plan([...files, ...prFiles('config.json')]);
+    const result = await plan([...files, ...prFiles('config.yaml')]);
     assert.equal(result.reason, 'unsupported-or-large-pr');
     assert.equal(result.files.length, 10);
     // A deleted file still reaches the importers of a barrel re-exporting it.
