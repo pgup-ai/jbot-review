@@ -208,7 +208,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: 'f'.repeat(40) }, 'history-or-impact-unavailable'],
       [
-        { files: [...files, { filename: 'config.yaml', patch: 'patch' }] },
+        // Config JSON can name changed code from a script, so only fixtures are exempt.
+        { files: [...files, { filename: 'package.json', patch: 'patch' }] },
         'unsupported-or-large-pr',
       ],
     ] as const) {
@@ -220,7 +221,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     }
     // A renamed reason must not silently stop the clean-run baseline refresh.
     for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
-    // Generated snapshots, the governance routing YAML and untouched JSON load into no code.
+    // Generated snapshots, the governance routing YAML and untouched JSON fixtures load into no code.
     const inert = await planIncrementalReview({
       ...input,
       files: [
