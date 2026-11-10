@@ -208,8 +208,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: 'f'.repeat(40) }, 'history-or-impact-unavailable'],
       [
-        // Config JSON can name changed code from a script, so only fixtures are exempt.
-        { files: [...files, { filename: 'package.json', patch: 'patch' }] },
+        // A package.json can call changed code from a script, even inside a fixtures directory.
+        { files: [...files, { filename: 'fixtures/package.json', patch: 'patch' }] },
         'unsupported-or-large-pr',
       ],
     ] as const) {

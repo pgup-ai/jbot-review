@@ -250,7 +250,7 @@ const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
 const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
 const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
-const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?[^/]+\.json$/i;
+const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
