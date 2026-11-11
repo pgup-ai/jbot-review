@@ -689,6 +689,13 @@ test('module bindings are the names other files reach, tied to their declaration
     ],
   );
   assert.deepEqual(exported('local.mjs', 'function helper() {}'), []);
+  assert.deepEqual(
+    exported(
+      'typed.cts',
+      "import type { Api } from './api';\nfunction run() {}\nexports.run = run;",
+    ),
+    ['run=run@2'],
+  );
 });
 
 test('indexes decorated NestJS sources and generic arrows in .ts files', () => {

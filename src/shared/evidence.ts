@@ -393,42 +393,41 @@ export function moduleBindings(
     n?.type === 'MemberExpression'
       ? `${memberPath(ast(n.object))}.${keyName(n.property, n.computed)}`
       : name(n);
-  return body
-    .flatMap((n) => {
-      if (!module) {
-        const assigned = ast(
-          ast(n.expression)?.type === 'AssignmentExpression' ? n.expression : undefined,
-        );
-        const target = memberPath(ast(assigned?.left));
-        const right = withoutTypeWrappers(ast(assigned?.right));
-        // CommonJS exposes `module.exports = { … }` and `exports.x =` names; scripts share globals.
-        const commonJs =
-          target === 'module.exports' && right?.type === 'ObjectExpression'
-            ? properties(right)
-            : /^(module\.)?exports\.[\w$]+$/.test(target)
-              ? [bind(right?.type === 'Identifier' ? name(right) : '', target.split('.').at(-1))]
-              : [];
-        return [...names(n).map(({ local }) => bind(local)), ...commonJs];
-      }
-      const value = withoutTypeWrappers(
-        ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration),
-      );
-      if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
-        return properties(value);
-      if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
-        return names(value).map(({ local }) => bind(local));
-      if (n.type !== 'ExportNamedDeclaration') return [];
-      return [
-        ...names(ast(n.declaration)).map(({ local }) => bind(local)),
-        ...((n.specifiers ?? []) as Ast[]).map((s) =>
-          // `x as default` is imported under any name; the local name is what callers reuse.
-          name(s.exported) === 'default'
-            ? bind(n.source ? '' : name(s.local))
-            : bind(n.source ? '' : name(s.local), name(s.exported)),
-        ),
-      ];
-    })
-    .filter((binding) => binding.exported);
+  // CommonJS exposes `module.exports = { … }` and `exports.x =` names, even beside `import type`.
+  const commonJs = (n: Ast) => {
+    const assigned = ast(
+      ast(n.expression)?.type === 'AssignmentExpression' ? n.expression : undefined,
+    );
+    const target = memberPath(ast(assigned?.left));
+    const right = withoutTypeWrappers(ast(assigned?.right));
+    return target === 'module.exports' && right?.type === 'ObjectExpression'
+      ? properties(right)
+      : /^(module\.)?exports\.[\w$]+$/.test(target)
+        ? [bind(right?.type === 'Identifier' ? name(right) : '', target.split('.').at(-1))]
+        : [];
+  };
+  const esm = (n: Ast) => {
+    // A script without module syntax shares its top-level declarations as globals.
+    if (!module) return names(n).map(({ local }) => bind(local));
+    const value = withoutTypeWrappers(
+      ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration),
+    );
+    if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
+      return properties(value);
+    if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
+      return names(value).map(({ local }) => bind(local));
+    if (n.type !== 'ExportNamedDeclaration') return [];
+    return [
+      ...names(ast(n.declaration)).map(({ local }) => bind(local)),
+      ...((n.specifiers ?? []) as Ast[]).map((s) =>
+        // `x as default` is imported under any name; the local name is what callers reuse.
+        name(s.exported) === 'default'
+          ? bind(n.source ? '' : name(s.local))
+          : bind(n.source ? '' : name(s.local), name(s.exported)),
+      ),
+    ];
+  };
+  return body.flatMap((n) => [...esm(n), ...commonJs(n)]).filter((binding) => binding.exported);
 }
 
 /** Every module a file loads: imports with or without bindings, re-exports, `import()` and `require`. */
