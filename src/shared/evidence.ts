@@ -401,9 +401,9 @@ export function moduleBindings(
       const local = withoutTypeWrappers(ast(p.value));
       return key ? [bind(local?.type === 'Identifier' ? name(local) : '', key)] : [];
     });
-  // `.mjs`/`.mts` files are ES modules even without import or export syntax.
+  // `.mjs`/`.mts`/`.cjs`/`.cts` files have module scope even without import or export syntax.
   const module =
-    /\.m[jt]s$/i.test(path) ||
+    /\.[cm][jt]s$/i.test(path) ||
     body.some((n) => /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type));
   const memberPath = (n: Ast | undefined): string =>
     n?.type === 'MemberExpression'
@@ -420,13 +420,17 @@ export function moduleBindings(
     const right = withoutTypeWrappers(ast(assigned?.right));
     return target === 'module.exports' && right?.type === 'ObjectExpression'
       ? properties(right)
-      : /^(module\.)?exports\.[\w$]+$/.test(target)
-        ? [bind(right?.type === 'Identifier' ? name(right) : '', target.split('.').at(-1))]
-        : [];
+      : target === 'module.exports' && right?.type === 'Identifier'
+        ? [bind(name(right))]
+        : /^(module\.)?exports\.[\w$]+$/.test(target)
+          ? [bind(right?.type === 'Identifier' ? name(right) : '', target.split('.').at(-1))]
+          : [];
   };
   const esm = (n: Ast) => {
     // A script without module syntax shares its top-level declarations as globals.
-    if (!module || ambient(n)) return names(n).map(({ local }) => bind(local));
+    // Each member keeps its own declaration line: `class Api` and a later `namespace Api` are two.
+    if (!module || ambient(n))
+      return names(n).map(({ local, line }) => ({ local, exported: local, line }));
     const value = withoutTypeWrappers(
       ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration),
     );

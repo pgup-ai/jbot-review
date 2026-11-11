@@ -689,6 +689,10 @@ test('module bindings are the names other files reach, tied to their declaration
     ],
   );
   assert.deepEqual(exported('local.mjs', 'function helper() {}'), []);
+  assert.deepEqual(exported('local.cjs', 'function helper() {}'), []);
+  assert.deepEqual(exported('single.cjs', 'function helper() {}\nmodule.exports = helper;'), [
+    'helper=helper@1',
+  ]);
   assert.deepEqual(
     exported(
       'globals.d.ts',
@@ -709,6 +713,13 @@ test('module bindings are the names other files reach, tied to their declaration
       "declare module 'pkg' {\n  class Api {}\n  class Internal {}\n  export = Api;\n}",
     ),
     ['Api=Api@2'],
+  );
+  assert.deepEqual(
+    exported(
+      'merged.d.ts',
+      "declare module 'pkg' {\n  class Api {}\n  namespace Api {}\n  export = Api;\n}",
+    ),
+    ['Api=Api@2', 'Api=Api@3'],
   );
   assert.deepEqual(
     exported(
