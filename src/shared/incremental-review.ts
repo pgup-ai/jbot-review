@@ -405,17 +405,23 @@ export async function planIncrementalReview(input: {
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
-    // app's own name (apps/api, apps/auth) says nothing about the file inside it.
-    const sensitive = (path: string) =>
-      !TEST_FILE.test(path) &&
-      !JEST_SNAPSHOT.test(path) &&
-      [
-        PATH_PATTERNS.security,
-        PATH_PATTERNS.data,
-        PATH_PATTERNS.api,
-        PATH_PATTERNS.infra,
-        PATH_PATTERNS.tooling,
-      ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
+    // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
+    // routes/ directory of a .tsx/.jsx page, which a client router (TanStack, React Router) renders.
+    const sensitive = (path: string) => {
+      const inner = path.replace(/^(?:apps|packages)\/[^/]+\//, '');
+      const scoped = /\.[jt]sx$/i.test(inner) ? inner.replace(/(^|\/)routes?\//gi, '$1') : inner;
+      return (
+        !TEST_FILE.test(path) &&
+        !JEST_SNAPSHOT.test(path) &&
+        [
+          PATH_PATTERNS.security,
+          PATH_PATTERNS.data,
+          PATH_PATTERNS.api,
+          PATH_PATTERNS.infra,
+          PATH_PATTERNS.tooling,
+        ].some((pattern) => pattern.test(scoped))
+      );
+    };
     if (changed.some(sensitive)) return full('sensitive-followup');
     // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's or a Jest
     // snapshot's lines are no contract change. An empty pathspec would diff every file.

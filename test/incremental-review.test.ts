@@ -516,6 +516,9 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ['apps/api/src/helper.ts', 'bounded-followup'],
       ['packages/api/src/helper.ts', 'bounded-followup'],
       ['apps/api/src/controllers/limits.ts', 'sensitive-followup'],
+      ['src/routes/oauth/ramp/index.lazy.tsx', 'bounded-followup'],
+      ['src/routes/oauth/ramp/index.ts', 'sensitive-followup'],
+      ['src/api/routes/limits.tsx', 'sensitive-followup'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write(path, 'export function check() {\n  return 1;\n}\n');
