@@ -410,7 +410,9 @@ export function moduleBindings(
               : [];
         return [...names(n).map(({ local }) => bind(local)), ...commonJs];
       }
-      const value = ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration);
+      const value = withoutTypeWrappers(
+        ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration),
+      );
       if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
         return properties(value);
       if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')

@@ -646,6 +646,17 @@ test('module bindings are the names other files reach, tied to their declaration
     'build=build@1',
   ]);
   assert.deepEqual(
+    exported('typed.ts', 'const build = () => 1;\nexport = build as () => number;'),
+    ['build=build@1'],
+  );
+  assert.deepEqual(exported('typed-map.ts', 'const run = 1;\nexport = { run } as const;'), [
+    'run=run@1',
+  ]);
+  assert.deepEqual(
+    exported('typed-default.ts', 'const impl = 1;\nexport default impl satisfies number;'),
+    ['impl=impl@1'],
+  );
+  assert.deepEqual(
     exported(
       'legacy-map.ts',
       'function helper() {}\nconst run = 1;\nexport = { helper, start: run as number, stop: run! };',
