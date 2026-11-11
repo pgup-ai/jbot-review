@@ -250,6 +250,10 @@ const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
 const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
 const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
+const CLIENT_ROUTE_PAGE = /(^|\/)routes?\/.*\.[jt]sx$/i;
+// A Remix action or loader, or a TanStack Start server function, makes a route page an endpoint.
+const SERVER_ROUTE =
+  /^export\s+(?:async\s+)?(?:function|const|let)\s+(?:action|loader)\b|^export\s*\{[^}]*\b(?:action|loader)\b|\bcreateServerFn\b/m;
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
@@ -406,10 +410,17 @@ export async function planIncrementalReview(input: {
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
     // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
-    // routes/ directory of a .tsx/.jsx page, which a client router (TanStack, React Router) renders.
+    // routes/ directory of a .tsx/.jsx page a client router (TanStack, React Router) renders.
+    const pages = new Set<string>();
+    for (const path of changed)
+      if (
+        CLIENT_ROUTE_PAGE.test(path) &&
+        !SERVER_ROUTE.test(await git('show', `${input.head}:${path}`))
+      )
+        pages.add(path);
     const sensitive = (path: string) => {
       const inner = path.replace(/^(?:apps|packages)\/[^/]+\//, '');
-      const scoped = /\.[jt]sx$/i.test(inner) ? inner.replace(/(^|\/)routes?\//gi, '$1') : inner;
+      const scoped = pages.has(path) ? inner.replace(/(^|\/)routes?\//gi, '$1') : inner;
       return (
         !TEST_FILE.test(path) &&
         !JEST_SNAPSHOT.test(path) &&
