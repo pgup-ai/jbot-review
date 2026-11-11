@@ -160,6 +160,21 @@ test('impact expansion includes aliased callers and callees from earlier PR file
     impactedReviewFiles(localFiles, ['cases/eval.ts'], locals).map((file) => file.filename),
     ['cases/eval.ts'],
   );
+  for (const [changed, text] of [
+    ['core/limits.ts', 'export const first = 0,\n  second = () => 1;'],
+    ['core/math.js', 'function second() { return 1; }'],
+  ]) {
+    const shared = new Map([
+      [changed, [text]],
+      ['worker/run.ts', ['import { second } from "@core/limits";\nsecond();']],
+      ['ui/cart.js', ['second();']],
+    ]);
+    const sharedFiles = [...shared.keys()].map((filename) => ({ filename }));
+    assert.deepEqual(
+      impactedReviewFiles(sharedFiles, [changed], shared).map((file) => file.filename),
+      [changed, 'worker/run.ts', 'ui/cart.js'],
+    );
+  }
 });
 
 test('incremental planning uses a successful ancestor and falls back on uncertain follow-ups', async () => {

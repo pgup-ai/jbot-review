@@ -3,7 +3,6 @@ import { execFile } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { posix } from 'node:path';
-import { exportedSymbols } from './blast-radius.ts';
 import { reviewReadLocations } from './review-read-locations.ts';
 import { promisify } from 'node:util';
 import {
@@ -337,6 +336,46 @@ export function indexEvidenceSource(
   if (options.rich) return result;
   const { definitions, imports, uses } = result;
   return { definitions, imports, uses };
+}
+
+/**
+ * Names another file can reach: a module's exported bindings, or every top-level
+ * declaration of a script without import/export, whose globals scripts share.
+ */
+export function moduleBindings(path: string, text: string): string[] {
+  if (!JS_SOURCE.test(path)) return [];
+  const body = (ast(parseSource(path, text).program)?.body ?? []) as Ast[];
+  const names = (n: Ast | undefined): string[] => {
+    if (!n) return [];
+    if (n.type === 'Identifier') return [name(n)];
+    if (n.type === 'VariableDeclaration')
+      return (n.declarations as Ast[]).flatMap((d) => names(ast(d.id)));
+    if (n.type === 'ObjectPattern')
+      return (n.properties as Ast[]).flatMap((p) =>
+        names(ast(p.type === 'RestElement' ? p.argument : p.value)),
+      );
+    if (n.type === 'ArrayPattern')
+      return (n.elements as (Ast | null)[]).flatMap((e) => names(e ?? undefined));
+    if (n.type === 'AssignmentPattern') return names(ast(n.left));
+    if (n.type === 'RestElement') return names(ast(n.argument));
+    return name(n.id) ? [name(n.id)] : [];
+  };
+  const module = body.some((n) =>
+    /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type),
+  );
+  return [
+    ...new Set(
+      body.flatMap((n) => {
+        if (!module) return names(n);
+        if (n.type === 'ExportDefaultDeclaration') return names(ast(n.declaration));
+        if (n.type !== 'ExportNamedDeclaration') return [];
+        return [
+          ...names(ast(n.declaration)),
+          ...((n.specifiers ?? []) as Ast[]).map((s) => name(s.exported)),
+        ];
+      }),
+    ),
+  ].filter(Boolean);
 }
 
 /** Every module a file loads: imports with or without bindings, re-exports, `import()` and `require`. */
@@ -873,7 +912,7 @@ export class EvidenceStore {
       for (const path of [...new Set(seeds)].slice(0, 20)) {
         const source = await read(path);
         if (!source) continue;
-        for (const symbol of exportedSymbols(path, source.text)) exported.add(`${path}\0${symbol}`);
+        for (const symbol of moduleBindings(path, source.text)) exported.add(`${path}\0${symbol}`);
         const lines =
           scope === 'verification' || options.locations
             ? refs.filter((r) => r.path === path).map((r) => r.line)

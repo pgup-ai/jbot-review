@@ -5,13 +5,13 @@ import { completedReviewHead, type PrFile } from './github.ts';
 import {
   indexEvidenceSource,
   loadPathAliases,
+  moduleBindings,
   moduleSpecifiers,
   opaqueModuleForms,
   resolveEvidenceImport,
   JS_SOURCE,
   JS_GLOBS,
 } from './evidence.ts';
-import { exportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
@@ -164,8 +164,8 @@ export function withReviewBaseline(body: string, baseline?: ReviewBaseline): str
 function indexImpactSource(path: string, text: string) {
   return {
     ...indexEvidenceSource(path, text),
-    // Only exports can link files: nested locals such as `line` or `event` match unrelated files by name.
-    declarations: exportedSymbols(path, text),
+    // Only module-level bindings can link files: nested locals such as `line` or `event` match unrelated files by name.
+    declarations: moduleBindings(path, text),
   };
 }
 

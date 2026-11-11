@@ -76,9 +76,6 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   return [...symbols];
 }
 
-export const exportedSymbols = (filename: string, text: string) =>
-  extractChangedExportedSymbols([{ filename, patch: text.replace(/^/gm, '+') }]);
-
 export type SymbolGrep = (workspace: string, symbol: string) => Promise<string[]>;
 
 async function gitGrepFiles(workspace: string, symbol: string): Promise<string[]> {
