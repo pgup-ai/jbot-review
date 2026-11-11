@@ -391,7 +391,10 @@ export function moduleBindings(
       return [
         ...names(ast(n.declaration)).map(({ local }) => bind(local)),
         ...((n.specifiers ?? []) as Ast[]).map((s) =>
-          bind(n.source ? '' : name(s.local), name(s.exported)),
+          // `x as default` is imported under any name; the local name is what callers reuse.
+          name(s.exported) === 'default'
+            ? bind(n.source ? '' : name(s.local))
+            : bind(n.source ? '' : name(s.local), name(s.exported)),
         ),
       ];
     })
@@ -615,11 +618,17 @@ export interface EvidenceCacheStats {
   prefetchStatus: 'disabled' | 'running' | 'completed' | 'failed';
 }
 
+type CachedSource = {
+  text: string;
+  truncated: boolean;
+  index: SourceIndex;
+  digest: string;
+  parsed: boolean;
+  bindings?: ReturnType<typeof moduleBindings>;
+};
+
 export class EvidenceStore {
-  private cache = new Map<
-    string,
-    { text: string; truncated: boolean; index: SourceIndex; digest: string; parsed: boolean }
-  >();
+  private cache = new Map<string, CachedSource>();
   private sources = new SourceCache();
   private observations = new Map<string, { path: string; line: number }>();
   private inventory?: Promise<Set<string>>;
@@ -932,16 +941,6 @@ export class EvidenceStore {
       for (const path of [...new Set(seeds)].slice(0, 20)) {
         const source = await read(path);
         if (!source) continue;
-        let bindings: ReturnType<typeof moduleBindings> = [];
-        try {
-          bindings = moduleBindings(path, source.text);
-        } catch {
-          /* Unsupported syntax indexed no definitions, so there is nothing to search for. */
-        }
-        for (const { local, line, exported: as } of bindings) {
-          const key = `${path}\0${local}\0${line}`;
-          exported.set(key, [...(exported.get(key) ?? []), as]);
-        }
         const lines =
           scope === 'verification' || options.locations
             ? refs.filter((r) => r.path === path).map((r) => r.line)
@@ -955,6 +954,19 @@ export class EvidenceStore {
             lines.some((l) => l >= d.start && l <= d.end)
           )
             targets.push({ path, ...d });
+        if (!targets.some((t) => t.path === path)) continue;
+        // Parsed once per file version: warm, exploration and verification share the cached source.
+        source.bindings ??= (() => {
+          try {
+            return moduleBindings(path, source.text);
+          } catch {
+            return []; // Unsupported syntax indexed no definitions either.
+          }
+        })();
+        for (const { local, line, exported: as } of source.bindings) {
+          const key = `${path}\0${local}\0${line}`;
+          exported.set(key, [...(exported.get(key) ?? []), as]);
+        }
       }
       // Search for the names other files use: a nested `line` matches unrelated files and crowds out callers.
       const symbols = [
@@ -1235,7 +1247,12 @@ export class EvidenceStore {
       }
       await this.disk.set(key, index);
     }
-    const value = { ...source, digest, index, parsed: !fromDisk };
+    const value: CachedSource = {
+      ...source,
+      digest,
+      index,
+      parsed: !fromDisk,
+    };
     if (this.cache.size >= 64) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(path, value);
     return value;

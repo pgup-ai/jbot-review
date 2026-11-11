@@ -628,9 +628,19 @@ test('module bindings are the names other files reach, tied to their declaration
         "const text = 'export const quoted = 0';",
         'const Button = () => null;',
         'export default Button;',
+        'function helper() {}',
+        'export { helper as default };',
+        "export { default } from './c';",
       ].join('\n'),
     ),
-    ['first=first@1', 'second=second@2', 'visible=internal@3', 'reexported=@0', 'Button=Button@8'],
+    [
+      'first=first@1',
+      'second=second@2',
+      'visible=internal@3',
+      'reexported=@0',
+      'Button=Button@8',
+      'helper=helper@10',
+    ],
   );
   assert.deepEqual(exported('legacy.ts', 'const build = () => 1;\nexport = build;'), [
     'build=build@1',
