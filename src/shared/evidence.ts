@@ -383,10 +383,16 @@ export function moduleBindings(
   return body
     .flatMap((n) => {
       if (!module) return names(n).map(({ local }) => bind(local));
-      if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
-        return names(ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration)).map(
-          ({ local }) => bind(local),
+      const value = ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration);
+      // `export = { helper }` exports each property, bound to the local it names.
+      if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
+        return (value.properties as Ast[]).flatMap((p) =>
+          ast(p.value)?.type === 'Identifier'
+            ? [bind(name(p.value), keyName(p.key, p.computed))]
+            : [],
         );
+      if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
+        return names(value).map(({ local }) => bind(local));
       if (n.type !== 'ExportNamedDeclaration') return [];
       return [
         ...names(ast(n.declaration)).map(({ local }) => bind(local)),
