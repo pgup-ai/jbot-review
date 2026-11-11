@@ -399,6 +399,8 @@ export function moduleBindings(
       ast(n.expression)?.type === 'AssignmentExpression' ? n.expression : undefined,
     );
     const target = memberPath(ast(assigned?.left));
+    // A file that declares its own `module` or `exports` is not assigning CommonJS exports.
+    if (declared.has(target.split('.')[0])) return [];
     const right = withoutTypeWrappers(ast(assigned?.right));
     return target === 'module.exports' && right?.type === 'ObjectExpression'
       ? properties(right)

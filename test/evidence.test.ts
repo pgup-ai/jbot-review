@@ -691,6 +691,13 @@ test('module bindings are the names other files reach, tied to their declaration
   assert.deepEqual(exported('local.mjs', 'function helper() {}'), []);
   assert.deepEqual(
     exported(
+      'shadow.js',
+      'const exports = {};\nexports.run = 1;\nlet module = {};\nmodule.exports = { stop: 1 };',
+    ),
+    ['exports=exports@1', 'module=module@3'],
+  );
+  assert.deepEqual(
+    exported(
       'typed.cts',
       "import type { Api } from './api';\nfunction run() {}\nexports.run = run;",
     ),
