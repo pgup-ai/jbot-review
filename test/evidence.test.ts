@@ -653,9 +653,26 @@ test('module bindings are the names other files reach, tied to their declaration
     ['helper=helper@1', 'start=run@2', 'stop=run@2'],
   );
   assert.deepEqual(
-    exported('script.js', 'function total() { const line = 1; }\nmodule.exports = { total };'),
-    ['total=total@1'],
+    exported(
+      'script.js',
+      [
+        'function total() { const line = 1; }',
+        'function helper() {}',
+        'module.exports = { total, public: helper };',
+        'exports.run = helper;',
+        'module.exports.stop = () => 0;',
+      ].join('\n'),
+    ),
+    [
+      'total=total@1',
+      'helper=helper@2',
+      'total=total@1',
+      'public=helper@2',
+      'run=helper@2',
+      'stop=@0',
+    ],
   );
+  assert.deepEqual(exported('local.mjs', 'function helper() {}'), []);
 });
 
 test('indexes decorated NestJS sources and generic arrows in .ts files', () => {

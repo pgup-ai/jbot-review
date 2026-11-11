@@ -378,21 +378,40 @@ export function moduleBindings(
     exported,
     line: declared.get(local) ?? 0,
   });
-  const module = body.some((n) =>
-    /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type),
-  );
+  // `{ helper, start: run }` exports each property, bound to the local it names.
+  const properties = (object: Ast) =>
+    (object.properties as Ast[]).flatMap((p) => {
+      const local = withoutTypeWrappers(ast(p.value));
+      return local?.type === 'Identifier' ? [bind(name(local), keyName(p.key, p.computed))] : [];
+    });
+  // `.mjs`/`.mts` files are ES modules even without import or export syntax.
+  const module =
+    /\.m[jt]s$/i.test(path) ||
+    body.some((n) => /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type));
+  const memberPath = (n: Ast | undefined): string =>
+    n?.type === 'MemberExpression' && !n.computed
+      ? `${memberPath(ast(n.object))}.${keyOrPrivateName(n.property)}`
+      : name(n);
   return body
     .flatMap((n) => {
-      if (!module) return names(n).map(({ local }) => bind(local));
+      if (!module) {
+        const assigned = ast(
+          ast(n.expression)?.type === 'AssignmentExpression' ? n.expression : undefined,
+        );
+        const target = memberPath(ast(assigned?.left));
+        const right = withoutTypeWrappers(ast(assigned?.right));
+        // CommonJS exposes `module.exports = { … }` and `exports.x =` names; scripts share globals.
+        const commonJs =
+          target === 'module.exports' && right?.type === 'ObjectExpression'
+            ? properties(right)
+            : /^(module\.)?exports\.[\w$]+$/.test(target)
+              ? [bind(right?.type === 'Identifier' ? name(right) : '', target.split('.').at(-1))]
+              : [];
+        return [...names(n).map(({ local }) => bind(local)), ...commonJs];
+      }
       const value = ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration);
-      // `export = { helper }` exports each property, bound to the local it names.
       if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
-        return (value.properties as Ast[]).flatMap((p) => {
-          const local = withoutTypeWrappers(ast(p.value));
-          return local?.type === 'Identifier'
-            ? [bind(name(local), keyName(p.key, p.computed))]
-            : [];
-        });
+        return properties(value);
       if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
         return names(value).map(({ local }) => bind(local));
       if (n.type !== 'ExportNamedDeclaration') return [];
