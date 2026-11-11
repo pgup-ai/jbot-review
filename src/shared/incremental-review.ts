@@ -654,7 +654,14 @@ export async function planIncrementalReview(input: {
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
-    for (const ref of terms.length ? [baseline.head, input.head] : [])
+    // That caller matters only when a PR file left out of the follow-up can load it; prose loads nothing.
+    const leftOutCode = input.files.some(
+      (file) =>
+        !selection.has(file.filename) &&
+        !baseline.recheck?.includes(file.filename) &&
+        !PROSE_FILE.test(file.filename),
+    );
+    for (const ref of terms.length && leftOutCode ? [baseline.head, input.head] : [])
       if (
         (await grep(ref, ['-w', '-F', ...terms.flatMap((term) => ['-e', term])], ...JS_GLOBS)).some(
           (path) => !paths.has(path),

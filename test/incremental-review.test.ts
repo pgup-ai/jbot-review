@@ -275,15 +275,16 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     );
     const outsideHead = commit();
     write('core/limit.ts', 'export function limit() {\n  return 1;\n}\n');
-    assert.equal(
-      (
-        await planIncrementalReview({
-          ...input,
-          head: commit(),
-          priorBodies: [body(outsideHead, base)],
-        })
-      ).reason,
-      'references-outside-pr',
+    const outside = { ...input, head: commit(), priorBodies: [body(outsideHead, base)] };
+    assert.equal((await planIncrementalReview(outside)).reason, 'references-outside-pr');
+    // A doc left out of the follow-up loads no module, so no outside caller can reach it.
+    const docsOnly = await planIncrementalReview({
+      ...outside,
+      files: [...files.slice(0, 2), { filename: 'docs/limit.md', patch: '@@ -0,0 +1 @@\n+a' }],
+    });
+    assert.deepEqual(
+      [docsOnly.reason, docsOnly.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts', 'worker/job.ts']],
     );
     for (const target of [
       'core/store.mjs',
