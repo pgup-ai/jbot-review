@@ -357,10 +357,18 @@ export function moduleBindings(
     (n.kind === 'global' || ast(n.id)?.type === 'StringLiteral');
   const names = (n: Ast | undefined, line = n?.loc?.start.line ?? 0): Named[] => {
     if (!n) return [];
-    if (ambient(n))
-      return ((ast(n.body)?.body ?? []) as Ast[]).flatMap((s) =>
+    if (ambient(n)) {
+      const statements = (ast(n.body)?.body ?? []) as Ast[];
+      const members = statements.flatMap((s) =>
         names(/^Export(Named|Default)/.test(s.type) ? ast(s.declaration) : s),
       );
+      // `export = Api` makes `Api` the module's only export.
+      const assigned = statements.find((s) => s.type === 'TSExportAssignment');
+      if (!assigned) return members;
+      const targets = names(withoutTypeWrappers(ast(assigned.expression)));
+      const declared = members.filter((m) => targets.some((t) => t.local === m.local));
+      return declared.length ? declared : targets;
+    }
     if (n.type === 'Identifier') return [{ local: name(n), line }];
     if (n.type === 'VariableDeclaration')
       return (n.declarations as Ast[]).flatMap((d) => names(ast(d.id), d.loc?.start.line));

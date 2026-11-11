@@ -705,6 +705,13 @@ test('module bindings are the names other files reach, tied to their declaration
   );
   assert.deepEqual(
     exported(
+      'pkg.d.ts',
+      "declare module 'pkg' {\n  class Api {}\n  class Internal {}\n  export = Api;\n}",
+    ),
+    ['Api=Api@2'],
+  );
+  assert.deepEqual(
+    exported(
       'shadow.js',
       'const exports = {};\nexports.run = 1;\nlet module = {};\nmodule.exports = { stop: 1 };',
     ),
