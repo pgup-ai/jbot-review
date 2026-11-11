@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { posix } from 'node:path';
+import { exportedSymbols } from './blast-radius.ts';
 import { reviewReadLocations } from './review-read-locations.ts';
 import { promisify } from 'node:util';
 import {
@@ -868,9 +869,11 @@ export class EvidenceStore {
       };
       const focus = new Map<string, number[]>();
       const targets: { path: string; symbol: string; start: number; end: number }[] = [];
+      const exported = new Set<string>();
       for (const path of [...new Set(seeds)].slice(0, 20)) {
         const source = await read(path);
         if (!source) continue;
+        for (const symbol of exportedSymbols(path, source.text)) exported.add(`${path}\0${symbol}`);
         const lines =
           scope === 'verification' || options.locations
             ? refs.filter((r) => r.path === path).map((r) => r.line)
@@ -885,7 +888,12 @@ export class EvidenceStore {
           )
             targets.push({ path, ...d });
       }
-      const symbols = [...new Set(targets.map((t) => t.symbol))].slice(0, 20);
+      // Searching the repo for a local such as `line` matches unrelated files and crowds out real callers.
+      const symbols = [
+        ...new Set(
+          targets.filter((t) => exported.has(`${t.path}\0${t.symbol}`)).map((t) => t.symbol),
+        ),
+      ].slice(0, 20);
       // A changed internal function can affect an unchanged exported wrapper's callers.
       const modules = [
         ...new Set(

@@ -96,7 +96,11 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   execFileSync('git', ['init', '-q', workspace]);
   await writeFile(
     join(workspace, 'engine.ts'),
-    'function internal() {\nreturn 2;\n}\nexport function review(options: unknown) { return internal(); }\n',
+    'function internal() {\nconst line = 2;\nreturn line;\n}\nexport function review(options: unknown) { return internal(); }\n',
+  );
+  await writeFile(
+    join(workspace, 'noise.ts'),
+    "export const label = () => { const line = 'NOISE_LOCAL'; };",
   );
   await writeFile(
     join(workspace, 'worker.ts'),
@@ -135,6 +139,7 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   assert.match(evidence, /reviewShards: 1/);
   assert.match(evidence, /import-linked reference/);
   assert.doesNotMatch(evidence, /WRONG_BINDING/);
+  assert.doesNotMatch(evidence, /NOISE_LOCAL/);
 });
 
 test('verification supplies distant imports and option-normalization definitions', async (t) => {

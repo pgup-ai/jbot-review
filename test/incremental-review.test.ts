@@ -145,6 +145,21 @@ test('impact expansion includes aliased callers and callees from earlier PR file
       ['core/shape.ts', 'worker/job.ts'],
     );
   }
+  const locals = new Map([
+    [
+      'cases/eval.ts',
+      ['export const CASES = [1].map((line) => { const event = line; return event; });'],
+    ],
+    [
+      'links/service.ts',
+      ['export function link(event: number) { const line = event; return line; }'],
+    ],
+  ]);
+  const localFiles = [...locals.keys()].map((filename) => ({ filename }));
+  assert.deepEqual(
+    impactedReviewFiles(localFiles, ['cases/eval.ts'], locals).map((file) => file.filename),
+    ['cases/eval.ts'],
+  );
 });
 
 test('incremental planning uses a successful ancestor and falls back on uncertain follow-ups', async () => {

@@ -11,7 +11,7 @@ import {
   JS_SOURCE,
   JS_GLOBS,
 } from './evidence.ts';
-import { extractChangedExportedSymbols } from './blast-radius.ts';
+import { exportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
@@ -162,23 +162,10 @@ export function withReviewBaseline(body: string, baseline?: ReviewBaseline): str
 }
 
 function indexImpactSource(path: string, text: string) {
-  const index = indexEvidenceSource(path, text);
   return {
-    ...index,
-    declarations: [
-      ...new Set([
-        ...index.definitions.map((definition) => definition.symbol),
-        ...extractChangedExportedSymbols([
-          {
-            filename: path,
-            patch: text
-              .split('\n')
-              .map((line) => '+' + line)
-              .join('\n'),
-          },
-        ]),
-      ]),
-    ],
+    ...indexEvidenceSource(path, text),
+    // Only exports can link files: nested locals such as `line` or `event` match unrelated files by name.
+    declarations: exportedSymbols(path, text),
   };
 }
 
