@@ -986,13 +986,7 @@ export class EvidenceStore {
             targets.push({ path, ...d });
         if (!targets.some((t) => t.path === path)) continue;
         // Parsed once per file version: warm, exploration and verification share the cached source.
-        source.bindings ??= (() => {
-          try {
-            return moduleBindings(path, source.text);
-          } catch {
-            return []; // Unsupported syntax indexed no definitions either.
-          }
-        })();
+        source.bindings ??= moduleBindings(path, source.text);
         for (const { local, line, exported: as } of source.bindings) {
           const key = `${path}\0${local}\0${line}`;
           exported.set(key, [...(exported.get(key) ?? []), as]);
