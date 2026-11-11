@@ -691,6 +691,20 @@ test('module bindings are the names other files reach, tied to their declaration
   assert.deepEqual(exported('local.mjs', 'function helper() {}'), []);
   assert.deepEqual(
     exported(
+      'globals.d.ts',
+      'declare global {\n  var flag: boolean;\n}\nnamespace Foo {\n  export const z = 1;\n}',
+    ),
+    ['flag=flag@2', 'Foo=Foo@4'],
+  );
+  assert.deepEqual(
+    exported(
+      'augment.d.ts',
+      "export {};\ndeclare global {\n  var flag: boolean;\n}\ndeclare module 'x' {\n  export const y: number;\n}",
+    ),
+    ['flag=flag@3', 'y=y@6'],
+  );
+  assert.deepEqual(
+    exported(
       'shadow.js',
       'const exports = {};\nexports.run = 1;\nlet module = {};\nmodule.exports = { stop: 1 };',
     ),

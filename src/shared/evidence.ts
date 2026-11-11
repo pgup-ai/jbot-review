@@ -351,8 +351,16 @@ export function moduleBindings(
   if (!JS_SOURCE.test(path)) return [];
   const body = (ast(parseSource(path, text).program)?.body ?? []) as Ast[];
   type Named = { local: string; line: number };
+  // `declare global { … }` and `declare module 'x' { … }` declare their members; a namespace only its name.
+  const ambient = (n: Ast | undefined) =>
+    n?.type === 'TSModuleDeclaration' &&
+    (n.kind === 'global' || ast(n.id)?.type === 'StringLiteral');
   const names = (n: Ast | undefined, line = n?.loc?.start.line ?? 0): Named[] => {
     if (!n) return [];
+    if (ambient(n))
+      return ((ast(n.body)?.body ?? []) as Ast[]).flatMap((s) =>
+        names(/^Export(Named|Default)/.test(s.type) ? ast(s.declaration) : s),
+      );
     if (n.type === 'Identifier') return [{ local: name(n), line }];
     if (n.type === 'VariableDeclaration')
       return (n.declarations as Ast[]).flatMap((d) => names(ast(d.id), d.loc?.start.line));
@@ -410,7 +418,7 @@ export function moduleBindings(
   };
   const esm = (n: Ast) => {
     // A script without module syntax shares its top-level declarations as globals.
-    if (!module) return names(n).map(({ local }) => bind(local));
+    if (!module || ambient(n)) return names(n).map(({ local }) => bind(local));
     const value = withoutTypeWrappers(
       ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration),
     );
