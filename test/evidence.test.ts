@@ -25,6 +25,7 @@ import {
   resolveEvidenceImport,
   evidenceMode,
   loadPathAliases,
+  moduleBindings,
   parseTsconfigPaths,
 } from '../src/shared/evidence.ts';
 import { normalizeOptions, requestFindingVerdicts } from '../src/shared/runner.ts';
@@ -96,7 +97,12 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   execFileSync('git', ['init', '-q', workspace]);
   await writeFile(
     join(workspace, 'engine.ts'),
-    'function internal() {\nreturn 2;\n}\nexport function review(options: unknown) { return internal(); }\n',
+    'function internal() {\nconst line = 2;\nreturn line;\n}\nexport function review(options: unknown) { return internal(); }\nexport const line = 0;\n',
+  );
+  await writeFile(join(workspace, 'broken.ts'), 'export const = ;\n');
+  await writeFile(
+    join(workspace, 'noise.ts'),
+    "export const label = () => { const line = 'NOISE_LOCAL'; };",
   );
   await writeFile(
     join(workspace, 'worker.ts'),
@@ -126,7 +132,10 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
     },
   ]);
   const evidence = await store.prepare('exploration', [], 'deterministic', {
-    locations: [{ path: 'engine.ts', line: 2 }],
+    locations: [
+      { path: 'broken.ts', line: 1 },
+      { path: 'engine.ts', line: 2 },
+    ],
     timeoutMs: 4000,
     log: () => {},
     onStats: () => {},
@@ -135,6 +144,7 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   assert.match(evidence, /reviewShards: 1/);
   assert.match(evidence, /import-linked reference/);
   assert.doesNotMatch(evidence, /WRONG_BINDING/);
+  assert.doesNotMatch(evidence, /NOISE_LOCAL/);
 });
 
 test('verification supplies distant imports and option-normalization definitions', async (t) => {
@@ -599,6 +609,131 @@ test('persistent cache reuses indexes and exact judgments with zero rebilling; c
   assert.equal(
     await new EvidenceDiskCache(cacheDir, cacheDir + '-other').get('jev-v1:' + rows[0].requestHash),
     undefined,
+  );
+});
+
+test('module bindings are the names other files reach, tied to their declarations', () => {
+  const exported = (path: string, text: string) =>
+    moduleBindings(path, text).map((b) => `${b.exported}=${b.local}@${b.line}`);
+  assert.deepEqual(
+    exported(
+      'a.ts',
+      [
+        'export const first = 0,',
+        '  second = () => { const line = 1; return line; };',
+        'function internal() {}',
+        'export { internal as visible };',
+        "export { reexported } from './b';",
+        '// export const commented = 0;',
+        "const text = 'export const quoted = 0';",
+        'const Button = () => null;',
+        'export default Button;',
+        'function helper() {}',
+        'export { helper as default };',
+        "export { default } from './c';",
+      ].join('\n'),
+    ),
+    [
+      'first=first@1',
+      'second=second@2',
+      'visible=internal@3',
+      'reexported=@0',
+      'Button=Button@8',
+      'helper=helper@10',
+    ],
+  );
+  assert.deepEqual(exported('legacy.ts', 'const build = () => 1;\nexport = build;'), [
+    'build=build@1',
+  ]);
+  assert.deepEqual(
+    exported('typed.ts', 'const build = () => 1;\nexport = build as () => number;'),
+    ['build=build@1'],
+  );
+  assert.deepEqual(exported('typed-map.ts', 'const run = 1;\nexport = { run } as const;'), [
+    'run=run@1',
+  ]);
+  assert.deepEqual(
+    exported('typed-default.ts', 'const impl = 1;\nexport default impl satisfies number;'),
+    ['impl=impl@1'],
+  );
+  assert.deepEqual(
+    exported(
+      'legacy-map.ts',
+      'function helper() {}\nconst run = 1;\nexport = { helper, start: run as number, stop: run! };',
+    ),
+    ['helper=helper@1', 'start=run@2', 'stop=run@2'],
+  );
+  assert.deepEqual(
+    exported(
+      'script.js',
+      [
+        'function total() { const line = 1; }',
+        'function helper() {}',
+        'module.exports = { total, public: helper, inline: () => 0, method() {}, ...rest };',
+        'exports.run = helper;',
+        "exports['walk'] = helper;",
+        'module.exports.stop = () => 0;',
+        'exports[name] = helper;',
+      ].join('\n'),
+    ),
+    [
+      'total=total@1',
+      'helper=helper@2',
+      'total=total@1',
+      'public=helper@2',
+      'inline=@0',
+      'method=@0',
+      'run=helper@2',
+      'walk=helper@2',
+      'stop=@0',
+    ],
+  );
+  assert.deepEqual(exported('local.mjs', 'function helper() {}'), []);
+  assert.deepEqual(exported('local.cjs', 'function helper() {}'), []);
+  assert.deepEqual(exported('single.cjs', 'function helper() {}\nmodule.exports = helper;'), [
+    'helper=helper@1',
+  ]);
+  assert.deepEqual(
+    exported(
+      'globals.d.ts',
+      'declare global {\n  var flag: boolean;\n}\nnamespace Foo {\n  export const z = 1;\n}',
+    ),
+    ['flag=flag@2', 'Foo=Foo@4'],
+  );
+  assert.deepEqual(
+    exported(
+      'augment.d.ts',
+      "export {};\ndeclare global {\n  var flag: boolean;\n}\ndeclare module 'x' {\n  export const y: number;\n}",
+    ),
+    ['flag=flag@3', 'y=y@6'],
+  );
+  assert.deepEqual(
+    exported(
+      'pkg.d.ts',
+      "declare module 'pkg' {\n  class Api {}\n  class Internal {}\n  export = Api;\n}",
+    ),
+    ['Api=Api@2'],
+  );
+  assert.deepEqual(
+    exported(
+      'merged.d.ts',
+      "declare module 'pkg' {\n  class Api {}\n  namespace Api {}\n  export = Api;\n}",
+    ),
+    ['Api=Api@2', 'Api=Api@3'],
+  );
+  assert.deepEqual(
+    exported(
+      'shadow.js',
+      'const exports = {};\nexports.run = 1;\nlet module = {};\nmodule.exports = { stop: 1 };',
+    ),
+    ['exports=exports@1', 'module=module@3'],
+  );
+  assert.deepEqual(
+    exported(
+      'typed.cts',
+      "import type { Api } from './api';\nfunction run() {}\nexports.run = run;",
+    ),
+    ['run=run@2'],
   );
 });
 

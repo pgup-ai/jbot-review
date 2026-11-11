@@ -145,6 +145,36 @@ test('impact expansion includes aliased callers and callees from earlier PR file
       ['core/shape.ts', 'worker/job.ts'],
     );
   }
+  const locals = new Map([
+    [
+      'cases/eval.ts',
+      ['export const CASES = [1].map((line) => { const event = line; return event; });'],
+    ],
+    [
+      'links/service.ts',
+      ['export function link(event: number) { const line = event; return line; }'],
+    ],
+  ]);
+  const localFiles = [...locals.keys()].map((filename) => ({ filename }));
+  assert.deepEqual(
+    impactedReviewFiles(localFiles, ['cases/eval.ts'], locals).map((file) => file.filename),
+    ['cases/eval.ts'],
+  );
+  for (const [changed, text] of [
+    ['core/limits.ts', 'export const first = 0,\n  second = () => 1;'],
+    ['core/math.js', 'function second() { return 1; }'],
+  ]) {
+    const shared = new Map([
+      [changed, [text]],
+      ['worker/run.ts', ['import { second } from "@core/limits";\nsecond();']],
+      ['ui/cart.js', ['second();']],
+    ]);
+    const sharedFiles = [...shared.keys()].map((filename) => ({ filename }));
+    assert.deepEqual(
+      impactedReviewFiles(sharedFiles, [changed], shared).map((file) => file.filename),
+      [changed, 'worker/run.ts', 'ui/cart.js'],
+    );
+  }
 });
 
 test('incremental planning uses a successful ancestor and falls back on uncertain follow-ups', async () => {
@@ -245,15 +275,16 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     );
     const outsideHead = commit();
     write('core/limit.ts', 'export function limit() {\n  return 1;\n}\n');
-    assert.equal(
-      (
-        await planIncrementalReview({
-          ...input,
-          head: commit(),
-          priorBodies: [body(outsideHead, base)],
-        })
-      ).reason,
-      'references-outside-pr',
+    const outside = { ...input, head: commit(), priorBodies: [body(outsideHead, base)] };
+    assert.equal((await planIncrementalReview(outside)).reason, 'references-outside-pr');
+    // A doc left out of the follow-up loads no module, so no outside caller can reach it.
+    const docsOnly = await planIncrementalReview({
+      ...outside,
+      files: [...files.slice(0, 2), { filename: 'docs/limit.md', patch: '@@ -0,0 +1 @@\n+a' }],
+    });
+    assert.deepEqual(
+      [docsOnly.reason, docsOnly.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts', 'worker/job.ts']],
     );
     for (const target of [
       'core/store.mjs',

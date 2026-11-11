@@ -78,6 +78,16 @@ export type RichSourceIndex = SourceIndex & {
 };
 
 const FUNCTION_VALUE = new Set(['FunctionExpression', 'ArrowFunctionExpression']);
+const TYPE_WRAPPER = new Set([
+  'TSAsExpression',
+  'TSSatisfiesExpression',
+  'TSTypeAssertion',
+  'TSNonNullExpression',
+]);
+const withoutTypeWrappers = (value: Ast | undefined) => {
+  while (value && TYPE_WRAPPER.has(value.type)) value = ast(value.expression);
+  return value;
+};
 const MEMBER_KIND: Record<string, DeclarationKind> = {
   ClassMethod: 'method',
   ClassPrivateMethod: 'method',
@@ -175,16 +185,7 @@ export function indexEvidenceSource(
     )
       result.lookups.push({ symbol: name(n.object), line: start });
     let value = ast(n.type === 'AssignmentExpression' ? n.right : n.value);
-    while (
-      value &&
-      [
-        'TSAsExpression',
-        'TSSatisfiesExpression',
-        'TSTypeAssertion',
-        'TSNonNullExpression',
-      ].includes(value.type)
-    )
-      value = ast(value.expression);
+    value = withoutTypeWrappers(value);
     if (
       n.type === 'AssignmentExpression' ||
       (n.type === 'ObjectProperty' && parent?.type === 'ObjectExpression')
@@ -336,6 +337,119 @@ export function indexEvidenceSource(
   if (options.rich) return result;
   const { definitions, imports, uses } = result;
   return { definitions, imports, uses };
+}
+
+/**
+ * Names another file can reach: a module's exported bindings, or every top-level
+ * declaration of a script without import/export, whose globals scripts share.
+ * `line` is the local declaration's start, matching its `definitions` entry (0 for re-exports).
+ */
+export function moduleBindings(
+  path: string,
+  text: string,
+): { local: string; exported: string; line: number }[] {
+  if (!JS_SOURCE.test(path)) return [];
+  const body = (ast(parseSource(path, text).program)?.body ?? []) as Ast[];
+  type Named = { local: string; line: number };
+  // `declare global { … }` and `declare module 'x' { … }` declare their members; a namespace only its name.
+  const ambient = (n: Ast | undefined) =>
+    n?.type === 'TSModuleDeclaration' &&
+    (n.kind === 'global' || ast(n.id)?.type === 'StringLiteral');
+  const names = (n: Ast | undefined, line = n?.loc?.start.line ?? 0): Named[] => {
+    if (!n) return [];
+    if (ambient(n)) {
+      const statements = (ast(n.body)?.body ?? []) as Ast[];
+      const members = statements.flatMap((s) =>
+        names(/^Export(Named|Default)/.test(s.type) ? ast(s.declaration) : s),
+      );
+      // `export = Api` makes `Api` the module's only export.
+      const assigned = statements.find((s) => s.type === 'TSExportAssignment');
+      if (!assigned) return members;
+      const targets = names(withoutTypeWrappers(ast(assigned.expression)));
+      const declared = members.filter((m) => targets.some((t) => t.local === m.local));
+      return declared.length ? declared : targets;
+    }
+    if (n.type === 'Identifier') return [{ local: name(n), line }];
+    if (n.type === 'VariableDeclaration')
+      return (n.declarations as Ast[]).flatMap((d) => names(ast(d.id), d.loc?.start.line));
+    if (n.type === 'ObjectPattern')
+      return (n.properties as Ast[]).flatMap((p) =>
+        names(ast(p.type === 'RestElement' ? p.argument : p.value), line),
+      );
+    if (n.type === 'ArrayPattern')
+      return (n.elements as (Ast | null)[]).flatMap((e) => names(e ?? undefined, line));
+    if (n.type === 'AssignmentPattern') return names(ast(n.left), line);
+    if (n.type === 'RestElement') return names(ast(n.argument), line);
+    return name(n.id) ? [{ local: name(n.id), line }] : [];
+  };
+  const declared = new Map<string, number>();
+  for (const n of body) {
+    const declaration = /^Export(Named|Default)/.test(n.type) ? ast(n.declaration) : n;
+    // `export default name` refers to a declaration, it does not make one.
+    if (declaration?.type !== 'Identifier')
+      for (const { local, line } of names(declaration)) declared.set(local, line);
+  }
+  const bind = (local: string, exported = local) => ({
+    local,
+    exported,
+    line: declared.get(local) ?? 0,
+  });
+  // `{ helper, start: run }` exports each property, bound to the local it names.
+  const properties = (object: Ast) =>
+    (object.properties as Ast[]).flatMap((p) => {
+      const key = keyName(p.key, p.computed);
+      const local = withoutTypeWrappers(ast(p.value));
+      return key ? [bind(local?.type === 'Identifier' ? name(local) : '', key)] : [];
+    });
+  // `.mjs`/`.mts`/`.cjs`/`.cts` files have module scope even without import or export syntax.
+  const module =
+    /\.[cm][jt]s$/i.test(path) ||
+    body.some((n) => /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type));
+  const memberPath = (n: Ast | undefined): string =>
+    n?.type === 'MemberExpression'
+      ? `${memberPath(ast(n.object))}.${keyName(n.property, n.computed)}`
+      : name(n);
+  // CommonJS exposes `module.exports = { … }` and `exports.x =` names, even beside `import type`.
+  const commonJs = (n: Ast) => {
+    const assigned = ast(
+      ast(n.expression)?.type === 'AssignmentExpression' ? n.expression : undefined,
+    );
+    const target = memberPath(ast(assigned?.left));
+    // A file that declares its own `module` or `exports` is not assigning CommonJS exports.
+    if (declared.has(target.split('.')[0])) return [];
+    const right = withoutTypeWrappers(ast(assigned?.right));
+    return target === 'module.exports' && right?.type === 'ObjectExpression'
+      ? properties(right)
+      : target === 'module.exports' && right?.type === 'Identifier'
+        ? [bind(name(right))]
+        : /^(module\.)?exports\.[\w$]+$/.test(target)
+          ? [bind(right?.type === 'Identifier' ? name(right) : '', target.split('.').at(-1))]
+          : [];
+  };
+  const esm = (n: Ast) => {
+    // A script without module syntax shares its top-level declarations as globals.
+    // Each member keeps its own declaration line: `class Api` and a later `namespace Api` are two.
+    if (!module || ambient(n))
+      return names(n).map(({ local, line }) => ({ local, exported: local, line }));
+    const value = withoutTypeWrappers(
+      ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration),
+    );
+    if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
+      return properties(value);
+    if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
+      return names(value).map(({ local }) => bind(local));
+    if (n.type !== 'ExportNamedDeclaration') return [];
+    return [
+      ...names(ast(n.declaration)).map(({ local }) => bind(local)),
+      ...((n.specifiers ?? []) as Ast[]).map((s) =>
+        // `x as default` is imported under any name; the local name is what callers reuse.
+        name(s.exported) === 'default'
+          ? bind(n.source ? '' : name(s.local))
+          : bind(n.source ? '' : name(s.local), name(s.exported)),
+      ),
+    ];
+  };
+  return body.flatMap((n) => [...esm(n), ...commonJs(n)]).filter((binding) => binding.exported);
 }
 
 /** Every module a file loads: imports with or without bindings, re-exports, `import()` and `require`. */
@@ -555,11 +669,17 @@ export interface EvidenceCacheStats {
   prefetchStatus: 'disabled' | 'running' | 'completed' | 'failed';
 }
 
+type CachedSource = {
+  text: string;
+  truncated: boolean;
+  index: SourceIndex;
+  digest: string;
+  parsed: boolean;
+  bindings?: ReturnType<typeof moduleBindings>;
+};
+
 export class EvidenceStore {
-  private cache = new Map<
-    string,
-    { text: string; truncated: boolean; index: SourceIndex; digest: string; parsed: boolean }
-  >();
+  private cache = new Map<string, CachedSource>();
   private sources = new SourceCache();
   private observations = new Map<string, { path: string; line: number }>();
   private inventory?: Promise<Set<string>>;
@@ -868,6 +988,7 @@ export class EvidenceStore {
       };
       const focus = new Map<string, number[]>();
       const targets: { path: string; symbol: string; start: number; end: number }[] = [];
+      const exported = new Map<string, string[]>();
       for (const path of [...new Set(seeds)].slice(0, 20)) {
         const source = await read(path);
         if (!source) continue;
@@ -884,8 +1005,20 @@ export class EvidenceStore {
             lines.some((l) => l >= d.start && l <= d.end)
           )
             targets.push({ path, ...d });
+        if (!targets.some((t) => t.path === path)) continue;
+        // Parsed once per file version: warm, exploration and verification share the cached source.
+        source.bindings ??= moduleBindings(path, source.text);
+        for (const { local, line, exported: as } of source.bindings) {
+          const key = `${path}\0${local}\0${line}`;
+          exported.set(key, [...(exported.get(key) ?? []), as]);
+        }
       }
-      const symbols = [...new Set(targets.map((t) => t.symbol))].slice(0, 20);
+      // Search for the names other files use: a nested `line` matches unrelated files and crowds out callers.
+      const symbols = [
+        ...new Set(
+          targets.flatMap((t) => exported.get(`${t.path}\0${t.symbol}\0${t.start}`) ?? []),
+        ),
+      ].slice(0, 20);
       // A changed internal function can affect an unchanged exported wrapper's callers.
       const modules = [
         ...new Set(
@@ -1159,7 +1292,12 @@ export class EvidenceStore {
       }
       await this.disk.set(key, index);
     }
-    const value = { ...source, digest, index, parsed: !fromDisk };
+    const value: CachedSource = {
+      ...source,
+      digest,
+      index,
+      parsed: !fromDisk,
+    };
     if (this.cache.size >= 64) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(path, value);
     return value;

@@ -5,13 +5,13 @@ import { completedReviewHead, type PrFile } from './github.ts';
 import {
   indexEvidenceSource,
   loadPathAliases,
+  moduleBindings,
   moduleSpecifiers,
   opaqueModuleForms,
   resolveEvidenceImport,
   JS_SOURCE,
   JS_GLOBS,
 } from './evidence.ts';
-import { extractChangedExportedSymbols } from './blast-radius.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
 import { isGuidelineSource } from './review-context.ts';
 
@@ -162,23 +162,10 @@ export function withReviewBaseline(body: string, baseline?: ReviewBaseline): str
 }
 
 function indexImpactSource(path: string, text: string) {
-  const index = indexEvidenceSource(path, text);
   return {
-    ...index,
-    declarations: [
-      ...new Set([
-        ...index.definitions.map((definition) => definition.symbol),
-        ...extractChangedExportedSymbols([
-          {
-            filename: path,
-            patch: text
-              .split('\n')
-              .map((line) => '+' + line)
-              .join('\n'),
-          },
-        ]),
-      ]),
-    ],
+    ...indexEvidenceSource(path, text),
+    // Only module-level bindings can link files: nested locals such as `line` or `event` match unrelated files by name.
+    declarations: [...new Set(moduleBindings(path, text).map((binding) => binding.exported))],
   };
 }
 
@@ -667,7 +654,14 @@ export async function planIncrementalReview(input: {
       ),
     ];
     if (terms.length > 100) return full('broad-impact');
-    for (const ref of terms.length ? [baseline.head, input.head] : [])
+    // That caller matters only when a PR file left out of the follow-up can load it; prose loads nothing.
+    const leftOutCode = input.files.some(
+      (file) =>
+        !selection.has(file.filename) &&
+        !baseline.recheck?.includes(file.filename) &&
+        !PROSE_FILE.test(file.filename),
+    );
+    for (const ref of terms.length && leftOutCode ? [baseline.head, input.head] : [])
       if (
         (await grep(ref, ['-w', '-F', ...terms.flatMap((term) => ['-e', term])], ...JS_GLOBS)).some(
           (path) => !paths.has(path),
