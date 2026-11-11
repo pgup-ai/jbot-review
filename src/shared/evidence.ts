@@ -78,6 +78,16 @@ export type RichSourceIndex = SourceIndex & {
 };
 
 const FUNCTION_VALUE = new Set(['FunctionExpression', 'ArrowFunctionExpression']);
+const TYPE_WRAPPER = new Set([
+  'TSAsExpression',
+  'TSSatisfiesExpression',
+  'TSTypeAssertion',
+  'TSNonNullExpression',
+]);
+const withoutTypeWrappers = (value: Ast | undefined) => {
+  while (value && TYPE_WRAPPER.has(value.type)) value = ast(value.expression);
+  return value;
+};
 const MEMBER_KIND: Record<string, DeclarationKind> = {
   ClassMethod: 'method',
   ClassPrivateMethod: 'method',
@@ -175,16 +185,7 @@ export function indexEvidenceSource(
     )
       result.lookups.push({ symbol: name(n.object), line: start });
     let value = ast(n.type === 'AssignmentExpression' ? n.right : n.value);
-    while (
-      value &&
-      [
-        'TSAsExpression',
-        'TSSatisfiesExpression',
-        'TSTypeAssertion',
-        'TSNonNullExpression',
-      ].includes(value.type)
-    )
-      value = ast(value.expression);
+    value = withoutTypeWrappers(value);
     if (
       n.type === 'AssignmentExpression' ||
       (n.type === 'ObjectProperty' && parent?.type === 'ObjectExpression')
@@ -386,11 +387,12 @@ export function moduleBindings(
       const value = ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration);
       // `export = { helper }` exports each property, bound to the local it names.
       if (n.type === 'TSExportAssignment' && value?.type === 'ObjectExpression')
-        return (value.properties as Ast[]).flatMap((p) =>
-          ast(p.value)?.type === 'Identifier'
-            ? [bind(name(p.value), keyName(p.key, p.computed))]
-            : [],
-        );
+        return (value.properties as Ast[]).flatMap((p) => {
+          const local = withoutTypeWrappers(ast(p.value));
+          return local?.type === 'Identifier'
+            ? [bind(name(local), keyName(p.key, p.computed))]
+            : [];
+        });
       if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
         return names(value).map(({ local }) => bind(local));
       if (n.type !== 'ExportNamedDeclaration') return [];

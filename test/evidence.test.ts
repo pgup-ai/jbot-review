@@ -648,9 +648,9 @@ test('module bindings are the names other files reach, tied to their declaration
   assert.deepEqual(
     exported(
       'legacy-map.ts',
-      'function helper() {}\nconst run = 1;\nexport = { helper, start: run };',
+      'function helper() {}\nconst run = 1;\nexport = { helper, start: run as number, stop: run! };',
     ),
-    ['helper=helper@1', 'start=run@2'],
+    ['helper=helper@1', 'start=run@2', 'stop=run@2'],
   );
   assert.deepEqual(
     exported('script.js', 'function total() { const line = 1; }\nmodule.exports = { total };'),
