@@ -99,6 +99,7 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
     join(workspace, 'engine.ts'),
     'function internal() {\nconst line = 2;\nreturn line;\n}\nexport function review(options: unknown) { return internal(); }\nexport const line = 0;\n',
   );
+  await writeFile(join(workspace, 'broken.ts'), 'export const = ;\n');
   await writeFile(
     join(workspace, 'noise.ts'),
     "export const label = () => { const line = 'NOISE_LOCAL'; };",
@@ -131,7 +132,10 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
     },
   ]);
   const evidence = await store.prepare('exploration', [], 'deterministic', {
-    locations: [{ path: 'engine.ts', line: 2 }],
+    locations: [
+      { path: 'broken.ts', line: 1 },
+      { path: 'engine.ts', line: 2 },
+    ],
     timeoutMs: 4000,
     log: () => {},
     onStats: () => {},

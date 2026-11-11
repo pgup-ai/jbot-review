@@ -932,7 +932,13 @@ export class EvidenceStore {
       for (const path of [...new Set(seeds)].slice(0, 20)) {
         const source = await read(path);
         if (!source) continue;
-        for (const { local, line, exported: as } of moduleBindings(path, source.text)) {
+        let bindings: ReturnType<typeof moduleBindings> = [];
+        try {
+          bindings = moduleBindings(path, source.text);
+        } catch {
+          /* Unsupported syntax indexed no definitions, so there is nothing to search for. */
+        }
+        for (const { local, line, exported: as } of bindings) {
           const key = `${path}\0${local}\0${line}`;
           exported.set(key, [...(exported.get(key) ?? []), as]);
         }
