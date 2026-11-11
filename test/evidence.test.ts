@@ -658,9 +658,11 @@ test('module bindings are the names other files reach, tied to their declaration
       [
         'function total() { const line = 1; }',
         'function helper() {}',
-        'module.exports = { total, public: helper };',
+        'module.exports = { total, public: helper, inline: () => 0, method() {}, ...rest };',
         'exports.run = helper;',
+        "exports['walk'] = helper;",
         'module.exports.stop = () => 0;',
+        'exports[name] = helper;',
       ].join('\n'),
     ),
     [
@@ -668,7 +670,10 @@ test('module bindings are the names other files reach, tied to their declaration
       'helper=helper@2',
       'total=total@1',
       'public=helper@2',
+      'inline=@0',
+      'method=@0',
       'run=helper@2',
+      'walk=helper@2',
       'stop=@0',
     ],
   );

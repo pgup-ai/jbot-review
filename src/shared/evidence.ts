@@ -381,16 +381,17 @@ export function moduleBindings(
   // `{ helper, start: run }` exports each property, bound to the local it names.
   const properties = (object: Ast) =>
     (object.properties as Ast[]).flatMap((p) => {
+      const key = keyName(p.key, p.computed);
       const local = withoutTypeWrappers(ast(p.value));
-      return local?.type === 'Identifier' ? [bind(name(local), keyName(p.key, p.computed))] : [];
+      return key ? [bind(local?.type === 'Identifier' ? name(local) : '', key)] : [];
     });
   // `.mjs`/`.mts` files are ES modules even without import or export syntax.
   const module =
     /\.m[jt]s$/i.test(path) ||
     body.some((n) => /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type));
   const memberPath = (n: Ast | undefined): string =>
-    n?.type === 'MemberExpression' && !n.computed
-      ? `${memberPath(ast(n.object))}.${keyOrPrivateName(n.property)}`
+    n?.type === 'MemberExpression'
+      ? `${memberPath(ast(n.object))}.${keyName(n.property, n.computed)}`
       : name(n);
   return body
     .flatMap((n) => {
