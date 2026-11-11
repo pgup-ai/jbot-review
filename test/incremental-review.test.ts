@@ -516,6 +516,9 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ['apps/api/src/helper.ts', 'bounded-followup'],
       ['packages/api/src/helper.ts', 'bounded-followup'],
       ['apps/api/src/controllers/limits.ts', 'sensitive-followup'],
+      ['src/routes/oauth/ramp/index.lazy.tsx', 'bounded-followup'],
+      ['src/routes/oauth/ramp/index.ts', 'sensitive-followup'],
+      ['src/api/routes/limits.tsx', 'sensitive-followup'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write(path, 'export function check() {\n  return 1;\n}\n');
@@ -528,6 +531,31 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         files: [...files, { filename: path, patch: '@@ -0,0 +1 @@\n+a' }],
       });
       assert.equal(plan.reason, reason, path);
+    }
+    // A route page with a server handler (Remix) on either side is an endpoint despite its extension.
+    const page = (value: number) => `export function Page() {\n  return ${value};\n}\n`;
+    for (const [before, after] of [
+      [
+        `export async function action() {}\n${page(1)}`,
+        `export async function action() {}\n${page(2)}`,
+      ],
+      [
+        `  export const loader = () => 1;\n${page(1)}`,
+        `  export const loader = () => 1;\n${page(2)}`,
+      ],
+      [`export { loader } from './users.server';\n${page(1)}`, page(1)],
+    ]) {
+      git('checkout', '-q', '--detach', head);
+      write('src/routes/users.tsx', before);
+      const handled = commit();
+      write('src/routes/users.tsx', after);
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(handled, base)],
+        files: [...files, { filename: 'src/routes/users.tsx', patch: '@@ -0,0 +1 @@\n+a' }],
+      });
+      assert.equal(plan.reason, 'sensitive-followup', after);
     }
     // A Jest snapshot under a sensitive directory is test output too, however many lines moved.
     git('checkout', '-q', '--detach', head);

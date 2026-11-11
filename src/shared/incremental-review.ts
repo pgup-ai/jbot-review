@@ -249,6 +249,10 @@ const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
 // Generated snapshots no code imports: Jest's (its spec's expected output) and MikroORM's schema.
 const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
 const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
+const CLIENT_ROUTE_PAGE = /(^|\/)routes?\/.*\.[jt]sx$/i;
+// A Remix action or loader, or a TanStack Start server function, makes a route page an endpoint.
+const SERVER_ROUTE =
+  /^\s*export\s+(?:async\s+)?(?:function|const|let)\s+(?:action|loader)\b|^\s*export\s*\{[^}]*\b(?:action|loader)\b|\bcreateServerFn\b/m;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
@@ -405,17 +409,31 @@ export async function planIncrementalReview(input: {
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
-    // app's own name (apps/api, apps/auth) says nothing about the file inside it.
-    const sensitive = (path: string) =>
-      !TEST_FILE.test(path) &&
-      !JEST_SNAPSHOT.test(path) &&
-      [
-        PATH_PATTERNS.security,
-        PATH_PATTERNS.data,
-        PATH_PATTERNS.api,
-        PATH_PATTERNS.infra,
-        PATH_PATTERNS.tooling,
-      ].some((pattern) => pattern.test(path.replace(/^(?:apps|packages)\/[^/]+\//, '')));
+    // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
+    // routes/ directory of a .tsx/.jsx page a client router (TanStack, React Router) renders.
+    // Either side counts, so a follow-up that removes a server handler stays sensitive.
+    const pages = new Set<string>();
+    for (const path of changed) {
+      if (!CLIENT_ROUTE_PAGE.test(path)) continue;
+      const sides = added.includes(path) ? [input.head] : [baseline.head, input.head];
+      const texts = await Promise.all(sides.map((ref) => git('show', `${ref}:${path}`)));
+      if (!texts.some((text) => SERVER_ROUTE.test(text))) pages.add(path);
+    }
+    const sensitive = (path: string) => {
+      const inner = path.replace(/^(?:apps|packages)\/[^/]+\//, '');
+      const scoped = pages.has(path) ? inner.replace(/(^|\/)routes?\//gi, '$1') : inner;
+      return (
+        !TEST_FILE.test(path) &&
+        !JEST_SNAPSHOT.test(path) &&
+        [
+          PATH_PATTERNS.security,
+          PATH_PATTERNS.data,
+          PATH_PATTERNS.api,
+          PATH_PATTERNS.infra,
+          PATH_PATTERNS.tooling,
+        ].some((pattern) => pattern.test(scoped))
+      );
+    };
     if (changed.some(sensitive)) return full('sensitive-followup');
     // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's or a Jest
     // snapshot's lines are no contract change. An empty pathspec would diff every file.
