@@ -165,7 +165,7 @@ function indexImpactSource(path: string, text: string) {
   return {
     ...indexEvidenceSource(path, text),
     // Only module-level bindings can link files: nested locals such as `line` or `event` match unrelated files by name.
-    declarations: moduleBindings(path, text),
+    declarations: [...new Set(moduleBindings(path, text).map((binding) => binding.exported))],
   };
 }
 

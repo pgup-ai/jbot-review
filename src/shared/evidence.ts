@@ -341,41 +341,61 @@ export function indexEvidenceSource(
 /**
  * Names another file can reach: a module's exported bindings, or every top-level
  * declaration of a script without import/export, whose globals scripts share.
+ * `line` is the local declaration's start, matching its `definitions` entry (0 for re-exports).
  */
-export function moduleBindings(path: string, text: string): string[] {
+export function moduleBindings(
+  path: string,
+  text: string,
+): { local: string; exported: string; line: number }[] {
   if (!JS_SOURCE.test(path)) return [];
   const body = (ast(parseSource(path, text).program)?.body ?? []) as Ast[];
-  const names = (n: Ast | undefined): string[] => {
+  type Named = { local: string; line: number };
+  const names = (n: Ast | undefined, line = n?.loc?.start.line ?? 0): Named[] => {
     if (!n) return [];
-    if (n.type === 'Identifier') return [name(n)];
+    if (n.type === 'Identifier') return [{ local: name(n), line }];
     if (n.type === 'VariableDeclaration')
-      return (n.declarations as Ast[]).flatMap((d) => names(ast(d.id)));
+      return (n.declarations as Ast[]).flatMap((d) => names(ast(d.id), d.loc?.start.line));
     if (n.type === 'ObjectPattern')
       return (n.properties as Ast[]).flatMap((p) =>
-        names(ast(p.type === 'RestElement' ? p.argument : p.value)),
+        names(ast(p.type === 'RestElement' ? p.argument : p.value), line),
       );
     if (n.type === 'ArrayPattern')
-      return (n.elements as (Ast | null)[]).flatMap((e) => names(e ?? undefined));
-    if (n.type === 'AssignmentPattern') return names(ast(n.left));
-    if (n.type === 'RestElement') return names(ast(n.argument));
-    return name(n.id) ? [name(n.id)] : [];
+      return (n.elements as (Ast | null)[]).flatMap((e) => names(e ?? undefined, line));
+    if (n.type === 'AssignmentPattern') return names(ast(n.left), line);
+    if (n.type === 'RestElement') return names(ast(n.argument), line);
+    return name(n.id) ? [{ local: name(n.id), line }] : [];
   };
+  const declared = new Map<string, number>();
+  for (const n of body) {
+    const declaration = /^Export(Named|Default)/.test(n.type) ? ast(n.declaration) : n;
+    // `export default name` refers to a declaration, it does not make one.
+    if (declaration?.type !== 'Identifier')
+      for (const { local, line } of names(declaration)) declared.set(local, line);
+  }
+  const bind = (local: string, exported = local) => ({
+    local,
+    exported,
+    line: declared.get(local) ?? 0,
+  });
   const module = body.some((n) =>
     /^(Import|Export)|^TSImportEquals|^TSExportAssignment/.test(n.type),
   );
-  return [
-    ...new Set(
-      body.flatMap((n) => {
-        if (!module) return names(n);
-        if (n.type === 'ExportDefaultDeclaration') return names(ast(n.declaration));
-        if (n.type !== 'ExportNamedDeclaration') return [];
-        return [
-          ...names(ast(n.declaration)),
-          ...((n.specifiers ?? []) as Ast[]).map((s) => name(s.exported)),
-        ];
-      }),
-    ),
-  ].filter(Boolean);
+  return body
+    .flatMap((n) => {
+      if (!module) return names(n).map(({ local }) => bind(local));
+      if (n.type === 'ExportDefaultDeclaration' || n.type === 'TSExportAssignment')
+        return names(ast(n.type === 'TSExportAssignment' ? n.expression : n.declaration)).map(
+          ({ local }) => bind(local),
+        );
+      if (n.type !== 'ExportNamedDeclaration') return [];
+      return [
+        ...names(ast(n.declaration)).map(({ local }) => bind(local)),
+        ...((n.specifiers ?? []) as Ast[]).map((s) =>
+          bind(n.source ? '' : name(s.local), name(s.exported)),
+        ),
+      ];
+    })
+    .filter((binding) => binding.exported);
 }
 
 /** Every module a file loads: imports with or without bindings, re-exports, `import()` and `require`. */
@@ -908,11 +928,14 @@ export class EvidenceStore {
       };
       const focus = new Map<string, number[]>();
       const targets: { path: string; symbol: string; start: number; end: number }[] = [];
-      const exported = new Set<string>();
+      const exported = new Map<string, string[]>();
       for (const path of [...new Set(seeds)].slice(0, 20)) {
         const source = await read(path);
         if (!source) continue;
-        for (const symbol of moduleBindings(path, source.text)) exported.add(`${path}\0${symbol}`);
+        for (const { local, line, exported: as } of moduleBindings(path, source.text)) {
+          const key = `${path}\0${local}\0${line}`;
+          exported.set(key, [...(exported.get(key) ?? []), as]);
+        }
         const lines =
           scope === 'verification' || options.locations
             ? refs.filter((r) => r.path === path).map((r) => r.line)
@@ -927,10 +950,10 @@ export class EvidenceStore {
           )
             targets.push({ path, ...d });
       }
-      // Searching the repo for a local such as `line` matches unrelated files and crowds out real callers.
+      // Search for the names other files use: a nested `line` matches unrelated files and crowds out callers.
       const symbols = [
         ...new Set(
-          targets.filter((t) => exported.has(`${t.path}\0${t.symbol}`)).map((t) => t.symbol),
+          targets.flatMap((t) => exported.get(`${t.path}\0${t.symbol}\0${t.start}`) ?? []),
         ),
       ].slice(0, 20);
       // A changed internal function can affect an unchanged exported wrapper's callers.

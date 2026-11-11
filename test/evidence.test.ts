@@ -25,6 +25,7 @@ import {
   resolveEvidenceImport,
   evidenceMode,
   loadPathAliases,
+  moduleBindings,
   parseTsconfigPaths,
 } from '../src/shared/evidence.ts';
 import { normalizeOptions, requestFindingVerdicts } from '../src/shared/runner.ts';
@@ -96,7 +97,7 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   execFileSync('git', ['init', '-q', workspace]);
   await writeFile(
     join(workspace, 'engine.ts'),
-    'function internal() {\nconst line = 2;\nreturn line;\n}\nexport function review(options: unknown) { return internal(); }\n',
+    'function internal() {\nconst line = 2;\nreturn line;\n}\nexport function review(options: unknown) { return internal(); }\nexport const line = 0;\n',
   );
   await writeFile(
     join(workspace, 'noise.ts'),
@@ -604,6 +605,35 @@ test('persistent cache reuses indexes and exact judgments with zero rebilling; c
   assert.equal(
     await new EvidenceDiskCache(cacheDir, cacheDir + '-other').get('jev-v1:' + rows[0].requestHash),
     undefined,
+  );
+});
+
+test('module bindings are the names other files reach, tied to their declarations', () => {
+  const exported = (path: string, text: string) =>
+    moduleBindings(path, text).map((b) => `${b.exported}=${b.local}@${b.line}`);
+  assert.deepEqual(
+    exported(
+      'a.ts',
+      [
+        'export const first = 0,',
+        '  second = () => { const line = 1; return line; };',
+        'function internal() {}',
+        'export { internal as visible };',
+        "export { reexported } from './b';",
+        '// export const commented = 0;',
+        "const text = 'export const quoted = 0';",
+        'const Button = () => null;',
+        'export default Button;',
+      ].join('\n'),
+    ),
+    ['first=first@1', 'second=second@2', 'visible=internal@3', 'reexported=@0', 'Button=Button@8'],
+  );
+  assert.deepEqual(exported('legacy.ts', 'const build = () => 1;\nexport = build;'), [
+    'build=build@1',
+  ]);
+  assert.deepEqual(
+    exported('script.js', 'function total() { const line = 1; }\nmodule.exports = { total };'),
+    ['total=total@1'],
   );
 });
 
