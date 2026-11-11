@@ -532,23 +532,31 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       });
       assert.equal(plan.reason, reason, path);
     }
-    // A route page exporting a server action (Remix) is an endpoint despite its extension.
-    git('checkout', '-q', '--detach', head);
-    const action = (value: number) => `export async function action() {\n  return ${value};\n}\n`;
-    write('src/routes/users.tsx', action(1));
-    const handled = commit();
-    write('src/routes/users.tsx', action(2));
-    assert.equal(
-      (
-        await planIncrementalReview({
-          ...input,
-          head: commit(),
-          priorBodies: [body(handled, base)],
-          files: [...files, { filename: 'src/routes/users.tsx', patch: '@@ -0,0 +1 @@\n+a' }],
-        })
-      ).reason,
-      'sensitive-followup',
-    );
+    // A route page with a server handler (Remix) on either side is an endpoint despite its extension.
+    const page = (value: number) => `export function Page() {\n  return ${value};\n}\n`;
+    for (const [before, after] of [
+      [
+        `export async function action() {}\n${page(1)}`,
+        `export async function action() {}\n${page(2)}`,
+      ],
+      [
+        `  export const loader = () => 1;\n${page(1)}`,
+        `  export const loader = () => 1;\n${page(2)}`,
+      ],
+      [`export { loader } from './users.server';\n${page(1)}`, page(1)],
+    ]) {
+      git('checkout', '-q', '--detach', head);
+      write('src/routes/users.tsx', before);
+      const handled = commit();
+      write('src/routes/users.tsx', after);
+      const plan = await planIncrementalReview({
+        ...input,
+        head: commit(),
+        priorBodies: [body(handled, base)],
+        files: [...files, { filename: 'src/routes/users.tsx', patch: '@@ -0,0 +1 @@\n+a' }],
+      });
+      assert.equal(plan.reason, 'sensitive-followup', after);
+    }
     // A Jest snapshot under a sensitive directory is test output too, however many lines moved.
     git('checkout', '-q', '--detach', head);
     const output = (value: number) => `exports[\`case 1\`] = \`${value}\`;\n`.repeat(130);
