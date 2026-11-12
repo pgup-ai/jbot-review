@@ -64,6 +64,8 @@ export interface PrFile {
 export interface PriorJbotThread {
   id: string;
   isResolved: boolean;
+  /** Resolved with a human reply last and no jbot addressed reply: nothing was fixed. */
+  declined?: boolean;
   replyToCommentId: number;
   path: string;
   line?: number;
@@ -439,6 +441,8 @@ export async function listPriorJbotThreads(
         ) || state.addressedTopLevelIds.has(topLevel.databaseId);
       // Before the disposition gates: outcomes cover skip/resolve-only threads too.
       // A bot's 👍 is not a human outcome — mirrors the [bot] exclusion in humanReplies.
+      const isHuman = (comment: (typeof comments)[number]) =>
+        comment.author?.login !== viewerLogin && !comment.author?.login?.endsWith('[bot]');
       const count = (content: string) =>
         topLevel.reactionGroups
           ?.find((group) => group.content === content)
@@ -449,12 +453,7 @@ export async function listPriorJbotThreads(
         line: thread.line ?? thread.originalLine ?? undefined,
         resolved: thread.isResolved,
         addressed,
-        humanReplies: comments.filter(
-          (comment) =>
-            comment !== topLevel &&
-            comment.author?.login !== viewerLogin &&
-            !comment.author?.login?.endsWith('[bot]'),
-        ).length,
+        humanReplies: comments.filter((comment) => comment !== topLevel && isHuman(comment)).length,
         thumbsUp: count('THUMBS_UP'),
         thumbsDown: count('THUMBS_DOWN'),
         confused: count('CONFUSED'),
@@ -466,17 +465,18 @@ export async function listPriorJbotThreads(
         continue;
       }
 
-      const replies = comments
-        .filter((comment) => comment !== topLevel)
-        .map((comment) => ({
-          author: comment.author?.login ?? 'unknown',
-          body: comment.body,
-          url: comment.url,
-        }));
+      const replyComments = comments.filter((comment) => comment !== topLevel);
+      const lastReply = replyComments.at(-1);
+      const replies = replyComments.map((comment) => ({
+        author: comment.author?.login ?? 'unknown',
+        body: comment.body,
+        url: comment.url,
+      }));
 
       threads.push({
         id: thread.id,
         isResolved: thread.isResolved,
+        declined: thread.isResolved && lastReply !== undefined && isHuman(lastReply),
         replyToCommentId: topLevel.databaseId,
         path: thread.path,
         // `line` is null both for file-level comments AND for outdated
@@ -1041,15 +1041,18 @@ export async function minimizePullRequestReview(
 
 /**
  * Byte backstop over the count caps above (invariant #4): the count caps
- * alone allow ≈133KB. Unresolved threads sort first, so the budget evicts
- * resolved threads preferentially.
+ * alone allow ≈133KB. Unresolved, then declined threads sort first, newest
+ * first, so the budget evicts old resolved threads preferentially.
  */
 export const MAX_PRIOR_JBOT_THREADS_BYTES = 32 * 1024;
 
 export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): string {
   if (threads.length === 0) return '';
+  const rank = (thread: PriorJbotThread) => (!thread.isResolved ? 0 : thread.declined ? 1 : 2);
+  // Threads arrive oldest first; on long PRs the newest declines matter most.
   const promptThreads = [...threads]
-    .sort((a, b) => Number(a.isResolved) - Number(b.isResolved))
+    .reverse()
+    .sort((a, b) => rank(a) - rank(b))
     .slice(0, MAX_PRIOR_JBOT_THREADS_FOR_PROMPT);
   const header = [
     '## Prior jbot-review inline comments',
