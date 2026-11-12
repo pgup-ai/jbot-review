@@ -1290,3 +1290,42 @@ test('the shadow scope selects edited files and their importers without changing
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('the impact-context cap counts a file the follow-up left unchanged once', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-cap-');
+  try {
+    git('init', '-q');
+    const big = (value: number) =>
+      `export function big() {\n  return ${value};\n}\n// ${'x'.repeat(1.2 * 1024 * 1024)}\n`;
+    write('core/limit.ts', 'export function limit() {\n  return 5;\n}\n');
+    write('cases/big.ts', big(1));
+    const base = commit();
+    write('cases/big.ts', big(2));
+    const reviewed = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
+    const head = commit();
+    write('cases/big.ts', big(3));
+    const bigEdit = commit();
+    const plan = (at: string) =>
+      planIncrementalReview({
+        workspace,
+        files: ['core/limit.ts', 'cases/big.ts'].map((filename) => ({
+          filename,
+          patch: '@@ -1 +1 @@\n-a\n+b',
+        })),
+        head: at,
+        base,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      });
+    const small = await plan(head);
+    assert.deepEqual(
+      [small.reason, small.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts']],
+    );
+    assert.equal((await plan(bigEdit)).reason, 'impact-context-too-large');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
