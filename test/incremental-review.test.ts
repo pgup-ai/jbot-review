@@ -1330,6 +1330,44 @@ test('the shadow scope selects edited files and their importers without changing
   }
 });
 
+test("a follow-up that reverts the PR's doc edits plans only its code edits", async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-revert-');
+  try {
+    git('init', '-q');
+    write('core/limit.ts', 'export function limit() {\n  return 5;\n}\n');
+    write('docs/LOG.md', 'D1.\n');
+    write('cases/other.ts', 'export function other() {\n  return 1;\n}\n');
+    const base = commit();
+    write('cases/other.ts', 'export function other() {\n  return 2;\n}\n');
+    write('core/limit.ts', 'export function limit() {\n  return 4;\n}\n');
+    write('docs/LOG.md', 'D1, edited.\n');
+    write('docs/NEW.md', 'Added.\n');
+    const reviewed = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
+    write('docs/LOG.md', 'D1.\n');
+    rmSync(join(workspace, 'docs/NEW.md'));
+    const head = commit();
+    const plan = await planIncrementalReview({
+      workspace,
+      files: ['core/limit.ts', 'cases/other.ts'].map((filename) => ({
+        filename,
+        patch: '@@ -1 +1 @@\n-a\n+b',
+      })),
+      head,
+      base,
+      policy,
+      priorBodies: [body(reviewed, base)],
+      rulesChangedSince: async () => false,
+    });
+    assert.deepEqual(
+      [plan.reason, plan.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts']],
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('the impact-context cap counts a file the follow-up left unchanged once', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-cap-');
   try {
