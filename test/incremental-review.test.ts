@@ -813,6 +813,45 @@ test('rule docs count as changed between heads only when their content moved', a
   }
 });
 
+test('a rule doc edit the PR reverted is no rule change; a base edit still is', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-rules-revert-');
+  try {
+    git('init', '-q', '-b', 'main');
+    write('AGENTS.md', 'Rules.\n');
+    write('src/a.ts', 'export const a = 1;\n');
+    commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('AGENTS.md', 'Rules, edited by the PR.\n');
+    write('docs/NEW_RULES.md', 'Added by the PR.\n');
+    const reviewed = commit();
+    write('AGENTS.md', 'Rules.\n');
+    rmSync(join(workspace, 'docs/NEW_RULES.md'));
+    const reverted = commit();
+    const rules = {
+      paths: ['AGENTS.md'],
+      prEdited: [],
+      prPaths: new Set<string>(),
+      complete: true,
+    };
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...rules, base: 'main' }, reviewed, reverted),
+      false,
+    );
+    git('checkout', '-q', 'main');
+    write('AGENTS.md', 'Rules, now mandatory.\n');
+    commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    const merged = git('rev-parse', 'HEAD');
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...rules, base: 'main' }, reviewed, merged),
+      true,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('a base edit to a rule doc the PR also edits counts; edits by the PR itself do not', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-rules-base-');
   try {

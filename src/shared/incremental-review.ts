@@ -745,13 +745,17 @@ export async function ruleDocsChanged(
       await git('--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', a, b, '--', ...paths)
     ).trim() !== '';
   try {
-    if (await changed(from, to, rules.paths)) return true;
+    const [oldFork, newFork] = rules.base
+      ? await Promise.all(
+          [from, to].map(async (head) => (await git('merge-base', head, rules.base!)).trim()),
+        )
+      : [from, to];
+    // The PR edits none of these docs now, so the head holds their base text. Compared with the
+    // reviewed fork, an edit the PR made and then reverted is no change: the baseline applied that text too.
+    if (await changed(oldFork, to, rules.paths)) return true;
     // What a base merge brought in shows between the two heads' fork points, without the PR's edits.
     if (rules.prEdited.length || !rules.complete) {
       if (!rules.base) return true;
-      const [oldFork, newFork] = await Promise.all(
-        [from, to].map(async (head) => (await git('merge-base', head, rules.base!)).trim()),
-      );
       if (oldFork !== newFork) {
         if (await changed(oldFork, newFork, rules.prEdited)) return true;
         // Discovery that ran out of budget did not list every rule source: any guidance the base changed counts.
@@ -777,7 +781,7 @@ export async function ruleDocsChanged(
       '--name-only',
       '--diff-filter=D',
       '-z',
-      from,
+      oldFork,
       to,
     );
     return deleted
