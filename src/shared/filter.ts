@@ -167,7 +167,7 @@ export interface PriorFindingRef {
   /**
    * Resolved threads never suppress: resolution means the issue was fixed,
    * so re-detecting it at the same location signals a regression or an
-   * incomplete fix that MUST be re-reported.
+   * incomplete fix that MUST be re-reported. `declined` is the one exception.
    */
   isResolved?: boolean;
   /** A human declined and resolved it: nothing was fixed, so it still suppresses. */

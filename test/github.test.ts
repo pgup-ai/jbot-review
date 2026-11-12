@@ -1085,9 +1085,15 @@ describe('formatPriorJbotThreadsForPrompt', () => {
       Buffer.byteLength(prompt, 'utf8') <= MAX_PRIOR_JBOT_THREADS_BYTES,
       `rendered block ${Buffer.byteLength(prompt, 'utf8')} bytes exceeds the budget`,
     );
-    for (let index = 0; index < 3; index += 1) {
-      assert.match(prompt, new RegExp(`PRRT_open_${100 + index}\\b`));
-    }
+    const openPositions = [102, 101, 100].map((index) =>
+      prompt.indexOf(`### PRRT_open_${index}\n`),
+    );
+    assert.ok(openPositions[0] >= 0, 'newest open thread is shown');
+    assert.deepEqual(
+      openPositions,
+      [...openPositions].sort((a, b) => a - b),
+      'newest first',
+    );
     assert.match(prompt, /Showing \d+ of 23 prior jbot-review threads/);
     // Declined beats fixed despite being oldest; among fixed, the oldest go first.
     assert.match(prompt, /PRRT_resolved_0\b/);
