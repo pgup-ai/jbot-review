@@ -483,9 +483,11 @@ export async function planIncrementalReview(input: {
             : git('show', `${ref}:${file.filename}`),
         ),
       );
-      bytes += texts.reduce((sum, text) => sum + Buffer.byteLength(text), 0);
+      // A file the follow-up left unchanged is one text, held once: counting it twice kept large PRs full on every follow-up.
+      const [before, after] = texts;
+      bytes += Buffer.byteLength(after) + (before === after ? 0 : Buffer.byteLength(before));
       if (bytes > 2 * 1024 * 1024) return full('impact-context-too-large');
-      sources.set(file.filename, texts);
+      sources.set(file.filename, before === after ? [after, after] : texts);
     }
     const edited = changed.flatMap((path) => sources.get(path)!);
     const aliases = await loadPathAliases((file) => git('show', `${input.head}:${file}`));

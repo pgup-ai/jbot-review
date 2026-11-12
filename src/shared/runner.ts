@@ -2787,14 +2787,15 @@ async function runReviewPipeline(params: {
         : options.experiment,
       jointGuidelineLens: GUIDELINE_REVIEW_LENS,
     };
-    // Hashed into the compliance policy and used to size pages: the prompt actually sent.
     const complianceReportTool = reportsFindings(auxBackend.name, auxModel);
     const policyFor = (session: string) =>
       auxiliaryPolicy({
         ...auxPolicy,
         prompt:
           session === 'guideline-compliance'
-            ? assembleGuidelineCompliancePrompt('', '', complianceReportTool)
+            ? // How findings come back follows the aux draw, which a pool varies per head; the rules
+              // audited do not, and an unpooled run hashes the draw itself.
+              assembleGuidelineCompliancePrompt('', '', false)
             : assembleReviewPrompt(
                 '',
                 '',
