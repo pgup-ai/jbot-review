@@ -813,6 +813,45 @@ test('rule docs count as changed between heads only when their content moved', a
   }
 });
 
+test('a rule doc edit the PR reverted is no rule change; a base edit still is', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-rules-revert-');
+  try {
+    git('init', '-q', '-b', 'main');
+    write('AGENTS.md', 'Rules.\n');
+    write('src/a.ts', 'export const a = 1;\n');
+    commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('AGENTS.md', 'Rules, edited by the PR.\n');
+    write('docs/NEW_RULES.md', 'Added by the PR.\n');
+    const reviewed = commit();
+    write('AGENTS.md', 'Rules.\n');
+    rmSync(join(workspace, 'docs/NEW_RULES.md'));
+    const reverted = commit();
+    const rules = {
+      paths: ['AGENTS.md'],
+      prEdited: [],
+      prPaths: new Set<string>(),
+      complete: true,
+    };
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...rules, base: 'main' }, reviewed, reverted),
+      false,
+    );
+    git('checkout', '-q', 'main');
+    write('AGENTS.md', 'Rules, now mandatory.\n');
+    commit();
+    git('checkout', '-q', 'pr');
+    git('merge', '-q', '--no-edit', 'main');
+    const merged = git('rev-parse', 'HEAD');
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...rules, base: 'main' }, reviewed, merged),
+      true,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('a base edit to a rule doc the PR also edits counts; edits by the PR itself do not', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-rules-base-');
   try {
@@ -1285,6 +1324,44 @@ test('the shadow scope selects edited files and their importers without changing
     assert.equal(
       (await plan([...selected, ...unrelated.slice(0, 1)])).shadow?.reason,
       'broad-impact',
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a follow-up that reverts the PR's doc edits plans only its code edits", async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-revert-');
+  try {
+    git('init', '-q');
+    write('core/limit.ts', 'export function limit() {\n  return 5;\n}\n');
+    write('docs/LOG.md', 'D1.\n');
+    write('cases/other.ts', 'export function other() {\n  return 1;\n}\n');
+    const base = commit();
+    write('cases/other.ts', 'export function other() {\n  return 2;\n}\n');
+    write('core/limit.ts', 'export function limit() {\n  return 4;\n}\n');
+    write('docs/LOG.md', 'D1, edited.\n');
+    write('docs/NEW.md', 'Added.\n');
+    const reviewed = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
+    write('docs/LOG.md', 'D1.\n');
+    rmSync(join(workspace, 'docs/NEW.md'));
+    const head = commit();
+    const plan = await planIncrementalReview({
+      workspace,
+      files: ['core/limit.ts', 'cases/other.ts'].map((filename) => ({
+        filename,
+        patch: '@@ -1 +1 @@\n-a\n+b',
+      })),
+      head,
+      base,
+      policy,
+      priorBodies: [body(reviewed, base)],
+      rulesChangedSince: async () => false,
+    });
+    assert.deepEqual(
+      [plan.reason, plan.files.map((file) => file.filename)],
+      ['bounded-followup', ['core/limit.ts']],
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
