@@ -841,6 +841,62 @@ describe('prior thread outcomes', () => {
       },
     ]);
   });
+
+  it('flags a resolved thread as declined only when a human replied last', async () => {
+    const thread = (id: string, isResolved: boolean, lastAuthor: string) => ({
+      id,
+      isResolved,
+      path: 'src/x.ts',
+      line: 7,
+      originalLine: 7,
+      comments: {
+        nodes: [
+          {
+            databaseId: id.length,
+            body: 'finding\n\n<!-- jbot-review:finding -->',
+            url: `https://github.com/acme/widget/pull/1#${id}`,
+            author: { login: 'github-actions[bot]' },
+          },
+          {
+            databaseId: id.length + 100,
+            body: 'Declined: intended.',
+            url: `https://github.com/acme/widget/pull/1#${id}-reply`,
+            author: { login: lastAuthor },
+          },
+        ],
+      },
+    });
+    const octokit = {
+      rest: { pulls: { listReviews: {}, listReviewComments: {} } },
+      paginate: async () => [],
+      graphql: async () => ({
+        viewer: { login: 'github-actions' },
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                thread('PRRT_declined', true, 'alice'),
+                thread('PRRT_open', false, 'alice'),
+                thread('PRRT_bot_last', true, 'github-actions'),
+              ],
+            },
+          },
+        },
+      }),
+    };
+
+    const result = await listPriorJbotThreads(octokit as unknown as Octokit, 'acme', 'widget', 1);
+
+    assert.deepEqual(
+      result.threads.map(({ id, declined }) => ({ id, declined })),
+      [
+        { id: 'PRRT_declined', declined: true },
+        { id: 'PRRT_open', declined: false },
+        { id: 'PRRT_bot_last', declined: false },
+      ],
+    );
+  });
 });
 
 describe('listClosingIssues', () => {
@@ -1000,7 +1056,7 @@ describe('review posting', () => {
 });
 
 describe('formatPriorJbotThreadsForPrompt', () => {
-  it('bounds the rendered block at the byte budget, dropping resolved threads first', () => {
+  it('bounds the rendered block at the byte budget, dropping old fixed threads first', () => {
     // Count caps alone allow ≈133KB; the byte budget is the invariant-#4
     // backstop, and unresolved-first ordering makes it evict resolved threads.
     const thread = (index: number, isResolved: boolean): PriorJbotThread => ({
@@ -1018,8 +1074,9 @@ describe('formatPriorJbotThreadsForPrompt', () => {
       })),
     });
     const threads = [
-      ...Array.from({ length: 20 }, (_, i) => thread(i, true)),
-      ...Array.from({ length: 5 }, (_, i) => thread(100 + i, false)),
+      { ...thread(0, true), declined: true },
+      ...Array.from({ length: 19 }, (_, i) => thread(i + 1, true)),
+      ...Array.from({ length: 3 }, (_, i) => thread(100 + i, false)),
     ];
 
     const prompt = formatPriorJbotThreadsForPrompt(threads);
@@ -1028,11 +1085,14 @@ describe('formatPriorJbotThreadsForPrompt', () => {
       Buffer.byteLength(prompt, 'utf8') <= MAX_PRIOR_JBOT_THREADS_BYTES,
       `rendered block ${Buffer.byteLength(prompt, 'utf8')} bytes exceeds the budget`,
     );
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       assert.match(prompt, new RegExp(`PRRT_open_${100 + index}\\b`));
     }
-    assert.match(prompt, /Showing \d+ of 25 prior jbot-review threads/);
-    assert.doesNotMatch(prompt, /PRRT_resolved_19\b/);
+    assert.match(prompt, /Showing \d+ of 23 prior jbot-review threads/);
+    // Declined beats fixed despite being oldest; among fixed, the oldest go first.
+    assert.match(prompt, /PRRT_resolved_0\b/);
+    assert.match(prompt, /PRRT_resolved_19\b/);
+    assert.doesNotMatch(prompt, /PRRT_resolved_1\b/);
   });
 
   it('includes human thread replies so declined suggestions are not re-raised', () => {

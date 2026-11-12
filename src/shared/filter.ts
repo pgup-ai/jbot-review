@@ -170,6 +170,8 @@ export interface PriorFindingRef {
    * incomplete fix that MUST be re-reported.
    */
   isResolved?: boolean;
+  /** A human declined and resolved it: nothing was fixed, so it still suppresses. */
+  declined?: boolean;
 }
 
 const SUPPRESS_LINE_TOLERANCE = 3;
@@ -200,7 +202,7 @@ export function suppressPreviouslyReported(
 
   const open = new Map<string, { thread: PriorFindingRef; text: string }[]>();
   for (const thread of priorThreads) {
-    if (thread.isResolved) continue;
+    if (thread.isResolved && !thread.declined) continue;
     const same = open.get(thread.path) ?? [];
     same.push({ thread, text: thread.body.toLowerCase() });
     open.set(thread.path, same);

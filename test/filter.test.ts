@@ -715,6 +715,15 @@ describe('suppressPreviouslyReported', () => {
     assert.equal(suppressedCount, 0);
     assert.equal(findings.length, 1);
   });
+
+  it('suppresses against a resolved thread a human declined', () => {
+    const { suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 11, title: 'Refund amount uses pre-tax subtotal' })],
+      [{ ...thread, isResolved: true, declined: true }],
+    );
+
+    assert.equal(suppressedCount, 1);
+  });
 });
 
 describe('shouldPostReviewComment', () => {
