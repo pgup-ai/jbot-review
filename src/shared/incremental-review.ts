@@ -427,26 +427,40 @@ export async function planIncrementalReview(input: {
         return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
       })
       .filter(Boolean);
+    const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
+      (
+        await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
+          (error) => (error.code === 1 ? '' : Promise.reject(error)),
+        )
+      )
+        .split('\0')
+        .filter(Boolean)
+        .map((path) => path.slice(ref.length + 1));
     // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
-    // it names no changed module as a whole word (so a script's built .js path counts) and no other
-    // changed file by full path (so docs/typescript.md is not the typescript package).
-    if (unsupported.length) {
-      const named = await git(
-        '--literal-pathspecs',
-        'grep',
-        '-l',
-        '-F',
-        '-w',
-        ...[...modules, ...changed.filter((path) => !JS_SOURCE.test(path))].flatMap((term) => [
-          '-e',
-          term,
-        ]),
-        input.head,
-        '--',
-        ...unsupported,
-      ).catch((error) => (error.code === 1 ? '' : Promise.reject(error)));
-      if (named.trim()) return full('unsupported-or-large-pr');
-    }
+    // it names no changed module as a whole word (so a script's built .js path counts), no changed
+    // module's directory (so a core/*.js glob counts), and no other changed file by full path (so
+    // docs/typescript.md is not the typescript package).
+    if (
+      unsupported.length &&
+      (
+        await grep(
+          input.head,
+          [
+            '-w',
+            '-F',
+            ...[
+              ...modules,
+              ...changed.flatMap((path) => {
+                const dir = posix.dirname(path);
+                return JS_SOURCE.test(path) ? (dir === '.' ? [] : [dir]) : [path];
+              }),
+            ].flatMap((term) => ['-e', term]),
+          ],
+          ...unsupported.map((path) => `:(literal)${path}`),
+        )
+      ).length
+    )
+      return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
     // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
@@ -636,15 +650,6 @@ export async function planIncrementalReview(input: {
     if (edits.length + lines.length > 120) return full('broad-or-contract-change');
     // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
     // color.ui=always would wrap paths in ANSI codes.
-    const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
-      (
-        await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
-          (error) => (error.code === 1 ? '' : Promise.reject(error)),
-        )
-      )
-        .split('\0')
-        .filter(Boolean)
-        .map((path) => path.slice(ref.length + 1));
     const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
     // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
     // { [name]: v } = process.env) could be any changed key.

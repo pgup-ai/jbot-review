@@ -1373,7 +1373,7 @@ test("a follow-up that reverts the PR's doc edits plans only its code edits", as
   }
 });
 
-test('untouched config blocks a follow-up only when it names a changed code file or doc path', async () => {
+test('untouched config blocks a follow-up only when it names a changed module, its directory or a doc path', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-config-');
   try {
     git('init', '-q');
@@ -1381,7 +1381,7 @@ test('untouched config blocks a follow-up only when it names a changed code file
     write('docs/typescript.md', 'Style.\n');
     write('other/label.ts', 'export function label() {\n  return 1;\n}\n');
     write('package.json', '{ "devDependencies": { "typescript": "6.0.0" } }\n');
-    write('ci.yaml', 'run: node core/limit.js\n');
+    write('ci.yaml', 'run: for s in core/*.js; do node "$s"; done\n');
     write('docs.yaml', 'check: docs/typescript.md\n');
     const base = commit();
     write('other/label.ts', 'export function label() {\n  return 2;\n}\n');
