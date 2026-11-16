@@ -240,6 +240,8 @@ const CLIENT_ROUTE_PAGE = /(^|\/)routes?\/.*\.[jt]sx$/i;
 // A Remix action or loader, or a TanStack Start server function, makes a route page an endpoint.
 const SERVER_ROUTE =
   /^\s*export\s+(?:async\s+)?(?:function|const|let)\s+(?:action|loader)\b|^\s*export\s*\{[^}]*\b(?:action|loader)\b|\bcreateServerFn\b/m;
+// Data formats that import nothing (unlike MDX or Vue); one can still name a script it runs.
+const CONFIG_FILE = /\.(json[c5]?|ya?ml|toml|ini|lock)$/i;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
@@ -402,21 +404,41 @@ export async function planIncrementalReview(input: {
     const broad = () =>
       changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
     if (!changed.length || broad()) return full('broad-or-empty-followup');
-    if (
-      input.files.length > 80 ||
-      input.files.some(
-        (file) =>
-          !file.patch ||
-          // Rule docs such as the governance routing YAML steer the reviewer, not the code.
-          (![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE, JEST_SNAPSHOT].some((pattern) =>
-            pattern.test(file.filename),
-          ) &&
-            !isGuidelineSource(file.filename) &&
-            // An untouched fixture depends on no code; an edited one may be read by path.
-            !(JSON_FIXTURE.test(file.filename) && !changed.includes(file.filename))),
-      )
-    )
+    if (input.files.length > 80 || input.files.some((file) => !file.patch))
       return full('unsupported-or-large-pr');
+    const unsupported = input.files
+      .map((file) => file.filename)
+      .filter(
+        (path) =>
+          // Rule docs such as the governance routing YAML steer the reviewer, not the code.
+          ![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE, JEST_SNAPSHOT].some((pattern) =>
+            pattern.test(path),
+          ) &&
+          !isGuidelineSource(path) &&
+          // An untouched fixture depends on no code; an edited one may be read by path.
+          !(JSON_FIXTURE.test(path) && !changed.includes(path)),
+      );
+    if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
+      return full('unsupported-or-large-pr');
+    // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
+    // it names no file the follow-up changed. Code matches by stem, so a script's built .js path
+    // counts; prose by full path, so docs/typescript.md is not the typescript package.
+    if (unsupported.length) {
+      const named = await git(
+        '--literal-pathspecs',
+        'grep',
+        '-l',
+        '-F',
+        ...changed.flatMap((path) => [
+          '-e',
+          PROSE_FILE.test(path) ? path : posix.basename(path).replace(/\.[^.]*$/, ''),
+        ]),
+        input.head,
+        '--',
+        ...unsupported,
+      ).catch((error) => (error.code === 1 ? '' : Promise.reject(error)));
+      if (named.trim()) return full('unsupported-or-large-pr');
+    }
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
     // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
