@@ -1382,6 +1382,7 @@ test('untouched config blocks a follow-up only when it names a changed code file
     write('other/label.ts', 'export function label() {\n  return 1;\n}\n');
     write('package.json', '{ "devDependencies": { "typescript": "6.0.0" } }\n');
     write('ci.yaml', 'run: node core/limit.js\n');
+    write('docs.yaml', 'check: docs/typescript.md\n');
     const base = commit();
     write('other/label.ts', 'export function label() {\n  return 2;\n}\n');
     const reviewed = commit();
@@ -1402,6 +1403,7 @@ test('untouched config blocks a follow-up only when it names a changed code file
         rulesChangedSince: async () => false,
       });
     assert.equal((await plan(docEdit, reviewed, 'package.json')).reason, 'bounded-followup');
+    assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'unsupported-or-large-pr');
     assert.equal((await plan(codeEdit, docEdit, 'ci.yaml')).reason, 'unsupported-or-large-pr');
   } finally {
     rmSync(workspace, { recursive: true, force: true });

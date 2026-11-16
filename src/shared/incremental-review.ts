@@ -420,18 +420,26 @@ export async function planIncrementalReview(input: {
       );
     if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
       return full('unsupported-or-large-pr');
+    // What a specifier loading a changed module contains: its file stem, or its directory for an index.
+    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
+      .map((path) => {
+        const stem = posix.basename(path).replace(/\.[^.]+$/, '');
+        return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
+      })
+      .filter(Boolean);
     // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
-    // it names no file the follow-up changed. Code matches by stem, so a script's built .js path
-    // counts; prose by full path, so docs/typescript.md is not the typescript package.
+    // it names no changed module as a whole word (so a script's built .js path counts) and no other
+    // changed file by full path (so docs/typescript.md is not the typescript package).
     if (unsupported.length) {
       const named = await git(
         '--literal-pathspecs',
         'grep',
         '-l',
         '-F',
-        ...changed.flatMap((path) => [
+        '-w',
+        ...[...modules, ...changed.filter((path) => !JS_SOURCE.test(path))].flatMap((term) => [
           '-e',
-          PROSE_FILE.test(path) ? path : posix.basename(path).replace(/\.[^.]*$/, ''),
+          term,
         ]),
         input.head,
         '--',
@@ -495,13 +503,6 @@ export async function planIncrementalReview(input: {
     )
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
-    // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
-      .map((path) => {
-        const stem = posix.basename(path).replace(/\.[^.]+$/, '');
-        return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
-      })
-      .filter(Boolean);
     // The tree listing outgrows the default buffer in large monorepos.
     const listing = await gitWithin(input.workspace, () => deadline, 64 * 1024 * 1024)(
       'ls-tree',
