@@ -427,6 +427,8 @@ export async function planIncrementalReview(input: {
         return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
       })
       .filter(Boolean);
+    // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
+    // color.ui=always would wrap paths in ANSI codes.
     const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
       (
         await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
@@ -648,8 +650,6 @@ export async function planIncrementalReview(input: {
     // A continuation line of a multiline value names no key to look up.
     if (keys.includes('')) return full('unsupported-or-large-pr');
     if (edits.length + lines.length > 120) return full('broad-or-contract-change');
-    // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
-    // color.ui=always would wrap paths in ANSI codes.
     const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
     // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
     // { [name]: v } = process.env) could be any changed key.
