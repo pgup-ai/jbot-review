@@ -187,6 +187,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       'import { limit as cap } from "../core/limit";\nexport function job() { return cap(); }\n',
     );
     write('other/label.ts', 'export function label() { return "ready"; }\n');
+    write('fixtures/package.json', '{ "scripts": { "cap": "node core/limit.js" } }\n');
+    write('.oxlintrc.json', '{ "rules": { "no-console": "error" } }\n');
     const base = commit();
     write('other/label.ts', 'export function label() { return "active"; }\n');
     const reviewed = commit();
@@ -238,7 +240,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [{ rulesChangedSince: async () => true }, 'guidelines-changed'],
       [{ head: 'f'.repeat(40) }, 'history-or-impact-unavailable'],
       [
-        // A package.json can call changed code from a script, even inside a fixtures directory.
+        // A package.json script can run changed code by path, even inside a fixtures directory.
         { files: [...files, { filename: 'fixtures/package.json', patch: 'patch' }] },
         'unsupported-or-large-pr',
       ],
@@ -251,7 +253,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     }
     // A renamed reason must not silently stop the clean-run baseline refresh.
     for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
-    // Generated snapshots, the governance routing YAML and untouched JSON fixtures load into no code.
+    // Generated snapshots, the governance routing YAML, untouched JSON fixtures and untouched
+    // config naming no changed file load into no changed code.
     const inert = await planIncrementalReview({
       ...input,
       files: [
@@ -262,6 +265,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
           'core/__fixtures__/limit.json',
           'core/__snapshots__/limit.spec.ts.snap',
           '.pr-governance/review/rules-for-diff.yaml',
+          '.oxlintrc.json',
         ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
       ],
     });
@@ -1285,6 +1289,7 @@ test('the shadow scope selects edited files and their importers without changing
     write('boot/main.ts', "import '../core/limit';\n");
     for (const name of ['a', 'b', 'c', 'd', 'e'])
       write(`other/${name}.ts`, `export const ${name} = 1;\n`);
+    write('config.yaml', 'run: core/limit.ts\n');
     const base = commit();
     write('other/a.ts', 'export const a = 2;\n');
     const reviewed = commit();
@@ -1363,6 +1368,43 @@ test("a follow-up that reverts the PR's doc edits plans only its code edits", as
       [plan.reason, plan.files.map((file) => file.filename)],
       ['bounded-followup', ['core/limit.ts']],
     );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('untouched config blocks a follow-up only when it names a changed module, its directory or a doc path', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-config-');
+  try {
+    git('init', '-q');
+    write('core/limit.ts', 'export function limit() {\n  return 5;\n}\n');
+    write('docs/typescript.md', 'Style.\n');
+    write('other/label.ts', 'export function label() {\n  return 1;\n}\n');
+    write('package.json', '{ "devDependencies": { "typescript": "6.0.0" } }\n');
+    write('ci.yaml', 'run: for s in core/*.js; do node "$s"; done\n');
+    write('docs.yaml', 'check: docs/typescript.md\n');
+    const base = commit();
+    write('other/label.ts', 'export function label() {\n  return 2;\n}\n');
+    const reviewed = commit();
+    write('docs/typescript.md', 'Style, revised.\n');
+    const docEdit = commit();
+    write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
+    const codeEdit = commit();
+    const plan = (head: string, prior: string, config: string) =>
+      planIncrementalReview({
+        workspace,
+        files: ['core/limit.ts', 'docs/typescript.md', 'other/label.ts', config].map(
+          (filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }),
+        ),
+        head,
+        base,
+        policy,
+        priorBodies: [body(prior, base)],
+        rulesChangedSince: async () => false,
+      });
+    assert.equal((await plan(docEdit, reviewed, 'package.json')).reason, 'bounded-followup');
+    assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'unsupported-or-large-pr');
+    assert.equal((await plan(codeEdit, docEdit, 'ci.yaml')).reason, 'unsupported-or-large-pr');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

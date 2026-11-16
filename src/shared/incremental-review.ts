@@ -240,6 +240,8 @@ const CLIENT_ROUTE_PAGE = /(^|\/)routes?\/.*\.[jt]sx$/i;
 // A Remix action or loader, or a TanStack Start server function, makes a route page an endpoint.
 const SERVER_ROUTE =
   /^\s*export\s+(?:async\s+)?(?:function|const|let)\s+(?:action|loader)\b|^\s*export\s*\{[^}]*\b(?:action|loader)\b|\bcreateServerFn\b/m;
+// Data formats that import nothing (unlike MDX or Vue); one can still name a script it runs.
+const CONFIG_FILE = /\.(json[c5]?|ya?ml|toml|ini|lock)$/i;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
@@ -402,19 +404,63 @@ export async function planIncrementalReview(input: {
     const broad = () =>
       changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
     if (!changed.length || broad()) return full('broad-or-empty-followup');
-    if (
-      input.files.length > 80 ||
-      input.files.some(
-        (file) =>
-          !file.patch ||
+    if (input.files.length > 80 || input.files.some((file) => !file.patch))
+      return full('unsupported-or-large-pr');
+    const unsupported = input.files
+      .map((file) => file.filename)
+      .filter(
+        (path) =>
           // Rule docs such as the governance routing YAML steer the reviewer, not the code.
-          (![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE, JEST_SNAPSHOT].some((pattern) =>
-            pattern.test(file.filename),
+          ![JS_SOURCE, PROSE_FILE, DOTENV_FILE, SNAPSHOT_FILE, JEST_SNAPSHOT].some((pattern) =>
+            pattern.test(path),
           ) &&
-            !isGuidelineSource(file.filename) &&
-            // An untouched fixture depends on no code; an edited one may be read by path.
-            !(JSON_FIXTURE.test(file.filename) && !changed.includes(file.filename))),
+          !isGuidelineSource(path) &&
+          // An untouched fixture depends on no code; an edited one may be read by path.
+          !(JSON_FIXTURE.test(path) && !changed.includes(path)),
+      );
+    if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
+      return full('unsupported-or-large-pr');
+    // What a specifier loading a changed module contains: its file stem, or its directory for an index.
+    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
+      .map((path) => {
+        const stem = posix.basename(path).replace(/\.[^.]+$/, '');
+        return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
+      })
+      .filter(Boolean);
+    // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
+    // color.ui=always would wrap paths in ANSI codes.
+    const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
+      (
+        await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
+          (error) => (error.code === 1 ? '' : Promise.reject(error)),
+        )
       )
+        .split('\0')
+        .filter(Boolean)
+        .map((path) => path.slice(ref.length + 1));
+    // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
+    // it names no changed module as a whole word (so a script's built .js path counts), no changed
+    // module's directory (so a core/*.js glob counts), and no other changed file by full path (so
+    // docs/typescript.md is not the typescript package).
+    if (
+      unsupported.length &&
+      (
+        await grep(
+          input.head,
+          [
+            '-w',
+            '-F',
+            ...[
+              ...modules,
+              ...changed.flatMap((path) => {
+                const dir = posix.dirname(path);
+                return JS_SOURCE.test(path) ? (dir === '.' ? [] : [dir]) : [path];
+              }),
+            ].flatMap((term) => ['-e', term]),
+          ],
+          ...unsupported.map((path) => `:(literal)${path}`),
+        )
+      ).length
     )
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
@@ -473,13 +519,6 @@ export async function planIncrementalReview(input: {
     )
       return full('broad-or-contract-change');
     const sources = new Map<string, string[]>();
-    // What a specifier loading a changed module contains: its file stem, or its directory for an index.
-    const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
-      .map((path) => {
-        const stem = posix.basename(path).replace(/\.[^.]+$/, '');
-        return stem === 'index' ? posix.basename(posix.dirname(path)) : stem;
-      })
-      .filter(Boolean);
     // The tree listing outgrows the default buffer in large monorepos.
     const listing = await gitWithin(input.workspace, () => deadline, 64 * 1024 * 1024)(
       'ls-tree',
@@ -611,17 +650,6 @@ export async function planIncrementalReview(input: {
     // A continuation line of a multiline value names no key to look up.
     if (keys.includes('')) return full('unsupported-or-large-pr');
     if (edits.length + lines.length > 120) return full('broad-or-contract-change');
-    // Files at a ref matching a pattern. No match is git grep's exit 1, and a user's
-    // color.ui=always would wrap paths in ANSI codes.
-    const grep = async (ref: string, args: string[], ...pathspecs: string[]) =>
-      (
-        await git('grep', '--no-color', '-l', '-z', ...args, ref, '--', ...pathspecs).catch(
-          (error) => (error.code === 1 ? '' : Promise.reject(error)),
-        )
-      )
-        .split('\0')
-        .filter(Boolean)
-        .map((path) => path.slice(ref.length + 1));
     const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
     // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
     // { [name]: v } = process.env) could be any changed key.
