@@ -251,8 +251,10 @@ const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 const isDotenv = (path: string) =>
   DOTENV_FILE.test(path) && !JS_SOURCE.test(path) && !PROSE_FILE.test(path);
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count;
-// a package's src/test/ holds shared test helpers.
-const TEST_FILE = /(^|\/)(__tests__|src\/test)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+// a package's src/test/ holds shared test helpers, except under a Next.js app/ router, which serves
+// any folder not prefixed with an underscore.
+const TEST_FILE =
+  /(^|\/)__tests__\/|^(?!(.*\/)?app\/.*src\/test\/)(.*\/)?src\/test\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 // A test case by name; a helper under __tests__/ can be imported by specs elsewhere.
 const TEST_CASE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
 
