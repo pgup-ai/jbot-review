@@ -1021,7 +1021,7 @@ test('a merge from the base branch re-reviews only the PR files it or the author
     const [notesTip, edited] = [mainTip, head];
     mainTip = mergeMain('shared/gamma.ts', 'export function gamma() {\n  return 4;\n}\n');
     head = git('rev-parse', 'HEAD');
-    // With no author edit since the baseline, the shadow still selects the merged module's importers.
+    // With no author edit since the baseline, the merged module's importers are the whole follow-up.
     const mergeOnly = await planIncrementalReview({
       workspace,
       files,
@@ -1031,6 +1031,10 @@ test('a merge from the base branch re-reviews only the PR files it or the author
       priorBodies: [body(edited, notesTip)],
       rulesChangedSince: async () => false,
     });
+    assert.deepEqual(
+      [mergeOnly.mode, mergeOnly.reason, mergeOnly.files.map((file) => file.filename)],
+      ['incremental', 'bounded-base-merge', ['b/beta.ts']],
+    );
     assert.deepEqual(mergeOnly.shadow?.files, ['b/beta.ts']);
     assert.deepEqual(await scope(head, mainTip, reviewed, base), [
       'incremental',
@@ -1195,6 +1199,57 @@ test('an amend or a rebase re-reviews only the PR files it or the author touched
       rulesChangedSince: async () => false,
     });
     assert.deepEqual([plan.mode, plan.reason], ['full', 'base-changed']);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a rebased stack re-reviews only the PR files importing what its rewritten base changed', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-stack-');
+  const source = (name: string, value: number) =>
+    `export function ${name}() {\n  return ${value};\n}\n`;
+  const beta = (value: number) =>
+    `import { shared } from '../s/shared';\nexport function beta() {\n  return shared() + ${value};\n}\n`;
+  try {
+    git('init', '-q', '-b', 'main');
+    write('s/shared.ts', source('shared', 1));
+    write('a/alpha.ts', source('alpha', 1));
+    write('b/beta.ts', beta(1));
+    write('docs/notes.ts', 'export const notes = 0;\n');
+    commit();
+    git('checkout', '-q', '-b', 'stack');
+    write('s/shared.ts', source('shared', 2));
+    const stackTip = commit();
+    git('checkout', '-q', '-b', 'pr');
+    write('a/alpha.ts', source('alpha', 10));
+    write('b/beta.ts', beta(10));
+    const reviewed = commit();
+    // Rebasing the stack onto main rewrites the base the review recorded.
+    git('checkout', '-q', 'main');
+    write('docs/notes.ts', 'export const notes = 1;\n');
+    commit();
+    git('checkout', '-q', 'stack');
+    git('rebase', '-q', 'main');
+    write('s/shared.ts', source('shared', 3));
+    const rewrittenTip = commit();
+    git('checkout', '-q', 'pr');
+    git('rebase', '-q', '--onto', 'stack', stackTip);
+    const plan = await planIncrementalReview({
+      workspace,
+      files: ['a/alpha.ts', 'b/beta.ts'].map((filename) => ({
+        filename,
+        patch: '@@ -1 +1 @@\n-a\n+b',
+      })),
+      head: git('rev-parse', 'HEAD'),
+      base: rewrittenTip,
+      policy,
+      priorBodies: [body(reviewed, stackTip)],
+      rulesChangedSince: async () => false,
+    });
+    assert.deepEqual(
+      [plan.mode, plan.reason, plan.files.map((file) => file.filename)],
+      ['incremental', 'bounded-base-merge', ['b/beta.ts']],
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

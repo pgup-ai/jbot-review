@@ -306,16 +306,14 @@ export async function planIncrementalReview(input: {
     // A base tip the PR has not merged can change code its unchanged files depend on.
     if (input.base !== baseline.base && forks[1] !== input.base) return full('base-changed');
     // A head rebuilt on an older base point turns base commits the review saw as base into PR
-    // changes that the head-to-head diff below never shows.
-    if (
+    // changes that the head-to-head diff below never shows; a rebased stack rewrites its base the same way.
+    const rewritten =
       forks[0] !== forks[1] &&
       !(await git('merge-base', '--is-ancestor', forks[0], forks[1]).then(
         () => true,
         // Exit 1 means not an ancestor; any other failure is unreadable history.
         (error) => (error.code === 1 ? false : Promise.reject(error)),
-      ))
-    )
-      return full('base-changed');
+      ));
     const merged =
       forks[0] === forks[1]
         ? undefined
@@ -347,6 +345,48 @@ export async function planIncrementalReview(input: {
     );
     const paths = new Set(input.files.map((file) => file.filename));
     const entries = delta.split('\0').filter(Boolean);
+    if (rewritten) {
+      // Each file's change as patch-id sees it: blob ids and line numbers move with the base.
+      const patches = async (base: string, head: string) =>
+        new Map(
+          (
+            await git(
+              'diff',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--no-renames',
+              base,
+              head,
+              '--',
+            )
+          )
+            .split(/^(?=diff --git )/m)
+            .map((chunk) => {
+              const lines = chunk.split('\n');
+              // A binary file has no hunks; only its blob ids tell its versions apart.
+              const hunks = lines.some((line) => line.startsWith('@@'));
+              const kept = lines.filter(
+                (line) => !line.startsWith('@@') && !(hunks && line.startsWith('index ')),
+              );
+              return [lines[0], kept.join('\n')];
+            }),
+        );
+      const [before, after] = await Promise.all([
+        patches(forks[0], baseline.head),
+        patches(forks[1], input.head),
+      ]);
+      const edited = new Set(
+        entries.filter((_, i) => i % 2).map((path) => `diff --git a/${path} b/${path}`),
+      );
+      // The base under the PR may move, but a PR change it absorbed or added is unreviewed.
+      if (
+        [...before.keys(), ...after.keys()].some(
+          (key) => before.get(key) !== after.get(key) && !edited.has(key),
+        )
+      )
+        return full('base-changed');
+    }
     // Prose the PR reverted to its base text has left the PR and loads nothing; ruleDocsChanged
     // settles what reverting a rule doc means for the guidance.
     const prose = entries.filter((path, i) => i % 2 && !paths.has(path) && PROSE_FILE.test(path));
@@ -401,7 +441,8 @@ export async function planIncrementalReview(input: {
     // A fix's own tests don't make a follow-up broad.
     const broad = () =>
       changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
-    if (!changed.length || broad()) return full('broad-or-empty-followup');
+    // A base merge alone still reaches the PR files importing what it changed, selected below.
+    if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
     if (input.files.length > 80 || input.files.some((file) => !file.patch))
       return full('unsupported-or-large-pr');
     const unsupported = input.files
@@ -621,7 +662,7 @@ export async function planIncrementalReview(input: {
         if ([path, ...hits].some(sensitive)) return full('sensitive-followup');
         if (!changed.includes(path)) changed.push(path);
       }
-      if (broad()) return full('broad-or-empty-followup');
+      if (!changed.length || broad()) return full('broad-or-empty-followup');
     }
     const dotenv = changed.filter(isDotenv);
     const lines = dotenv.length
