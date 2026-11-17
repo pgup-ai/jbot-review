@@ -347,11 +347,12 @@ export async function planIncrementalReview(input: {
     const paths = new Set(input.files.map((file) => file.filename));
     const entries = delta.split('\0').filter(Boolean);
     if (rewritten) {
-      // Each file's change as patch-id sees it: hunk line numbers move with the base.
+      // Each file's change without hunk line numbers, which move with the base; the enclosing
+      // function git names after them still tells a change moved elsewhere apart.
       const patches = async (base: string, head: string) =>
         new Map(
           parseGitDiff(await git(...GIT_DIFF_ARGS, '--no-renames', base, head, '--')).map(
-            (file) => [file.filename, file.patch?.replace(/^@@.*$/gm, '')],
+            (file) => [file.filename, file.patch?.replace(/^@@ [^@]* @@/gm, '@@')],
           ),
         );
       const [before, after] = await Promise.all([
