@@ -219,8 +219,9 @@ its model, guidelines and review settings still match. PR title and
 description edits don't count. A moved base counts only until the PR merges
 it: the follow-up then selects the PR files the author or the merged commits
 edited, plus PR files importing a module the merge changed. A rebase or amend is
-planned the same way when its reviewed head can still be fetched; a head rebuilt
-on an older base point falls back to full review. A model pool counts
+planned the same way when its reviewed head can still be fetched, and so is a
+stacked PR whose base branch was rebased, as long as each PR file's own change
+survived; a head rebuilt on an older base point falls back to full review. A model pool counts
 as one setting, so the member a push draws does not force full review. A
 completed review that leaves a concern unverified on a PR file still sets the
 baseline, and the next follow-up re-reviews the files carrying those concerns; a
