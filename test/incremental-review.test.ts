@@ -687,11 +687,16 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ],
     );
     // An edited Jest snapshot brings its spec and the code the spec covers; an edited spec
-    // alone brings nothing; an edited migration snapshot is a schema change.
+    // alone brings nothing, but a shared __tests__ helper brings the specs importing it; an
+    // edited migration snapshot is a schema change.
     git('checkout', '-q', '--detach', head);
     write(
       'other/label.spec.ts',
-      "import { label } from './label';\nit('labels', () => label());\n",
+      "import { label } from './label';\nimport { labelFixture } from '../fixtures/__tests__/label-fixture';\nit('labels', () => label(labelFixture()));\n",
+    );
+    write(
+      'fixtures/__tests__/label-fixture.ts',
+      'const value = 1;\nexport const labelFixture = () => value;\n',
     );
     write('other/__snapshots__/label.spec.ts.snap', 'exports[`labels 1`] = `"active"`;\n');
     write('db/migrations/.snapshot-app.json', '{"tables":[]}\n');
@@ -702,6 +707,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         'other/label.spec.ts',
         'other/__snapshots__/label.spec.ts.snap',
         'db/migrations/.snapshot-app.json',
+        'fixtures/__tests__/label-fixture.ts',
       ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
     ];
     for (const [path, text, reason, selected] of [
@@ -709,13 +715,24 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         'other/__snapshots__/label.spec.ts.snap',
         'exports[`labels 1`] = `"idle"`;\n',
         'bounded-followup',
-        ['other/label.ts', 'other/label.spec.ts', 'other/__snapshots__/label.spec.ts.snap'],
+        [
+          'other/label.ts',
+          'other/label.spec.ts',
+          'other/__snapshots__/label.spec.ts.snap',
+          'fixtures/__tests__/label-fixture.ts',
+        ],
       ],
       [
         'other/label.spec.ts',
-        "import { label } from './label';\nit('labels twice', () => label());\n",
+        "import { label } from './label';\nimport { labelFixture } from '../fixtures/__tests__/label-fixture';\nit('labels twice', () => label(labelFixture()));\n",
         'bounded-followup',
         ['other/label.spec.ts'],
+      ],
+      [
+        'fixtures/__tests__/label-fixture.ts',
+        'const value = 2;\nexport const labelFixture = () => value;\n',
+        'bounded-followup',
+        ['other/label.ts', 'other/label.spec.ts', 'fixtures/__tests__/label-fixture.ts'],
       ],
       [
         'db/migrations/.snapshot-app.json',
