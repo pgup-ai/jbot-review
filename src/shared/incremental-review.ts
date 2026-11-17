@@ -250,8 +250,9 @@ const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
 const isDotenv = (path: string) =>
   DOTENV_FILE.test(path) && !JS_SOURCE.test(path) && !PROSE_FILE.test(path);
-// Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
-const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+// Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count;
+// a package's src/test/ holds shared test helpers.
+const TEST_FILE = /(^|\/)(__tests__|src\/test)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 // A test case by name; a helper under __tests__/ can be imported by specs elsewhere.
 const TEST_CASE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
 

@@ -510,12 +510,13 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // A fix's own tests do not count toward a broad follow-up: files under __tests__/ (named
-    // like modules here, so only the directory matches), and specs with their Jest snapshots.
+    // A fix's own tests do not count toward a broad follow-up: files under __tests__/ or src/test/
+    // (named like modules here, so only the directory matches), and specs with their Jest snapshots.
     const names = ['alpha', 'bravo', 'charlie'];
     const suite = (value: number) => `export function suite() {\n  return ${value};\n}\n`;
     for (const suites of [
       names.map((name) => `core/__tests__/${name}.ts`),
+      names.map((name) => `core/src/test/${name}.ts`),
       [
         ...names.map((name) => `core/${name}.test.ts`),
         ...names.map((name) => `core/__snapshots__/${name}.test.ts.snap`),
@@ -548,6 +549,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ['api/handler.ts', 'sensitive-followup'],
       ['api/spec/schema.ts', 'sensitive-followup'],
       ['api/test/route.ts', 'sensitive-followup'],
+      ['api/src/test/fixture.ts', 'bounded-followup'],
       ['apps/api/src/helper.ts', 'bounded-followup'],
       ['packages/api/src/helper.ts', 'bounded-followup'],
       ['apps/api/src/controllers/limits.ts', 'sensitive-followup'],
