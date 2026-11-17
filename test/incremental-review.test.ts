@@ -543,7 +543,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         suites[0],
       );
     }
-    // A test under a sensitive directory is not itself sensitive.
+    // A test under a sensitive directory is not itself sensitive; a src/test/ folder inside a Next.js
+    // app/ router can serve routes, so it is not a test folder.
     for (const [path, reason] of [
       ['api/__tests__/handler.test.ts', 'bounded-followup'],
       ['api/handler.ts', 'sensitive-followup'],
