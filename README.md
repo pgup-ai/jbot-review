@@ -236,7 +236,7 @@ review for uncertain history or dependencies, references outside the PR, export
 edits, module forms or string-keyed wiring that may reach a changed module,
 unresolvable relative imports, broad changes (a fix's own tests don't count),
 edits under security, data, API, infra or tooling paths (except `__tests__/`
-folders and `.test`/`.spec` files),
+and `src/test/` folders and `.test`/`.spec` files),
 tool-less reviewers and explicit reruns. Verification stays
 enabled according to its existing setting. Reports identify incremental reviews;
 telemetry records the baseline, selected/total files and fallback reason. Quiet
