@@ -251,6 +251,8 @@ const isDotenv = (path: string) =>
   DOTENV_FILE.test(path) && !JS_SOURCE.test(path) && !PROSE_FILE.test(path);
 // Bare test/ and spec/ directories are ambiguous (a route, an API contract), so only these count.
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+// A test case by name; a helper under __tests__/ can be imported by specs elsewhere.
+const TEST_CASE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
 
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
 export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
@@ -392,11 +394,7 @@ export async function planIncrementalReview(input: {
     // its output; a helper or setup file under __tests__/ can be named by config, so it does not count.
     const added: string[] = [];
     for (const [status, path] of touched) {
-      if (
-        status === 'A' &&
-        (/\.(test|spec)\.[cm]?[jt]sx?$/i.test(path) || JEST_SNAPSHOT.test(path))
-      )
-        added.push(path);
+      if (status === 'A' && (TEST_CASE.test(path) || JEST_SNAPSHOT.test(path))) added.push(path);
       else if (status !== 'M') return full('added-removed-or-renamed-file');
       changed.push(path);
     }
@@ -684,10 +682,29 @@ export async function planIncrementalReview(input: {
       return spec ? [(spec[1] ?? '') + spec[2]] : [];
     });
     if (owners.some((spec) => !paths.has(spec))) return full('references-outside-pr');
-    const files = impactedReviewFiles(
-      input.files,
-      [...changed.filter((path) => !isDotenv(path)), ...owners],
-      sources,
+    // What an edited test case imports was reviewed at the baseline, so one no PR file imports joins
+    // the selection without spreading it; a snapshot's spec still spreads, standing in for the snapshot.
+    const imported = new Set(
+      [...sources].flatMap(([path, texts]) =>
+        texts.flatMap((text) =>
+          indexEvidenceSource(path, text).imports.map((binding) =>
+            resolveEvidenceImport(path, binding.from, paths, aliases),
+          ),
+        ),
+      ),
+    );
+    const tests = changed.filter(
+      (path) => TEST_CASE.test(path) && !owners.includes(path) && !imported.has(path),
+    );
+    const impacted = new Set(
+      impactedReviewFiles(
+        input.files,
+        [...changed.filter((path) => !isDotenv(path) && !tests.includes(path)), ...owners],
+        sources,
+      ).map((file) => file.filename),
+    );
+    const files = input.files.filter(
+      (file) => impacted.has(file.filename) || tests.includes(file.filename),
     );
     const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
     if (selection.size === input.files.length || selection.size > 8) return full('broad-impact');
