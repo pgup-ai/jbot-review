@@ -1214,6 +1214,7 @@ test('a rebased stack re-reviews only the PR files importing what its rewritten 
     git('init', '-q', '-b', 'main');
     write('s/shared.ts', source('shared', 1));
     write('a/alpha.ts', source('alpha', 1));
+    write('n/näme.ts', source('name', 1));
     write('b/beta.ts', beta(1));
     write('docs/notes.ts', 'export const notes = 0;\n');
     commit();
@@ -1222,6 +1223,7 @@ test('a rebased stack re-reviews only the PR files importing what its rewritten 
     const stackTip = commit();
     git('checkout', '-q', '-b', 'pr');
     write('a/alpha.ts', source('alpha', 10));
+    write('n/näme.ts', source('name', 10));
     write('b/beta.ts', beta(10));
     const reviewed = commit();
     // Rebasing the stack onto main rewrites the base the review recorded.
@@ -1234,22 +1236,30 @@ test('a rebased stack re-reviews only the PR files importing what its rewritten 
     const rewrittenTip = commit();
     git('checkout', '-q', 'pr');
     git('rebase', '-q', '--onto', 'stack', stackTip);
-    const plan = await planIncrementalReview({
-      workspace,
-      files: ['a/alpha.ts', 'b/beta.ts'].map((filename) => ({
-        filename,
-        patch: '@@ -1 +1 @@\n-a\n+b',
-      })),
-      head: git('rev-parse', 'HEAD'),
-      base: rewrittenTip,
-      policy,
-      priorBodies: [body(reviewed, stackTip)],
-      rulesChangedSince: async () => false,
-    });
-    assert.deepEqual(
-      [plan.mode, plan.reason, plan.files.map((file) => file.filename)],
-      ['incremental', 'bounded-base-merge', ['b/beta.ts']],
-    );
+    const scope = async () => {
+      const plan = await planIncrementalReview({
+        workspace,
+        files: ['a/alpha.ts', 'b/beta.ts', 'n/näme.ts'].map((filename) => ({
+          filename,
+          patch: '@@ -1 +1 @@\n-a\n+b',
+        })),
+        head: git('rev-parse', 'HEAD'),
+        base: rewrittenTip,
+        policy,
+        priorBodies: [body(reviewed, stackTip)],
+        rulesChangedSince: async () => false,
+      });
+      return [plan.mode, plan.reason, plan.files.map((file) => file.filename)];
+    };
+    assert.deepEqual(await scope(), ['incremental', 'bounded-base-merge', ['b/beta.ts']]);
+    // An author edit after the rebase explains its own patch change, whatever git would quote.
+    write('n/näme.ts', source('name', 11));
+    commit();
+    assert.deepEqual(await scope(), [
+      'incremental',
+      'bounded-base-merge',
+      ['b/beta.ts', 'n/näme.ts'],
+    ]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

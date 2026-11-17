@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { posix } from 'node:path';
 import { completedReviewHead, type PrFile } from './github.ts';
+import { GIT_DIFF_ARGS, parseGitDiff } from './git.ts';
 import {
   indexEvidenceSource,
   loadPathAliases,
@@ -346,43 +347,25 @@ export async function planIncrementalReview(input: {
     const paths = new Set(input.files.map((file) => file.filename));
     const entries = delta.split('\0').filter(Boolean);
     if (rewritten) {
-      // Each file's change as patch-id sees it: blob ids and line numbers move with the base.
+      // Each file's change as patch-id sees it: hunk line numbers move with the base.
       const patches = async (base: string, head: string) =>
         new Map(
-          (
-            await git(
-              'diff',
-              '--no-color',
-              '--no-ext-diff',
-              '--no-textconv',
-              '--no-renames',
-              base,
-              head,
-              '--',
-            )
-          )
-            .split(/^(?=diff --git )/m)
-            .map((chunk) => {
-              const lines = chunk.split('\n');
-              // A binary file has no hunks; only its blob ids tell its versions apart.
-              const hunks = lines.some((line) => line.startsWith('@@'));
-              const kept = lines.filter(
-                (line) => !line.startsWith('@@') && !(hunks && line.startsWith('index ')),
-              );
-              return [lines[0], kept.join('\n')];
-            }),
+          parseGitDiff(await git(...GIT_DIFF_ARGS, '--no-renames', base, head, '--')).map(
+            (file) => [file.filename, file.patch?.replace(/^@@.*$/gm, '')],
+          ),
         );
       const [before, after] = await Promise.all([
         patches(forks[0], baseline.head),
         patches(forks[1], input.head),
       ]);
-      const edited = new Set(
-        entries.filter((_, i) => i % 2).map((path) => `diff --git a/${path} b/${path}`),
-      );
-      // The base under the PR may move, but a PR change it absorbed or added is unreviewed.
+      const edited = new Set(entries.filter((_, i) => i % 2));
+      // The base under the PR may move, but a PR change it absorbed or added is unreviewed. A
+      // patchless (binary or mode-only) change has no text to tell its versions apart.
       if (
         [...before.keys(), ...after.keys()].some(
-          (key) => before.get(key) !== after.get(key) && !edited.has(key),
+          (path) =>
+            (before.get(path) === undefined || before.get(path) !== after.get(path)) &&
+            !edited.has(path),
         )
       )
         return full('base-changed');
