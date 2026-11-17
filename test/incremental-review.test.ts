@@ -687,8 +687,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ],
     );
     // An edited Jest snapshot brings its spec and the code the spec covers; an edited spec
-    // alone brings nothing, but a shared __tests__ helper brings the specs importing it; an
-    // edited migration snapshot is a schema change.
+    // alone brings nothing unless a PR file imports it, and a shared __tests__ helper brings the
+    // specs importing it; an edited migration snapshot is a schema change.
     git('checkout', '-q', '--detach', head);
     write(
       'other/label.spec.ts',
@@ -697,6 +697,14 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     write(
       'fixtures/__tests__/label-fixture.ts',
       'const value = 1;\nexport const labelFixture = () => value;\n',
+    );
+    write(
+      'tables/rows.spec.ts',
+      "const rows = 1;\nexport const tableRows = () => rows;\nit('rows', () => tableRows());\n",
+    );
+    write(
+      'consumers/table-view.ts',
+      "import { tableRows } from '../tables/rows.spec';\nexport const renderTableRows = () => tableRows();\n",
     );
     write('other/__snapshots__/label.spec.ts.snap', 'exports[`labels 1`] = `"active"`;\n');
     write('db/migrations/.snapshot-app.json', '{"tables":[]}\n');
@@ -708,6 +716,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         'other/__snapshots__/label.spec.ts.snap',
         'db/migrations/.snapshot-app.json',
         'fixtures/__tests__/label-fixture.ts',
+        'tables/rows.spec.ts',
+        'consumers/table-view.ts',
       ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
     ];
     for (const [path, text, reason, selected] of [
@@ -733,6 +743,12 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         'const value = 2;\nexport const labelFixture = () => value;\n',
         'bounded-followup',
         ['other/label.ts', 'other/label.spec.ts', 'fixtures/__tests__/label-fixture.ts'],
+      ],
+      [
+        'tables/rows.spec.ts',
+        "const rows = 2;\nexport const tableRows = () => rows;\nit('rows', () => tableRows());\n",
+        'bounded-followup',
+        ['tables/rows.spec.ts', 'consumers/table-view.ts'],
       ],
       [
         'db/migrations/.snapshot-app.json',

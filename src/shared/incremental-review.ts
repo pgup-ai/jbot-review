@@ -682,9 +682,20 @@ export async function planIncrementalReview(input: {
       return spec ? [(spec[1] ?? '') + spec[2]] : [];
     });
     if (owners.some((spec) => !paths.has(spec))) return full('references-outside-pr');
-    // Nothing imports an edited test case and what it imports was reviewed at the baseline, so it
-    // joins the selection without spreading it; a snapshot's spec still spreads, standing in for the snapshot.
-    const tests = changed.filter((path) => TEST_CASE.test(path) && !owners.includes(path));
+    // What an edited test case imports was reviewed at the baseline, so one no PR file imports joins
+    // the selection without spreading it; a snapshot's spec still spreads, standing in for the snapshot.
+    const imported = new Set(
+      [...sources].flatMap(([path, texts]) =>
+        texts.flatMap((text) =>
+          indexEvidenceSource(path, text).imports.map((binding) =>
+            resolveEvidenceImport(path, binding.from, paths, aliases),
+          ),
+        ),
+      ),
+    );
+    const tests = changed.filter(
+      (path) => TEST_CASE.test(path) && !owners.includes(path) && !imported.has(path),
+    );
     const impacted = new Set(
       impactedReviewFiles(
         input.files,
