@@ -684,10 +684,18 @@ export async function planIncrementalReview(input: {
       return spec ? [(spec[1] ?? '') + spec[2]] : [];
     });
     if (owners.some((spec) => !paths.has(spec))) return full('references-outside-pr');
-    const files = impactedReviewFiles(
-      input.files,
-      [...changed.filter((path) => !isDotenv(path)), ...owners],
-      sources,
+    // Nothing imports an edited test and what it imports was reviewed at the baseline, so it joins
+    // the selection without spreading it; a snapshot's spec still spreads, standing in for the snapshot.
+    const tests = changed.filter((path) => TEST_FILE.test(path) && !owners.includes(path));
+    const impacted = new Set(
+      impactedReviewFiles(
+        input.files,
+        [...changed.filter((path) => !isDotenv(path) && !tests.includes(path)), ...owners],
+        sources,
+      ).map((file) => file.filename),
+    );
+    const files = input.files.filter(
+      (file) => impacted.has(file.filename) || tests.includes(file.filename),
     );
     const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
     if (selection.size === input.files.length || selection.size > 8) return full('broad-impact');
