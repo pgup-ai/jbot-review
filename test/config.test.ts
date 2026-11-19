@@ -473,6 +473,8 @@ describe('main review reasoning', () => {
     assert.deepEqual(supportedModelOptions('opencode-go', 'hy4-flash', verify, 'down'), {
       reasoningEffort: 'low',
     });
+    const off = { reasoningEffort: 'none' };
+    assert.equal(supportedModelOptions('opencode-go', 'hy4-flash', off), off);
   });
 });
 
