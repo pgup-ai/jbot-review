@@ -363,7 +363,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
   [DIM_CLI_BIN]: 'npm i -g dimcode',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
-  [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.10.21/setup.sh | bash',
+  [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.14.30821/setup.sh | bash',
 };
 
 async function main(invocation: LocalInvocation): Promise<void> {

@@ -144,7 +144,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    config) never loads — that code runs at server start OUTSIDE the tool
    sandbox. Sessions are hermetic on both sides: the operator's global config
    is excluded too (`XDG_CONFIG_HOME` is a jbot-owned dir holding only the jbot
-   plugin; per-run `XDG_DATA_HOME`), and each session's shell env is replaced
+   plugin; per-run `XDG_DATA_HOME`; `OPENCODE_DISABLE_CLAUDE_CODE` so neither the
+   repo's `CLAUDE.md` files nor `~/.claude/CLAUDE.md` load), and each session's shell env is replaced
    with an allowlist (`sessionEnvironment`) so provider keys and
    `OPENCODE_CONFIG_CONTENT` never reach a tool call. The sessions must never mutate the workspace;
    bash stays allowed for git diff/log/grep. Scope is the model sessions — the

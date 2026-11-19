@@ -92,6 +92,7 @@ describe('childEnv', () => {
       HTTPS_PROXY: 'http://p',
       OPENAI_API_KEY: 'k',
       OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+      OPENCODE_DISABLE_CLAUDE_CODE: '1',
       XDG_CONFIG_HOME: '/cfg',
       XDG_DATA_HOME: '/data',
       OPENCODE_CONFIG_CONTENT: '{"a":1}',

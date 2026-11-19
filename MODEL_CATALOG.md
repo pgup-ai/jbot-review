@@ -793,7 +793,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.2.5`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.3.2`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
@@ -882,7 +882,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`@opencode/cli@2.2.5`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
+- Source: Docker-pinned npm package [`@opencode/cli@2.3.2`](https://www.npmjs.com/package/@opencode/cli) live provider catalog.
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
@@ -931,7 +931,7 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.87.3`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.91.1`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
