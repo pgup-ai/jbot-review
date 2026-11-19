@@ -136,6 +136,9 @@ export function defaultModelOptions(
 const MAIN_REVIEW_REASONING = new Map([
   ['opencode-go/muse-spark-1.3-contributor', 'high'],
   ['commandcode/meta/muse-spark-1.3-contributor', 'high'],
+  // A 2-PR screen found one more known issue per PR at high, for 1.3–1.7x wall.
+  ['opencode-go/hy4-flash-free', 'high'],
+  ['opencode-go/hy4-flash', 'high'],
 ]);
 
 export function mainReviewModelOptions(
@@ -263,6 +266,8 @@ const EFFORT_RESTRICTED_MODELS = {
   'deepseek-v4.1-flash': { reasoningEfforts: ['low'] },
   'deepseek-v4-flash': { reasoningEfforts: ['low'] },
   'deepseek-v4-pro': { reasoningEfforts: ['low'] },
+  // hy4 reasons the same at every effort but `none`, so the verifier rounds down to `low`.
+  'hy4-flash': { reasoningEfforts: ['none', 'low', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
 // "only `"auto"` is supported for `tool_choice`" (opencode-go and Zen free, 2026-09-24; 1.2 on opencode-go, 2026-09-25).
