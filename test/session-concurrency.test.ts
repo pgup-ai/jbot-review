@@ -397,6 +397,23 @@ describe('limitReviewBackendSessions', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 
+  it('one verifier timing out leaves the concurrent verifier running', async () => {
+    const backend = makeBackend();
+    const finishes: Array<() => void> = [];
+    backend.runFindingVerification = async () => {
+      await new Promise<void>((resolve) => finishes.push(resolve));
+      return [];
+    };
+    backend.abortSessionsByLabel = () => assert.fail('aborted sibling verifier');
+    const limited = limitReviewBackendSessions(backend, 'aux', new Semaphore(2));
+    const first = limited.runFindingVerification('model', '', [], noLog, 50);
+    const second = limited.runFindingVerification('model', '', [], noLog, 5000);
+    await assert.rejects(first, /^Error: finding-verification timed out$/);
+    assert.equal(finishes.length, 2);
+    for (const finish of finishes) finish();
+    assert.deepEqual(await second, []);
+  });
+
   it("counts a queued verification shard's wait against its timeout", async () => {
     const slots = new Semaphore(1);
     const observed: Array<number | undefined> = [];

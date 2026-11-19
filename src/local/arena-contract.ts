@@ -56,6 +56,7 @@ export interface ComparisonReviewConfigV1 {
   commandCodeTools: boolean;
   verifierSlimContext: boolean;
   verifyOverlapGrace: boolean;
+  verifyAuxReady?: boolean;
   sharedPrefixPrompt: boolean;
 }
 
@@ -270,6 +271,9 @@ function validateReviewConfig(value: unknown): ComparisonReviewConfigV1 {
       config.verifierSlimContext,
       'reviewConfig.verifierSlimContext',
     ),
+    ...(config.verifyAuxReady === undefined
+      ? {}
+      : { verifyAuxReady: requireBoolean(config.verifyAuxReady, 'reviewConfig.verifyAuxReady') }),
     verifyOverlapGrace: requireBoolean(
       config.verifyOverlapGrace,
       'reviewConfig.verifyOverlapGrace',

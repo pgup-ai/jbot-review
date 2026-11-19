@@ -746,6 +746,9 @@ async function review(
       commandCodeTools: config?.commandCodeTools ?? parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
       verifierSlimContext:
         config?.verifierSlimContext ?? parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
+      verifyAuxReady: config
+        ? (config.verifyAuxReady ?? false)
+        : parseEnvBoolean('JBOT_VERIFY_AUX_READY', false),
       verifyOverlapGrace:
         config?.verifyOverlapGrace ?? parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
       sharedPrefixPrompt:
