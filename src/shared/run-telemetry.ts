@@ -51,7 +51,7 @@ export function runConfiguration(
   const configuration = {
     ...Object.fromEntries(POLICY_KEYS.map((key) => [key, options[key]])),
     // Absent when off, so an opted-out run keeps the hash it had before the arm existed.
-    ...(options.verifyAuxReady ? { verifyAuxReady: true } : {}),
+    ...(options.verifyOverlapGrace && options.verifyAuxReady ? { verifyAuxReady: true } : {}),
     ...(options.rulesOnlyTests ? { rulesOnlyTests: true } : {}),
     sdkEngine: ['auto', 'dsh', 'opencode'].includes(options.sdkEngine ?? '')
       ? options.sdkEngine

@@ -142,6 +142,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
           guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
           verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
+          verifyAuxReady: parseEnvBoolean('JBOT_VERIFY_AUX_READY', false),
           verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
           sharedPrefixPrompt: parseEnvBoolean('JBOT_SHARED_PREFIX_PROMPT', false),
           rulesOnlyTests: parseEnvBoolean('JBOT_RULES_ONLY_TESTS', true),

@@ -196,7 +196,9 @@ export function limitReviewBackendSessions(
               `${session} timed out`,
               () => {
                 timedOut = true;
-                backend.abortSessionsByLabel?.(session, budget.log);
+                // Verifier calls have individual backend timeouts but share a label across shards and waves.
+                if (priority !== 'verification')
+                  backend.abortSessionsByLabel?.(session, budget.log);
               },
             )
           : await running;
