@@ -33,7 +33,7 @@ the worker executes untrusted PR code via opencode's `bash`.)
 ## Prerequisites
 
 - A VPS with **Node 22.19+** (the `engines` floor the pi SDK sets), **git**, and
-  **opencode** (`npm i -g @opencode/cli@2.2.5`). The existing CloudCone box
+  **opencode** (`npm i -g @opencode/cli@2.3.2`). The existing CloudCone box
   (`ssh jbot-vps`, `/opt/jbot-review`) has git and opencode; check `node -v`
   against the floor before deploying.
 - **dsh** (`npm i -g @deepseek-ai/dsh@0.2.2-rc.1`, which needs **Node 24.9+**) to run opencode/opencode-go

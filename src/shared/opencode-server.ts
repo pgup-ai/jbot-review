@@ -139,6 +139,8 @@ export function childEnv(input: ChildEnvInput): Record<string, string> {
   delete env.OPENCODE_CONFIG_DIR;
   Object.assign(env, input.keys, {
     OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+    // 2.3.1+ loads the repo's CLAUDE.md files and the operator's ~/.claude/CLAUDE.md as instructions.
+    OPENCODE_DISABLE_CLAUDE_CODE: '1',
     XDG_CONFIG_HOME: input.configHome,
     XDG_DATA_HOME: input.dataHome,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(input.config),
