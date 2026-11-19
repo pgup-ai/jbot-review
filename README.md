@@ -1392,6 +1392,10 @@ and `JBOT_VERIFY_OVERLAP_GRACE=true`: main findings enter fresh verification as
 soon as main review returns; new auxiliary findings receive a later verification
 batch. Other consumers can select the same environment settings.
 
+With grace overlap enabled, `JBOT_VERIFY_AUX_READY=true` lets a second verifier
+start once all auxiliary finders settle and the final filters identify new findings.
+It uses the existing auxiliary route and session limiter. The default is off.
+
 `review-interactions` investigates cross-file regressions and inconsistent
 contracts across the selected scope and relevant callers. `addressed-prior-comments` separately checks
 whether old findings have been fixed; deterministic checks control thread

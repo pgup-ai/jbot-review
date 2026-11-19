@@ -75,7 +75,6 @@ import {
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
-  mergeVerdictsByLocation,
   resolveFindingAnchors,
   resolvesFinding,
   isNoiseFile,
@@ -178,6 +177,7 @@ import {
   type ModelRejection,
 } from './model-fallback.ts';
 import { parseModelName } from '@symma/protocol';
+import { finishVerificationWaves } from './verification-waves.ts';
 import { parseAddedLines } from './patch.ts';
 import {
   buildIncrementalReviewContext,
@@ -965,6 +965,7 @@ export interface ReviewRunOptions {
    * Off by default. Not the rejected overlap-with-the-main-pass.
    */
   verifyOverlapGrace?: boolean;
+  verifyAuxReady?: boolean;
   /**
    * JBOT_SHARED_PREFIX_PROMPT arm: main and lens prompts lead with the diff
    * block and lens launches are staggered, so sessions on one provider can
@@ -3525,6 +3526,7 @@ async function runReviewPipeline(params: {
         : undefined,
     );
     // Overlap only with auxiliary settling; the final pipeline owns telemetry and late arrivals.
+    let firstWaveTargets: Finding[] = [];
     const startOverlapVerification = async (): Promise<
       { targets: Finding[]; verdicts: FindingVerdictList } | 'skipped'
     > => {
@@ -3572,6 +3574,7 @@ async function runReviewPipeline(params: {
         return 'skipped';
       }
       const targets = indexes.map((index) => settled[index]);
+      firstWaveTargets = targets;
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
         sourceContext: verifierSourceContext,
@@ -3782,73 +3785,42 @@ async function runReviewPipeline(params: {
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
-    let verifiedFindings: Finding[];
-    const outcome = await overlapVerification;
-    if (outcome && outcome !== 'skipped') {
-      const merge = mergeVerdictsByLocation(
-        suppression.findings,
-        outcome.targets,
-        outcome.verdicts,
-      );
-      logVerdictOutcomes(merge, log);
-      const late = await verifyFindings({
-        sourceContext: verifierSourceContext,
-        prepareEvidence: (targets, timeoutMs) =>
-          prepareEvidence('verification', targets, timeoutMs),
-        verificationContextFor,
-        verificationRetrieval: options.experiment.verificationRetrieval,
-        verificationProof: options.experiment.verificationProof,
-        generateVerificationSupport: options.experiment.generateVerificationSupport,
-        workspace,
-        backend: auxBackend,
-        model: auxModel,
-        prContext: verifierPrContext,
-        contextForTargets: verifierContextForTargets,
-        promptBudget: auxPromptBudget,
-        findings: merge.lateUnverified,
-        enabled: verificationEnabled,
-        timeoutMs: computeVerificationTimeoutMs(
-          options.timeBudgetMinutes,
-          Date.now() - runStartedAt,
-        ),
-        modelOptions: verifierSessionOptions,
-        toolLessFirst: toolLessAux,
-        toolLessOnly: auxCheckoutBlind,
-        log,
-        onTokenUsage: recordTokenUsage,
-        onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
-      });
-      const lateSet = new Set(merge.lateUnverified);
-      verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
-    } else {
-      verifiedFindings = await verifyFindings({
-        sourceContext: verifierSourceContext,
-        prepareEvidence: (targets, timeoutMs) =>
-          prepareEvidence('verification', targets, timeoutMs),
-        verificationContextFor,
-        verificationRetrieval: options.experiment.verificationRetrieval,
-        verificationProof: options.experiment.verificationProof,
-        generateVerificationSupport: options.experiment.generateVerificationSupport,
-        workspace,
-        backend: auxBackend,
-        model: auxModel,
-        prContext: verifierPrContext,
-        contextForTargets: verifierContextForTargets,
-        promptBudget: auxPromptBudget,
-        timeoutMs: computeVerificationTimeoutMs(
-          options.timeBudgetMinutes,
-          Date.now() - runStartedAt,
-        ),
-        findings: suppression.findings,
-        enabled: verificationEnabled,
-        modelOptions: verifierSessionOptions,
-        toolLessFirst: toolLessAux,
-        toolLessOnly: auxCheckoutBlind,
-        log,
-        onTokenUsage: recordTokenUsage,
-        onCoverage: recordCoverage,
-      });
-    }
+    const verifiedFindings = await finishVerificationWaves({
+      findings: suppression.findings,
+      firstWave: overlapVerification,
+      pendingTargets: options.verifyAuxReady && !optionalEarly ? firstWaveTargets : [],
+      logOutcomes: (application) => logVerdictOutcomes(application, log),
+      verify: (findings, late) =>
+        verifyFindings({
+          sourceContext: verifierSourceContext,
+          prepareEvidence: (targets, timeoutMs) =>
+            prepareEvidence('verification', targets, timeoutMs),
+          verificationContextFor,
+          verificationRetrieval: options.experiment.verificationRetrieval,
+          verificationProof: options.experiment.verificationProof,
+          generateVerificationSupport: options.experiment.generateVerificationSupport,
+          workspace,
+          backend: auxBackend,
+          model: auxModel,
+          prContext: verifierPrContext,
+          contextForTargets: verifierContextForTargets,
+          promptBudget: auxPromptBudget,
+          findings,
+          enabled: verificationEnabled,
+          timeoutMs: computeVerificationTimeoutMs(
+            options.timeBudgetMinutes,
+            Date.now() - runStartedAt,
+          ),
+          modelOptions: verifierSessionOptions,
+          toolLessFirst: toolLessAux,
+          toolLessOnly: auxCheckoutBlind,
+          log,
+          onTokenUsage: recordTokenUsage,
+          onCoverage: late
+            ? (row) => recordCoverage({ ...row, session: 'late-finding-verification' })
+            : recordCoverage,
+        }),
+    });
     verificationDone(
       'completed',
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
@@ -4453,6 +4425,7 @@ export function normalizeOptions(
     verifierSlimContext: options?.verifierSlimContext ?? false,
     commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
+    verifyAuxReady: options?.verifyAuxReady ?? false,
     sharedPrefixPrompt: options?.sharedPrefixPrompt ?? false,
     rulesOnlyTests: options?.rulesOnlyTests ?? true,
     auxModel: options?.auxModel ?? '',

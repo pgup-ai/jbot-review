@@ -262,6 +262,10 @@ export interface OverlapVerdictMerge extends VerdictApplication {
   lateUnverified: Finding[];
 }
 
+export function verificationIdentity(finding: Finding): string {
+  return JSON.stringify([finding.path, finding.line, finding.title]);
+}
+
 /** Location and title prevent a late replacement from inheriting another finding's verdict. */
 export function mergeVerdictsByLocation(
   findings: Finding[],
@@ -269,20 +273,16 @@ export function mergeVerdictsByLocation(
   verdicts: FindingVerdict[],
 ): OverlapVerdictMerge {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
-  // JSON-encoded tuple: fields can carry ':' themselves, and a joined string
-  // would let "a:1"+2+"x" forge the identity of "a"+1+"2:x".
-  const identityOf = (finding: Finding) =>
-    JSON.stringify([finding.path, finding.line, finding.title]);
   const verdictByIdentity = new Map<string, FindingVerdict | undefined>();
   verifiedTargets.forEach((target, position) => {
-    verdictByIdentity.set(identityOf(target), verdictByPosition.get(position));
+    verdictByIdentity.set(verificationIdentity(target), verdictByPosition.get(position));
   });
 
   const dropped: VerdictApplication['dropped'] = [];
   const demoted: VerdictApplication['demoted'] = [];
   const lateUnverified: Finding[] = [];
   const result = findings.flatMap((finding) => {
-    const identity = identityOf(finding);
+    const identity = verificationIdentity(finding);
     if (!verdictByIdentity.has(identity)) {
       lateUnverified.push(finding);
       return [finding];
