@@ -440,6 +440,8 @@ describe('main review reasoning', () => {
     for (const [model, effort] of [
       ['opencode-go/muse-spark-1.3-contributor', 'high'],
       ['commandcode/meta/muse-spark-1.3-contributor', 'high'],
+      ['opencode-go/hy4-flash-free', 'high'],
+      ['opencode-go/hy4-flash', 'high'],
       ['opencode/muse-spark-1.3-contributor', 'low'],
       ['opencode-go/muse-spark-1.2-contributor', 'low'],
       ['commandcode/meta/muse-spark-1.3', 'low'],
@@ -463,6 +465,14 @@ describe('main review reasoning', () => {
         assert.equal(mainReviewModelOptions(model, explicit, true), explicit);
       }
     }
+  });
+
+  it('runs the hy4 verifier at low under a high main', () => {
+    const main = mainReviewModelOptions('opencode-go/hy4-flash', { reasoningEffort: 'low' }, false);
+    const verify = verificationModelOptions(main, undefined);
+    assert.deepEqual(supportedModelOptions('opencode-go', 'hy4-flash', verify, 'down'), {
+      reasoningEffort: 'low',
+    });
   });
 });
 
