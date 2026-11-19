@@ -474,7 +474,7 @@ describe('main review reasoning', () => {
       reasoningEffort: 'low',
     });
     const off = { reasoningEffort: 'none' };
-    assert.equal(supportedModelOptions('opencode-go', 'hy4-flash', off), off);
+    assert.equal(supportedModelOptions('opencode-go', 'hy4-flash-free', off), off);
   });
 });
 

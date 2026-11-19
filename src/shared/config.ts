@@ -267,7 +267,6 @@ const EFFORT_RESTRICTED_MODELS = {
   'deepseek-v4-flash': { reasoningEfforts: ['low'] },
   'deepseek-v4-pro': { reasoningEfforts: ['low'] },
   // hy4 reasons the same at every effort but `none`, so the verifier rounds down to `low`.
-  'hy4-flash-free': { reasoningEfforts: ['none', 'low', 'high'] },
   'hy4-flash': { reasoningEfforts: ['none', 'low', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
