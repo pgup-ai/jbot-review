@@ -259,14 +259,12 @@ const TEST_FILE =
 // A test case by name; a helper under __tests__/ can be imported by specs elsewhere.
 const TEST_CASE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
 
+// Type, build, lint and coverage directives can carry references themselves.
+const COMMENT_DIRECTIVE =
+  /@|[#<>]|\b(?:eslint|tslint|biome|prettier|istanbul|c8|v8|webpack\w*|vite|rollup|deno|bun|jsx|flow|globals?|exported|sourceMappingURL|sourceURL)\b/i;
+
 function isProseComment(path: string, before: string, line: number, removed: string): boolean {
-  // Preserve type, build, lint and coverage directives on the ordinary impact path.
-  if (
-    /@|[#<>]|\b(?:eslint|tslint|biome|prettier|istanbul|c8|v8|webpack|vite|rollup|deno|bun|jsx|flow|sourceMappingURL|sourceURL)\b/i.test(
-      removed,
-    )
-  )
-    return false;
+  if (COMMENT_DIRECTIVE.test(removed)) return false;
   try {
     return !!parseSource(path, before).comments?.some(
       ({ loc, start, end }, i, comments) =>
@@ -279,6 +277,19 @@ function isProseComment(path: string, before: string, line: number, removed: str
   } catch {
     return false;
   }
+}
+
+function mentionsOnlyInComments(path: string, text: string, reference: RegExp): boolean {
+  if (text.includes('\0') || !reference.test(text)) return false;
+  const comments = parseSource(path, text).comments ?? [];
+  let start = 0;
+  for (const comment of comments) {
+    if (COMMENT_DIRECTIVE.test(comment.value)) continue;
+    if (comment.start == null || comment.end == null) return false;
+    if (reference.test(text.slice(start, comment.start))) return false;
+    start = comment.end;
+  }
+  return start > 0 && !reference.test(text.slice(start));
 }
 
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
@@ -870,13 +881,30 @@ export async function planIncrementalReview(input: {
         !baseline.recheck?.includes(file.filename) &&
         !PROSE_FILE.test(file.filename),
     );
-    for (const ref of terms.length && leftOutCode ? [baseline.head, input.head] : [])
-      if (
-        (await grep(ref, ['-w', '-F', ...terms.flatMap((term) => ['-e', term])], ...JS_GLOBS)).some(
-          (path) => !paths.has(path),
-        )
-      )
-        return full('references-outside-pr');
+    if (terms.length && leftOutCode) {
+      const confirmed = new Set<string>();
+      const literals = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const reference = new RegExp(`(?<!\\w)(?:${literals.join('|')})(?!\\w)`);
+      for (const ref of [baseline.head, input.head]) {
+        const hits = await grep(
+          ref,
+          ['-w', '-F', ...terms.flatMap((term) => ['-e', term])],
+          ...JS_GLOBS,
+        );
+        for (const path of hits) {
+          if (paths.has(path) || confirmed.has(path)) continue;
+          // Git treats embedded newlines as separate -e patterns.
+          if (terms.some((term) => !term || term.includes('\n')))
+            return full('references-outside-pr');
+          const text = await git('show', `${ref}:${path}`);
+          bytes += Buffer.byteLength(text);
+          if (bytes > 2 * 1024 * 1024 || !mentionsOnlyInComments(path, text, reference))
+            return full('references-outside-pr');
+          // The delta lists every changed path, including changes brought in by a base merge.
+          if (!entries.includes(path)) confirmed.add(path);
+        }
+      }
+    }
     return {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',

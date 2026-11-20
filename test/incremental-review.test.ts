@@ -1742,3 +1742,65 @@ test('standalone added and edited guides keep their complete patches and outstan
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('an outside mention of a changed function needs a full review only when it may be a dependency', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-outside-comment-');
+  try {
+    git('init', '-q');
+    const file = 'core/widget.ts';
+    const implementation = (n: number) => `export function runWidget() {\n  return ${n};\n}\n`;
+    write(file, implementation(0));
+    write('other/label.ts', 'export const label = 0;\n');
+    const initial = commit();
+    for (const [source, reason] of [
+      [
+        'const runWidgets = 0; // See runWidget for details.\n/* Also described\n * in widget.ts. */',
+        'bounded-followup',
+      ],
+      ['runWidget(); // See runWidget for details.', 'references-outside-pr'],
+      ['const example = `// runWidget`; // See runWidget', 'references-outside-pr'],
+      ['/** @type {import("../core/widget").Widget} */\nlet current;', 'references-outside-pr'],
+      ['const invalid = ; // runWidget', 'history-or-impact-unavailable'],
+    ]) {
+      git('checkout', '-q', '--detach', initial);
+      write('external/notes.js', source + '\n');
+      const base = commit();
+      write(file, implementation(1));
+      write('other/label.ts', 'export const label = 1;\n');
+      const reviewed = commit();
+      write(file, implementation(2));
+      const head = commit();
+      const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+      const input = {
+        workspace,
+        files,
+        head,
+        base,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      };
+      const result = await planIncrementalReview(input);
+      assert.equal(result.reason, reason, source);
+      assert.deepEqual(
+        result.files,
+        reason === 'bounded-followup' ? files.filter((f) => f.filename === file) : files,
+      );
+      if (reason === 'bounded-followup') {
+        git('checkout', '-q', '--detach', base);
+        write('external/notes.js', "import { runWidget } from '../core/widget';\nrunWidget();\n");
+        const nextBase = commit();
+        git('checkout', '-q', '--detach', head);
+        git('merge', '-q', '--no-edit', nextBase);
+        const merged = await planIncrementalReview({
+          ...input,
+          base: nextBase,
+          head: git('rev-parse', 'HEAD'),
+        });
+        assert.equal(merged.reason, 'references-outside-pr');
+      }
+    }
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
