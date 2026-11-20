@@ -295,20 +295,14 @@ function probeDsh(bin: string): DshProbe {
   return probe;
 }
 
-/**
- * JBOT_SDK_ENGINE: `dsh` (default; `auto`, once pi, now means the same)
- * serves opencode/opencode-go DeepSeek models on DeepSeek Harness, `opencode`
- * pins the opencode server. A missing or broken dsh, an unusable sandbox, an unreadable
- * catalog, a credentialed proxy or an unknown value falls back to opencode, so
- * the engine choice can never fail a run.
- */
+/** Explicit `auto` preserves the legacy opt-in, including fallback when dsh is unusable. */
 export function resolveSdkEngine(
   env: NodeJS.ProcessEnv,
   dshBin = resolveDshBin(process.env),
   probe: (bin: string) => DshProbe = probeDsh,
   networkEnv: NodeJS.ProcessEnv = process.env,
 ): { dshBin?: string; catalog?: DshCatalog; reason: string } {
-  const engine = env.JBOT_SDK_ENGINE?.trim() || 'dsh';
+  const engine = env.JBOT_SDK_ENGINE?.trim() || 'opencode';
   if (engine === 'opencode') return { reason: '' };
   if (engine !== 'dsh' && engine !== 'auto') {
     return { reason: `unknown JBOT_SDK_ENGINE value "${engine}"; using the opencode engine` };
