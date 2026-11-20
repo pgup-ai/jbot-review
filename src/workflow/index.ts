@@ -16,6 +16,7 @@ import {
   assertImageSupportsModels,
   swallowedProviderWarnings,
 } from '../shared/backend-selection.ts';
+import { sdkEngineName } from '../shared/dsh.ts';
 import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { takeOpencodeProxyEnv } from '../shared/opencode.ts';
 import {
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
   const options = {
     enhancedContext: true,
     opencodeProxyEnv: {},
-    sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'opencode',
+    sdkEngine: sdkEngineName(getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE')),
     dryRun: parseBooleanInput('dry-run', false),
     autoApprove: parseBooleanInput('auto-approve', false),
     maxFindings: parseNumberInput('max-findings', 0),

@@ -295,6 +295,10 @@ function probeDsh(bin: string): DshProbe {
   return probe;
 }
 
+export function sdkEngineName(value: string | undefined): string {
+  return value?.trim() || 'opencode';
+}
+
 /** Explicit `auto` preserves the legacy opt-in, including fallback when dsh is unusable. */
 export function resolveSdkEngine(
   env: NodeJS.ProcessEnv,
@@ -302,7 +306,7 @@ export function resolveSdkEngine(
   probe: (bin: string) => DshProbe = probeDsh,
   networkEnv: NodeJS.ProcessEnv = process.env,
 ): { dshBin?: string; catalog?: DshCatalog; reason: string } {
-  const engine = env.JBOT_SDK_ENGINE?.trim() || 'opencode';
+  const engine = sdkEngineName(env.JBOT_SDK_ENGINE);
   if (engine === 'opencode') return { reason: '' };
   if (engine !== 'dsh' && engine !== 'auto') {
     return { reason: `unknown JBOT_SDK_ENGINE value "${engine}"; using the opencode engine` };

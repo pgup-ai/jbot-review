@@ -38,6 +38,7 @@ describe('dsh engine', () => {
     const broken = () => ({ reason: 'dsh failed its headless boot check' });
     for (const [env, bin, unusable, network, reason] of [
       [dsh, '', usable, {}, /no dsh binary/],
+      [{ JBOT_SDK_ENGINE: 'auto' }, '', usable, {}, /no dsh binary/],
       [dsh, '/bin/dsh', broken, {}, /headless boot check; using the opencode engine/],
       [dsh, '/bin/dsh', usable, { HTTPS_PROXY: 'http://u:p@proxy:8080' }, /HTTPS_PROXY carries/],
       [dsh, '/bin/dsh', usable, { https_proxy: ' u:p@proxy:8080' }, /https_proxy carries/],
