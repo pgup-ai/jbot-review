@@ -1673,3 +1673,72 @@ test('large edits and batches of standalone specs keep their complete patches', 
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('standalone added and edited guides keep their complete patches and outstanding rechecks', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-guides-');
+  try {
+    git('init', '-q');
+    write('README.md', 'Project notes.\n');
+    const base = commit();
+    const guides = Array.from({ length: 20 }, (_, i) => `guides/page-${i}.md`);
+    for (const path of guides) write(path, '# Getting started\n');
+    const recheck = 'src/check.ts';
+    write(recheck, 'export const ready = true;\n');
+    const reviewed = commit();
+    const added = 'guides/field-guide.md';
+    const plan = (
+      head: string,
+      prior = reviewed,
+      guidancePaths: ReadonlySet<string> = new Set(),
+    ) => {
+      const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+      return planIncrementalReview({
+        workspace,
+        head,
+        base,
+        files,
+        policy,
+        guideChangesGuidance: async (path) => guidancePaths.has(path),
+        priorBodies: [
+          withReviewCoverage(
+            withReviewBaseline('<sup>driver</sup>', {
+              head: prior,
+              base,
+              policy,
+              recheck: [recheck],
+            }),
+            prior,
+            true,
+          ),
+        ],
+        rulesChangedSince: async () => false,
+      });
+    };
+    for (const path of [added, guides[0]]) {
+      git('checkout', '-q', '--detach', reviewed);
+      write(path, '# Updated introduction\n');
+      const head = commit();
+      const result = await plan(head);
+      assert.equal(result.reason, 'standalone-guide');
+      assert.deepEqual(
+        result.files,
+        parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head)).filter((file) =>
+          [path, recheck].includes(file.filename),
+        ),
+      );
+      assert.equal((await plan(head, reviewed, new Set([path]))).mode, 'full');
+    }
+    git('checkout', '-q', '--detach', reviewed);
+    write('build.js', "const pages = collect('guides/*.md');\n");
+    const loader = commit();
+    write(added, '# Getting started\n');
+    assert.equal((await plan(commit(), loader)).reason, 'document-dependencies');
+    git('checkout', '-q', '--detach', reviewed);
+    write('README.md', 'Read [the field guide](guides/field-guide.md).\n');
+    const linked = commit();
+    write(added, '# Getting started\n');
+    assert.equal((await plan(commit(), linked)).reason, 'document-dependencies');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

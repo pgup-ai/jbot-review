@@ -298,6 +298,8 @@ export async function planIncrementalReview(input: {
   priorBodies?: string[];
   forceFull?: boolean;
   worktree?: boolean;
+  /** Whether narrowing to this guide would change which instructions the other PR files receive. */
+  guideChangesGuidance?: (path: string, added: boolean) => Promise<boolean>;
   rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
   let shadow: ShadowReviewPlan | undefined;
@@ -439,13 +441,23 @@ export async function planIncrementalReview(input: {
     }));
     // The shadow's git time does not count against the real plan's budget.
     deadline += Date.now() - shadowStarted;
+    // Only a single ordinary guide can bypass directory expansion. A rename also has a deletion.
+    const [status, guide] = entries.length === 2 ? entries : [];
+    const guideOnly =
+      !merged?.size &&
+      (status === 'A' || status === 'M') &&
+      /^(?:docs|guides)\/(?:[\w-]+\/)*[\w-]+\.(?:md|markdown)$/i.test(guide) &&
+      !/^(?:_|readme\.|index\.|summary\.|sidebar\.|toc\.)/i.test(posix.basename(guide)) &&
+      input.guideChangesGuidance !== undefined &&
+      !(await input.guideChangesGuidance(guide, status === 'A'));
     const changed: string[] = [];
     // A new test file is loaded by the runner's glob, never by an import, and its Jest snapshot is
     // its output; a helper or setup file under __tests__/ can be named by config, so it does not count.
     const added: string[] = [];
     for (const [status, path] of touched) {
       if (status === 'A' && (TEST_CASE.test(path) || JEST_SNAPSHOT.test(path))) added.push(path);
-      else if (status !== 'M') return full('added-removed-or-renamed-file');
+      else if (status !== 'M' && !(guideOnly && status === 'A'))
+        return full('added-removed-or-renamed-file');
       changed.push(path);
     }
     // A fix's own tests don't make a follow-up broad.
@@ -539,6 +551,53 @@ export async function planIncrementalReview(input: {
       );
     };
     if (changed.some(sensitive)) return full('sensitive-followup');
+    if (guideOnly) {
+      const slug = posix.parse(guide).name;
+      // Readers may name the page without its extension or collect pages by directory or glob.
+      const mentions = await grep(input.head, ['-i', '-w', '-F', '-e', slug]);
+      const directories = posix.dirname(guide).split('/');
+      const loaders = await grep(
+        input.head,
+        [
+          '-i',
+          '-E',
+          '-e',
+          `(^|[^[:alnum:]_-])(${directories.join('|')})(/[^[:alnum:]_./-]|[^[:alnum:]_./-]|$)`,
+          '-e',
+          '(^|[^[:alnum:]_-])\\.(md|markdown)([^[:alnum:]_-]|$)|mkdocs|docusaurus|vitepress|vuepress|readdir|walkdir|os\\.walk|\\*\\*/\\*([^[:alnum:]._-]|$)',
+        ],
+        '.',
+        ...['md', 'markdown', 'rst', 'adoc', 'txt'].map((ext) => `:(exclude,icase)*.${ext}`),
+      );
+      const refs = status === 'A' ? [input.head] : [baseline.head, input.head];
+      const modes = await Promise.all(
+        refs.map((ref) => git('--literal-pathspecs', 'ls-tree', ref, '--', guide)),
+      );
+      // Git grep skips symlink blobs, including an alias for the guide or its parent directory.
+      const treeModes = await git('ls-tree', '-r', '--format=%(objectmode)', input.head);
+      const texts = await Promise.all(refs.map((ref) => git('show', `${ref}:${guide}`)));
+      const standalone =
+        !mentions.some((path) => path !== guide) &&
+        !loaders.length &&
+        !treeModes.includes('120000') &&
+        texts.every((text) => text.trim() && !/^\s*(?:---|\+\+\+)[ \t]*(?:\r?\n|$)/.test(text)) &&
+        modes.every((row) => row.startsWith('100644 blob '));
+      if (standalone) {
+        const files = input.files.filter(
+          (file) => file.filename === guide || baseline.recheck?.includes(file.filename),
+        );
+        return files.length === input.files.length
+          ? full('broad-impact')
+          : {
+              mode: 'incremental',
+              reason: 'standalone-guide',
+              files,
+              baseline: baseline.head,
+              shadow,
+            };
+      }
+      if (status === 'A') return full('document-dependencies');
+    }
     // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's or a Jest
     // snapshot's lines are no contract change. An empty pathspec would diff every file.
     const code = changed.filter(
