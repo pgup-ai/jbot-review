@@ -584,10 +584,11 @@ export async function planIncrementalReview(input: {
     }
     if (input.files.length > 80) return full('unsupported-or-large-pr');
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
+    const testCasesOnly = !merged?.size && changed.every((path) => TEST_CASE.test(path));
     // An export edit changes the contract and a computed load can reach anything; a static
     // import or a comment naming one does not, as both sides' imports feed the graph below.
     if (
-      edits.length > 120 ||
+      (!testCasesOnly && edits.length > 120) ||
       edits.some((line) => /^[+-]\s*export\b|\b(?:require|import)\s*\(/.test(line))
     )
       return full('broad-or-contract-change');
@@ -722,7 +723,7 @@ export async function planIncrementalReview(input: {
     );
     // A continuation line of a multiline value names no key to look up.
     if (keys.includes('')) return full('unsupported-or-large-pr');
-    if (edits.length + lines.length > 120) return full('broad-or-contract-change');
+    if (lines.length && edits.length + lines.length > 120) return full('broad-or-contract-change');
     const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
     // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
     // { [name]: v } = process.env) could be any changed key.
@@ -771,6 +772,9 @@ export async function planIncrementalReview(input: {
     const tests = changed.filter(
       (path) => TEST_CASE.test(path) && !owners.includes(path) && !imported.has(path),
     );
+    // Independent specs need no impact expansion, however many cases the follow-up adds.
+    const standaloneTestsOnly = testCasesOnly && tests.length === changed.length;
+    if (!standaloneTestsOnly && edits.length > 120) return full('broad-or-contract-change');
     const impacted = new Set(
       impactedReviewFiles(
         input.files,
@@ -782,7 +786,8 @@ export async function planIncrementalReview(input: {
       (file) => impacted.has(file.filename) || tests.includes(file.filename),
     );
     const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
-    if (selection.size === input.files.length || selection.size > 8) return full('broad-impact');
+    if (selection.size === input.files.length || (!standaloneTestsOnly && selection.size > 8))
+      return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
     // Widen to a full review rather than trusting that incomplete graph.
     const terms = [

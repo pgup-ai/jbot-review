@@ -1612,14 +1612,63 @@ test('a standalone prose comment removal keeps complete patches and outstanding 
       selected.files,
       filesAt(head).filter((file) => [path, recheck].includes(file.filename)),
     );
-    for (const text of [
-      literal.replace(prose, '') + directive + code + prose,
-      literal + code + prose,
-      literal + directive + code.replace('example;', '1;'),
+    for (const [text, reason] of [
+      [literal.replace(prose, '') + directive + code + prose, 'impact-context-too-large'],
+      [literal + code + prose, 'impact-context-too-large'],
+      [literal + directive + code.replace('example;', '1;'), 'broad-or-contract-change'],
     ]) {
       write(path, text);
-      assert.equal((await plan(commit())).mode, 'full');
+      assert.equal((await plan(commit())).reason, reason);
     }
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('large edits and batches of standalone specs keep their complete patches', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-specs-');
+  try {
+    git('init', '-q');
+    write('README.md', 'Tests.\n');
+    const base = commit();
+    const specs = Array.from({ length: 9 }, (_, i) => `cases/case-${i}.spec.ts`);
+    const check = "it('counts', () => expect(1).toBe(1));\n";
+    for (const path of specs) write(path, check);
+    const imported = 'cases/shared.spec.ts';
+    write(imported, 'export const count = 1;\n' + check);
+    write(
+      'other/consumer.ts',
+      "import { count } from '../cases/shared.spec';\nconsole.log(count);\n",
+    );
+    const reviewed = commit();
+    const plan = async () => {
+      const head = commit();
+      const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+      return planIncrementalReview({
+        workspace,
+        head,
+        base,
+        files,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      });
+    };
+    for (const paths of [specs.slice(0, 1), specs]) {
+      git('checkout', '-q', '--detach', reviewed);
+      for (const path of paths) write(path, check.repeat(paths.length === 1 ? 126 : 2));
+      const result = await plan();
+      assert.equal(result.mode, 'incremental');
+      assert.deepEqual(
+        result.files,
+        parseGitDiff(git(...GIT_DIFF_ARGS, base + '...HEAD')).filter((file) =>
+          paths.includes(file.filename),
+        ),
+      );
+    }
+    git('checkout', '-q', '--detach', reviewed);
+    write(imported, 'export const count = 1;\n' + check.repeat(126));
+    assert.equal((await plan()).reason, 'broad-or-contract-change');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
