@@ -34,7 +34,7 @@ dsh --version
 # jbot's own probe: sandbox, catalog, and a key-less headless boot under the review patch (catches a bad prune).
 node --input-type=module -e '
   const { resolveSdkEngine } = await import("/app/dist/dsh.js");
-  const { dshBin, reason } = resolveSdkEngine({});
+  const { dshBin, reason } = resolveSdkEngine({ JBOT_SDK_ENGINE: "dsh" });
   if (!dshBin) throw new Error(`dsh engine unusable: ${reason}`);
 '
 if [ "$variant" = opencode ]; then

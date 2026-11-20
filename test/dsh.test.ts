@@ -20,26 +20,28 @@ import {
 } from '../src/shared/dsh.ts';
 
 describe('dsh engine', () => {
-  it('is the default engine and falls back to opencode rather than fail a run', () => {
+  it('defaults to opencode and uses dsh only when requested and usable', () => {
     const catalog = {
       'opencode-go': { 'deepseek-v4.1-flash': { contextTokens: 1, outputTokens: 1 } },
     };
     const usable = () => ({ catalog });
-    for (const env of [{}, { JBOT_SDK_ENGINE: 'auto' }]) {
+    const dsh = { JBOT_SDK_ENGINE: 'dsh' };
+    for (const env of [dsh, { JBOT_SDK_ENGINE: 'auto' }]) {
       assert.deepEqual(
         resolveSdkEngine(env, '/bin/dsh', usable, { HTTPS_PROXY: 'http://proxy:8080' }),
         { dshBin: '/bin/dsh', catalog, reason: '' },
       );
     }
-    assert.deepEqual(resolveSdkEngine({ JBOT_SDK_ENGINE: 'opencode' }, '/bin/dsh', usable), {
-      reason: '',
-    });
+    for (const env of [{}, { JBOT_SDK_ENGINE: ' ' }, { JBOT_SDK_ENGINE: 'opencode' }]) {
+      assert.deepEqual(resolveSdkEngine(env, '/bin/dsh', usable), { reason: '' });
+    }
     const broken = () => ({ reason: 'dsh failed its headless boot check' });
     for (const [env, bin, unusable, network, reason] of [
-      [{}, '', usable, {}, /no dsh binary/],
-      [{}, '/bin/dsh', broken, {}, /headless boot check; using the opencode engine/],
-      [{}, '/bin/dsh', usable, { HTTPS_PROXY: 'http://u:p@proxy:8080' }, /HTTPS_PROXY carries/],
-      [{}, '/bin/dsh', usable, { https_proxy: ' u:p@proxy:8080' }, /https_proxy carries/],
+      [dsh, '', usable, {}, /no dsh binary/],
+      [{ JBOT_SDK_ENGINE: 'auto' }, '', usable, {}, /no dsh binary/],
+      [dsh, '/bin/dsh', broken, {}, /headless boot check; using the opencode engine/],
+      [dsh, '/bin/dsh', usable, { HTTPS_PROXY: 'http://u:p@proxy:8080' }, /HTTPS_PROXY carries/],
+      [dsh, '/bin/dsh', usable, { https_proxy: ' u:p@proxy:8080' }, /https_proxy carries/],
       [{ JBOT_SDK_ENGINE: 'pi-please' }, '/bin/dsh', usable, {}, /unknown JBOT_SDK_ENGINE/],
     ] as const) {
       const resolved = resolveSdkEngine(env, bin, unusable, network);

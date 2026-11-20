@@ -462,8 +462,9 @@ concurrency before wider use.
 
 #### Backend execution and limits
 
-**SDK engines.** `opencode`/`opencode-go` DeepSeek models (except `-free`
-ones) run on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+**SDK engines.** SDK-routed models default to OpenCode. Set `sdk-engine: dsh`
+(or `JBOT_SDK_ENGINE=dsh`) to run `opencode`/`opencode-go` DeepSeek models
+(except `-free` ones) on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 (`dsh`, shipped in every image), which found more known issues than opencode's
 harness on DeepSeek in our screens at about the same cost. Its sessions call
 tools through PTC `run_code` programs, run under a read-only OS sandbox
@@ -743,7 +744,7 @@ matching provider-specific input, such as `opencode-api-key` for
 | ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                           |
-| `sdk-engine`                 | No       | `dsh`                 | `dsh` runs opencode/opencode-go DeepSeek models on DeepSeek Harness and the rest on opencode; `opencode` pins opencode                                                                                                                                       |
+| `sdk-engine`                 | No       | `opencode`            | `dsh` runs opencode/opencode-go DeepSeek models on DeepSeek Harness and the rest on opencode; `opencode` pins opencode                                                                                                                                       |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                               |
 | `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                                                                                                                             |

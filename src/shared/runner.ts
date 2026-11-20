@@ -143,7 +143,13 @@ import {
   runPoolsideReview,
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
-import { createDshBackend, dshCandidate, resolveSdkEngine, startDsh } from './dsh.ts';
+import {
+  createDshBackend,
+  dshCandidate,
+  resolveSdkEngine,
+  sdkEngineName,
+  startDsh,
+} from './dsh.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   buildDiffHunksBlockWithMetadata,
@@ -1225,7 +1231,10 @@ async function runReviewPipeline(params: {
       repository: `${owner}/${repo}`,
       identity: runIdentity(process.env),
       policy: runConfiguration(
-        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'dsh' },
+        {
+          ...options,
+          sdkEngine: sdkEngineName(options.sdkEngine || process.env.JBOT_SDK_ENGINE),
+        },
         model,
       ),
       ...(baseSha ? { baseSha } : {}),
