@@ -1739,6 +1739,12 @@ async function runReviewPipeline(params: {
             mainOnOpencode ? modelID : undefined,
           )),
     worktree: !!localDiff,
+    guidance: {
+      current: applicable,
+      ruleSources,
+      changedFiles,
+      discover: (files) => discoverGuidelineDocs(workspace, files),
+    },
     rulesChangedSince,
   });
   const shadowScope = reviewScope.shadow;

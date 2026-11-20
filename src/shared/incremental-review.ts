@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import { posix } from 'node:path';
 import { completedReviewHead, type PrFile } from './github.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from './git.ts';
@@ -7,14 +7,20 @@ import {
   indexEvidenceSource,
   loadPathAliases,
   moduleBindings,
+  moduleForms,
   moduleSpecifiers,
   opaqueModuleForms,
+  parseSource,
   resolveEvidenceImport,
   JS_SOURCE,
   JS_GLOBS,
 } from './evidence.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
-import { isGuidelineSource } from './review-context.ts';
+import {
+  applicableGuidelines,
+  isGuidelineSource,
+  type DiscoveredGuidelines,
+} from './review-context.ts';
 
 const exec = promisify(execFile);
 const MARKER = /\n<!-- jbot-review:baseline:(\{[^\n]*\}) -->\n/;
@@ -258,6 +264,77 @@ const TEST_FILE =
 // A test case by name; a helper under __tests__/ can be imported by specs elsewhere.
 const TEST_CASE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
 
+// Type, build, lint and coverage directives can carry references themselves.
+const COMMENT_DIRECTIVE =
+  /@|[#<>]|\b(?:eslint|tslint|biome|prettier|istanbul|c8|v8|webpack\w*|vite|rollup|deno|bun|jsx|flow|globals?|exported|sourceMappingURL|sourceURL)\b/i;
+
+function isProseComment(path: string, before: string, line: number, removed: string): boolean {
+  if (COMMENT_DIRECTIVE.test(removed)) return false;
+  try {
+    return !!parseSource(path, before).comments?.some(
+      ({ loc, start, end }, i, comments) =>
+        loc?.start.line === line &&
+        loc.end.line === line &&
+        before.slice(start, end) === removed.trim() &&
+        // Removing a comment between a directive and its target can activate the directive.
+        (i === 0 || before.slice(comments[i - 1].end, start).trim() !== ''),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function mentionsOnlyInComments(
+  path: string,
+  text: string,
+  reference: RegExp,
+  mayLoadChangedModule: (from: string) => boolean,
+): boolean {
+  if (text.includes('\0') || !reference.test(text)) return false;
+  const tree = parseSource(path, text);
+  const comments = tree.comments ?? [];
+  let start = 0;
+  for (const comment of comments) {
+    if (COMMENT_DIRECTIVE.test(comment.value)) continue;
+    if (comment.start == null || comment.end == null) return false;
+    if (reference.test(text.slice(start, comment.start))) return false;
+    start = comment.end;
+  }
+  return (
+    start > 0 &&
+    !reference.test(text.slice(start)) &&
+    !moduleForms(tree, true).some((from) => from !== undefined && mayLoadChangedModule(from))
+  );
+}
+
+interface GuideGuidance {
+  current: DiscoveredGuidelines;
+  ruleSources: readonly string[];
+  changedFiles: string[];
+  discover: (files: string[]) => Promise<DiscoveredGuidelines>;
+}
+
+export async function guideChangesGuidance(
+  path: string,
+  added: boolean,
+  { current, ruleSources, changedFiles, discover }: GuideGuidance,
+): Promise<boolean> {
+  if (
+    current.budgetExhausted ||
+    ruleSources.includes(path) ||
+    current.referenced.includes(path) ||
+    current.required?.includes(path)
+  )
+    return true;
+  if (!added) return false;
+  // A new PR path can activate scoped guidance even when the document itself is ordinary prose.
+  const previousFiles = changedFiles.filter((file) => file !== path);
+  return !isDeepStrictEqual(
+    current,
+    applicableGuidelines(await discover(previousFiles), previousFiles),
+  );
+}
+
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
 export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
   'no-completed-baseline',
@@ -275,6 +352,7 @@ export async function planIncrementalReview(input: {
   priorBodies?: string[];
   forceFull?: boolean;
   worktree?: boolean;
+  guidance?: GuideGuidance;
   rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
   let shadow: ShadowReviewPlan | undefined;
@@ -416,13 +494,23 @@ export async function planIncrementalReview(input: {
     }));
     // The shadow's git time does not count against the real plan's budget.
     deadline += Date.now() - shadowStarted;
+    // Only a single ordinary guide can bypass directory expansion. A rename also has a deletion.
+    const [status, guide] = entries.length === 2 ? entries : [];
+    const guideOnly =
+      !merged?.size &&
+      (status === 'A' || status === 'M') &&
+      /^(?:docs|guides)\/(?:[\w-]+\/)*[\w-]+\.(?:md|markdown)$/i.test(guide) &&
+      !/^(?:_|readme\.|index\.|summary\.|sidebar\.|toc\.)/i.test(posix.basename(guide)) &&
+      input.guidance !== undefined &&
+      !(await guideChangesGuidance(guide, status === 'A', input.guidance));
     const changed: string[] = [];
     // A new test file is loaded by the runner's glob, never by an import, and its Jest snapshot is
     // its output; a helper or setup file under __tests__/ can be named by config, so it does not count.
     const added: string[] = [];
     for (const [status, path] of touched) {
       if (status === 'A' && (TEST_CASE.test(path) || JEST_SNAPSHOT.test(path))) added.push(path);
-      else if (status !== 'M') return full('added-removed-or-renamed-file');
+      else if (status !== 'M' && !(guideOnly && status === 'A'))
+        return full('added-removed-or-renamed-file');
       changed.push(path);
     }
     // A fix's own tests don't make a follow-up broad.
@@ -430,8 +518,7 @@ export async function planIncrementalReview(input: {
       changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
     // A base merge alone still reaches the PR files importing what it changed, selected below.
     if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
-    if (input.files.length > 80 || input.files.some((file) => !file.patch))
-      return full('unsupported-or-large-pr');
+    if (input.files.some((file) => !file.patch)) return full('unsupported-or-large-pr');
     const unsupported = input.files
       .map((file) => file.filename)
       .filter(
@@ -517,6 +604,53 @@ export async function planIncrementalReview(input: {
       );
     };
     if (changed.some(sensitive)) return full('sensitive-followup');
+    if (guideOnly) {
+      const slug = posix.parse(guide).name;
+      // Readers may name the page without its extension or collect pages by directory or glob.
+      const mentions = await grep(input.head, ['-i', '-w', '-F', '-e', slug]);
+      const directories = posix.dirname(guide).split('/');
+      const loaders = await grep(
+        input.head,
+        [
+          '-i',
+          '-E',
+          '-e',
+          `(^|[^[:alnum:]_-])(${directories.join('|')})(/[^[:alnum:]_./-]|[^[:alnum:]_./-]|$)`,
+          '-e',
+          '(^|[^[:alnum:]_-])\\.(md|markdown)([^[:alnum:]_-]|$)|mkdocs|docusaurus|vitepress|vuepress|readdir|walkdir|os\\.walk|\\*\\*/\\*([^[:alnum:]._-]|$)',
+        ],
+        '.',
+        ...['md', 'markdown', 'rst', 'adoc', 'txt'].map((ext) => `:(exclude,icase)*.${ext}`),
+      );
+      const refs = status === 'A' ? [input.head] : [baseline.head, input.head];
+      const modes = await Promise.all(
+        refs.map((ref) => git('--literal-pathspecs', 'ls-tree', ref, '--', guide)),
+      );
+      // Git grep skips symlink blobs, including an alias for the guide or its parent directory.
+      const treeModes = await git('ls-tree', '-r', '--format=%(objectmode)', input.head);
+      const texts = await Promise.all(refs.map((ref) => git('show', `${ref}:${guide}`)));
+      const standalone =
+        !mentions.some((path) => path !== guide) &&
+        !loaders.length &&
+        !treeModes.includes('120000') &&
+        texts.every((text) => text.trim() && !/^\s*(?:---|\+\+\+)[ \t]*(?:\r?\n|$)/.test(text)) &&
+        modes.every((row) => row.startsWith('100644 blob '));
+      if (standalone) {
+        const files = input.files.filter(
+          (file) => file.filename === guide || baseline.recheck?.includes(file.filename),
+        );
+        return files.length === input.files.length
+          ? full('broad-impact')
+          : {
+              mode: 'incremental',
+              reason: 'standalone-guide',
+              files,
+              baseline: baseline.head,
+              shadow,
+            };
+      }
+      return full('document-dependencies');
+    }
     // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's or a Jest
     // snapshot's lines are no contract change. An empty pathspec would diff every file.
     const code = changed.filter(
@@ -536,11 +670,37 @@ export async function planIncrementalReview(input: {
           ...code,
         )
       : '';
+    // Only an ordinary standalone comment disappeared. Check its parser range: a line
+    // that looks exactly like a comment can be part of a template literal or JSX text.
+    if (!merged?.size && changed.length === 1 && JS_SOURCE.test(changed[0])) {
+      const hunk = patch.slice(patch.indexOf('\n@@ '));
+      const removal =
+        /^\n@@ -(\d+)(?:,1)? \+\d+,0 @@[^\n]*\n-([ \t]*(?:\/\/ |\/\*\* )[A-Za-z]+ [^\r\n]*?)\r?\n$/.exec(
+          hunk,
+        );
+      if (removal && /^index [a-f0-9]+\.\.[a-f0-9]+ 100(?:644|755)$/m.test(patch)) {
+        const path = changed[0];
+        const before = await git('show', `${baseline.head}:${path}`);
+        if (isProseComment(path, before, Number(removal[1]), removal[2])) {
+          return {
+            mode: 'incremental',
+            reason: 'comment-removal',
+            files: input.files.filter(
+              (file) => file.filename === path || baseline.recheck?.includes(file.filename),
+            ),
+            baseline: baseline.head,
+            shadow,
+          };
+        }
+      }
+    }
+    if (input.files.length > 80) return full('unsupported-or-large-pr');
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
+    const testCasesOnly = !merged?.size && changed.every((path) => TEST_CASE.test(path));
     // An export edit changes the contract and a computed load can reach anything; a static
     // import or a comment naming one does not, as both sides' imports feed the graph below.
     if (
-      edits.length > 120 ||
+      (!testCasesOnly && edits.length > 120) ||
       edits.some((line) => /^[+-]\s*export\b|\b(?:require|import)\s*\(/.test(line))
     )
       return full('broad-or-contract-change');
@@ -675,7 +835,7 @@ export async function planIncrementalReview(input: {
     );
     // A continuation line of a multiline value names no key to look up.
     if (keys.includes('')) return full('unsupported-or-large-pr');
-    if (edits.length + lines.length > 120) return full('broad-or-contract-change');
+    if (lines.length && edits.length + lines.length > 120) return full('broad-or-contract-change');
     const readsValue = (path: string) => !isDotenv(path) && !PROSE_FILE.test(path);
     // A computed key (env[name], env?.[name], env['A_' + b], env[`A_${b}`],
     // { [name]: v } = process.env) could be any changed key.
@@ -724,6 +884,9 @@ export async function planIncrementalReview(input: {
     const tests = changed.filter(
       (path) => TEST_CASE.test(path) && !owners.includes(path) && !imported.has(path),
     );
+    // Independent specs need no impact expansion, however many cases the follow-up adds.
+    const standaloneTestsOnly = testCasesOnly && tests.length === changed.length;
+    if (!standaloneTestsOnly && edits.length > 120) return full('broad-or-contract-change');
     const impacted = new Set(
       impactedReviewFiles(
         input.files,
@@ -735,7 +898,8 @@ export async function planIncrementalReview(input: {
       (file) => impacted.has(file.filename) || tests.includes(file.filename),
     );
     const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
-    if (selection.size === input.files.length || selection.size > 8) return full('broad-impact');
+    if (selection.size === input.files.length || (!standaloneTestsOnly && selection.size > 8))
+      return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
     // Widen to a full review rather than trusting that incomplete graph.
     const terms = [
@@ -759,13 +923,39 @@ export async function planIncrementalReview(input: {
         !baseline.recheck?.includes(file.filename) &&
         !PROSE_FILE.test(file.filename),
     );
-    for (const ref of terms.length && leftOutCode ? [baseline.head, input.head] : [])
-      if (
-        (await grep(ref, ['-w', '-F', ...terms.flatMap((term) => ['-e', term])], ...JS_GLOBS)).some(
-          (path) => !paths.has(path),
-        )
-      )
-        return full('references-outside-pr');
+    if (terms.length && leftOutCode) {
+      const confirmed = new Set<string>();
+      const literals = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const reference = new RegExp(`(?<!\\w)(?:${literals.join('|')})(?!\\w)`);
+      for (const ref of [baseline.head, input.head]) {
+        const hits = await grep(
+          ref,
+          ['-w', '-F', ...terms.flatMap((term) => ['-e', term])],
+          ...JS_GLOBS,
+        );
+        for (const path of hits) {
+          if (paths.has(path) || confirmed.has(path)) continue;
+          // Git treats embedded newlines as separate -e patterns.
+          if (terms.some((term) => !term || term.includes('\n')))
+            return full('references-outside-pr');
+          const text = await git('show', `${ref}:${path}`);
+          bytes += Buffer.byteLength(text);
+          if (
+            bytes > 2 * 1024 * 1024 ||
+            !mentionsOnlyInComments(path, text, reference, (from) => {
+              if (from.startsWith('node:')) return false;
+              // A base merge can change alias resolution between the two trees. An external
+              // intermediary or an unresolved loader can also reach the selected files.
+              const target = from && resolveEvidenceImport(path, from, repo, aliases);
+              return !!merged?.size || !target || !paths.has(target) || selection.has(target);
+            })
+          )
+            return full('references-outside-pr');
+          // The delta lists every changed path, including changes brought in by a base merge.
+          if (!entries.includes(path)) confirmed.add(path);
+        }
+      }
+    }
     return {
       mode: 'incremental',
       reason: merged?.size ? 'bounded-base-merge' : 'bounded-followup',

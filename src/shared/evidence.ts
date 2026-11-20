@@ -102,7 +102,7 @@ const TYPE_DECLARATION = new Set([
 ]);
 
 /** NestJS parameter decorators need the legacy plugin; only the modern one reads a decorated computed key. */
-function parseSource(path: string, text: string) {
+export function parseSource(path: string, text: string) {
   // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
   const plugins: ParserPlugin[] = /\.[cm]?ts$/i.test(path) ? ['typescript'] : ['typescript', 'jsx'];
   const options = (decorators: ParserPlugin) => ({
@@ -483,11 +483,22 @@ export function moduleSpecifiers(path: string, text: string): string[] {
  * (`export {…}`, `export default`). Parsed, so strings and comments never count.
  */
 export function opaqueModuleForms(path: string, text: string): (string | undefined)[] {
+  return moduleForms(parseSource(path, text), false);
+}
+
+export function moduleForms(
+  tree: ReturnType<typeof parseSource>,
+  includeNamedImports: boolean,
+): (string | undefined)[] {
   const found: (string | undefined)[] = [];
   const walk = (n: Ast) => {
     const specifiers = n.specifiers as Ast[] | undefined;
     if (n.type === 'ImportDeclaration') {
-      if (!specifiers!.length || specifiers!.some((s) => s.type === 'ImportNamespaceSpecifier'))
+      if (
+        includeNamedImports ||
+        !specifiers!.length ||
+        specifiers!.some((s) => s.type === 'ImportNamespaceSpecifier')
+      )
         found.push(name(n.source));
     } else if (n.type === 'ExportAllDeclaration') found.push(name(n.source));
     else if (n.type === 'ExportNamedDeclaration' && n.source) found.push(name(n.source));
@@ -514,7 +525,7 @@ export function opaqueModuleForms(path: string, text: string): (string | undefin
       } else if (ast(value)?.type) walk(value as Ast);
     }
   };
-  walk(parseSource(path, text) as unknown as Ast);
+  walk(tree as unknown as Ast);
   return found;
 }
 

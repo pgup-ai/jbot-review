@@ -13,12 +13,14 @@ import {
 import {
   BASELINE_REFRESH_REASONS,
   fetchMissingCommit,
+  guideChangesGuidance,
   impactedReviewFiles,
   planIncrementalReview,
   reviewBaseline,
   ruleDocsChanged,
   withReviewBaseline,
 } from '../src/shared/incremental-review.ts';
+import { parseGitDiff, GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { buildIncrementalReviewContext } from '../src/shared/prompt.ts';
 
 const policy = 'c'.repeat(64);
@@ -1552,6 +1554,304 @@ test('the impact-context cap counts a file the follow-up left unchanged once', a
       ['bounded-followup', ['core/limit.ts']],
     );
     assert.equal((await plan(bigEdit)).reason, 'impact-context-too-large');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a standalone prose comment removal keeps complete patches and outstanding rechecks on a large PR', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-comment-');
+  try {
+    git('init', '-q');
+    const path = 'core/caption.ts';
+    const recheck = 'other/check.ts';
+    const large = 'cases/large.ts';
+    write(path, 'export const caption = 0;\n');
+    const secondLarge = 'more/large.ts';
+    for (const filename of [large, secondLarge])
+      write(filename, '// ' + 'x'.repeat(1200 * 1024) + '\n'.repeat(5));
+    const base = commit();
+    const prose = '/** Explain the original caption. */\n';
+    const literal = 'const example = `\n' + prose + '`;\n';
+    const directive = '// @ts-expect-error pending migration\n';
+    const code = 'export const caption: number = example;\n';
+    write(path, literal + directive + code + prose);
+    write(recheck, 'export const check = 1;\n');
+    for (const filename of [large, secondLarge])
+      write(
+        filename,
+        readFileSync(join(workspace, filename), 'utf8') + 'export const value = 1;\n',
+      );
+    const reviewed = commit();
+    const filesAt = (head: string) => parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+    const plan = (head: string) =>
+      planIncrementalReview({
+        workspace,
+        files: filesAt(head),
+        head,
+        base,
+        policy,
+        priorBodies: [
+          withReviewCoverage(
+            withReviewBaseline('<sup>driver</sup>', {
+              head: reviewed,
+              base,
+              policy,
+              recheck: [recheck],
+            }),
+            reviewed,
+            true,
+          ),
+        ],
+        rulesChangedSince: async () => false,
+      });
+    write(path, literal + directive + code);
+    const head = commit();
+    const selected = await plan(head);
+    assert.equal(selected.reason, 'comment-removal');
+    assert.deepEqual(
+      selected.files,
+      filesAt(head).filter((file) => [path, recheck].includes(file.filename)),
+    );
+    for (const [text, reason] of [
+      [literal.replace(prose, '') + directive + code + prose, 'impact-context-too-large'],
+      [literal + code + prose, 'impact-context-too-large'],
+      [literal + directive + code.replace('example;', '1;'), 'broad-or-contract-change'],
+    ]) {
+      write(path, text);
+      assert.equal((await plan(commit())).reason, reason);
+    }
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('large edits and batches of standalone specs keep their complete patches', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-specs-');
+  try {
+    git('init', '-q');
+    write('README.md', 'Tests.\n');
+    const base = commit();
+    const specs = Array.from({ length: 9 }, (_, i) => `cases/case-${i}.spec.ts`);
+    const check = "it('counts', () => expect(1).toBe(1));\n";
+    for (const path of specs) write(path, check);
+    const imported = 'cases/shared.spec.ts';
+    write(imported, 'export const count = 1;\n' + check);
+    write(
+      'other/consumer.ts',
+      "import { count } from '../cases/shared.spec';\nconsole.log(count);\n",
+    );
+    const reviewed = commit();
+    const plan = async () => {
+      const head = commit();
+      const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+      return planIncrementalReview({
+        workspace,
+        head,
+        base,
+        files,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      });
+    };
+    for (const paths of [specs.slice(0, 1), specs]) {
+      git('checkout', '-q', '--detach', reviewed);
+      for (const path of paths) write(path, check.repeat(paths.length === 1 ? 126 : 2));
+      const result = await plan();
+      assert.equal(result.mode, 'incremental');
+      assert.deepEqual(
+        result.files,
+        parseGitDiff(git(...GIT_DIFF_ARGS, base + '...HEAD')).filter((file) =>
+          paths.includes(file.filename),
+        ),
+      );
+    }
+    git('checkout', '-q', '--detach', reviewed);
+    write(imported, 'export const count = 1;\n' + check.repeat(126));
+    assert.equal((await plan()).reason, 'broad-or-contract-change');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('guide scope checks discovered, referenced, and newly activated guidance', async () => {
+  const path = 'guides/intro.md';
+  const files = ['src/feature.ts', path];
+  const empty = { docs: [], referenced: [], budgetExhausted: false };
+  const noDiscovery = async () => assert.fail('unexpected rediscovery');
+  const guidance = { current: empty, ruleSources: [], changedFiles: files, discover: noDiscovery };
+  for (const overrides of [
+    { current: { ...empty, budgetExhausted: true } },
+    { ruleSources: [path] },
+    { current: { ...empty, referenced: [path] } },
+    { current: { ...empty, required: [path] } },
+  ])
+    assert.equal(await guideChangesGuidance(path, true, { ...guidance, ...overrides }), true);
+  assert.equal(await guideChangesGuidance(path, false, guidance), false);
+  const discover = async (paths: string[]) => {
+    assert.deepEqual(paths, ['src/feature.ts']);
+    return empty;
+  };
+  assert.equal(await guideChangesGuidance(path, true, { ...guidance, discover }), false);
+  assert.equal(
+    await guideChangesGuidance(path, true, {
+      ...guidance,
+      discover,
+      current: {
+        ...empty,
+        docs: [{ label: 'guides/AGENTS.md', text: 'Guide rules', relevance: 3 }],
+      },
+    }),
+    true,
+  );
+});
+
+test('standalone added and edited guides keep their complete patches and outstanding rechecks', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-guides-');
+  try {
+    git('init', '-q');
+    write('README.md', 'Project notes.\n');
+    const base = commit();
+    const guides = Array.from({ length: 20 }, (_, i) => `guides/page-${i}.md`);
+    for (const path of guides) write(path, '# Getting started\n');
+    const recheck = 'src/check.ts';
+    write(recheck, 'export const ready = true;\n');
+    const reviewed = commit();
+    const added = 'guides/field-guide.md';
+    const empty = { docs: [], referenced: [], budgetExhausted: false };
+    const plan = (head: string, prior = reviewed, guidancePaths: string[] = []) => {
+      const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+      return planIncrementalReview({
+        workspace,
+        head,
+        base,
+        files,
+        policy,
+        guidance: {
+          current: empty,
+          ruleSources: guidancePaths,
+          changedFiles: files.map((file) => file.filename),
+          discover: async () => empty,
+        },
+        priorBodies: [
+          withReviewCoverage(
+            withReviewBaseline('<sup>driver</sup>', {
+              head: prior,
+              base,
+              policy,
+              recheck: [recheck],
+            }),
+            prior,
+            true,
+          ),
+        ],
+        rulesChangedSince: async () => false,
+      });
+    };
+    for (const path of [added, guides[0]]) {
+      git('checkout', '-q', '--detach', reviewed);
+      write(path, '# Updated introduction\n');
+      const head = commit();
+      const result = await plan(head);
+      assert.equal(result.reason, 'standalone-guide');
+      assert.deepEqual(
+        result.files,
+        parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head)).filter((file) =>
+          [path, recheck].includes(file.filename),
+        ),
+      );
+      assert.equal((await plan(head, reviewed, [path])).mode, 'full');
+    }
+    git('checkout', '-q', '--detach', reviewed);
+    write('build.js', "const pages = collect('guides/*.md');\n");
+    const loader = commit();
+    write(added, '# Getting started\n');
+    assert.equal((await plan(commit(), loader)).reason, 'document-dependencies');
+    git('checkout', '-q', '--detach', reviewed);
+    write('README.md', 'Read [the field guide](guides/field-guide.md).\n');
+    const linked = commit();
+    write(added, '# Getting started\n');
+    assert.equal((await plan(commit(), linked)).reason, 'document-dependencies');
+    const edited = 'docs/troubleshooting.md';
+    write(edited, '# Before\n');
+    write('README.md', 'See [troubleshooting](docs/troubleshooting.md).\n');
+    const linkedGuide = commit();
+    write(edited, '# After\n');
+    const modified = await plan(commit(), linkedGuide);
+    assert.equal(modified.reason, 'document-dependencies');
+    assert.ok(modified.files.some((file) => file.filename === 'README.md'));
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('an outside mention of a changed function needs a full review only when it may be a dependency', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-outside-comment-');
+  try {
+    git('init', '-q');
+    const file = 'core/widget.ts';
+    const implementation = (n: number) => `export function runWidget() {\n  return ${n};\n}\n`;
+    write(file, implementation(0));
+    write('other/label.ts', 'export const label = 0;\n');
+    write(
+      'tsconfig.json',
+      JSON.stringify({ compilerOptions: { paths: { '@/w': ['core/widget.ts'] } } }),
+    );
+    const initial = commit();
+    for (const [source, reason] of [
+      [
+        'const runWidgets = 0; // See runWidget for details.\n/* Also described\n * in widget.ts. */',
+        'bounded-followup',
+      ],
+      ["import * as W from '@/w'; use(W); /* mirrors widget behavior */", 'references-outside-pr'],
+      [
+        String.raw`import { run\u0057idget as W } from '@/w'; W(); // mirrors widget behavior`,
+        'references-outside-pr',
+      ],
+      ['runWidget(); // See runWidget for details.', 'references-outside-pr'],
+      ['const example = `// runWidget`; // See runWidget', 'references-outside-pr'],
+      ['/** @type {import("../core/widget").Widget} */\nlet current;', 'references-outside-pr'],
+      ['const invalid = ; // runWidget', 'history-or-impact-unavailable'],
+    ]) {
+      git('checkout', '-q', '--detach', initial);
+      write('external/notes.js', source + '\n');
+      const base = commit();
+      write(file, implementation(1));
+      write('other/label.ts', 'export const label = 1;\n');
+      const reviewed = commit();
+      write(file, implementation(2));
+      const head = commit();
+      const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+      const input = {
+        workspace,
+        files,
+        head,
+        base,
+        policy,
+        priorBodies: [body(reviewed, base)],
+        rulesChangedSince: async () => false,
+      };
+      const result = await planIncrementalReview(input);
+      assert.equal(result.reason, reason, source);
+      assert.deepEqual(
+        result.files,
+        reason === 'bounded-followup' ? files.filter((f) => f.filename === file) : files,
+      );
+      if (reason === 'bounded-followup') {
+        git('checkout', '-q', '--detach', base);
+        write('external/notes.js', "import { runWidget } from '../core/widget';\nrunWidget();\n");
+        const nextBase = commit();
+        git('checkout', '-q', '--detach', head);
+        git('merge', '-q', '--no-edit', nextBase);
+        const merged = await planIncrementalReview({
+          ...input,
+          base: nextBase,
+          head: git('rev-parse', 'HEAD'),
+        });
+        assert.equal(merged.reason, 'references-outside-pr');
+      }
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
