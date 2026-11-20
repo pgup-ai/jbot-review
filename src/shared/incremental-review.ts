@@ -607,7 +607,7 @@ export async function planIncrementalReview(input: {
               shadow,
             };
       }
-      if (status === 'A') return full('document-dependencies');
+      return full('document-dependencies');
     }
     // Dotenv edits (`export KEY=` included) are checked by key below, and a new test's or a Jest
     // snapshot's lines are no contract change. An empty pathspec would diff every file.

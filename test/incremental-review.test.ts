@@ -1738,6 +1738,14 @@ test('standalone added and edited guides keep their complete patches and outstan
     const linked = commit();
     write(added, '# Getting started\n');
     assert.equal((await plan(commit(), linked)).reason, 'document-dependencies');
+    const edited = 'docs/troubleshooting.md';
+    write(edited, '# Before\n');
+    write('README.md', 'See [troubleshooting](docs/troubleshooting.md).\n');
+    const linkedGuide = commit();
+    write(edited, '# After\n');
+    const modified = await plan(commit(), linkedGuide);
+    assert.equal(modified.reason, 'document-dependencies');
+    assert.ok(modified.files.some((file) => file.filename === 'README.md'));
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
