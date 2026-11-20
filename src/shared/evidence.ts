@@ -102,7 +102,7 @@ const TYPE_DECLARATION = new Set([
 ]);
 
 /** NestJS parameter decorators need the legacy plugin; only the modern one reads a decorated computed key. */
-function parseSource(path: string, text: string) {
+export function parseSource(path: string, text: string) {
   // .ts cannot hold JSX, and enabling it there rejects generic arrows such as <T>(x: T) => x.
   const plugins: ParserPlugin[] = /\.[cm]?ts$/i.test(path) ? ['typescript'] : ['typescript', 'jsx'];
   const options = (decorators: ParserPlugin) => ({

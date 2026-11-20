@@ -19,6 +19,7 @@ import {
   ruleDocsChanged,
   withReviewBaseline,
 } from '../src/shared/incremental-review.ts';
+import { parseGitDiff, GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { buildIncrementalReviewContext } from '../src/shared/prompt.ts';
 
 const policy = 'c'.repeat(64);
@@ -1552,6 +1553,73 @@ test('the impact-context cap counts a file the follow-up left unchanged once', a
       ['bounded-followup', ['core/limit.ts']],
     );
     assert.equal((await plan(bigEdit)).reason, 'impact-context-too-large');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a standalone prose comment removal keeps complete patches and outstanding rechecks on a large PR', async () => {
+  const { workspace, git, write, commit } = gitRepo('jbot-incremental-comment-');
+  try {
+    git('init', '-q');
+    const path = 'core/caption.ts';
+    const recheck = 'other/check.ts';
+    const large = 'cases/large.ts';
+    write(path, 'export const caption = 0;\n');
+    const secondLarge = 'more/large.ts';
+    for (const filename of [large, secondLarge])
+      write(filename, '// ' + 'x'.repeat(1200 * 1024) + '\n'.repeat(5));
+    const base = commit();
+    const prose = '/** Explain the original caption. */\n';
+    const literal = 'const example = `\n' + prose + '`;\n';
+    const directive = '// @ts-expect-error pending migration\n';
+    const code = 'export const caption: number = example;\n';
+    write(path, literal + directive + code + prose);
+    write(recheck, 'export const check = 1;\n');
+    for (const filename of [large, secondLarge])
+      write(
+        filename,
+        readFileSync(join(workspace, filename), 'utf8') + 'export const value = 1;\n',
+      );
+    const reviewed = commit();
+    const filesAt = (head: string) => parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
+    const plan = (head: string) =>
+      planIncrementalReview({
+        workspace,
+        files: filesAt(head),
+        head,
+        base,
+        policy,
+        priorBodies: [
+          withReviewCoverage(
+            withReviewBaseline('<sup>driver</sup>', {
+              head: reviewed,
+              base,
+              policy,
+              recheck: [recheck],
+            }),
+            reviewed,
+            true,
+          ),
+        ],
+        rulesChangedSince: async () => false,
+      });
+    write(path, literal + directive + code);
+    const head = commit();
+    const selected = await plan(head);
+    assert.equal(selected.reason, 'comment-removal');
+    assert.deepEqual(
+      selected.files,
+      filesAt(head).filter((file) => [path, recheck].includes(file.filename)),
+    );
+    for (const text of [
+      literal.replace(prose, '') + directive + code + prose,
+      literal + code + prose,
+      literal + directive + code.replace('example;', '1;'),
+    ]) {
+      write(path, text);
+      assert.equal((await plan(commit())).mode, 'full');
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

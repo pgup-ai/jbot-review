@@ -9,6 +9,7 @@ import {
   moduleBindings,
   moduleSpecifiers,
   opaqueModuleForms,
+  parseSource,
   resolveEvidenceImport,
   JS_SOURCE,
   JS_GLOBS,
@@ -258,6 +259,28 @@ const TEST_FILE =
 // A test case by name; a helper under __tests__/ can be imported by specs elsewhere.
 const TEST_CASE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
 
+function isProseComment(path: string, before: string, line: number, removed: string): boolean {
+  // Preserve type, build, lint and coverage directives on the ordinary impact path.
+  if (
+    /@|[#<>]|\b(?:eslint|tslint|biome|prettier|istanbul|c8|v8|webpack|vite|rollup|deno|bun|jsx|flow|sourceMappingURL|sourceURL)\b/i.test(
+      removed,
+    )
+  )
+    return false;
+  try {
+    return !!parseSource(path, before).comments?.some(
+      ({ loc, start, end }, i, comments) =>
+        loc?.start.line === line &&
+        loc.end.line === line &&
+        before.slice(start, end) === removed.trim() &&
+        // Removing a comment between a directive and its target can activate the directive.
+        (i === 0 || before.slice(comments[i - 1].end, start).trim() !== ''),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
 export const BASELINE_REFRESH_REASONS: ReadonlySet<string> = new Set([
   'no-completed-baseline',
@@ -430,8 +453,7 @@ export async function planIncrementalReview(input: {
       changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
     // A base merge alone still reaches the PR files importing what it changed, selected below.
     if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
-    if (input.files.length > 80 || input.files.some((file) => !file.patch))
-      return full('unsupported-or-large-pr');
+    if (input.files.some((file) => !file.patch)) return full('unsupported-or-large-pr');
     const unsupported = input.files
       .map((file) => file.filename)
       .filter(
@@ -536,6 +558,31 @@ export async function planIncrementalReview(input: {
           ...code,
         )
       : '';
+    // Only an ordinary standalone comment disappeared. Check its parser range: a line
+    // that looks exactly like a comment can be part of a template literal or JSX text.
+    if (!merged?.size && changed.length === 1 && JS_SOURCE.test(changed[0])) {
+      const hunk = patch.slice(patch.indexOf('\n@@ '));
+      const removal =
+        /^\n@@ -(\d+)(?:,1)? \+\d+,0 @@[^\n]*\n-([ \t]*(?:\/\/ |\/\*\* )[A-Za-z]+ [^\r\n]*?)\r?\n$/.exec(
+          hunk,
+        );
+      if (removal && /^index [a-f0-9]+\.\.[a-f0-9]+ 100(?:644|755)$/m.test(patch)) {
+        const path = changed[0];
+        const before = await git('show', `${baseline.head}:${path}`);
+        if (isProseComment(path, before, Number(removal[1]), removal[2])) {
+          return {
+            mode: 'incremental',
+            reason: 'comment-removal',
+            files: input.files.filter(
+              (file) => file.filename === path || baseline.recheck?.includes(file.filename),
+            ),
+            baseline: baseline.head,
+            shadow,
+          };
+        }
+      }
+    }
+    if (input.files.length > 80) return full('unsupported-or-large-pr');
     const edits = patch.split('\n').filter((line) => /^[+-](?![+-])/.test(line));
     // An export edit changes the contract and a computed load can reach anything; a static
     // import or a comment naming one does not, as both sides' imports feed the graph below.
