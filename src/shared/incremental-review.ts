@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import { posix } from 'node:path';
 import { completedReviewHead, type PrFile } from './github.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from './git.ts';
@@ -7,6 +7,7 @@ import {
   indexEvidenceSource,
   loadPathAliases,
   moduleBindings,
+  moduleForms,
   moduleSpecifiers,
   opaqueModuleForms,
   parseSource,
@@ -15,7 +16,11 @@ import {
   JS_GLOBS,
 } from './evidence.ts';
 import { PATH_PATTERNS } from './diff-context.ts';
-import { isGuidelineSource } from './review-context.ts';
+import {
+  applicableGuidelines,
+  isGuidelineSource,
+  type DiscoveredGuidelines,
+} from './review-context.ts';
 
 const exec = promisify(execFile);
 const MARKER = /\n<!-- jbot-review:baseline:(\{[^\n]*\}) -->\n/;
@@ -279,9 +284,15 @@ function isProseComment(path: string, before: string, line: number, removed: str
   }
 }
 
-function mentionsOnlyInComments(path: string, text: string, reference: RegExp): boolean {
+function mentionsOnlyInComments(
+  path: string,
+  text: string,
+  reference: RegExp,
+  mayLoadChangedModule: (from: string) => boolean,
+): boolean {
   if (text.includes('\0') || !reference.test(text)) return false;
-  const comments = parseSource(path, text).comments ?? [];
+  const tree = parseSource(path, text);
+  const comments = tree.comments ?? [];
   let start = 0;
   for (const comment of comments) {
     if (COMMENT_DIRECTIVE.test(comment.value)) continue;
@@ -289,7 +300,39 @@ function mentionsOnlyInComments(path: string, text: string, reference: RegExp): 
     if (reference.test(text.slice(start, comment.start))) return false;
     start = comment.end;
   }
-  return start > 0 && !reference.test(text.slice(start));
+  return (
+    start > 0 &&
+    !reference.test(text.slice(start)) &&
+    !moduleForms(tree, true).some((from) => from !== undefined && mayLoadChangedModule(from))
+  );
+}
+
+interface GuideGuidance {
+  current: DiscoveredGuidelines;
+  ruleSources: readonly string[];
+  changedFiles: string[];
+  discover: (files: string[]) => Promise<DiscoveredGuidelines>;
+}
+
+export async function guideChangesGuidance(
+  path: string,
+  added: boolean,
+  { current, ruleSources, changedFiles, discover }: GuideGuidance,
+): Promise<boolean> {
+  if (
+    current.budgetExhausted ||
+    ruleSources.includes(path) ||
+    current.referenced.includes(path) ||
+    current.required?.includes(path)
+  )
+    return true;
+  if (!added) return false;
+  // A new PR path can activate scoped guidance even when the document itself is ordinary prose.
+  const previousFiles = changedFiles.filter((file) => file !== path);
+  return !isDeepStrictEqual(
+    current,
+    applicableGuidelines(await discover(previousFiles), previousFiles),
+  );
 }
 
 /** Full-scope reasons the stored baseline caused; only a posted review body records a new one. */
@@ -309,8 +352,7 @@ export async function planIncrementalReview(input: {
   priorBodies?: string[];
   forceFull?: boolean;
   worktree?: boolean;
-  /** Whether narrowing to this guide would change which instructions the other PR files receive. */
-  guideChangesGuidance?: (path: string, added: boolean) => Promise<boolean>;
+  guidance?: GuideGuidance;
   rulesChangedSince: (head: string) => Promise<boolean>;
 }): Promise<IncrementalReviewPlan> {
   let shadow: ShadowReviewPlan | undefined;
@@ -459,8 +501,8 @@ export async function planIncrementalReview(input: {
       (status === 'A' || status === 'M') &&
       /^(?:docs|guides)\/(?:[\w-]+\/)*[\w-]+\.(?:md|markdown)$/i.test(guide) &&
       !/^(?:_|readme\.|index\.|summary\.|sidebar\.|toc\.)/i.test(posix.basename(guide)) &&
-      input.guideChangesGuidance !== undefined &&
-      !(await input.guideChangesGuidance(guide, status === 'A'));
+      input.guidance !== undefined &&
+      !(await guideChangesGuidance(guide, status === 'A', input.guidance));
     const changed: string[] = [];
     // A new test file is loaded by the runner's glob, never by an import, and its Jest snapshot is
     // its output; a helper or setup file under __tests__/ can be named by config, so it does not count.
@@ -898,7 +940,16 @@ export async function planIncrementalReview(input: {
             return full('references-outside-pr');
           const text = await git('show', `${ref}:${path}`);
           bytes += Buffer.byteLength(text);
-          if (bytes > 2 * 1024 * 1024 || !mentionsOnlyInComments(path, text, reference))
+          if (
+            bytes > 2 * 1024 * 1024 ||
+            !mentionsOnlyInComments(path, text, reference, (from) => {
+              if (from.startsWith('node:')) return false;
+              // A base merge can change alias resolution between the two trees. An external
+              // intermediary or an unresolved loader can also reach the selected files.
+              const target = from && resolveEvidenceImport(path, from, repo, aliases);
+              return !!merged?.size || !target || !paths.has(target) || selection.has(target);
+            })
+          )
             return full('references-outside-pr');
           // The delta lists every changed path, including changes brought in by a base merge.
           if (!entries.includes(path)) confirmed.add(path);

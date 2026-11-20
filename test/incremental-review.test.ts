@@ -13,6 +13,7 @@ import {
 import {
   BASELINE_REFRESH_REASONS,
   fetchMissingCommit,
+  guideChangesGuidance,
   impactedReviewFiles,
   planIncrementalReview,
   reviewBaseline,
@@ -1674,6 +1675,38 @@ test('large edits and batches of standalone specs keep their complete patches', 
   }
 });
 
+test('guide scope checks discovered, referenced, and newly activated guidance', async () => {
+  const path = 'guides/intro.md';
+  const files = ['src/feature.ts', path];
+  const empty = { docs: [], referenced: [], budgetExhausted: false };
+  const noDiscovery = async () => assert.fail('unexpected rediscovery');
+  const guidance = { current: empty, ruleSources: [], changedFiles: files, discover: noDiscovery };
+  for (const overrides of [
+    { current: { ...empty, budgetExhausted: true } },
+    { ruleSources: [path] },
+    { current: { ...empty, referenced: [path] } },
+    { current: { ...empty, required: [path] } },
+  ])
+    assert.equal(await guideChangesGuidance(path, true, { ...guidance, ...overrides }), true);
+  assert.equal(await guideChangesGuidance(path, false, guidance), false);
+  const discover = async (paths: string[]) => {
+    assert.deepEqual(paths, ['src/feature.ts']);
+    return empty;
+  };
+  assert.equal(await guideChangesGuidance(path, true, { ...guidance, discover }), false);
+  assert.equal(
+    await guideChangesGuidance(path, true, {
+      ...guidance,
+      discover,
+      current: {
+        ...empty,
+        docs: [{ label: 'guides/AGENTS.md', text: 'Guide rules', relevance: 3 }],
+      },
+    }),
+    true,
+  );
+});
+
 test('standalone added and edited guides keep their complete patches and outstanding rechecks', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-guides-');
   try {
@@ -1686,11 +1719,8 @@ test('standalone added and edited guides keep their complete patches and outstan
     write(recheck, 'export const ready = true;\n');
     const reviewed = commit();
     const added = 'guides/field-guide.md';
-    const plan = (
-      head: string,
-      prior = reviewed,
-      guidancePaths: ReadonlySet<string> = new Set(),
-    ) => {
+    const empty = { docs: [], referenced: [], budgetExhausted: false };
+    const plan = (head: string, prior = reviewed, guidancePaths: string[] = []) => {
       const files = parseGitDiff(git(...GIT_DIFF_ARGS, base + '...' + head));
       return planIncrementalReview({
         workspace,
@@ -1698,7 +1728,12 @@ test('standalone added and edited guides keep their complete patches and outstan
         base,
         files,
         policy,
-        guideChangesGuidance: async (path) => guidancePaths.has(path),
+        guidance: {
+          current: empty,
+          ruleSources: guidancePaths,
+          changedFiles: files.map((file) => file.filename),
+          discover: async () => empty,
+        },
         priorBodies: [
           withReviewCoverage(
             withReviewBaseline('<sup>driver</sup>', {
@@ -1726,7 +1761,7 @@ test('standalone added and edited guides keep their complete patches and outstan
           [path, recheck].includes(file.filename),
         ),
       );
-      assert.equal((await plan(head, reviewed, new Set([path]))).mode, 'full');
+      assert.equal((await plan(head, reviewed, [path])).mode, 'full');
     }
     git('checkout', '-q', '--detach', reviewed);
     write('build.js', "const pages = collect('guides/*.md');\n");
@@ -1759,11 +1794,20 @@ test('an outside mention of a changed function needs a full review only when it 
     const implementation = (n: number) => `export function runWidget() {\n  return ${n};\n}\n`;
     write(file, implementation(0));
     write('other/label.ts', 'export const label = 0;\n');
+    write(
+      'tsconfig.json',
+      JSON.stringify({ compilerOptions: { paths: { '@/w': ['core/widget.ts'] } } }),
+    );
     const initial = commit();
     for (const [source, reason] of [
       [
         'const runWidgets = 0; // See runWidget for details.\n/* Also described\n * in widget.ts. */',
         'bounded-followup',
+      ],
+      ["import * as W from '@/w'; use(W); /* mirrors widget behavior */", 'references-outside-pr'],
+      [
+        String.raw`import { run\u0057idget as W } from '@/w'; W(); // mirrors widget behavior`,
+        'references-outside-pr',
       ],
       ['runWidget(); // See runWidget for details.', 'references-outside-pr'],
       ['const example = `// runWidget`; // See runWidget', 'references-outside-pr'],

@@ -1739,19 +1739,11 @@ async function runReviewPipeline(params: {
             mainOnOpencode ? modelID : undefined,
           )),
     worktree: !!localDiff,
-    guideChangesGuidance: async (path, added) => {
-      if (
-        !rules.complete ||
-        ruleSources.includes(path) ||
-        applicable.referenced.includes(path) ||
-        applicable.required?.includes(path)
-      )
-        return true;
-      if (!added) return false;
-      // A new PR path can activate scoped guidance even when the document itself is ordinary prose.
-      const previousFiles = changedFiles.filter((file) => file !== path);
-      const previous = await discoverGuidelineDocs(workspace, previousFiles);
-      return !isDeepStrictEqual(applicable, applicableGuidelines(previous, previousFiles));
+    guidance: {
+      current: applicable,
+      ruleSources,
+      changedFiles,
+      discover: (files) => discoverGuidelineDocs(workspace, files),
     },
     rulesChangedSince,
   });
