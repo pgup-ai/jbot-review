@@ -16,6 +16,21 @@ export function observesGuidelineVerifier(
   );
 }
 
+export function guidelinePreviewPolicy(input: {
+  mainFinished: boolean;
+  partial: boolean;
+  sharedSource: boolean;
+  verificationRetrieval: boolean;
+  verificationProof: boolean;
+  fork: boolean;
+}) {
+  if (input.mainFinished || input.partial) return 'skip';
+  // Previewing must not warm the live evidence cache or create a verifier session.
+  return input.sharedSource || input.verificationRetrieval || input.verificationProof || input.fork
+    ? 'unavailable'
+    : 'prepare';
+}
+
 function digest(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
@@ -54,14 +69,16 @@ export class GuidelineVerifierShadow {
   }
 
   report(mainDoneAt: number, verificationFailed: boolean) {
-    const earlyHash = batchHash(this.early);
+    const complete = this.state === 'prepared';
+    const earlyHash = complete ? batchHash(this.early) : null;
     const actualHash = batchHash(this.actual);
     return {
-      state: this.state,
+      state: this.state === 'preparing' ? 'unavailable' : this.state,
       freeSlots: this.slots ?? null,
       overlapMs: this.settledAt === undefined ? 0 : Math.max(0, mainDoneAt - this.settledAt),
       preparedOverlapMs: this.readyAt === undefined ? 0 : Math.max(0, mainDoneAt - this.readyAt),
-      earlyBatches: this.early.length,
+      earlyBatches:
+        this.state === 'preparing' || this.state === 'unavailable' ? null : this.early.length,
       actualBatches: this.actual.length,
       earlyHash,
       actualHash,

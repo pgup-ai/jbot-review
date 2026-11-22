@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import {
   GuidelineVerifierShadow,
+  guidelinePreviewPolicy,
   observesGuidelineVerifier,
 } from '../src/shared/guideline-verifier-shadow.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
@@ -69,6 +70,10 @@ it('distinguishes changed text, extra waves, incomplete previews and zero-gain r
   shadow.earlyPrompt('same title, earlier source');
   shadow.actualPrompt('same title, later source');
   assert.equal(shadow.report(20, false).match, null);
+  const unfinished = shadow.report(20, false);
+  assert.equal(unfinished.state, 'unavailable');
+  assert.equal(unfinished.earlyBatches, null);
+  assert.equal(unfinished.earlyHash, null);
   shadow.prepared(21, true);
   const result = shadow.report(20, false);
   assert.equal(result.match, false);
@@ -96,4 +101,20 @@ it('requires both roles on the specified model and engine at the effective cap',
     [ds, ds, 'opencode', 'opencode', 9],
   ] as const)
     assert.equal(observesGuidelineVerifier(main, aux, mainEngine, auxEngine, cap), false);
+});
+
+it('skips late or partial producers and marks evidence-dependent previews unavailable', () => {
+  const input = {
+    mainFinished: false,
+    partial: false,
+    sharedSource: false,
+    verificationRetrieval: false,
+    verificationProof: false,
+    fork: false,
+  };
+  assert.equal(guidelinePreviewPolicy(input), 'prepare');
+  for (const key of ['mainFinished', 'partial'])
+    assert.equal(guidelinePreviewPolicy({ ...input, [key]: true }), 'skip');
+  for (const key of ['sharedSource', 'verificationRetrieval', 'verificationProof', 'fork'])
+    assert.equal(guidelinePreviewPolicy({ ...input, [key]: true }), 'unavailable');
 });

@@ -1,4 +1,8 @@
-import { GuidelineVerifierShadow, observesGuidelineVerifier } from './guideline-verifier-shadow.ts';
+import {
+  GuidelineVerifierShadow,
+  guidelinePreviewPolicy,
+  observesGuidelineVerifier,
+} from './guideline-verifier-shadow.ts';
 import { VerificationEvidence } from './verification-evidence.ts';
 import {
   BASELINE_REFRESH_REASONS,
@@ -3544,25 +3548,22 @@ async function runReviewPipeline(params: {
     let mainDoneAt: number | undefined;
     if (shadow && opencodeRuntime) {
       opencodeRuntime.onVerifierFirstPrompt = (prompt) => shadow.actualPrompt(prompt);
-      void guidelineComplianceCheck.promise
+      const producer = jointGuidelines ? lensPasses[0] : guidelineComplianceCheck;
+      void producer.promise
         .then(async (list) => {
-          if (
-            mainDoneAt !== undefined ||
-            !list.length ||
-            partialSessions.has('guideline-compliance')
-          )
-            return;
+          const policy = guidelinePreviewPolicy({
+            mainFinished: mainDoneAt !== undefined,
+            partial: partialSessions.has(producer.label),
+            sharedSource: !!verifierSourceContext,
+            verificationRetrieval: options.experiment.verificationRetrieval,
+            verificationProof: options.experiment.verificationProof,
+            fork: !!opencodeRuntime?.verifyFork,
+          });
+          if (policy === 'skip' || !list.length) return;
           const targets = overlapTargets([list]);
           if (!targets.length) return;
           shadow.begin(Date.now(), sessionSlots.freeSlots);
-          // A preview must never warm the review's evidence cache, fork a session,
-          // or trigger external retrieval. Mark those configurations unmeasurable.
-          if (
-            verifierSourceContext ||
-            options.experiment.verificationRetrieval ||
-            options.experiment.verificationProof ||
-            opencodeRuntime?.verifyFork
-          ) {
+          if (policy === 'unavailable') {
             shadow.prepared(Date.now(), false);
             return;
           }
