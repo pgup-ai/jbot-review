@@ -157,6 +157,10 @@ export class Semaphore {
     this.drain();
   }
 
+  get freeSlots(): number {
+    return this.limit - this.active;
+  }
+
   isBusy(): boolean {
     return this.active > 0 || Object.values(this.queues).some((queue) => queue.length > 0);
   }
@@ -241,6 +245,7 @@ export interface PromptSpec {
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onDispatch?: (text: string) => void;
   onModelSteps?: (steps: number | undefined) => void;
   /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
   abortLabel?: string;
@@ -778,6 +783,7 @@ async function promptHoldingSlot(
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
     try {
+      spec.onDispatch?.(spec.text);
       await client.session.prompt(
         { sessionID, text: spec.text },
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },

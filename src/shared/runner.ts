@@ -1,3 +1,4 @@
+import { GuidelineVerifierShadow, observesGuidelineVerifier } from './guideline-verifier-shadow.ts';
 import { VerificationEvidence } from './verification-evidence.ts';
 import {
   BASELINE_REFRESH_REASONS,
@@ -3516,6 +3517,75 @@ async function runReviewPipeline(params: {
             ),
     );
 
+    const overlapTargets = (lists: Finding[][]) => {
+      // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
+      // these are the very objects the final pipeline re-anchors and counts —
+      // a mutated pre-pass would empty the final `reanchored` telemetry.
+      const gatedLists = lists.map(
+        (list) =>
+          demoteLowConfidenceBlockingFindings(list.map((finding) => ({ ...finding }))).findings,
+      );
+      for (const list of gatedLists) {
+        resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
+      }
+      const settled = suppressPreviouslyReported(
+        dedupeFindings(...gatedLists),
+        priorJbotThreads,
+        headSha ? addable : undefined,
+      ).findings;
+      return selectFindingIndexes(settled).map((index) => settled[index]);
+    };
+    const shadow =
+      verificationEnabled &&
+      observesGuidelineVerifier(model, auxModel, mainBackend.name, auxBackend.name, sessionCap) &&
+      opencodeRuntime
+        ? new GuidelineVerifierShadow()
+        : undefined;
+    let mainDoneAt: number | undefined;
+    if (shadow && opencodeRuntime) {
+      opencodeRuntime.onVerifierFirstPrompt = (prompt) => shadow.actualPrompt(prompt);
+      void guidelineComplianceCheck.promise
+        .then(async (list) => {
+          if (
+            mainDoneAt !== undefined ||
+            !list.length ||
+            partialSessions.has('guideline-compliance')
+          )
+            return;
+          const targets = overlapTargets([list]);
+          if (!targets.length) return;
+          shadow.begin(Date.now(), sessionSlots.freeSlots);
+          // A preview must never warm the review's evidence cache, fork a session,
+          // or trigger external retrieval. Mark those configurations unmeasurable.
+          if (
+            verifierSourceContext ||
+            options.experiment.verificationRetrieval ||
+            options.experiment.verificationProof ||
+            opencodeRuntime?.verifyFork
+          ) {
+            shadow.prepared(Date.now(), false);
+            return;
+          }
+          const extras = new Map(targets.map((target) => [target, verificationContextFor(target)]));
+          await requestFindingVerdicts({
+            previewPrompt: (prompt) => shadow.earlyPrompt(prompt),
+            workspace,
+            model: auxModel,
+            prContext: verifierPrContext,
+            targets,
+            contextForTargets: verifierContextForTargets,
+            verificationContextFor: (target) => extras.get(target)!,
+            generateVerificationSupport: options.experiment.generateVerificationSupport,
+            promptBudget: auxPromptBudget,
+            toolLessFirst: toolLessAux,
+            toolLessOnly: auxCheckoutBlind,
+            log: () => {},
+            onCoverage: (row) => shadow.prepared(Date.now(), row.state === 'completed'),
+          });
+        })
+        .catch(() => shadow.prepared(Date.now(), false));
+    }
+
     let summary: string;
     let findings: Finding[];
     let mainCoverageGap: IncompleteSession | undefined;
@@ -3534,6 +3604,7 @@ async function runReviewPipeline(params: {
       }
       throw error;
     }
+    if (shadow) mainDoneAt = Date.now();
     mainExecutionDone(
       'completed',
       telemetry.enabled
@@ -3553,23 +3624,8 @@ async function runReviewPipeline(params: {
       if (guidelineComplianceCheck.isSettled()) {
         lists.push(await guidelineComplianceCheck.promise.catch(() => [] as Finding[]));
       }
-      // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
-      // these are the very objects the final pipeline re-anchors and counts —
-      // a mutated pre-pass would empty the final `reanchored` telemetry.
-      const gatedLists = lists.map(
-        (list) =>
-          demoteLowConfidenceBlockingFindings(list.map((finding) => ({ ...finding }))).findings,
-      );
-      for (const list of gatedLists) {
-        resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
-      }
-      const settled = suppressPreviouslyReported(
-        dedupeFindings(...gatedLists),
-        priorJbotThreads,
-        headSha ? addable : undefined,
-      ).findings;
-      const indexes = selectFindingIndexes(settled);
-      if (indexes.length === 0) {
+      const targets = overlapTargets(lists);
+      if (targets.length === 0) {
         recordCoverage({ session, state: 'skipped' });
         return { targets: [], verdicts: [] };
       }
@@ -3588,7 +3644,6 @@ async function runReviewPipeline(params: {
         });
         return 'skipped';
       }
-      const targets = indexes.map((index) => settled[index]);
       firstWaveTargets = targets;
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
@@ -3836,6 +3891,12 @@ async function runReviewPipeline(params: {
             : recordCoverage,
         }),
     });
+    if (shadow) {
+      const failed = ['finding-verification', 'late-finding-verification'].some(
+        (label) => auxCoverage.get(label)?.complete === false,
+      );
+      log(`Guideline verifier shadow: ${JSON.stringify(shadow.report(mainDoneAt!, failed))}`);
+    }
     verificationDone(
       'completed',
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
@@ -4837,7 +4898,6 @@ type VerificationRequest = {
   verificationProof?: boolean;
   generateVerificationSupport?: boolean;
   workspace: string;
-  backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
   prContext: string;
   targets: Finding[];
@@ -4849,7 +4909,10 @@ type VerificationRequest = {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
-};
+} & (
+  | { backend: Pick<ReviewBackend, 'runFindingVerification'>; previewPrompt?: never }
+  | { previewPrompt: (prompt: string) => void; backend?: never }
+);
 
 async function verifyShard(
   params: VerificationRequest,
@@ -5035,6 +5098,18 @@ async function verifyShard(
           ? undefined
           : Math.max(0, params.timeoutMs - (Date.now() - startedAt));
       if (remaining() === 0) throw new Error('Finding verification budget exhausted.');
+      if (params.previewPrompt) {
+        params.previewPrompt(
+          assembleFindingVerificationPrompt(
+            context,
+            targets,
+            Boolean(params.toolLessFirst || params.toolLessOnly),
+            params.verificationProof,
+          ),
+        );
+        offset += size;
+        continue;
+      }
       const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') =>
         params.backend.runFindingVerification(
           params.model,

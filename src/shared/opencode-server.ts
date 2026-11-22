@@ -314,6 +314,7 @@ export interface OpencodeRuntime {
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
   verifyFork?: boolean;
+  onVerifierFirstPrompt?: (prompt: string) => void;
   onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   suppliedContext?: (session: string) => SuppliedContext | undefined;
   reviewerAgent?: boolean;
