@@ -36,6 +36,7 @@ export interface ReviewBaseline {
 export interface IncrementalReviewPlan {
   mode: 'full' | 'incremental';
   reason: string;
+  reasonPath?: string;
   files: PrFile[];
   baseline?: string;
   shadow?: ShadowReviewPlan;
@@ -531,6 +532,10 @@ export async function planIncrementalReview(input: {
           // An untouched fixture depends on no code; an edited one may be read by path.
           !(JSON_FIXTURE.test(path) && !changed.includes(path)),
       );
+    const workflow = unsupported.find(
+      (path) => changed.includes(path) && /^\.(github|depot)\/workflows\/[^/]+\.ya?ml$/i.test(path),
+    );
+    if (workflow) return { ...full('changed-workflow-config'), reasonPath: workflow };
     if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
       return full('unsupported-or-large-pr');
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.

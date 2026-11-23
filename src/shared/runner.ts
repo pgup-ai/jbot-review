@@ -1770,6 +1770,7 @@ async function runReviewPipeline(params: {
   const scopeStats = {
     mode: reviewScope.mode,
     reason: reviewScope.reason,
+    ...(reviewScope.reasonPath && { reasonPath: reviewScope.reasonPath }),
     files: reviewScope.files.length,
     totalFiles: fullReviewFiles.length,
     patchBytes: reviewScope.files.reduce(
@@ -1821,7 +1822,7 @@ async function runReviewPipeline(params: {
       : undefined;
   changedFiles.splice(0, changedFiles.length, ...reviewedFiles);
   log(
-    `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
+    `Review scope: ${reviewScope.mode}; reason=${reviewScope.reason}${reviewScope.reasonPath ? `; path=${JSON.stringify(reviewScope.reasonPath)}` : ''}; files=${files.length}/${fullReviewFiles.length}; patchBytes=${scopeStats.patchBytes}/${scopeStats.totalPatchBytes}${reviewScope.baseline ? `; baseline=${reviewScope.baseline}` : ''}.`,
   );
   // Logged so posted findings can be judged against the scope a follow-up would get.
   if (shadowScope) {
