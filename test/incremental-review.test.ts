@@ -277,6 +277,17 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       [inert.reason, inert.files.map((file) => file.filename)],
       ['bounded-followup', ['core/limit.ts', 'worker/job.ts']],
     );
+    // An edited image may be read by path, so it still forces a full review.
+    write('public/images/logo.png', 'v1');
+    const imageHead = commit();
+    write('public/images/logo.png', 'v2');
+    const edited = await planIncrementalReview({
+      ...input,
+      head: commit(),
+      priorBodies: [body(imageHead, base)],
+      files: [...files, { filename: 'public/images/logo.png' }],
+    });
+    assert.equal(edited.reason, 'unsupported-or-large-pr');
     write(
       'unchanged/wrapper.ts',
       'import { limit } from "../core/limit";\nexport const wrapper = () => limit();\n',
