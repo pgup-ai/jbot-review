@@ -255,8 +255,9 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     }
     // A renamed reason must not silently stop the clean-run baseline refresh.
     for (const reason of BASELINE_REFRESH_REASONS) assert.ok(emitted.has(reason), reason);
-    // Generated snapshots, the governance routing YAML, untouched JSON fixtures and untouched
-    // config naming no changed file load into no changed code.
+    // Generated snapshots, the governance routing YAML, untouched JSON fixtures, untouched images
+    // (patchless, as GitHub serves binaries) and untouched config naming no changed file load into
+    // no changed code.
     const inert = await planIncrementalReview({
       ...input,
       files: [
@@ -269,6 +270,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
           '.pr-governance/review/rules-for-diff.yaml',
           '.oxlintrc.json',
         ].map((filename) => ({ filename, patch: '@@ -0,0 +1 @@\n+a' })),
+        { filename: 'public/images/logo.png' },
       ],
     });
     assert.deepEqual(

@@ -252,6 +252,8 @@ const SERVER_ROUTE =
 const CONFIG_FILE = /\.(json[c5]?|ya?ml|toml|ini|lock)$/i;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
+// A binary image has no patch and loads no code.
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|avif|ico|bmp)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
@@ -523,7 +525,11 @@ export async function planIncrementalReview(input: {
       changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
     // A base merge alone still reaches the PR files importing what it changed, selected below.
     if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
-    if (input.files.some((file) => !file.patch)) return full('unsupported-or-large-pr');
+    // An untouched image or fixture depends on no code; an edited one may be read by path.
+    const inert = (path: string) =>
+      (IMAGE_FILE.test(path) || JSON_FIXTURE.test(path)) && !changed.includes(path);
+    if (input.files.some((file) => !file.patch && !inert(file.filename)))
+      return full('unsupported-or-large-pr');
     const unsupported = input.files
       .map((file) => file.filename)
       .filter(
@@ -533,8 +539,7 @@ export async function planIncrementalReview(input: {
             pattern.test(path),
           ) &&
           !isGuidelineSource(path) &&
-          // An untouched fixture depends on no code; an edited one may be read by path.
-          !(JSON_FIXTURE.test(path) && !changed.includes(path)),
+          !inert(path),
       );
     if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
       return full('unsupported-or-large-pr');
