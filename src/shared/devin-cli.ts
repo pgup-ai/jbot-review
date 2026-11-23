@@ -217,7 +217,6 @@ function openDevinSession(
   return {
     async prompt(prompt: string, label: string, timeoutMs = DEVIN_PROMPT_TIMEOUT_MS) {
       const deadlineAt = Date.now() + timeoutMs;
-      observeVerifierPacket(label, model, prompt);
       writeFileSync(promptFile, prompt, { mode: 0o600 });
       log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
       let retriedSetup = false;
@@ -290,6 +289,7 @@ function openDevinSession(
           }
           throw new Error(`devin ${label} exited 0 with no output${suffix}`);
         }
+        observeVerifierPacket(label, model, prompt);
         launched = true;
         if (existsSync(nudgedMarker))
           log(`${label} Stop hook continued an announced-then-stopped turn in-session`);

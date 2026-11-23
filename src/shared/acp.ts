@@ -161,8 +161,9 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
     timeoutMs?: number,
   ): Promise<string> => {
     try {
+      const response = await run(model, prompt, label, log, timeoutMs);
       observeVerifierPacket(label, model, prompt);
-      return await run(model, prompt, label, log, timeoutMs);
+      return response;
     } catch (error) {
       if (error instanceof Error && /produced no assistant message/.test(error.message)) return '';
       throw error;

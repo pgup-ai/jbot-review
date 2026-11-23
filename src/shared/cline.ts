@@ -410,7 +410,6 @@ async function runClinePrompt(
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   assertClinePromptArgWithinBudget(label, prompt);
-  observeVerifierPacket(label, model, prompt);
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
   const deadline = Date.now() + timeoutMs;
   const timeoutMessage = formatClinePromptTimeoutMessage(label, model, timeoutMs);
@@ -442,6 +441,7 @@ async function runClinePrompt(
       )}`,
     );
   }
+  observeVerifierPacket(label, model, prompt);
   return finalMessage;
 }
 
@@ -514,7 +514,6 @@ export async function runClineSdkFindingVerification(
         fileURLToPath(new URL('./cline-sdk-worker.ts', import.meta.url)),
       ];
   const prompt = assembleFindingVerificationPrompt(prContext, findings, false, proof);
-  observeVerifierPacket('finding-verification', model, prompt);
   const result = await inClineHome(runtime.home, log, (dir) =>
     runCliProcess(process.execPath, worker, {
       cwd: dir,
@@ -539,6 +538,7 @@ export async function runClineSdkFindingVerification(
   log(
     `finding-verification complete via cline-sdk: ${output.toolCalls} tool calls, ${output.denied} denied`,
   );
+  observeVerifierPacket('finding-verification', model, prompt);
   const verdicts = parseFindingVerdicts(output.text, findings.length, log);
   if (!verdicts?.length)
     throw new Error('cline-sdk finding-verification returned no usable verdicts');

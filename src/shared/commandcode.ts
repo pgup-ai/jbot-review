@@ -746,7 +746,6 @@ async function runCommandCodePrompt(
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
       : withNoToolsReviewDirective(prompt);
-  observeVerifierPacket(label, model, input);
   const effortLabel =
     effort ??
     (COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers.length === 0
@@ -774,6 +773,7 @@ async function runCommandCodePrompt(
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
       onStdout: progress.feed,
     });
+    observeVerifierPacket(label, model, input);
     progress.finish();
     if (progress.snapshot().stopReason === 'permission_denied') {
       let findings: Finding[] = [];

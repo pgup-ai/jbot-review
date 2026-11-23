@@ -403,7 +403,6 @@ async function runQoderPrompt(
   log(`Calling ${label} prompt (agent=qoder-cli, model=${model})`);
   try {
     const { query } = await import('@qoder-ai/qoder-agent-sdk');
-    observeVerifierPacket(label, model, prompt);
     session = query({
       prompt,
       options: await buildQoderOptions(workspace, model, token ?? '', home, abortController),
@@ -428,6 +427,7 @@ async function runQoderPrompt(
     }
     finishPendingTools();
     if (!result) throw new Error(`qoder ${label} produced no result event`);
+    observeVerifierPacket(label, model, prompt);
     toolTelemetry?.finishSession({
       session: label,
       backend: QODER_PROVIDER_ID,

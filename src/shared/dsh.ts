@@ -769,7 +769,6 @@ async function promptDshSession(
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(session.model);
   log(`Calling ${label} prompt (engine=dsh, provider=${providerID} model=${modelID})`);
-  observeVerifierPacket(label, session.model, prompt);
   const promptBytes = Buffer.byteLength(prompt, 'utf8');
   const args = ['--profile', 'headless', '--patch', session.patch, '--json'];
   if (session.sessionId) args.push('--session-id', session.sessionId);
@@ -849,6 +848,7 @@ async function promptDshSession(
     telemetry(error, turn.steps);
     throw error;
   }
+  observeVerifierPacket(label, session.model, prompt);
   telemetry('completed', turn.steps);
   if (!turn.text) log(`${label} response contained no text output`);
   return turn.text;

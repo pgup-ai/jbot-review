@@ -464,7 +464,6 @@ async function runDimPrompt(
   const mismatch = dimProviderMismatch(model, runtime.bundle);
   if (mismatch) throw new Error(`dim ${label}: ${mismatch}`);
   const home = createDimSessionHome(runtime.parent, runtime.bundle);
-  observeVerifierPacket(label, model, prompt);
   log(`Calling ${label} prompt (agent=dim-cli, model=${model})`);
   let result;
   try {
@@ -528,5 +527,6 @@ async function runDimPrompt(
       `dim ${label} produced no final message; stderr: ${truncateForLog(result.stderr, 1000)}`,
     );
   }
+  observeVerifierPacket(label, model, prompt);
   return text;
 }

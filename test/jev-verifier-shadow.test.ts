@@ -2,6 +2,10 @@ import { setImmediate } from 'node:timers/promises';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JevVerifierShadow, observeVerifierPacket } from '../src/shared/jev-verifier-shadow.ts';
+import {
+  runClineFindingVerification,
+  runClineSdkFindingVerification,
+} from '../src/shared/cline.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
 import { runFindingVerification, runReview } from '../src/shared/opencode.ts';
 import { fakeOpencodeServer, fakeRuntime } from './support/opencode-fake.ts';
@@ -209,4 +213,22 @@ it('excludes forked OpenCode packets and leaves rejected submissions unobserved'
       ['unobserved', null],
     ],
   );
+});
+
+it('leaves Cline CLI and SDK rechecks unknown when home setup fails before spawn', async () => {
+  const rows: string[] = [];
+  const shadow = new JevVerifierShadow('test-only', (row) => rows.push(row));
+  const model = 'cline/test';
+  const runtime = { home: '/missing-jbot-test-home', workspace: '/unused' };
+  const log = () => {};
+  for (const verify of [
+    () => runClineFindingVerification(model, 'ctx', targets, log, undefined, undefined, runtime),
+    () => runClineSdkFindingVerification(model, 'ctx', targets, log, runtime),
+  ]) {
+    const pass = { model, elapsedMs: 0 };
+    await assert.rejects(shadow.time(pass, verify), { code: 'ENOENT' });
+    await shadow.record(targets.slice(0, 1), { model: pass.model, elapsedMs: 0 }, pass, targets);
+  }
+  assert.equal(rows.length, 2);
+  for (const row of rows) assert.match(row, /"neededSecondPass":null/);
 });

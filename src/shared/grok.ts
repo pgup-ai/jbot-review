@@ -330,7 +330,6 @@ async function runGrokPrompt(
 ): Promise<string> {
   const fullPrompt = buildGrokPrompt(prompt);
   assertGrokPromptWithinBudget(label, fullPrompt);
-  observeVerifierPacket(label, model, fullPrompt);
   const env = grokEnvForHome(
     runtime?.home,
     runtime?.authMode === 'api-key' ? runtime.apiKey : undefined,
@@ -366,6 +365,7 @@ async function runGrokPrompt(
         `grok ${label} produced no final message; stderr: ${truncateForLog(result.stderr, 1000)}`,
       );
     }
+    observeVerifierPacket(label, model, fullPrompt);
     return finalMessage;
   } finally {
     try {
