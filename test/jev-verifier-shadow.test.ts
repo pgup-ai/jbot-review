@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JevVerifierShadow, observeVerifierPacket } from '../src/shared/jev-verifier-shadow.ts';
@@ -52,7 +53,7 @@ it('scores only the dispatched first packet and joins each score to the validate
     log: () => {},
     backend: { runFindingVerification: (...args) => runFindingVerification(runtime, ...args) },
   });
-  await shadow.flush();
+  await setImmediate();
   assert.deepEqual(
     result.map((r) => r.verdict),
     ['confirmed', 'refuted'],
@@ -103,11 +104,45 @@ it('isolates parallel model packets and reports single-pass outcomes when scorin
       }),
     ),
   );
-  await shadow.flush();
+  await setImmediate();
   assert.deepEqual(requests.sort(), ['acp/b final packet', 'cli/a final packet']);
   assert.equal(rows.length, 2);
   for (const row of rows) {
     const r = JSON.parse(row.slice(row.indexOf('{')));
     assert.deepEqual([r.status, r.score, r.neededSecondPass], ['http-503', null, null]);
   }
+});
+
+it('returns the verifier verdict while Jev is stalled and cancels the request on shutdown', async (t) => {
+  let signal: AbortSignal | undefined;
+  t.mock.method(globalThis, 'fetch', (_url: string, init: RequestInit) => {
+    signal = init.signal!;
+    return new Promise<Response>((_, reject) =>
+      signal!.addEventListener('abort', () => reject(signal!.reason)),
+    );
+  });
+  const rows: string[] = [];
+  const shadow = new JevVerifierShadow('test-only', (row) => rows.push(row));
+  const verdicts = await requestFindingVerdicts({
+    targets: targets.slice(0, 1),
+    workspace: '/unused',
+    jevShadow: shadow,
+    model: 'test',
+    prContext: 'ctx',
+    sourceContext: async () => '',
+    log: () => {},
+    backend: {
+      async runFindingVerification() {
+        observeVerifierPacket('finding-verification', 'test', 'packet');
+        return [{ index: 0, verdict: 'confirmed' }];
+      },
+    },
+  });
+  assert.equal(verdicts[0].verdict, 'confirmed');
+  assert.equal(signal?.aborted, false);
+  assert.equal(rows.length, 0);
+  shadow.stop();
+  assert.equal(signal?.aborted, true);
+  await setImmediate();
+  assert.match(rows[0], /"status":"cancelled"/);
 });

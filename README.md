@@ -1112,7 +1112,19 @@ actual first-pass model, sufficiency score (threshold 0.5), and whether the norm
 two-stage verifier sent that finding to its tool-enabled pass. Single-stage
 routes report `neededSecondPass: null`. First- and second-pass times are elapsed
 batch milliseconds including queueing; group by batch ID before aggregating.
-Jev time is separate. Scores are observational and never enter verdict handling.
+Jev time is separate. Scoring runs in the background. Review teardown cancels
+outstanding requests without waiting. An unavailable or cancelled score is missing
+data and should be counted separately.
+
+The 0.5 cutoff is a frozen shadow baseline. Keep the raw Noul probability to
+compare cutoffs offline, starting with 0.7 for a positive prediction as suggested
+by the [Noul guide](https://docs.typesafe.ai/primitives/noul). For each verifier
+model, measure how often a packet
+classified as sufficient still went to a second pass, alongside the fraction
+classified as sufficient. Check decisive evidence and verdict correctness on a
+held-out set of PRs before using a cutoff for routing. Second-pass usage measures
+verifier behavior and is only a proxy for evidence sufficiency.
+See [TypeSafe’s threshold guidance](https://docs.typesafe.ai/confidence).
 
 The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
 source files, and bounds the complete JSON request to 30,000 bytes. Preparation

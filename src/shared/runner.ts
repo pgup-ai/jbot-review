@@ -4304,7 +4304,6 @@ async function runReviewPipeline(params: {
     finishTelemetry('completed');
   } finally {
     auxiliaryStopped = true;
-    await jevShadow?.flush();
     const teardownDone = phases.start({ phase: 'teardown', scope: 'run' });
     let teardownCompleted = false;
     try {
@@ -4317,6 +4316,7 @@ async function runReviewPipeline(params: {
       await cleanupCliHomes();
       teardownCompleted = true;
     } finally {
+      jevShadow?.stop();
       teardownDone(teardownCompleted ? 'completed' : 'failed');
       phases.finishOpen(teardownCompleted ? 'aborted' : 'failed');
       if (!teardownCompleted) {
@@ -5232,7 +5232,8 @@ async function verifyShard(
       );
       if (params.timeoutMs !== undefined && Date.now() - startedAt >= params.timeoutMs) break;
     } finally {
-      if (attempted) params.jevShadow?.record(targets, firstPass, secondPass, rechecked);
+      if (attempted)
+        void params.jevShadow?.record(targets, firstPass, secondPass, rechecked).catch(() => {});
     }
     offset += size;
   }

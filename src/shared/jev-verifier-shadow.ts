@@ -21,7 +21,7 @@ export function observeVerifierPacket(label: string, model: string, prompt: stri
 }
 
 export class JevVerifierShadow {
-  private readonly pending = new Set<Promise<void>>();
+  private readonly lifetime = new AbortController();
 
   constructor(
     private readonly key: string,
@@ -37,17 +37,11 @@ export class JevVerifierShadow {
     }
   }
 
-  record(targets: Finding[], first: Pass, second: Pass, rechecked?: Finding[]) {
-    const task = this.score(targets, first, second, rechecked);
-    this.pending.add(task);
-    void task.finally(() => this.pending.delete(task));
+  stop() {
+    this.lifetime.abort();
   }
 
-  async flush() {
-    await Promise.all(this.pending);
-  }
-
-  private async score(targets: Finding[], first: Pass, second: Pass, rechecked?: Finding[]) {
+  async record(targets: Finding[], first: Pass, second: Pass, rechecked?: Finding[]) {
     const batchId = randomUUID();
     const start = performance.now();
     let status = 'unobserved';
@@ -61,7 +55,8 @@ export class JevVerifierShadow {
         });
         if (Buffer.byteLength(body) > 512 * 1024) status = 'oversize';
         else {
-          const response = await requestJev(body, this.key, AbortSignal.timeout(5000));
+          const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(5000)]);
+          const response = await requestJev(body, this.key, signal);
           if (!response.ok) {
             status = `http-${response.status}`;
             await response.body?.cancel();
@@ -84,7 +79,7 @@ export class JevVerifierShadow {
           }
         }
       } catch {
-        status = 'unavailable';
+        status = this.lifetime.signal.aborted ? 'cancelled' : 'unavailable';
       }
     }
     const jevMs = Math.round(performance.now() - start);
