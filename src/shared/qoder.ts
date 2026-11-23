@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -426,6 +427,7 @@ async function runQoderPrompt(
     }
     finishPendingTools();
     if (!result) throw new Error(`qoder ${label} produced no result event`);
+    observeVerifierPacket(label, model, prompt);
     toolTelemetry?.finishSession({
       session: label,
       backend: QODER_PROVIDER_ID,

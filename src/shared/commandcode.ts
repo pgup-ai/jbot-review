@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import type { NativeEvidenceStore } from './native-evidence.ts';
 import { measureReviewPrompt, reviewPromptBudget } from './review-plan.ts';
 import {
@@ -772,6 +773,7 @@ async function runCommandCodePrompt(
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
       onStdout: progress.feed,
     });
+    observeVerifierPacket(label, model, input);
     progress.finish();
     if (progress.snapshot().stopReason === 'permission_denied') {
       let findings: Finding[] = [];

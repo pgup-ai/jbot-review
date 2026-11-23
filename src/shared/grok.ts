@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -364,6 +365,7 @@ async function runGrokPrompt(
         `grok ${label} produced no final message; stderr: ${truncateForLog(result.stderr, 1000)}`,
       );
     }
+    observeVerifierPacket(label, model, fullPrompt);
     return finalMessage;
   } finally {
     try {

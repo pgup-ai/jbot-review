@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   appendFileSync,
   closeSync,
@@ -239,6 +240,7 @@ export interface PromptOutcome {
 }
 
 export interface PromptSpec {
+  inheritedContext?: boolean;
   model: string;
   text: string;
   label: string;
@@ -788,6 +790,7 @@ async function promptHoldingSlot(
         { sessionID, text: spec.text },
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
       );
+      observeVerifierPacket(label, spec.model, spec.inheritedContext ? null : spec.text);
     } catch (error) {
       // The server may have accepted the prompt before the request failed.
       await interruptBestEffort(client, sessionID, label, log);

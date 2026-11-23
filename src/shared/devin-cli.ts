@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   existsSync,
   mkdirSync,
@@ -288,6 +289,7 @@ function openDevinSession(
           }
           throw new Error(`devin ${label} exited 0 with no output${suffix}`);
         }
+        observeVerifierPacket(label, model, prompt);
         launched = true;
         if (existsSync(nudgedMarker))
           log(`${label} Stop hook continued an announced-then-stopped turn in-session`);

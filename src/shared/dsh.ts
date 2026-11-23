@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -847,6 +848,7 @@ async function promptDshSession(
     telemetry(error, turn.steps);
     throw error;
   }
+  observeVerifierPacket(label, session.model, prompt);
   telemetry('completed', turn.steps);
   if (!turn.text) log(`${label} response contained no text output`);
   return turn.text;

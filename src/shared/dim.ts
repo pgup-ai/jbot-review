@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
@@ -526,5 +527,6 @@ async function runDimPrompt(
       `dim ${label} produced no final message; stderr: ${truncateForLog(result.stderr, 1000)}`,
     );
   }
+  observeVerifierPacket(label, model, prompt);
   return text;
 }

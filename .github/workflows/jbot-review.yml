@@ -277,6 +277,8 @@ jobs:
           JBOT_COMMANDCODE_TOOLS: ${{ vars.JBOT_COMMANDCODE_TOOLS }}
           JBOT_GUIDELINE_SWEEP: 'false'
           JBOT_VERIFY_OVERLAP_GRACE: 'true'
+          JBOT_JEV_VERIFIER_SHADOW: ${{ vars.JBOT_JEV_VERIFIER_SHADOW }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           # Unset arrives empty and takes each arm's default: trim off, embedded-first on,
           # the context-pack preset.
           JBOT_REVIEW_EXPERIMENT: ${{ vars.JBOT_REVIEW_EXPERIMENT }}

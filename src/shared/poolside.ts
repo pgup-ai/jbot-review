@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
@@ -302,6 +303,7 @@ async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string
     );
   }
 
+  observeVerifierPacket(label, model, fullPrompt);
   const { raw, usage } = parsePoolsideStream(body, label);
   if (!raw) {
     throw new Error(

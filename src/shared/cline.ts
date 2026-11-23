@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   chmodSync,
   copyFileSync,
@@ -440,6 +441,7 @@ async function runClinePrompt(
       )}`,
     );
   }
+  observeVerifierPacket(label, model, prompt);
   return finalMessage;
 }
 
@@ -511,6 +513,7 @@ export async function runClineSdkFindingVerification(
         import.meta.resolve('tsx'),
         fileURLToPath(new URL('./cline-sdk-worker.ts', import.meta.url)),
       ];
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, false, proof);
   const result = await inClineHome(runtime.home, log, (dir) =>
     runCliProcess(process.execPath, worker, {
       cwd: dir,
@@ -520,7 +523,7 @@ export async function runClineSdkFindingVerification(
       input: JSON.stringify({
         providerId: parseModelName(model).providerID,
         modelId: clineModelId(model),
-        prompt: assembleFindingVerificationPrompt(prContext, findings, false, proof),
+        prompt,
         workspace: runtime.workspace,
         timeoutMs,
       }),
@@ -535,6 +538,7 @@ export async function runClineSdkFindingVerification(
   log(
     `finding-verification complete via cline-sdk: ${output.toolCalls} tool calls, ${output.denied} denied`,
   );
+  observeVerifierPacket('finding-verification', model, prompt);
   const verdicts = parseFindingVerdicts(output.text, findings.length, log);
   if (!verdicts?.length)
     throw new Error('cline-sdk finding-verification returned no usable verdicts');

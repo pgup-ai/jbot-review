@@ -1,3 +1,4 @@
+import { readJevResponse, requestJev } from './jev-client.ts';
 import { evidenceHash, type EvidenceDiskCache } from './evidence-cache.ts';
 import { readTrackedSource, SOURCE_FILE } from './finding-context.ts';
 import type { PrFile } from './github.ts';
@@ -302,34 +303,14 @@ export async function buildJevPrefetch(
       if (!cached) {
         apiStarted = Date.now();
         stats.collectMs = apiStarted - started;
-        const response = await fetch('https://api.typesafe.ai/v1/systemone', {
-          method: 'POST',
-          redirect: 'error',
-          signal,
-          headers: {
-            Authorization: `Bearer ${options.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: request.body,
-        });
+        const response = await requestJev(request.body, options.apiKey!, signal);
         stats.httpStatus = response.status;
         if (!response.ok) {
           await response.body?.cancel();
           stats.reason = 'http';
           return '';
         }
-        const chunks: Uint8Array[] = [];
-        let responseBytes = 0;
-        for await (const chunk of response.body ?? []) {
-          responseBytes += chunk.byteLength;
-          if (responseBytes > 16_384) throw new Error('invalid-response');
-          chunks.push(chunk);
-        }
-        try {
-          value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        } catch {
-          throw new Error('invalid-response');
-        }
+        value = await readJevResponse(response);
       }
       const result = selectJevCandidates(
         value,

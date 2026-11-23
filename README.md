@@ -1090,9 +1090,39 @@ JBOT_REVIEW_EXPERIMENT=context-pack npm run review:local -- --base origin/main
 To disable the experiments, set `JBOT_REVIEW_EXPERIMENT=off`. Explicit environment
 values override local `.env`; unknown values disable the experiments. An empty
 value keeps the default. Removed flags cannot reactivate them. Keep the TypeSafe
-key in the ignored `.env` or a hosted secret. Only `jev` sends bounded
-diff/source fragments to TypeSafe; `off`, `diff-batches`, `adaptive`, `linked`
-and `context-pack` make no Jev API call.
+key in the ignored `.env` or a hosted secret. The `jev` preset sends bounded diff/source fragments to TypeSafe for caller ranking.
+Any preset can also send verifier packets when the independent shadow below is enabled.
+
+To measure verifier packet sufficiency on any model, set the Actions secret
+`TYPESAFE_API_KEY` and the Actions variable `JBOT_JEV_VERIFIER_SHADOW=true`.
+Map both into the review action step in each calling workflow:
+
+```yaml
+env:
+  TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+  JBOT_JEV_VERIFIER_SHADOW: ${{ vars.JBOT_JEV_VERIFIER_SHADOW }}
+```
+
+This opt-in sends the full first-pass verifier packet to TypeSafe, independently
+of the review experiment preset. Each batch gets one shadow request. Packets over
+512 KiB and unavailable scores are recorded without truncating the evidence.
+Each `Jev verifier shadow` log row identifies the batch, finding index and anchor,
+actual first-pass model, sufficiency score (threshold 0.5), and whether the normal
+two-stage verifier sent that finding to its tool-enabled pass. Single-stage routes and rechecks that never dispatched report `neededSecondPass: null`. Forks with inherited context are excluded from scoring. First- and second-pass times are elapsed
+batch milliseconds including queueing; group by batch ID before aggregating.
+Jev time is separate. Scoring runs in the background. Review teardown cancels
+outstanding requests without waiting. An unavailable or cancelled score is missing
+data and should be counted separately.
+
+The 0.5 cutoff is a frozen shadow baseline. Keep the raw Noul probability to
+compare cutoffs offline, starting with 0.7 for a positive prediction as suggested
+by the [Noul guide](https://docs.typesafe.ai/primitives/noul). For each verifier
+model, measure how often a packet
+classified as sufficient still went to a second pass, alongside the fraction
+classified as sufficient. Check decisive evidence and verdict correctness on a
+held-out set of PRs before using a cutoff for routing. Second-pass usage measures
+verifier behavior and is only a proxy for evidence sufficiency.
+See [TypeSafe’s threshold guidance](https://docs.typesafe.ai/confidence).
 
 The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
 source files, and bounds the complete JSON request to 30,000 bytes. Preparation

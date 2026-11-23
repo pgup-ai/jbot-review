@@ -525,6 +525,7 @@ export async function runFindingVerification(
     const raw = await promptInSession(runtime, sessionID, {
       model,
       text: prompt,
+      inheritedContext: Boolean(forkFrom),
       onDispatch: mode === 'capped' ? undefined : runtime.onVerifierFirstPrompt,
       label: 'finding-verification',
       log,
