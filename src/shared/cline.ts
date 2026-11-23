@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   chmodSync,
   copyFileSync,
@@ -409,6 +410,7 @@ async function runClinePrompt(
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   assertClinePromptArgWithinBudget(label, prompt);
+  observeVerifierPacket(label, model, prompt);
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
   const deadline = Date.now() + timeoutMs;
   const timeoutMessage = formatClinePromptTimeoutMessage(label, model, timeoutMs);
@@ -511,6 +513,8 @@ export async function runClineSdkFindingVerification(
         import.meta.resolve('tsx'),
         fileURLToPath(new URL('./cline-sdk-worker.ts', import.meta.url)),
       ];
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, false, proof);
+  observeVerifierPacket('finding-verification', model, prompt);
   const result = await inClineHome(runtime.home, log, (dir) =>
     runCliProcess(process.execPath, worker, {
       cwd: dir,
@@ -520,7 +524,7 @@ export async function runClineSdkFindingVerification(
       input: JSON.stringify({
         providerId: parseModelName(model).providerID,
         modelId: clineModelId(model),
-        prompt: assembleFindingVerificationPrompt(prContext, findings, false, proof),
+        prompt,
         workspace: runtime.workspace,
         timeoutMs,
       }),

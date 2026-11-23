@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
@@ -463,6 +464,7 @@ async function runDimPrompt(
   const mismatch = dimProviderMismatch(model, runtime.bundle);
   if (mismatch) throw new Error(`dim ${label}: ${mismatch}`);
   const home = createDimSessionHome(runtime.parent, runtime.bundle);
+  observeVerifierPacket(label, model, prompt);
   log(`Calling ${label} prompt (agent=dim-cli, model=${model})`);
   let result;
   try {

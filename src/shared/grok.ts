@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -329,6 +330,7 @@ async function runGrokPrompt(
 ): Promise<string> {
   const fullPrompt = buildGrokPrompt(prompt);
   assertGrokPromptWithinBudget(label, fullPrompt);
+  observeVerifierPacket(label, model, fullPrompt);
   const env = grokEnvForHome(
     runtime?.home,
     runtime?.authMode === 'api-key' ? runtime.apiKey : undefined,

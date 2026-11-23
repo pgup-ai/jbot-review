@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 /**
  * ACP review backends: wraps a prompt runner in the ReviewBackend the runner
  * consumes, and parses what the agent returns. Local and remote share
@@ -160,6 +161,7 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
     timeoutMs?: number,
   ): Promise<string> => {
     try {
+      observeVerifierPacket(label, model, prompt);
       return await run(model, prompt, label, log, timeoutMs);
     } catch (error) {
       if (error instanceof Error && /produced no assistant message/.test(error.message)) return '';

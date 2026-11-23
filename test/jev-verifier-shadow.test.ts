@@ -1,0 +1,113 @@
+import { it } from 'node:test';
+import assert from 'node:assert/strict';
+import { JevVerifierShadow, observeVerifierPacket } from '../src/shared/jev-verifier-shadow.ts';
+import { requestFindingVerdicts } from '../src/shared/runner.ts';
+import { runFindingVerification } from '../src/shared/opencode.ts';
+import { fakeOpencodeServer, fakeRuntime } from './support/opencode-fake.ts';
+import { JEV_MODEL } from '../src/shared/prompt.ts';
+import type { Finding } from '../src/shared/types.ts';
+
+const targets: Finding[] = ['a.ts', 'b.ts'].map((path) => ({
+  path,
+  line: 1,
+  title: 'Check condition',
+  body: 'Verify the outcome',
+  severity: 'P2',
+}));
+
+it('scores only the dispatched first packet and joins each score to the validated recheck decision', async (t) => {
+  const rows: string[] = [];
+  const shadow = new JevVerifierShadow('test-only', (s) => rows.push(s));
+  let submitted = '';
+  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
+    const request = JSON.parse(String(init.body));
+    submitted = request.state.packet;
+    assert.deepEqual(Object.keys(request.questions), ['f0', 'f1']);
+    return Response.json({
+      model: JEV_MODEL,
+      answers: { f0: { type: 'noul', noul: 0.5 }, f1: { type: 'noul', noul: 0.49 } },
+    });
+  });
+  const fake = fakeOpencodeServer((session) => ({
+    text: JSON.stringify({
+      verdicts:
+        session.agent === 'jbot-closed-book'
+          ? [
+              { index: 0, verdict: 'confirmed', reason: 'source evidence' },
+              { index: 1, verdict: 'uncertain', reason: 'lookup' },
+            ]
+          : [{ index: 0, verdict: 'refuted', reason: 'guard' }],
+    }),
+  }));
+  const runtime = fakeRuntime(fake);
+  const model = 'openai/gpt-5';
+  const result = await requestFindingVerdicts({
+    jevShadow: shadow,
+    targets,
+    workspace: '/unused',
+    model,
+    prContext: 'private-source-fixture',
+    sourceContext: async () => '',
+    toolLessFirst: true,
+    log: () => {},
+    backend: { runFindingVerification: (...args) => runFindingVerification(runtime, ...args) },
+  });
+  await shadow.flush();
+  assert.deepEqual(
+    result.map((r) => r.verdict),
+    ['confirmed', 'refuted'],
+  );
+  assert.equal(fake.prompts.length, 2);
+  assert.equal(submitted, fake.prompts[0].body.text);
+  assert.equal(rows.length, 2);
+  const [a, b] = rows.map((s) => JSON.parse(s.slice(s.indexOf('{'))));
+  assert.equal(a.batchId, b.batchId);
+  assert.deepEqual(
+    [a.model, a.sufficient, a.neededSecondPass, a.secondPassMs],
+    [model, true, false, null],
+  );
+  assert.deepEqual(
+    [b.model, b.sufficient, b.neededSecondPass, b.secondPassModel],
+    [model, false, true, model],
+  );
+  assert.ok(b.firstPassMs >= 0 && b.secondPassMs >= 0 && b.jevMs >= 0);
+  assert.ok(rows.every((s) => !s.includes('private-source-fixture') && !s.includes('test-only')));
+});
+
+it('isolates parallel model packets and reports single-pass outcomes when scoring fails', async (t) => {
+  const requests: string[] = [];
+  const rows: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
+    requests.push(JSON.parse(String(init.body)).state.packet);
+    return new Response(null, { status: 503 });
+  });
+  const shadow = new JevVerifierShadow('test-only', (s) => rows.push(s));
+  await Promise.all(
+    ['cli/a', 'acp/b'].map((model) =>
+      requestFindingVerdicts({
+        targets: targets.slice(0, 1),
+        workspace: '/unused',
+        jevShadow: shadow,
+        model,
+        prContext: 'ctx',
+        sourceContext: async () => '',
+        log: () => {},
+        backend: {
+          async runFindingVerification() {
+            await Promise.resolve();
+            observeVerifierPacket('finding-verification', model, model + ' final packet');
+            observeVerifierPacket('finding-verification-repair', model, 'repair');
+            return [{ index: 0, verdict: 'refuted' }];
+          },
+        },
+      }),
+    ),
+  );
+  await shadow.flush();
+  assert.deepEqual(requests.sort(), ['acp/b final packet', 'cli/a final packet']);
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    const r = JSON.parse(row.slice(row.indexOf('{')));
+    assert.deepEqual([r.status, r.score, r.neededSecondPass], ['http-503', null, null]);
+  }
+});

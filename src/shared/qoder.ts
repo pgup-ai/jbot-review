@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -402,6 +403,7 @@ async function runQoderPrompt(
   log(`Calling ${label} prompt (agent=qoder-cli, model=${model})`);
   try {
     const { query } = await import('@qoder-ai/qoder-agent-sdk');
+    observeVerifierPacket(label, model, prompt);
     session = query({
       prompt,
       options: await buildQoderOptions(workspace, model, token ?? '', home, abortController),

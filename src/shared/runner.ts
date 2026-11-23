@@ -1,3 +1,4 @@
+import { JevVerifierShadow } from './jev-verifier-shadow.ts';
 import {
   GuidelineVerifierShadow,
   guidelinePreviewPolicy,
@@ -2745,6 +2746,12 @@ async function runReviewPipeline(params: {
     : auxRoleBackend;
   const auxSessionsEnabled = !auxBootError && !auxGatewayPreflightError;
   const verificationEnabled = options.verifyFindings && auxSessionsEnabled;
+  const jevKey = process.env.TYPESAFE_API_KEY?.trim();
+  const jevShadowEnabled = process.env.JBOT_JEV_VERIFIER_SHADOW === 'true';
+  const jevShadow = jevShadowEnabled && jevKey ? new JevVerifierShadow(jevKey, log) : undefined;
+  if (jevShadowEnabled && !jevKey)
+    log('Jev verifier shadow disabled: TYPESAFE_API_KEY is missing.');
+
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, verificationEnabled);
   if (finderTimeoutMs) {
     log(
@@ -3648,6 +3655,7 @@ async function runReviewPipeline(params: {
       firstWaveTargets = targets;
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
+        jevShadow,
         sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
@@ -3863,6 +3871,7 @@ async function runReviewPipeline(params: {
       logOutcomes: (application) => logVerdictOutcomes(application, log),
       verify: (findings, late) =>
         verifyFindings({
+          jevShadow,
           sourceContext: verifierSourceContext,
           prepareEvidence: (targets, timeoutMs) =>
             prepareEvidence('verification', targets, timeoutMs),
@@ -4295,6 +4304,7 @@ async function runReviewPipeline(params: {
     finishTelemetry('completed');
   } finally {
     auxiliaryStopped = true;
+    await jevShadow?.flush();
     const teardownDone = phases.start({ phase: 'teardown', scope: 'run' });
     let teardownCompleted = false;
     try {
@@ -4806,6 +4816,7 @@ export async function takeSettledAuxiliary<T>(
 }
 
 async function verifyFindings(params: {
+  jevShadow?: JevVerifierShadow;
   contextForTargets?: (targets: Finding[]) => string;
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
@@ -4890,6 +4901,7 @@ export async function requestFindingVerdicts(
 }
 
 type VerificationRequest = {
+  jevShadow?: JevVerifierShadow;
   contextForTargets?: (targets: Finding[]) => string;
   promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
@@ -4929,6 +4941,10 @@ async function verifyShard(
   for (let offset = 0; offset < params.targets.length;) {
     let size = Math.min(batchSize, params.targets.length - offset);
     let targets = params.targets.slice(offset, offset + size);
+    const firstPass = { model: params.model, elapsedMs: 0 };
+    const secondPass = { model: params.model, elapsedMs: 0 };
+    let attempted = false;
+    let rechecked: Finding[] | undefined;
     try {
       let context: string;
       let sourceContext: string;
@@ -5111,18 +5127,24 @@ async function verifyShard(
         offset += size;
         continue;
       }
-      const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') =>
-        params.backend.runFindingVerification(
-          params.model,
-          context,
-          findings,
-          params.log,
-          remaining(),
-          params.onTokenUsage,
-          params.modelOptions,
-          mode,
-          params.verificationProof,
-        );
+      const verify = (findings: Finding[], mode?: 'single-shot' | 'capped') => {
+        attempted = true;
+        const call = () =>
+          params.backend.runFindingVerification(
+            params.model,
+            context,
+            findings,
+            params.log,
+            remaining(),
+            params.onTokenUsage,
+            params.modelOptions,
+            mode,
+            params.verificationProof,
+          );
+        return params.jevShadow
+          ? params.jevShadow.time(mode === 'capped' ? secondPass : firstPass, call)
+          : call();
+      };
       const check = async (verdict: FindingVerdictList[number], suppliedOnly = false) => {
         let result = checkConfirmationEvidence(verdict, sourceContext);
         const target = targets[verdict.index];
@@ -5166,6 +5188,7 @@ async function verifyShard(
             verdict.verdict === 'confirmed' && resolvesFinding(targets[verdict.index], verdict),
         );
         const rest = targets.filter((_, index) => !confirmed.some((v) => v.index === index));
+        rechecked = rest;
         const why = recheckReasons(
           rest.map((target) => first?.find((v) => v.index === targets.indexOf(target))?.verdict),
         );
@@ -5208,6 +5231,8 @@ async function verifyShard(
         `(finding verification batch failed; keeping its findings unverified: ${error instanceof Error ? error.message : String(error)})`,
       );
       if (params.timeoutMs !== undefined && Date.now() - startedAt >= params.timeoutMs) break;
+    } finally {
+      if (attempted) params.jevShadow?.record(targets, firstPass, secondPass, rechecked);
     }
     offset += size;
   }

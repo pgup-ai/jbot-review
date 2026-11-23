@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   existsSync,
   mkdirSync,
@@ -216,6 +217,7 @@ function openDevinSession(
   return {
     async prompt(prompt: string, label: string, timeoutMs = DEVIN_PROMPT_TIMEOUT_MS) {
       const deadlineAt = Date.now() + timeoutMs;
+      observeVerifierPacket(label, model, prompt);
       writeFileSync(promptFile, prompt, { mode: 0o600 });
       log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
       let retriedSetup = false;

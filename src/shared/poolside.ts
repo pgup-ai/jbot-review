@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
@@ -268,6 +269,7 @@ async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string
   const { apiKey, reasoningEffort, model, prompt, label, log, onTokenUsage } = options;
   const timeoutMs = options.timeoutMs ?? POOLSIDE_PROMPT_TIMEOUT_MS;
   const fullPrompt = `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
+  observeVerifierPacket(label, model, fullPrompt);
   log(
     `Calling ${label} prompt (backend=poolside-api, model=${model}, reasoning=${reasoningEffort})`,
   );

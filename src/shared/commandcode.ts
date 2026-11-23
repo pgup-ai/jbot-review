@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import type { NativeEvidenceStore } from './native-evidence.ts';
 import { measureReviewPrompt, reviewPromptBudget } from './review-plan.ts';
 import {
@@ -745,6 +746,7 @@ async function runCommandCodePrompt(
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
       : withNoToolsReviewDirective(prompt);
+  observeVerifierPacket(label, model, input);
   const effortLabel =
     effort ??
     (COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers.length === 0

@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import {
   appendFileSync,
   closeSync,
@@ -783,6 +784,7 @@ async function promptHoldingSlot(
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
     try {
+      observeVerifierPacket(label, spec.model, spec.text);
       spec.onDispatch?.(spec.text);
       await client.session.prompt(
         { sessionID, text: spec.text },

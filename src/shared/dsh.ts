@@ -1,3 +1,4 @@
+import { observeVerifierPacket } from './jev-verifier-shadow.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -768,6 +769,7 @@ async function promptDshSession(
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(session.model);
   log(`Calling ${label} prompt (engine=dsh, provider=${providerID} model=${modelID})`);
+  observeVerifierPacket(label, session.model, prompt);
   const promptBytes = Buffer.byteLength(prompt, 'utf8');
   const args = ['--profile', 'headless', '--patch', session.patch, '--json'];
   if (session.sessionId) args.push('--session-id', session.sessionId);

@@ -1090,9 +1090,29 @@ JBOT_REVIEW_EXPERIMENT=context-pack npm run review:local -- --base origin/main
 To disable the experiments, set `JBOT_REVIEW_EXPERIMENT=off`. Explicit environment
 values override local `.env`; unknown values disable the experiments. An empty
 value keeps the default. Removed flags cannot reactivate them. Keep the TypeSafe
-key in the ignored `.env` or a hosted secret. Only `jev` sends bounded
+key in the ignored `.env` or a hosted secret. Among these presets, only `jev` sends bounded
 diff/source fragments to TypeSafe; `off`, `diff-batches`, `adaptive`, `linked`
 and `context-pack` make no Jev API call.
+
+To measure verifier packet sufficiency on any model, set the Actions secret
+`TYPESAFE_API_KEY` and the Actions variable `JBOT_JEV_VERIFIER_SHADOW=true`.
+Map both into the review action step in each calling workflow:
+
+```yaml
+env:
+  TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+  JBOT_JEV_VERIFIER_SHADOW: ${{ vars.JBOT_JEV_VERIFIER_SHADOW }}
+```
+
+This opt-in sends the full first-pass verifier packet to TypeSafe, independently
+of the review experiment preset. Each batch gets one shadow request. Packets over
+512 KiB and unavailable scores are recorded without truncating the evidence.
+Each `Jev verifier shadow` log row identifies the batch, finding index and anchor,
+actual first-pass model, sufficiency score (threshold 0.5), and whether the normal
+two-stage verifier sent that finding to its tool-enabled pass. Single-stage
+routes report `neededSecondPass: null`. First- and second-pass times are elapsed
+batch milliseconds including queueing; group by batch ID before aggregating.
+Jev time is separate. Scores are observational and never enter verdict handling.
 
 The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
 source files, and bounds the complete JSON request to 30,000 bytes. Preparation
