@@ -785,12 +785,12 @@ async function promptHoldingSlot(
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
     try {
-      observeVerifierPacket(label, spec.model, spec.inheritedContext ? null : spec.text);
       spec.onDispatch?.(spec.text);
       await client.session.prompt(
         { sessionID, text: spec.text },
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
       );
+      observeVerifierPacket(label, spec.model, spec.inheritedContext ? null : spec.text);
     } catch (error) {
       // The server may have accepted the prompt before the request failed.
       await interruptBestEffort(client, sessionID, label, log);

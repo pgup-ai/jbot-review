@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JevVerifierShadow, observeVerifierPacket } from '../src/shared/jev-verifier-shadow.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
-import { runFindingVerification } from '../src/shared/opencode.ts';
+import { runFindingVerification, runReview } from '../src/shared/opencode.ts';
 import { fakeOpencodeServer, fakeRuntime } from './support/opencode-fake.ts';
 import { JEV_MODEL } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -147,15 +147,17 @@ it('returns the verifier verdict while Jev is stalled and cancels the request on
   assert.match(rows[0], /"status":"cancelled"/);
 });
 
-it('distinguishes token limits, forked evidence and rechecks that never dispatched', async (t) => {
+it('distinguishes provider token limits, the local byte cap and undispatched rechecks', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', async () =>
     Response.json({ detail: { error_type: 'max_tokens_exceeded' } }, { status: 400 }),
   );
   const rows: string[] = [];
   const shadow = new JevVerifierShadow('test-only', (row) => rows.push(row));
   const pass = { model: 'test', elapsedMs: 0 };
-  await shadow.record(targets, { ...pass, prompt: 'large packet' }, pass, [targets[1]]);
-  await shadow.record(targets.slice(0, 1), { ...pass, prompt: null }, pass);
+  await shadow.record(targets, { ...pass, prompt: 'provider token-limit fixture' }, pass, [
+    targets[1],
+  ]);
+  await shadow.record(targets.slice(0, 1), { ...pass, prompt: 'a'.repeat(512 * 1024) }, pass);
   assert.equal(fetch.mock.callCount(), 1);
   assert.deepEqual(
     rows.map((row) => {
@@ -165,7 +167,46 @@ it('distinguishes token limits, forked evidence and rechecks that never dispatch
     [
       ['oversize', false, null, null],
       ['oversize', null, null, null],
-      ['inherited-context', null, null, null],
+      ['oversize', null, null, null],
+    ],
+  );
+});
+
+it('excludes forked OpenCode packets and leaves rejected submissions unobserved', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('unexpected Jev request');
+  });
+  let rejectPrompt = false;
+  const fake = fakeOpencodeServer((session) =>
+    session.forkedFrom
+      ? {
+          rejectPrompt,
+          text: '{"verdicts":[{"index":0,"verdict":"confirmed","reason":"inherited evidence"}]}',
+        }
+      : { text: '{"findings":[]}' },
+  );
+  const runtime = fakeRuntime(fake, { verifyFork: true });
+  const model = 'openai/gpt-5';
+  const rows: string[] = [];
+  const shadow = new JevVerifierShadow('test-only', (row) => rows.push(row));
+  const findings = targets.slice(0, 1);
+  const log = () => {};
+  await runReview(runtime, model, 'ctx', '', log);
+  const submit = () => runFindingVerification(runtime, model, 'ctx', findings, log);
+  const first = { model, elapsedMs: 0 };
+  await shadow.time(first, submit);
+  rejectPrompt = true;
+  const rejected = { model, elapsedMs: 0 };
+  await assert.rejects(shadow.time(rejected, submit));
+  await shadow.record(findings, first, rejected, findings);
+  await shadow.record(findings, rejected, rejected);
+  assert.equal(fetch.mock.callCount(), 0);
+  const observations = rows.map((row) => JSON.parse(row.slice(row.indexOf('{'))));
+  assert.deepEqual(
+    observations.map((r) => [r.status, r.neededSecondPass]),
+    [
+      ['inherited-context', null],
+      ['unobserved', null],
     ],
   );
 });
