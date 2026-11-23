@@ -1493,6 +1493,8 @@ test('untouched config blocks a follow-up only when it names a changed module, i
     write('package.json', '{ "devDependencies": { "typescript": "6.0.0" } }\n');
     write('ci.yaml', 'run: for s in core/*.js; do node "$s"; done\n');
     write('docs.yaml', 'check: docs/typescript.md\n');
+    const workflow = '.depot/workflows/pr.yaml';
+    write(workflow, 'name: Tests\n');
     const base = commit();
     write('other/label.ts', 'export function label() {\n  return 2;\n}\n');
     const reviewed = commit();
@@ -1515,6 +1517,28 @@ test('untouched config blocks a follow-up only when it names a changed module, i
     assert.equal((await plan(docEdit, reviewed, 'package.json')).reason, 'bounded-followup');
     assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'unsupported-or-large-pr');
     assert.equal((await plan(codeEdit, docEdit, 'ci.yaml')).reason, 'unsupported-or-large-pr');
+    write(workflow, 'name: Worker tests\n');
+    const workflowEdit = commit();
+    const workflowPlan = await plan(workflowEdit, codeEdit, workflow);
+    assert.equal(workflowPlan.mode, 'full');
+    assert.equal(workflowPlan.reason, 'changed-workflow-config');
+    assert.equal(workflowPlan.reasonPath, workflow);
+    assert.equal(workflowPlan.files.length, 4);
+    const githubWorkflow = '.github/workflows/ci.yml';
+    write(githubWorkflow, 'name: CI\n');
+    const addition = commit();
+    rmSync(join(workspace, githubWorkflow));
+    const deletion = commit();
+    write(workflow, 'name: Tests\n');
+    for (const [result, path] of [
+      [await plan(addition, workflowEdit, githubWorkflow), githubWorkflow],
+      [await plan(deletion, addition, workflow), githubWorkflow],
+      [await plan(commit(), deletion, 'package.json'), workflow],
+    ] as const) {
+      assert.equal(result.mode, 'full');
+      assert.equal(result.reason, 'changed-workflow-config');
+      assert.equal(result.reasonPath, path);
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

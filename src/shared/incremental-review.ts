@@ -36,6 +36,7 @@ export interface ReviewBaseline {
 export interface IncrementalReviewPlan {
   mode: 'full' | 'incremental';
   reason: string;
+  reasonPath?: string;
   files: PrFile[];
   baseline?: string;
   shadow?: ShadowReviewPlan;
@@ -494,6 +495,10 @@ export async function planIncrementalReview(input: {
     }));
     // The shadow's git time does not count against the real plan's budget.
     deadline += Date.now() - shadowStarted;
+    const workflow = touched.find(([, path]) =>
+      /^\.(github|depot)\/workflows\/[^/]+\.ya?ml$/i.test(path),
+    );
+    if (workflow) return { ...full('changed-workflow-config'), reasonPath: workflow[1] };
     // Only a single ordinary guide can bypass directory expansion. A rename also has a deletion.
     const [status, guide] = entries.length === 2 ? entries : [];
     const guideOnly =

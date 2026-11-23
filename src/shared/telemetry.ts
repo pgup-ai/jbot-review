@@ -230,6 +230,7 @@ export interface RunExecutionTelemetry {
   reviewScope?: {
     mode: 'full' | 'incremental';
     reason: string;
+    reasonPath?: string;
     files: number;
     totalFiles: number;
     patchBytes: number;
