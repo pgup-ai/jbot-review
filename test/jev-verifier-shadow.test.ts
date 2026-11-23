@@ -146,3 +146,26 @@ it('returns the verifier verdict while Jev is stalled and cancels the request on
   await setImmediate();
   assert.match(rows[0], /"status":"cancelled"/);
 });
+
+it('distinguishes token limits, forked evidence and rechecks that never dispatched', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ detail: { error_type: 'max_tokens_exceeded' } }, { status: 400 }),
+  );
+  const rows: string[] = [];
+  const shadow = new JevVerifierShadow('test-only', (row) => rows.push(row));
+  const pass = { model: 'test', elapsedMs: 0 };
+  await shadow.record(targets, { ...pass, prompt: 'large packet' }, pass, [targets[1]]);
+  await shadow.record(targets.slice(0, 1), { ...pass, prompt: null }, pass);
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.deepEqual(
+    rows.map((row) => {
+      const r = JSON.parse(row.slice(row.indexOf('{')));
+      return [r.status, r.neededSecondPass, r.secondPassModel, r.secondPassMs];
+    }),
+    [
+      ['oversize', false, null, null],
+      ['oversize', null, null, null],
+      ['inherited-context', null, null, null],
+    ],
+  );
+});

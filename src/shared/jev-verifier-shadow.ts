@@ -6,7 +6,7 @@ import type { Finding } from './types.ts';
 
 interface Pass {
   model: string;
-  prompt?: string;
+  prompt?: string | null;
   elapsedMs: number;
 }
 
@@ -14,7 +14,7 @@ const activePass = new AsyncLocalStorage<Pass>();
 
 // Capture the backend's final packet, including native evidence and tool directives.
 // Budget probes, recovery prompts and concurrent batches must never supply this text.
-export function observeVerifierPacket(label: string, model: string, prompt: string): void {
+export function observeVerifierPacket(label: string, model: string, prompt: string | null): void {
   if (label !== 'finding-verification') return;
   const pass = activePass.getStore();
   if (pass) Object.assign(pass, { model, prompt });
@@ -44,7 +44,7 @@ export class JevVerifierShadow {
   async record(targets: Finding[], first: Pass, second: Pass, rechecked?: Finding[]) {
     const batchId = randomUUID();
     const start = performance.now();
-    let status = 'unobserved';
+    let status = first.prompt === null ? 'inherited-context' : 'unobserved';
     let scores: number[] = [];
     if (first.prompt) {
       try {
@@ -59,7 +59,10 @@ export class JevVerifierShadow {
           const response = await requestJev(body, this.key, signal);
           if (!response.ok) {
             status = `http-${response.status}`;
-            await response.body?.cancel();
+            if (response.status === 400) {
+              const detail = (await readJevResponse(response).catch(() => null))?.detail;
+              if (detail?.error_type === 'max_tokens_exceeded') status = 'oversize';
+            } else await response.body?.cancel();
           } else {
             const value = await readJevResponse(response);
             scores = targets.map((_, i) => {
@@ -85,7 +88,8 @@ export class JevVerifierShadow {
     const jevMs = Math.round(performance.now() - start);
     for (const [index, finding] of targets.entries()) {
       const score = scores[index] ?? null;
-      const neededSecondPass = rechecked?.includes(finding) ?? null;
+      const selected = rechecked?.includes(finding);
+      const neededSecondPass = selected && second.prompt === undefined ? null : (selected ?? null);
       this.log(
         'Jev verifier shadow: ' +
           JSON.stringify({
