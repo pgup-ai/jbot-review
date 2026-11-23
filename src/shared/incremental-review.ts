@@ -495,6 +495,10 @@ export async function planIncrementalReview(input: {
     }));
     // The shadow's git time does not count against the real plan's budget.
     deadline += Date.now() - shadowStarted;
+    const workflow = touched.find(([, path]) =>
+      /^\.(github|depot)\/workflows\/[^/]+\.ya?ml$/i.test(path),
+    );
+    if (workflow) return { ...full('changed-workflow-config'), reasonPath: workflow[1] };
     // Only a single ordinary guide can bypass directory expansion. A rename also has a deletion.
     const [status, guide] = entries.length === 2 ? entries : [];
     const guideOnly =
@@ -532,10 +536,6 @@ export async function planIncrementalReview(input: {
           // An untouched fixture depends on no code; an edited one may be read by path.
           !(JSON_FIXTURE.test(path) && !changed.includes(path)),
       );
-    const workflow = unsupported.find(
-      (path) => changed.includes(path) && /^\.(github|depot)\/workflows\/[^/]+\.ya?ml$/i.test(path),
-    );
-    if (workflow) return { ...full('changed-workflow-config'), reasonPath: workflow };
     if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
       return full('unsupported-or-large-pr');
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
