@@ -807,6 +807,37 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
+    // Data kept with docs that only prose names goes incremental; code naming it may read it.
+    const docsFiles = [
+      ...files,
+      ...['docs/email/notice.json', 'docs/email/runbook.md'].map((filename) => ({
+        filename,
+        patch: 'patch',
+      })),
+    ];
+    for (const [reader, reason] of [
+      [undefined, 'bounded-followup'],
+      ['worker/notice.ts', 'unsupported-or-large-pr'],
+    ] as const) {
+      git('checkout', '-q', '--detach', head);
+      write('docs/email/notice.json', '{ "color": "#888" }\n');
+      write('docs/email/runbook.md', 'Upload notice.json to the mail provider.\n');
+      if (reader) write(reader, "export const template = 'docs/email/notice.json';\n");
+      const documented = commit();
+      write('docs/email/notice.json', '{ "color": "#444" }\n');
+      const plan = await planIncrementalReview({
+        ...input,
+        priorBodies: [body(documented, base)],
+        head: commit(),
+        files: docsFiles,
+      });
+      assert.equal(plan.reason, reason);
+      if (!reader)
+        assert.deepEqual(
+          plan.files.map((file) => file.filename),
+          ['docs/email/notice.json', 'docs/email/runbook.md'],
+        );
+    }
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
       git('checkout', '-q', '--detach', head);
