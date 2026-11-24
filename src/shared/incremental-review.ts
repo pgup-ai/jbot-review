@@ -589,14 +589,27 @@ export async function planIncrementalReview(input: {
       ).length
     )
       return full('unsupported-or-large-pr');
-    // Prose naming the file, such as its runbook, runs nothing.
-    if (
-      docsData.length &&
-      (
-        await grep(input.head, ['-F', ...docsData.flatMap((path) => ['-e', posix.basename(path)])])
-      ).some((path) => !docsData.includes(path) && !PROSE_FILE.test(path))
-    )
-      return full('unsupported-or-large-pr');
+    // Code may name the file or list its directory, in one string or path.join parts; prose naming
+    // it, such as its runbook, runs nothing but joins the review so the two stay in step.
+    const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const docsMentions = docsData.length
+      ? (
+          await grep(input.head, [
+            '-E',
+            ...docsData.flatMap((path) => [
+              '-e',
+              literal(posix.basename(path)),
+              '-e',
+              `(^|[^[:alnum:]_.-])${posix
+                .dirname(path)
+                .split('/')
+                .map(literal)
+                .join('(/|[\'"`][[:space:]]*,[[:space:]]*[\'"`])')}([^[:alnum:]_.-]|$)`,
+            ]),
+          ])
+        ).filter((path) => !docsData.includes(path))
+      : [];
+    if (docsMentions.some((path) => !PROSE_FILE.test(path))) return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
     // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
@@ -918,7 +931,12 @@ export async function planIncrementalReview(input: {
     const files = input.files.filter(
       (file) => impacted.has(file.filename) || tests.includes(file.filename),
     );
-    const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
+    const selection = new Set([
+      ...files.map((file) => file.filename),
+      ...dotenv,
+      ...readers,
+      ...docsMentions.filter((path) => paths.has(path)),
+    ]);
     if (selection.size === input.files.length || (!standaloneTestsOnly && selection.size > 8))
       return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
@@ -946,7 +964,7 @@ export async function planIncrementalReview(input: {
     );
     if (terms.length && leftOutCode) {
       const confirmed = new Set<string>();
-      const literals = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const literals = terms.map(literal);
       const reference = new RegExp(`(?<!\\w)(?:${literals.join('|')})(?!\\w)`);
       for (const ref of [baseline.head, input.head]) {
         const hits = await grep(

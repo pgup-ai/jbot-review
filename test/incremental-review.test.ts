@@ -807,22 +807,25 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // Data kept with docs that only prose names goes incremental; code naming it may read it.
+    // Data kept with docs that only prose names goes incremental with that prose; code naming the
+    // file or listing its directory may read it.
     const docsFiles = [
       ...files,
-      ...['docs/email/notice.json', 'docs/email/runbook.md'].map((filename) => ({
+      ...['docs/email/notice.json', 'guides/mail.md'].map((filename) => ({
         filename,
         patch: 'patch',
       })),
     ];
     for (const [reader, reason] of [
       [undefined, 'bounded-followup'],
-      ['worker/notice.ts', 'unsupported-or-large-pr'],
+      ["export const template = 'docs/email/notice.json';\n", 'unsupported-or-large-pr'],
+      ["fs.readdirSync('docs/email');\n", 'unsupported-or-large-pr'],
+      ["path.join(root, 'docs', 'email');\n", 'unsupported-or-large-pr'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write('docs/email/notice.json', '{ "color": "#888" }\n');
-      write('docs/email/runbook.md', 'Upload notice.json to the mail provider.\n');
-      if (reader) write(reader, "export const template = 'docs/email/notice.json';\n");
+      write('guides/mail.md', 'Upload notice.json to the mail provider.\n');
+      if (reader) write('worker/notice.ts', reader);
       const documented = commit();
       write('docs/email/notice.json', '{ "color": "#444" }\n');
       const plan = await planIncrementalReview({
@@ -831,11 +834,11 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
         head: commit(),
         files: docsFiles,
       });
-      assert.equal(plan.reason, reason);
+      assert.equal(plan.reason, reason, reader);
       if (!reader)
         assert.deepEqual(
           plan.files.map((file) => file.filename),
-          ['docs/email/notice.json', 'docs/email/runbook.md'],
+          ['docs/email/notice.json', 'guides/mail.md'],
         );
     }
     // A helper under __tests__/ can be named by config, unlike a spec.
