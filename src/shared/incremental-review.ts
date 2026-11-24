@@ -253,8 +253,8 @@ const CONFIG_FILE = /\.(json[c5]?|ya?ml|toml|ini|lock)$/i;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Data kept with docs, such as an email template a person uploads; unlike tsconfig.json or a CI
-// workflow, no tool loads it by convention, so code reading it has to name its file.
-const DOCS_DATA = /(^|\/)docs?\/(.*\/)?[^/]+\.(json[c5]?|ya?ml)$/i;
+// workflow, no tool loads it by convention, so code reading it has to name its file or directory.
+const DOCS_DATA = /^docs\/(.*\/)?[^/]+\.(json[c5]?|ya?ml)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
