@@ -822,6 +822,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ["fs.readdirSync('docs/email');\n", 'unsupported-or-large-pr'],
       ["path.join(root, 'docs', 'email');\n", 'unsupported-or-large-pr'],
       ["path.join(root, 'docs',\n  'email');\n", 'unsupported-or-large-pr'],
+      ["glob('docs/**/*.json');\n", 'unsupported-or-large-pr'],
+      ["fs.readdirSync('docs', { recursive: true });\n", 'unsupported-or-large-pr'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write('docs/email/notice.json', '{ "color": "#888" }\n');

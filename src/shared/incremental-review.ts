@@ -589,9 +589,9 @@ export async function planIncrementalReview(input: {
       ).length
     )
       return full('unsupported-or-large-pr');
-    // Code may name the file or list its directory, as one path or as path.join parts that can sit
-    // on separate lines, so a file quoting every segment counts; prose naming the file, such as its
-    // runbook, runs nothing but joins the review so the two stay in step.
+    // Code may name the file or list its directory or a parent, as one path or as path.join parts
+    // that can sit on separate lines, so a file quoting every segment counts; prose naming the file,
+    // such as its runbook, runs nothing but joins the review so the two stay in step.
     const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const { head } = input;
     const mentions = async (args: string[]) =>
@@ -605,6 +605,14 @@ export async function planIncrementalReview(input: {
             docsData.flatMap((path) => [
               '-e',
               `(^|[^[:alnum:]_.-])${literal(posix.dirname(path))}([^[:alnum:]_.-]|$)`,
+              // A walk or glob of a parent directory, such as 'docs' or 'docs/**/*.json'.
+              ...posix
+                .dirname(path)
+                .split('/')
+                .flatMap((_, i, segments) => [
+                  '-e',
+                  `['"\`]${literal(segments.slice(0, i + 1).join('/'))}/?(\\*\\*[^'"\`]*)?['"\`]`,
+                ]),
             ]),
           )
         : []),
