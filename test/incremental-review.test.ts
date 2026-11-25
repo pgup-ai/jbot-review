@@ -807,11 +807,11 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // Data kept with docs that only prose names goes incremental with that prose; code naming the
-    // file or listing its directory may read it.
+    // Data kept with docs that only prose names goes incremental with that prose, not with prose
+    // naming just its directory; code naming the file or listing its directory may read it.
     const docsFiles = [
       ...files,
-      ...['docs/email/notice.json', 'guides/mail.md'].map((filename) => ({
+      ...['docs/email/notice.json', 'guides/mail.md', 'guides/layout.md'].map((filename) => ({
         filename,
         patch: 'patch',
       })),
@@ -821,10 +821,12 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ["export const template = 'docs/email/notice.json';\n", 'unsupported-or-large-pr'],
       ["fs.readdirSync('docs/email');\n", 'unsupported-or-large-pr'],
       ["path.join(root, 'docs', 'email');\n", 'unsupported-or-large-pr'],
+      ["path.join(root, 'docs',\n  'email');\n", 'unsupported-or-large-pr'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write('docs/email/notice.json', '{ "color": "#888" }\n');
       write('guides/mail.md', 'Upload notice.json to the mail provider.\n');
+      write('guides/layout.md', 'Email templates live in docs/email/.\n');
       if (reader) write('worker/notice.ts', reader);
       const documented = commit();
       write('docs/email/notice.json', '{ "color": "#444" }\n');

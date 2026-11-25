@@ -589,27 +589,41 @@ export async function planIncrementalReview(input: {
       ).length
     )
       return full('unsupported-or-large-pr');
-    // Code may name the file or list its directory, in one string or path.join parts; prose naming
-    // it, such as its runbook, runs nothing but joins the review so the two stay in step.
+    // Code may name the file or list its directory, as one path or as path.join parts that can sit
+    // on separate lines, so a file quoting every segment counts; prose naming the file, such as its
+    // runbook, runs nothing but joins the review so the two stay in step.
     const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const docsMentions = docsData.length
-      ? (
-          await grep(input.head, [
-            '-E',
-            ...docsData.flatMap((path) => [
+    const { head } = input;
+    const mentions = async (args: string[]) =>
+      (await grep(head, ['-E', ...args])).filter((path) => !docsData.includes(path));
+    const docsNamed = docsData.length
+      ? await mentions(docsData.flatMap((path) => ['-e', literal(posix.basename(path))]))
+      : [];
+    const docsReaders = [
+      ...(docsData.length
+        ? await mentions(
+            docsData.flatMap((path) => [
               '-e',
-              literal(posix.basename(path)),
-              '-e',
-              `(^|[^[:alnum:]_.-])${posix
+              `(^|[^[:alnum:]_.-])${literal(posix.dirname(path))}([^[:alnum:]_.-]|$)`,
+            ]),
+          )
+        : []),
+      ...(
+        await Promise.all(
+          docsData.map((path) =>
+            mentions([
+              '--all-match',
+              ...posix
                 .dirname(path)
                 .split('/')
-                .map(literal)
-                .join('(/|[\'"`][[:space:]]*,[[:space:]]*[\'"`])')}([^[:alnum:]_.-]|$)`,
+                .flatMap((segment) => ['-e', `['"\`]${literal(segment)}['"\`]`]),
             ]),
-          ])
-        ).filter((path) => !docsData.includes(path))
-      : [];
-    if (docsMentions.some((path) => !PROSE_FILE.test(path))) return full('unsupported-or-large-pr');
+          ),
+        )
+      ).flat(),
+    ];
+    if ([...docsNamed, ...docsReaders].some((path) => !PROSE_FILE.test(path)))
+      return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
     // app's own name (apps/api, apps/auth) says nothing about the file inside it, nor does the
@@ -935,7 +949,7 @@ export async function planIncrementalReview(input: {
       ...files.map((file) => file.filename),
       ...dotenv,
       ...readers,
-      ...docsMentions.filter((path) => paths.has(path)),
+      ...docsNamed.filter((path) => paths.has(path)),
     ]);
     if (selection.size === input.files.length || (!standaloneTestsOnly && selection.size > 8))
       return full('broad-impact');
