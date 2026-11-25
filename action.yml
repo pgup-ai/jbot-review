@@ -216,7 +216,7 @@ inputs:
 
 outputs:
   findings-posted:
-    description: 'Findings posted (or logged in dry-run) by this run, including a partial review whose main pass was cut off. Unset when the review fails before posting.'
+    description: 'Findings this run newly reports (or logs in dry-run): findings and unverified concerns no prior J-Bot review listed, including from a partial review whose main pass was cut off. A finding a prior review already listed is not counted even when the rebuilt review body lists it again. Unset when the review fails before posting.'
   terminal-state:
     description: 'completed when the review pipeline finished; partial when it posted a main review that was cut off or timed out (the step then fails unless fail-on-error is false); failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
 
