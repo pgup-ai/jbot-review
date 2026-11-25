@@ -593,6 +593,23 @@ export async function planIncrementalReview(input: {
       ).length
     )
       return full('unsupported-or-large-pr');
+    // Only the document exemption lets a batch this size through, and no graph below follows a
+    // link: another PR file naming a changed document by file name needs the full review.
+    const others = input.files
+      .map((file) => file.filename)
+      .filter((path) => !changed.includes(path));
+    if (
+      changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3 &&
+      others.length &&
+      (
+        await grep(
+          input.head,
+          ['-w', '-F', ...changed.flatMap((path) => ['-e', posix.basename(path)])],
+          ...others.map((path) => `:(literal)${path}`),
+        )
+      ).length
+    )
+      return full('document-dependencies');
     // Code may name the file or list its directory or a parent: path.join parts, even on separate
     // lines, include a quoted 'docs'. Prose naming the file, such as its runbook, runs nothing but
     // joins the review so the two stay in step.

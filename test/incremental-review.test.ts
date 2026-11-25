@@ -876,22 +876,30 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
           ['docs/email/notice.json', 'guides/mail.md'],
         );
     }
-    // Edited prose doesn't make a follow-up broad.
+    // Edited prose doesn't make a follow-up broad unless another PR file links to it.
     const guides = ['guides/a.md', 'guides/b.md', 'guides/c.md', 'guides/d.md'];
-    git('checkout', '-q', '--detach', head);
-    for (const guide of guides) write(guide, 'Draft.\n');
-    const drafted = commit();
-    for (const guide of guides) write(guide, 'Final.\n');
-    const prose = await planIncrementalReview({
-      ...input,
-      priorBodies: [body(drafted, base)],
-      head: commit(),
-      files: [...files, ...guides.map((filename) => ({ filename, patch: 'patch' }))],
-    });
-    assert.deepEqual(
-      [prose.reason, prose.files.map((file) => file.filename)],
-      ['bounded-followup', guides],
-    );
+    for (const readme of ['', 'See [setup](guides/a.md#setup).\n']) {
+      git('checkout', '-q', '--detach', head);
+      if (readme) write('README.md', readme);
+      for (const guide of guides) write(guide, 'Draft.\n');
+      const drafted = commit();
+      for (const guide of guides) write(guide, 'Final.\n');
+      const prose = await planIncrementalReview({
+        ...input,
+        priorBodies: [body(drafted, base)],
+        head: commit(),
+        files: [
+          ...files,
+          ...['README.md', ...guides].map((filename) => ({ filename, patch: 'patch' })),
+        ],
+      });
+      assert.equal(prose.reason, readme ? 'document-dependencies' : 'bounded-followup');
+      if (!readme)
+        assert.deepEqual(
+          prose.files.map((file) => file.filename),
+          guides,
+        );
+    }
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
       git('checkout', '-q', '--detach', head);
