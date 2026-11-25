@@ -279,80 +279,60 @@ function ruleIds(text: string): Set<string> {
 const NEAR_IDENTICAL_OVERLAP = 0.8;
 const DESIGN_NOTE_PATH = /-design-note\.md$|(^|\/)docs\/(.+\/)?plans\/|-plan\.md$/;
 // A title label ("Unverified: …", "[unverified]"), never body prose about unchecked input.
-const SELF_UNVERIFIED = /^\W*unverified\b|[[(]unverified[\])]/i;
+const SELF_UNVERIFIED = /^\W*unverified\b|[[(]unverified[\])]|\bverification not completed\b/i;
 const CWE_OR_CVE = /\b(?:CWE|CVE)-\d+/;
-// Test-writing style the repo rates nit: helper use and matcher shape.
+// Test conventions the repo rates nit: helper use, cleanup and titles. Never
+// matcher shape, which can hide a test passing for the wrong reason.
 const TEST_STYLE =
-  /\btoBeDefined\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bsubstring\b[^.]*\btoThrow|\btoThrow\b[^.]*\bsubstring\b|\bem\.clear\b|\bafterAll\b|\bcreateTest[A-Z]\w*|\btest (?:data )?helpers?\b|\binline (?:test )?(?:data|fixtures?)\b/i;
+  /\bem\.clear\b|\bafterAll\b|\bcreateTest[A-Z]\w*|\btest (?:data )?helpers?\b|\binline (?:test )?(?:data|fixtures?)\b|\btest (?:case )?(?:title|name)\b/i;
 // TS-6.3 is the coverage risk tier, rated by what a regression would get past.
 const isTestStyleRule = (id: string) => /^TS-6(\.\d+)?$/.test(id) && id !== 'TS-6.3';
-const REVERT_STILL_PASSES =
-  /\bpass(?:es|ed)?\b[^.]*\brevert|\brevert\w*\b[^.]*\b(?:still )?pass(?:es|ed)?\b/i;
+const STILL_PASSES =
+  /\bpass(?:es|ed)?\b[^.]*\b(?:revert|remov|delet)|\b(?:revert|remov|delet)\w*\b[^.]*\bpass(?:es|ed)?\b/i;
 
-export type NoiseDropReason = 'design-note' | 'parent-pr';
+/**
+ * A non-bug, non-security finding citing only `TS-6` rules (not the `TS-6.3`
+ * coverage tier) about test conventions is `nit`, unless it says the case still
+ * passes with the guard reverted or removed. Applied again after verification,
+ * which can promote a hypothesis to a rated finding.
+ */
+export function capTestConvention(finding: Finding): Finding {
+  const text = `${finding.title}\n${finding.body}`;
+  const ids = ruleIds(text);
+  return finding.severity !== 'nit' &&
+    finding.kind !== 'bug' &&
+    finding.kind !== 'security' &&
+    ids.size > 0 &&
+    [...ids].every(isTestStyleRule) &&
+    TEST_STYLE.test(text) &&
+    !STILL_PASSES.test(text)
+    ? { ...finding, severity: 'nit' }
+    : finding;
+}
 
 /**
  * Deterministic over-reach filters, applied before verification:
  * - drops non-security findings on design notes and plans, which record intent
  *   rather than current behavior;
- * - on a PR stacked on another branch, drops P2-or-lower, non-security
- *   findings on lines of its changed files outside its own hunks: that code
- *   came from the parent PR. Findings on other files stay, since they may be
- *   unchanged callers this PR breaks;
  * - treats a finding whose title labels it unverified as a hypothesis for the
  *   verifier, never an inline claim;
- * - rates a non-bug, non-security test-style finding (helper use, matcher
- *   shape) `nit` unless it shows the case passes with the guarded line reverted.
+ * - caps test-convention findings (`capTestConvention`).
  */
-export function filterReviewNoise(
-  findings: Finding[],
-  context: { patchByPath: ReadonlyMap<string, string>; stacked: boolean },
-): { findings: Finding[]; dropped: Array<{ finding: Finding; reason: NoiseDropReason }> } {
-  const hunkLines = new Map<string, Set<number>>();
-  const dropReason = (finding: Finding): NoiseDropReason | undefined => {
-    if (DESIGN_NOTE_PATH.test(finding.path) && finding.kind !== 'security') return 'design-note';
-    const patch = context.patchByPath.get(finding.path);
-    if (
-      context.stacked &&
-      patch &&
-      finding.line > 0 &&
-      finding.kind !== 'security' &&
-      SEVERITY_RANK[finding.severity] > SEVERITY_RANK.P1
-    ) {
-      let lines = hunkLines.get(finding.path);
-      if (!lines) {
-        lines = new Set([...newSideLines(patch)].map(({ line }) => line));
-        hunkLines.set(finding.path, lines);
-      }
-      if (!lines.has(finding.line)) return 'parent-pr';
-    }
-    return undefined;
-  };
-
-  const dropped: Array<{ finding: Finding; reason: NoiseDropReason }> = [];
+export function filterReviewNoise(findings: Finding[]): {
+  findings: Finding[];
+  dropped: Finding[];
+} {
+  const dropped: Finding[] = [];
   const kept: Finding[] = [];
   for (const original of findings) {
-    const text = `${original.title}\n${original.body}`;
-    const ids = ruleIds(text);
-    const reason = dropReason(original);
-    if (reason) {
-      dropped.push({ finding: original, reason });
+    if (DESIGN_NOTE_PATH.test(original.path) && original.kind !== 'security') {
+      dropped.push(original);
       continue;
     }
     let finding = original;
     if (!isUnresolvedFinding(finding) && SELF_UNVERIFIED.test(finding.title))
       finding = { ...finding, kind: 'investigate' };
-    if (
-      finding.severity !== 'nit' &&
-      finding.kind !== 'bug' &&
-      finding.kind !== 'security' &&
-      ids.size > 0 &&
-      [...ids].every(isTestStyleRule) &&
-      TEST_STYLE.test(text) &&
-      !REVERT_STILL_PASSES.test(text)
-    )
-      finding = { ...finding, severity: 'nit' };
-    kept.push(finding);
+    kept.push(capTestConvention(finding));
   }
   return { findings: kept, dropped };
 }
@@ -362,7 +342,10 @@ export function filterReviewNoise(
  * own, resolved findings sharing a guideline rule id and a near-identical title
  * collapse into the strongest one, which lists every other site.
  */
-export function collapseRepeatedFindings(findings: Finding[]): Finding[] {
+export function collapseRepeatedFindings(
+  findings: Finding[],
+  bodyOnly: (finding: Finding) => boolean = () => false,
+): Finding[] {
   const groups: Array<{ ids: Set<string>; members: Finding[] }> = [];
   for (const finding of findings) {
     // An unresolved site keeps its own entry, in diagnostics and Unverified concerns.
@@ -373,6 +356,8 @@ export function collapseRepeatedFindings(findings: Finding[]): Finding[] {
       ids.size > 0
         ? groups.find(
             (candidate) =>
+              // Same routing only: a body-only primary would hide an inline site.
+              bodyOnly(candidate.members[0]) === bodyOnly(finding) &&
               [...ids].some((id) => candidate.ids.has(id)) &&
               titleTokenMatch(candidate.members[0].title, finding.title).overlap >=
                 NEAR_IDENTICAL_OVERLAP,
@@ -436,6 +421,23 @@ export function unchangedLines(patchByPath: ReadonlyMap<string, string>): Map<st
     result.set(path, lines);
   }
   return result;
+}
+
+/**
+ * A finding on a line this PR did not write belongs in the review body: a moved
+ * or context line, or, on a PR stacked on another branch, any line of a changed
+ * file outside the PR's own additions (parent code, or a caller this PR breaks).
+ */
+export function isBodyOnly(
+  finding: Pick<Finding, 'path' | 'line'>,
+  addable: ReadonlyMap<string, ReadonlySet<number>>,
+  unchanged: ReadonlyMap<string, ReadonlySet<number>>,
+  stacked: boolean,
+): boolean {
+  if (finding.line <= 0) return false;
+  if (unchanged.get(finding.path)?.has(finding.line)) return true;
+  const added = addable.get(finding.path);
+  return stacked && added !== undefined && !added.has(finding.line);
 }
 
 /** Stable severity order keeps blocking findings first without excluding advisories. */
@@ -786,8 +788,6 @@ export interface AnchoredFindings {
   orphaned: Finding[];
   /** A subset of `fileLevel`: demoted because no anchor resolved, unlike a model-declared line 0. */
   anchorMissed: Finding[];
-  /** A subset of `orphaned`: on a line the PR only moved or shows as context. */
-  carried: Finding[];
 }
 
 /**
@@ -801,22 +801,19 @@ export function anchorFindings(
   findings: Finding[],
   addable: ReadonlyMap<string, ReadonlySet<number>>,
   hasHeadSha: boolean,
-  unchanged?: ReadonlyMap<string, ReadonlySet<number>>,
+  bodyOnly: (finding: Finding) => boolean = () => false,
 ): AnchoredFindings {
   const result: AnchoredFindings = {
     inline: [],
     fileLevel: [],
     orphaned: [],
     anchorMissed: [],
-    carried: [],
     withheld: [],
   };
   for (const f of findings) {
     if (isUnresolvedFinding(f)) result.withheld.push(f);
-    else if (f.line > 0 && unchanged?.get(f.path)?.has(f.line)) {
-      result.orphaned.push(f);
-      result.carried.push(f);
-    } else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
+    else if (bodyOnly(f)) result.orphaned.push(f);
+    else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
     else if (hasHeadSha && addable.has(f.path)) {
       f.line = 0;
@@ -827,6 +824,29 @@ export function anchorFindings(
     }
   }
   return result;
+}
+
+/**
+ * Findings that are new to the PR. A body-only finding (outside the diff, on a
+ * line the PR did not write, or unverified) lives in the review body, which
+ * thread suppression cannot see, so it counts unless a prior jbot review body
+ * already lists it.
+ */
+export function newFindingCount(
+  findings: Finding[],
+  bodyOnly: Finding[],
+  priorBodies: readonly string[],
+): number {
+  return (
+    findings.length -
+    bodyOnly.filter((finding) =>
+      priorBodies.some(
+        (body) =>
+          (body.includes(finding.title) || body.includes(escapeHtml(finding.title))) &&
+          body.includes(finding.path),
+      ),
+    ).length
+  );
 }
 
 export function shouldPostReviewComment(

@@ -94,6 +94,9 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
   unchangedLines,
+  isBodyOnly,
+  capTestConvention,
+  newFindingCount,
 } from './filter.ts';
 import {
   ASSEMBLED_CONTEXT_WARN_BYTES,
@@ -3553,10 +3556,9 @@ async function runReviewPipeline(params: {
             ),
     );
 
-    const noiseContext = {
-      patchByPath,
-      stacked: Boolean(baseRef && defaultBranch && baseRef !== defaultBranch),
-    };
+    const stacked = Boolean(baseRef && defaultBranch && baseRef !== defaultBranch);
+    const unchanged = unchangedLines(patchByPath);
+    const bodyOnly = (finding: Finding) => isBodyOnly(finding, addable, unchanged, stacked);
     const overlapTargets = (lists: Finding[][]) => {
       // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
       // these are the very objects the final pipeline re-anchors and counts —
@@ -3574,7 +3576,6 @@ async function runReviewPipeline(params: {
           priorJbotThreads,
           headSha ? addable : undefined,
         ).findings,
-        noiseContext,
       ).findings;
       return selectFindingIndexes(settled).map((index) => settled[index]);
     };
@@ -3890,14 +3891,9 @@ async function runReviewPipeline(params: {
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
       );
     }
-    const noise = filterReviewNoise(suppression.findings, noiseContext);
-    if (noise.dropped.length > 0) {
-      const reasons = new Map<string, number>();
-      for (const { reason } of noise.dropped) reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
-      log(
-        `Dropped ${noise.dropped.length} over-reach finding(s): ${JSON.stringify(Object.fromEntries(reasons))}.`,
-      );
-    }
+    const noise = filterReviewNoise(suppression.findings);
+    if (noise.dropped.length > 0)
+      log(`Dropped ${noise.dropped.length} finding(s) on design notes and plans.`);
     telemetry.snapshot('suppressed', noise.findings);
     initialFilteringDone(
       'completed',
@@ -3955,7 +3951,10 @@ async function runReviewPipeline(params: {
     telemetry.recordEvidenceCache(evidence.stats());
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
-    const filteredFindings = filterFindings(collapseRepeatedFindings(verifiedFindings), options);
+    const filteredFindings = filterFindings(
+      collapseRepeatedFindings(verifiedFindings.map(capTestConvention), bodyOnly),
+      options,
+    );
     const incompleteSessions = reviewCoverageSessions([
       ...(mainCoverageGap ? [mainCoverageGap] : []),
       ...(guidelineSnapshotError
@@ -4004,11 +4003,11 @@ async function runReviewPipeline(params: {
       `Review ${coverageNotice ? 'incomplete' : 'complete'}: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const { inline, fileLevel, orphaned, anchorMissed, withheld, carried } = anchorFindings(
+    const { inline, fileLevel, orphaned, anchorMissed, withheld } = anchorFindings(
       filteredFindings,
       addable,
       !!headSha,
-      unchangedLines(patchByPath),
+      bodyOnly,
     );
     if (withheld.length > 0) log(`Unpublished review candidates: ${JSON.stringify(withheld)}`);
     let diagnosticsUrl: string | undefined;
@@ -4148,9 +4147,11 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
-    // A finding on moved or context lines lives only in the body, which thread
-    // suppression cannot see; alone it would re-post the same review every run.
-    const findingCount = filteredFindings.length - carried.length;
+    const findingCount = newFindingCount(
+      filteredFindings,
+      [...orphaned, ...withheld],
+      priorJbotReviewGroups.map((group) => group.body),
+    );
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,
       findingCount,

@@ -472,6 +472,11 @@ describe('discoverGuidelineDocs with diff routing', () => {
     git('init', '-q');
     writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are P2.');
     writeFileSync(join(root, 'app.ts'), 'export {};');
+    // Neither export-ignore nor a symlinked AGENTS.md may hide a rule.
+    writeFileSync(join(root, '.gitattributes'), 'REVIEW.md export-ignore\n');
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(join(root, 'docs/RULES.md'), '# Rules\nLock every write.');
+    symlinkSync('docs/RULES.md', join(root, 'AGENTS.md'));
     git('add', '.');
     git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base');
     const base = git('rev-parse', 'HEAD');
@@ -481,6 +486,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     const { docs, snapshotError } = await discoverBaseGuidelineDocs(root, base, ['app.ts']);
     assert.equal(snapshotError, undefined);
     assert.match(docs.find((doc) => doc.label === 'REVIEW.md')!.text, /are P2/);
+    assert.match(docs.find((doc) => doc.label === 'AGENTS.md')!.text, /Lock every write/);
     assert.ok(!docs.some((doc) => /nit/.test(doc.text)));
 
     const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);

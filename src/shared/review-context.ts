@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, access, open, readdir, realpath, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { diffRiskScore } from './diff-context.ts';
@@ -905,28 +905,80 @@ export async function discoverBaseGuidelineDocs(
   changedFiles: string[],
 ): Promise<DiscoveredGuidelines & { snapshotError?: unknown }> {
   const root = await mkdtemp(join(tmpdir(), 'jbot-guidelines-'));
-  const archive = `${root}.tar`;
-  let snapshotError: unknown;
   try {
-    const git = (...args: string[]) =>
-      exec('git', args, { cwd: workspace, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
-    const sources = (await git('ls-tree', '-r', '-z', '--name-only', base)).stdout
-      .split('\0')
-      .filter((path) => path && isGuidelineSource(path));
-    if (sources.length > 0) {
-      await git('archive', '--format=tar', '-o', archive, base, '--', ...sources);
-      await exec('tar', ['-xf', archive, '-C', root], { timeout: 30_000 });
+    for (const [path, content] of await readBaseGuidelines(workspace, base)) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), content);
     }
-  } catch (error) {
-    snapshotError = error;
+  } catch (snapshotError) {
+    await rm(root, { recursive: true, force: true });
+    return { docs: [], referenced: [], budgetExhausted: false, snapshotError };
   }
   try {
-    if (snapshotError) return { docs: [], referenced: [], budgetExhausted: false, snapshotError };
     return await discoverGuidelineDocs(root, changedFiles);
   } finally {
     await rm(root, { recursive: true, force: true });
-    await rm(archive, { force: true });
   }
+}
+
+const MAX_SYMLINK_HOPS = 8;
+
+/**
+ * Every guideline source at `base`, read from the tree itself: `git archive`
+ * would honor `export-ignore` and leave symlinks dangling. A symlink resolves
+ * inside the tree, up to MAX_SYMLINK_HOPS; one that cannot resolve throws.
+ */
+async function readBaseGuidelines(workspace: string, base: string): Promise<Map<string, Buffer>> {
+  const options = { cwd: workspace, timeout: 30_000, maxBuffer: 256 * 1024 * 1024 };
+  const tree = new Map<string, { mode: string; sha: string }>();
+  for (const entry of (await exec('git', ['ls-tree', '-r', '-z', base], options)).stdout.split(
+    '\0',
+  )) {
+    const match = /^(\d+) \w+ ([0-9a-f]+)\t(.+)$/.exec(entry);
+    if (match) tree.set(match[3], { mode: match[1], sha: match[2] });
+  }
+  const readBlobs = async (shas: string[]): Promise<Map<string, Buffer>> => {
+    if (shas.length === 0) return new Map();
+    const pending = exec('git', ['cat-file', '--batch'], { ...options, encoding: 'buffer' });
+    pending.child.stdin?.end(`${shas.join('\n')}\n`);
+    const out = (await pending).stdout;
+    const blobs = new Map<string, Buffer>();
+    for (let at = 0; at < out.length;) {
+      const eol = out.indexOf(0x0a, at);
+      const [sha, type, size] = out.subarray(at, eol).toString().split(' ');
+      if (type !== 'blob') throw new Error(`guideline object ${sha} is not a blob`);
+      blobs.set(sha, out.subarray(eol + 1, eol + 1 + Number(size)));
+      at = eol + 1 + Number(size) + 1;
+    }
+    return blobs;
+  };
+  // Resolve each symlink to the file it names inside the tree.
+  const targets = new Map<string, { mode: string; sha: string }>();
+  let links = [...tree]
+    .filter(([path]) => isGuidelineSource(path))
+    .map(([path, entry]) => ({ path, at: path, entry }));
+  for (let hop = 0; links.length > 0; hop++) {
+    const linkTargets = await readBlobs(
+      links.filter(({ entry }) => entry.mode === '120000').map(({ entry }) => entry.sha),
+    );
+    const next: typeof links = [];
+    for (const link of links) {
+      if (link.entry.mode !== '120000') {
+        targets.set(link.path, link.entry);
+        continue;
+      }
+      const target = posix.normalize(
+        posix.join(posix.dirname(link.at), linkTargets.get(link.entry.sha)!.toString()),
+      );
+      const entry = tree.get(target);
+      if (hop >= MAX_SYMLINK_HOPS || target.startsWith('../') || posix.isAbsolute(target) || !entry)
+        throw new Error(`guideline symlink ${link.path} does not resolve inside the base tree`);
+      next.push({ path: link.path, at: target, entry });
+    }
+    links = next;
+  }
+  const blobs = await readBlobs([...new Set([...targets.values()].map(({ sha }) => sha))]);
+  return new Map([...targets].map(([path, { sha }]) => [path, blobs.get(sha)!]));
 }
 
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.

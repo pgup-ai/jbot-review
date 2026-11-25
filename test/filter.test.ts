@@ -20,6 +20,9 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
   unchangedLines,
+  isBodyOnly,
+  capTestConvention,
+  newFindingCount,
 } from '../src/shared/filter.ts';
 import type { PriorFindingRef } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -682,16 +685,7 @@ describe('suppressPreviouslyReported', () => {
 });
 
 describe('filterReviewNoise', () => {
-  const patch = '@@ -1,2 +1,3 @@\n context\n+added\n context';
-  const noise = (
-    findings: Finding[],
-    overrides: Partial<Parameters<typeof filterReviewNoise>[1]> = {},
-  ) =>
-    filterReviewNoise(findings, {
-      patchByPath: new Map([['src/example.ts', patch]]),
-      stacked: false,
-      ...overrides,
-    });
+  const noise = (findings: Finding[]) => filterReviewNoise(findings);
 
   it('suppresses a P2-or-lower finding declined near the same lines, until those lines change', () => {
     const thread = {
@@ -724,30 +718,18 @@ describe('filterReviewNoise', () => {
       assert.deepEqual(suppress(changed, [byRule]), [byRule]);
   });
 
-  it('drops findings on design notes, plans, and parent-PR code of a stacked PR', () => {
+  it('drops non-security findings on design notes and plans', () => {
     const paths = ['docs/x-design-note.md', 'docs/a/plans/p.md', 'ROLLOUT-plan.md'];
-    const findings = [
+    const { findings, dropped } = noise([
       ...paths.map((path) => finding({ path, title: path })),
       finding({ path: paths[1], kind: 'security', title: 'committed credential' }),
-      finding({ line: 40, title: 'outside own hunks' }),
-      finding({ line: 40, severity: 'P1', title: 'blocking outside own hunks' }),
-      finding({ path: 'src/caller.ts', title: 'caller breaks on the new return contract' }),
-      finding({ line: 2, title: 'own line' }),
-    ];
+      finding({ title: 'own code' }),
+    ]);
     assert.deepEqual(
-      noise(findings).findings.map((f) => f.title),
-      [
-        'committed credential',
-        'outside own hunks',
-        'blocking outside own hunks',
-        'caller breaks on the new return contract',
-        'own line',
-      ],
+      findings.map((f) => f.title),
+      ['committed credential', 'own code'],
     );
-    assert.deepEqual(
-      noise(findings, { stacked: true }).dropped.map(({ reason }) => reason),
-      ['design-note', 'design-note', 'design-note', 'parent-pr'],
-    );
+    assert.equal(dropped.length, 3);
   });
 
   it('sends a self-declared unverified finding to verification as a hypothesis', () => {
@@ -759,18 +741,28 @@ describe('filterReviewNoise', () => {
     assert.equal(isUnresolvedFinding(self), true);
     assert.equal(isUnresolvedFinding(prose), false);
     assert.equal(isUnresolvedFinding(body), false);
+    const [labeled] = noise([
+      finding({ title: 'Retry double-posts (verification not completed)' }),
+    ]).findings;
+    assert.equal(isUnresolvedFinding(labeled), true);
   });
 
   it('rates a TS-6 test-style finding nit unless it shows the case passes with the line reverted', () => {
-    const [helper, reverted, bug, mixed] = noise([
+    const [helper, reverted, matcher, bug, mixed] = noise([
       finding({
         path: 'src/a.spec.ts',
         title: 'Use `createTestOrder` for inline test data (TS-6)',
       }),
       finding({
         path: 'src/a.spec.ts',
-        title: 'Assertion uses `toBeDefined` (TS-6)',
-        body: 'The case still passes with line 12 reverted.',
+        title: 'Clean up in `afterAll` (TS-6)',
+        body: 'The case still passes with the guard removed.',
+      }),
+      // Matcher shape can hide a test passing for the wrong reason: never clamped.
+      finding({
+        path: 'src/a.spec.ts',
+        title: '`expect(result?.id).toBeDefined()` cannot fail (TS-6.6)',
+        body: 'It still passes when the authorization guard is removed.',
       }),
       finding({
         path: 'src/a.spec.ts',
@@ -783,9 +775,12 @@ describe('filterReviewNoise', () => {
       }),
     ]).findings;
     assert.deepEqual(
-      [helper, reverted, bug, mixed].map((f) => f.severity),
-      ['nit', 'P2', 'P2', 'P2'],
+      [helper, reverted, matcher, bug, mixed].map((f) => f.severity),
+      ['nit', 'P2', 'P2', 'P2', 'P2'],
     );
+    // Verification can promote a hypothesis to a rated finding; the cap applies again.
+    assert.equal(capTestConvention({ ...helper, severity: 'P2', kind: 'test' }).severity, 'nit');
+    assert.equal(capTestConvention(matcher).severity, 'P2');
   });
 
   it('collapses one rule and title across sites into one thread listing every site', () => {
@@ -817,6 +812,27 @@ describe('filterReviewNoise', () => {
 });
 
 describe('shouldPostReviewComment', () => {
+  it('posts a re-run with a new body-only finding, not one a prior body already lists', () => {
+    const contextLine = finding({ severity: 'P1', line: 1, title: 'Lock is released early' });
+    const prior = '- **P1** Older issue — `src/example.ts:9`';
+    assert.equal(
+      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [prior])),
+      true,
+    );
+    const listed = `${prior}\n- **P1** Lock is released early — \`src/example.ts:1\``;
+    assert.equal(
+      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [listed])),
+      false,
+    );
+    // The same unverified concern re-detected on the same head is not new either.
+    const concern = finding({
+      title: 'Unverified concern: `a < b` may race',
+      verificationUncertain: true,
+    });
+    const posted = `<pre lang="text"><code>Unverified concern: \`a &lt; b\` may race\nsrc/example.ts:10</code></pre>`;
+    assert.equal(newFindingCount([concern], [concern], [posted]), 0);
+  });
+
   it('always posts the first visible run, clean or not', () => {
     assert.equal(shouldPostReviewComment(0, 0), true);
     assert.equal(shouldPostReviewComment(0, 3), true);
@@ -1005,7 +1021,7 @@ describe('resolveFindingAnchors', () => {
 });
 
 describe('anchorFindings', () => {
-  it('routes findings on moved or context lines to the review body', () => {
+  it('routes findings on lines this PR did not write to the review body', () => {
     const moved = 'const total = computeInvoiceTotal(order.lines);';
     const patches = new Map([
       ['src/old.ts', `@@ -1,2 +1,1 @@\n keep\n-${moved}`],
@@ -1013,19 +1029,44 @@ describe('anchorFindings', () => {
     ]);
     const unchanged = unchangedLines(patches);
     const addable = new Map([['src/new.ts', new Set([2, 3, 4])]]);
-    const routed = anchorFindings(
-      [1, 2, 3, 4].map((line) => finding({ path: 'src/new.ts', line, title: `L${line}` })),
-      addable,
-      true,
-      unchanged,
+    // Line 40 is an unchanged caller farther down the same changed file.
+    const sites = [1, 2, 3, 4, 40].map((line) =>
+      finding({ path: 'src/new.ts', line, title: `L${line}` }),
+    );
+    for (const stacked of [false, true]) {
+      const bodyOnly = (f: Finding) => isBodyOnly(f, addable, unchanged, stacked);
+      const routed = anchorFindings(
+        sites.map((f) => ({ ...f })),
+        addable,
+        true,
+        bodyOnly,
+      );
+      assert.deepEqual(
+        routed.orphaned.map((f) => f.line),
+        stacked ? [1, 2, 40] : [1, 2],
+      );
+      assert.deepEqual(
+        routed.inline.map((f) => f.line),
+        [3, 4],
+      );
+      assert.equal(routed.anchorMissed.length, stacked ? 0 : 1);
+    }
+    // A confirmed added-line site is not hidden behind a context-line site of the same pattern.
+    const bodyOnly = (f: Finding) => isBodyOnly(f, addable, unchanged, false);
+    const collapsed = collapseRepeatedFindings(
+      [1, 3].map((line) =>
+        finding({
+          path: 'src/new.ts',
+          line,
+          severity: line === 1 ? 'P1' : 'P2',
+          title: 'Unscoped write (TS-13)',
+        }),
+      ),
+      bodyOnly,
     );
     assert.deepEqual(
-      routed.orphaned.map((f) => f.line),
-      [1, 2],
-    );
-    assert.deepEqual(
-      routed.inline.map((f) => f.line),
-      [3, 4],
+      anchorFindings(collapsed, addable, true, bodyOnly).inline.map((f) => f.line),
+      [3],
     );
   });
 

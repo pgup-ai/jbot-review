@@ -163,46 +163,48 @@ threads are suppressed in code before posting. Deterministic over-reach filters
 also run before verification: a P2-or-lower, non-security finding that the PR
 author or a writer declined, then resolved, within three lines (same guideline
 rule ID such as `TS-13`, `INV-1` or `§12.1` with an overlapping title, or a
-near-identical title) is dropped unless that thread's lines changed since;
-non-security findings on design notes and plans (`*-design-note.md`,
-`docs/**/plans/**`, `*-plan.md`) are dropped; on a PR into a branch other than
-the default, P2-or-lower non-security findings on lines of its changed files
-outside its own hunks belong to the parent PR and are dropped; a finding whose
-title labels it unverified is checked as a hypothesis; a non-bug, non-security
-test-style finding (helper use, matcher shape) that cites only `TS-6` rules (not
-the `TS-6.3` coverage tier) is rated `nit` unless it shows the case passes with
-the guarded line reverted; after verification, findings sharing a rule ID and
-title collapse into one thread listing every site. A finding on a context line,
-or in an added block of at least 20 alphanumeric characters whose every line the
-PR removed elsewhere (a move), is listed in the review body instead of an inline
-thread, and such findings alone do not post a new review. Several inputs tune
-the recall/precision/cost balance:
+near-identical title; when either cites a CWE or CVE, only the rule ID path
+applies) is dropped unless that thread's lines changed since; non-security
+findings on design notes and plans (`*-design-note.md`, `docs/**/plans/**`,
+`*-plan.md`) are dropped; a finding whose title labels it unverified is checked
+as a hypothesis; a non-bug, non-security test-convention finding (helper use,
+cleanup, titles; never matcher shape) that cites only `TS-6` rules (not the
+`TS-6.3` coverage tier) is rated `nit` unless it says the case still passes with
+the guard reverted or removed; after verification, confirmed findings sharing a
+rule ID and title, and routed to the same place, collapse into one thread
+listing every site. A finding on a context line, or in an added block of at
+least 20 alphanumeric characters whose every line the PR removed elsewhere (a
+move), is listed in the review body instead of an inline thread. So is, on a PR
+into a branch other than the default, a finding on a changed file's line outside
+the PR's own additions: parent-PR code, or a caller this PR breaks. A re-run
+posts only for findings no prior review reports, so a body-only or unverified
+finding a prior review body already lists does not post again. Several inputs
+tune the recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
-(baseline), and any run with new inline findings posts. A clean re-run posts no
-comment. With `auto-approve: true`, a clean run approves the exact reviewed
-head only when every prior jbot thread is resolved and GitHub reports the PR
-open, non-draft, and mergeable. CI, required reviews, and every other merge
-requirement remain GitHub's responsibility. Jbot never submits a blocking
-`REQUEST_CHANGES` review or calls the review-dismissal API. To keep an older
-approval from covering a new head, repositories must require approval of the
-most recent reviewable push. That rule does not invalidate an approval when a
-same-head re-run finds new or open findings; repositories that need those
+(baseline), and any run with findings no prior review reports posts. A clean
+re-run posts no comment. With `auto-approve: true`, a clean run approves the
+exact reviewed head only when every prior jbot thread is resolved and GitHub
+reports the PR open, non-draft, and mergeable. CI, required reviews, and every
+other merge requirement remain GitHub's responsibility. Jbot never submits a
+blocking `REQUEST_CHANGES` review or calls the review-dismissal API. To keep an
+older approval from covering a new head, repositories must require approval of
+the most recent reviewable push. That rule does not invalidate an approval when
+a same-head re-run finds new or open findings; repositories that need those
 findings to block merge must enforce a separate manual or workflow safeguard.
-The 🚀 reaction means **the PR has
-no open jbot findings** — it is
-added only when a real review leaves zero new findings _and_ every prior
-finding thread is resolved, and removed when a review starts. So 🚀-present
-means "reviewed, all good"; 🚀-absent means a review is in flight or the PR
-has open findings. Addressed-thread replies and resolution always run
-regardless. A push that leaves the diff byte-identical to the last posted
-review, typically an "Update branch" merge from main (see `skip-unchanged`), or
-a docs/diagram-only PR under `skip-doc-only: true`, is skipped before any model
-call and leaves the reaction unchanged (it isn't reviewed, so it neither earns
-nor loses the 🚀). The exception is a merge that changed a rule document the
-review loads: that push is reviewed. _Reactions are best-effort: if they don't
-appear, grant the workflow `issues: write` (PR reactions use the issues API);
-the review itself is unaffected._
+The 🚀 reaction means **the PR has no open jbot findings** — it is added only
+when a real review leaves zero new findings _and_ every prior finding thread is
+resolved, and removed when a review starts. So 🚀-present means "reviewed, all
+good"; 🚀-absent means a review is in flight or the PR has open findings.
+Addressed-thread replies and resolution always run regardless. A push that
+leaves the diff byte-identical to the last posted review, typically an "Update
+branch" merge from main (see `skip-unchanged`), or a docs/diagram-only PR under
+`skip-doc-only: true`, is skipped before any model call and leaves the reaction
+unchanged (it isn't reviewed, so it neither earns nor loses the 🚀). The
+exception is a merge that changed a rule document the review loads: that push is
+reviewed. _Reactions are best-effort: if they don't appear, grant the workflow
+`issues: write` (PR reactions use the issues API); the review itself is
+unaffected._
 
 | Input                     | Default            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
