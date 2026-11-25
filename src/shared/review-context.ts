@@ -1060,7 +1060,13 @@ async function readBaseGuidelines(
   const blobs = await readBlobs([...new Set(kept.map(([, { sha }]) => sha))]);
   return {
     files: new Map(kept.map(([path, { sha }]) => [path, blobs.get(sha)!])),
-    basePaths: new Set(tree.keys()),
+    basePaths: new Set(
+      [...tree].flatMap(([path, { mode }]) =>
+        mode === '120000' && [...targets.keys()].some((kept) => kept.startsWith(`${path}/`))
+          ? []
+          : [path],
+      ),
+    ),
   };
 }
 

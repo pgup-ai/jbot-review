@@ -171,8 +171,9 @@ unverified label (`Unverified:`, `[unverified]`, "verification not completed")
 is checked as a hypothesis; a maintainability finding about test conventions
 (helper use, cleanup, titles) that cites only `TS-6` rules (not the `TS-6.3`
 coverage tier) is rated `nit` only when it is a pure convention finding with no
-coverage claim (never matcher shape, nor any mention of passing, failing,
-catching, covering or reverting); after verification, confirmed findings sharing
+coverage claim (never matcher shape, nor any coverage word such as passing,
+failing, catching, covering, reverting, guarding or asserting; `COVERAGE_CLAIM`
+in `src/shared/filter.ts` holds the full list); after verification, confirmed findings sharing
 a rule ID and title, and routed to the same place, collapse into one thread
 listing every site. A finding on a context line, or in an added block of at
 least 20 alphanumeric characters whose every line the PR removed elsewhere (a

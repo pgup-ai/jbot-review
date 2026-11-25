@@ -308,7 +308,7 @@ const MATCHER_SHAPE =
   /\btoBe(?:Defined|Truthy|Falsy)\b|\btoThrow\b|Containing\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bmatcher\b/i;
 // Any coverage claim keeps severity: only a pure convention finding is clamped.
 const COVERAGE_CLAIM =
-  /\b(?:pass\w*|fail\w*|catch\w*|caught|cover\w*|exercis\w*|reach\w*|regress\w*|revert\w*|guard\w*|assert\w*|verif\w*|prov\w*|mask\w*|hid(?:e|es|den|ing)|false (?:positive|negative)s?)\b/i;
+  /\b(?:pass(?:es|ed|ing)?|fail(?:s|ed|ing|ure|ures)?|catch(?:es|ing)?|caught|cover(?:s|ed|ing|age)?|exercis(?:e|es|ed|ing)|reach(?:es|ed|ing)?|regress(?:es|ed|ion|ions)?|revert(?:s|ed|ing)?|guard(?:s|ed)?|assert(?:s|ed|ion|ions)?|verif(?:y|ies|ied|ication)|prov(?:e|es|ed|en|ing)|mask(?:s|ed|ing)?|hid(?:e|es|den|ing)|false (?:positive|negative)s?)\b/i;
 
 /**
  * A maintainability finding citing only `TS-6` rules (not the `TS-6.3`
@@ -884,7 +884,7 @@ function bodyFindingKeys(finding: Finding): Array<{ path: string; key: string }>
 
 /** The hidden markers at the end of a jbot review body; model text cannot open one (neutralizeMarkers). */
 function trailerMarkers(body: string): string[] {
-  const block = /(?:\n<!-- [^\n]* -->[ \t]*)+\s*$/.exec(body)?.[0] ?? '';
+  const block = /(?:\s*\n<!-- [^\n]* -->[ \t]*)+\s*$/.exec(body)?.[0] ?? '';
   return [...block.matchAll(/<!-- ([^\n]*?) -->/g)].map(([, marker]) => marker);
 }
 
