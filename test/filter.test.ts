@@ -835,6 +835,9 @@ describe('shouldPostReviewComment', () => {
       shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [prior])),
       true,
     );
+    // Title and location must sit in the same entry, not anywhere in the body.
+    const split = `- **P1** Lock is released early — \`src/other.ts:1\`\n- **P2** Other — \`src/example.ts:1\``;
+    assert.equal(newFindingCount([contextLine], [contextLine], [split]), 1);
     const listed = `${prior}\n- **P1** Lock is released early — \`src/example.ts:1\``;
     assert.equal(
       shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [listed])),
