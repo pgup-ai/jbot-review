@@ -477,7 +477,9 @@ export async function listPriorJbotThreads(
       });
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
-      if (disposition === 'resolve-only') {
+      // A grouped thread is never retry-resolved: only its primary site was checked. It stays an
+      // open thread, so it still suppresses repeats and counts as open.
+      if (disposition === 'resolve-only' && parseGroupedSites(topLevel.body).length === 0) {
         unresolvedAddressedThreadIds.push(thread.id);
         continue;
       }

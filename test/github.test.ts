@@ -875,6 +875,18 @@ describe('prior thread outcomes', () => {
         ],
       },
     });
+    const addressedOpen = (
+      id: string,
+      topBody = 'finding\n\n<!-- jbot-sites:src%2Fy.ts:20 -->\n<!-- jbot-review:finding -->',
+    ) => {
+      const base = thread(id, false, 'github-actions', 'NONE', 'github-actions[bot]', topBody);
+      base.comments.nodes[1] = {
+        ...base.comments.nodes[1],
+        body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
+        author: { login: 'github-actions[bot]' },
+      };
+      return base;
+    };
     const octokit = {
       rest: { pulls: { listReviews: {}, listReviewComments: {} } },
       paginate: async () => [],
@@ -911,6 +923,9 @@ describe('prior thread outcomes', () => {
                   'github-actions[bot]',
                   'finding\n\n<!-- jbot-sites:src%ZZ.ts:1,src%2Fy.ts:20 -->\n<!-- jbot-review:finding -->',
                 ),
+                // Addressed but never resolved: a single-site thread is retried; a grouped one stays an open thread.
+                addressedOpen('PRRT_single_addressed', 'finding\n\n<!-- jbot-review:finding -->'),
+                addressedOpen('PRRT_grouped_addressed'),
               ],
             },
           },
@@ -930,8 +945,11 @@ describe('prior thread outcomes', () => {
         { id: 'PRRT_author', declined: true, outdated: false },
         { id: 'PRRT_quoted', declined: false, outdated: false },
         { id: 'PRRT_malformed', declined: false, outdated: false },
+        { id: 'PRRT_grouped_addressed', declined: false, outdated: false },
       ],
     );
+    // Only the single-site addressed thread is retry-resolved; the grouped one stays open and keeps suppressing.
+    assert.deepEqual(result.unresolvedAddressedThreadIds, ['PRRT_single_addressed']);
     assert.ok(!result.threads.some(({ id }) => id === 'PRRT_forged_declined'));
     // A marked comment someone else posted is not a jbot finding, so it suppresses nothing.
     assert.ok(!result.outcomes.some(({ threadId }) => threadId === 'PRRT_forged_thread'));
@@ -948,6 +966,7 @@ describe('prior thread outcomes', () => {
         ['PRRT_quoted', []],
         // One undecodable entry voids the whole list.
         ['PRRT_malformed', []],
+        ['PRRT_grouped_addressed', [{ path: 'src/y.ts', line: 20 }]],
       ],
     );
   });
