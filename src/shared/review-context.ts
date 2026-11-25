@@ -1618,7 +1618,7 @@ function guidelineBudgetNote(discovered: DiscoveredGuidelines, omissions: string
 // Replaying 159 rules cited in real reviews: 50 kept 97% of routed ones while lifting unrouted 37% → 83%.
 const ROUTED_DOC_PRIOR = 50;
 const MAX_RANKED_SECTION_BYTES = 6 * 1024;
-const REQUIRED_SECTION_BYTES = 2 * 1024;
+const MAX_REQUIRED_DOC_BYTES = 24 * 1024;
 
 /**
  * The guideline-compliance budget (JBOT_GUIDELINE_RANK=legacy restores
@@ -1664,22 +1664,17 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
       };
     });
   });
-  // The repo requires these docs for every review, so each keeps its best section
-  // (clipped, preferring one with a body) even when no changed path names it.
-  const substantive = (unit: (typeof units)[number]) =>
-    Number(unit.section.text.length > unit.heading.length + 40);
-  for (const label of new Set([...(discovered.required ?? []), 'REVIEW.md'])) {
-    const [best] = units
+  // The repo requires these docs for every review, so they load in reading order,
+  // severity rules included, even when no changed path names them.
+  let required = 0;
+  for (const label of new Set([...(discovered.required ?? []), 'REVIEW.md']))
+    for (const unit of units
       .filter((unit) => unit.doc.label === label)
-      .sort(
-        (a, b) =>
-          substantive(b) - substantive(a) ||
-          b.section.score - a.section.score ||
-          a.section.order - b.section.order,
-      );
-    if (best)
-      Object.assign(best, { rank: Number.MAX_SAFE_INTEGER - 1, max: REQUIRED_SECTION_BYTES });
-  }
+      .sort((a, b) => a.section.order - b.section.order)) {
+      required += Buffer.byteLength(unit.section.text);
+      if (required > MAX_REQUIRED_DOC_BYTES) break;
+      unit.rank = Number.MAX_SAFE_INTEGER - 1;
+    }
   units.sort((a, b) => b.rank - a.rank || a.index - b.index || a.section.order - b.section.order);
 
   // Notes are bounded lists plus under 512 bytes of fixed prose, so the cap holds by construction.

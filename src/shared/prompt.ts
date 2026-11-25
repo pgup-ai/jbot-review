@@ -140,6 +140,7 @@ Use these severity levels.
 | P3   | Minor improvement (cleaner approach, DRY, clarity)  |
 | nit  | Trivial suggestion (naming, comment, formatting)    |
 
+Where the repository guidelines rate a kind of finding, use their rating.
 P0, P1, and P2 are blocking findings. P3 and nit are advisory only; include
 them only when they are clearly useful and low-noise. Prefer the lower
 severity when uncertain about IMPACT — but do not lower severity merely
@@ -1073,9 +1074,10 @@ rule by rule. Report only observed conflicts with an explicit written rule;
 quote it and name the file it comes from.
 Do not invent rules or infer tool usage, authorship, or generation history
 from file style. A recommendation needs a concrete benefit on changed code.
-For written-rule violations use P1 only for a mandatory/blocking rule with
-material impact, P2 for a clear standard violation, and P3 for a recommendation.
-Prefer the lower severity when uncertain; do not use P0 or nit for these violations.`;
+For written-rule violations use the guidelines' own rating where they give one,
+nit included; otherwise P1 only for a mandatory/blocking rule with material
+impact, P2 for a clear standard violation, and P3 for a recommendation.
+Prefer the lower severity when uncertain; do not use P0 for these violations.`;
 
 export type ReviewPlaybookId =
   | 'code-review-core'
@@ -1626,11 +1628,14 @@ ${REVIEW_COMMAND_POLICY}
 
 ## Severity
 
+Where the documents rate a kind of finding, use their rating, "nit" included.
+Otherwise:
+
 - "P1": violation of a rule the documents mark as mandatory or blocking, with
   material impact on this change.
 - "P2": clear violation of a written standard.
 - "P3": deviation from a written recommendation or preference.
-- Do not use "P0" or "nit". Prefer the lower severity when uncertain.
+- Do not use "P0". Prefer the lower severity when uncertain.
 
 ## Output
 
@@ -1654,7 +1659,7 @@ JSON string values; escape newlines inside string values as \\n.
 
 Field constraints are the same as a normal review finding: "path" and "line"
 must point at a line ADDED by this PR (or line 0 for a file-level finding on
-a changed file); "severity" is one of "P1", "P2", "P3"; "kind" is one of
+a changed file); "severity" is one of "P1", "P2", "P3", "nit"; "kind" is one of
 "bug", "security", "performance", "maintainability", "architecture", "test",
 "docs", "investigate"; "confidence" is one of "high", "medium", "low". If
 nothing violates the written rules, return {"findings": []}.`;

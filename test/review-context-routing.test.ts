@@ -414,7 +414,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!(await matches('x/a/c.md')), '? does not match a slash');
   });
 
-  it("keeps the best section of each doc the README's review reading lists, clipped", async () => {
+  it("keeps every section of each doc the README's review reading lists, clipped", async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-required-'));
     roots.push(root);
     mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
@@ -444,7 +444,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     );
     writeFileSync(
       join(root, '.pr-governance/review/CHECKLIST.md'),
-      `# Checklist\n${'Check every item. '.repeat(200)}`,
+      `# Checklist\n${'Check every item. '.repeat(400)}\n## Severity\nTest-helper findings are nit.`,
     );
     const discovered = await discoverGuidelineDocs(root, ['src/check.ts']);
     assert.deepEqual(discovered.required, [
@@ -457,6 +457,8 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(out, /Keep changes small/);
     assert.match(out, /declared seams/);
     assert.match(out, /Check every item\.[^]*\[section truncated\]/);
+    // A later section the diff names nothing from, such as the repo's severity rules.
+    assert.match(out, /Test-helper findings are nit/);
     // A conditional list's doc still has to name something in the diff.
     assert.doesNotMatch(out, /decimal types/);
   });
