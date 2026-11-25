@@ -236,6 +236,7 @@ function isSameIssue(
   addable?: ReadonlyMap<string, ReadonlySet<number>>,
 ): boolean {
   const addableLines = addable?.get(finding.path);
+  if (thread.isResolved && thread.line === undefined) return false;
   const locationMatches =
     thread.line === undefined
       ? finding.line === 0 || (addableLines !== undefined && !addableLines.has(finding.line))

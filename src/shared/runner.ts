@@ -1908,7 +1908,9 @@ async function runReviewPipeline(params: {
   if (!options.includePriorComments) {
     log('Prior review comments excluded from review context by configuration.');
   }
-  const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
+  const priorJbotThreads = options.includePriorComments
+    ? allPriorJbotThreads.filter((thread) => !thread.sites?.length)
+    : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock();
@@ -4071,7 +4073,7 @@ async function runReviewPipeline(params: {
     // the posting/approval phase below succeeds.
     const findingCount = newFindingCount(
       filteredFindings,
-      [...orphaned, ...withheld],
+      [...orphaned, ...withheld, ...fileLevel],
       priorJbotReviewGroups,
     );
     try {

@@ -929,7 +929,8 @@ export async function discoverBaseGuidelineDocs(
       (path) =>
         !snapshot.files.has(path) &&
         (attempted.has(path) ||
-          (isGuidelineSource(path) && attempted.has(`${posix.dirname(path)}/`))),
+          ((isGuidelineSource(path) || posix.dirname(path) === '.pr-governance') &&
+            attempted.has(`${posix.dirname(path)}/`))),
     );
     return missing.length ? { ...discovered, snapshotSkipped: missing } : discovered;
   } finally {

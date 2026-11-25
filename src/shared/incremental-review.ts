@@ -1090,6 +1090,19 @@ export async function ruleDocsChanged(
     // Guidance is read at the base, so a base edit counts before the PR merges it.
     if (rules.base && (await changed(oldFork, rules.base, [...rules.paths, ...rules.prEdited])))
       return true;
+    if (rules.base) {
+      const baseDeleted = await git(
+        'diff',
+        '--no-ext-diff',
+        '--no-renames',
+        '--name-only',
+        '--diff-filter=D',
+        '-z',
+        oldFork,
+        rules.base,
+      );
+      if (baseDeleted.split('\0').some((path) => path && isGuidelineSource(path))) return true;
+    }
     if (rules.base && !rules.complete) {
       const baseEdits = await git(
         'diff',
