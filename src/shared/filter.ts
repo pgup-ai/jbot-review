@@ -281,7 +281,8 @@ function ruleIds(text: string): Set<string> {
 const NEAR_IDENTICAL_OVERLAP = 0.8;
 const DESIGN_NOTE_PATH = /-design-note\.md$|(^|\/)docs\/(.+\/)?plans\/|-plan\.md$/;
 // A title label ("Unverified: …", "[unverified]"), never body prose about unchecked input.
-const SELF_UNVERIFIED = /^\W*unverified\b|[[(]unverified[\])]|\bverification not completed\b/i;
+// "Unverified redirect parameter" names a defect, not a label: require the label form.
+const SELF_UNVERIFIED = /^\W*unverified\s*:|\[unverified\]|\bverification not completed\b/i;
 const CWE_OR_CVE = /\b(?:CWE|CVE)-\d+/;
 // Test conventions the repo rates nit: helper use, cleanup and titles. Never
 // matcher shape, which can hide a test passing for the wrong reason.
@@ -319,8 +320,8 @@ export function capTestConvention(finding: Finding): Finding {
  * Deterministic over-reach filters, applied before verification:
  * - drops non-security findings on design notes and plans, which record intent
  *   rather than current behavior;
- * - treats a finding whose title labels it unverified as a hypothesis for the
- *   verifier, never an inline claim;
+ * - treats a non-security finding whose title carries an unverified label as a
+ *   hypothesis for the verifier, never an inline claim;
  * - caps test-convention findings (`capTestConvention`).
  */
 export function filterReviewNoise(findings: Finding[]): {
@@ -335,7 +336,11 @@ export function filterReviewNoise(findings: Finding[]): {
       continue;
     }
     let finding = original;
-    if (!isUnresolvedFinding(finding) && SELF_UNVERIFIED.test(finding.title))
+    if (
+      !isUnresolvedFinding(finding) &&
+      finding.kind !== 'security' &&
+      SELF_UNVERIFIED.test(finding.title)
+    )
       finding = { ...finding, kind: 'investigate' };
     kept.push(capTestConvention(finding));
   }

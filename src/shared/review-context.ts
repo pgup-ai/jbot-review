@@ -899,9 +899,8 @@ const exec = promisify(execFile);
  * reviewed against. Fails closed: when the snapshot cannot be built, no
  * repository guidance loads and `snapshotError` says why. A file that cannot be
  * loaded (over MAX_RULE_DOC_BYTES, or a link that does not resolve inside the
- * tree) is left out; `snapshotSkipped` lists it when discovery always consults
- * it (a control file, or `AGENTS.md`/`CLAUDE.md`/`REVIEW.md` at the root or an
- * ancestor of a changed file) or a loaded doc or route names it.
+ * tree) is left out; `snapshotSkipped` lists it when discovery looked it up or
+ * listed its directory, so unrelated files stay silent.
  */
 export async function discoverBaseGuidelineDocs(
   workspace: string,
@@ -922,20 +921,10 @@ export async function discoverBaseGuidelineDocs(
     return { docs: [], referenced: [], budgetExhausted: false, snapshotError };
   }
   try {
-    const discovered = await discoverGuidelineDocs(root, changedFiles);
-    const ancestors = new Set(['.', ...getChangedFileAncestorDirs(changedFiles)]);
-    // What discovery read: loaded docs and the routing config, which name further docs.
-    const consulted = [
-      ...discovered.docs.map((doc) => doc.text),
-      snapshot.files.get(GUIDELINE_CONTROL_FILES[0])?.toString() ?? '',
-    ].join('\n');
+    const attempted = new Set<string>();
+    const discovered = await discoverGuidelineDocs(root, changedFiles, attempted);
     const missing = snapshot.unloadable.filter(
-      (path) =>
-        GUIDELINE_CONTROL_FILES.includes(path) ||
-        ROOT_GUIDELINE_FILES.includes(path) ||
-        (/^(?:AGENTS|CLAUDE|REVIEW)\.md$/.test(posix.basename(path)) &&
-          ancestors.has(posix.dirname(path))) ||
-        consulted.includes(posix.basename(path)),
+      (path) => attempted.has(path) || attempted.has(`${posix.dirname(path)}/`),
     );
     return missing.length ? { ...discovered, snapshotSkipped: missing } : discovered;
   } finally {
@@ -1097,6 +1086,8 @@ export const GUIDELINE_CONTROL_FILES = [GOVERNANCE_ROUTING, GOVERNANCE_INDEX].ma
 export async function discoverGuidelineDocs(
   cwd: string,
   changedFiles: string[] = [],
+  /** Collects every path discovery looks up, and `dir/` for every directory it lists. */
+  attempted?: Set<string>,
 ): Promise<DiscoveredGuidelines> {
   const docs: GuidelineDoc[] = [];
   const seen = new Set<string>();
@@ -1115,6 +1106,7 @@ export async function discoverGuidelineDocs(
     path: string,
   ): Promise<{ absolutePath: string; realPath: string } | undefined> {
     const absolutePath = resolve(path);
+    attempted?.add(relative(cwd, absolutePath));
     if (!isInsideDirectory(cwd, absolutePath)) return undefined;
     if (isGeneratedReviewReport(relative(cwd, absolutePath))) return undefined;
     try {
@@ -1279,6 +1271,7 @@ export async function discoverGuidelineDocs(
   ): Promise<void> {
     const resolvedDir = await resolveExistingInsideWorkspace(resolve(cwd, relativeDir));
     if (!resolvedDir) return;
+    attempted?.add(`${relative(cwd, resolvedDir.absolutePath)}/`);
     try {
       const entries = await readdir(resolvedDir.realPath, { withFileTypes: true });
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -1573,6 +1566,7 @@ export async function discoverGuidelineDocs(
   try {
     const resolvedGovernanceDir = await resolveExistingInsideWorkspace(governanceDir);
     if (resolvedGovernanceDir) {
+      attempted?.add('.pr-governance/');
       const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
         if (!entry.isFile()) continue;

@@ -737,14 +737,21 @@ describe('filterReviewNoise', () => {
   });
 
   it('sends a self-declared unverified finding to verification as a hypothesis', () => {
-    const [self, prose, body] = noise([
+    const [self, prose, body, defect, security] = noise([
       finding({ title: 'Unverified: retry may double-post' }),
       finding({ kind: 'security', title: 'Webhook signature is not verified' }),
       finding({ title: 'Retry double-posts', body: 'Rules out the unverified hypothesis.' }),
+      // A title that names an unverified input is a defect, not a label.
+      finding({ title: 'Unverified redirect parameter enables open redirect' }),
+      finding({ kind: 'security', title: 'Unverified: webhook signature permits forgery' }),
     ]).findings;
     assert.equal(isUnresolvedFinding(self), true);
-    assert.equal(isUnresolvedFinding(prose), false);
-    assert.equal(isUnresolvedFinding(body), false);
+    assert.deepEqual([prose, body, defect, security].map(isUnresolvedFinding), [
+      false,
+      false,
+      false,
+      false,
+    ]);
     const [labeled] = noise([
       finding({ title: 'Retry double-posts (verification not completed)' }),
     ]).findings;

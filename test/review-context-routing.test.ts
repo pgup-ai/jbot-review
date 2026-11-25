@@ -501,6 +501,8 @@ describe('discoverGuidelineDocs with diff routing', () => {
       git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', message);
     git('rm', '-q', 'CONTRIBUTING.md');
     writeFileSync(join(root, 'docs/archive.md'), 'x'.repeat(513 * 1024));
+    // A loaded doc naming another file that ends the same way does not make it needed.
+    writeFileSync(join(root, 'docs/RULES.md'), '# Rules\nLock every write. See old-archive.md.');
     symlinkSync('gone.md', join(root, 'docs/old.md'));
     git('add', 'docs');
     commit('unrelated');
@@ -527,6 +529,13 @@ describe('discoverGuidelineDocs with diff routing', () => {
       '.pr-governance/review/rules-for-diff.yaml',
     ]);
     assert.ok(governance.docs.some((doc) => /declared seams/.test(doc.text)));
+    // Any scoped guideline name above a changed file is looked up, so it is needed.
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src/TECHNICAL_STANDARDS.md'), 'x'.repeat(513 * 1024));
+    git('add', 'src');
+    commit('oversized scoped standards');
+    const scoped = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(scoped.snapshotSkipped?.includes('src/TECHNICAL_STANDARDS.md'));
 
     const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
     assert.ok(failed.snapshotError);

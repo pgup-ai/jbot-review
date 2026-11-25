@@ -166,23 +166,24 @@ rule ID such as `TS-13`, `INV-1` or `§12.1` with an overlapping title, or a
 near-identical title; when either cites a CWE or CVE, only the rule ID path
 applies) is dropped unless that thread's lines changed since; non-security
 findings on design notes and plans (`*-design-note.md`, `docs/**/plans/**`,
-`*-plan.md`) are dropped; a finding whose title labels it unverified is checked
-as a hypothesis; a maintainability finding about test conventions (helper use,
-cleanup, titles) that cites only `TS-6` rules (not the `TS-6.3` coverage tier)
-is rated `nit`, never one about matcher shape or a test that may pass without
-catching its regression; after verification, confirmed findings sharing a rule
-ID and title, and routed to the same place, collapse into one thread listing
-every site. A finding on a context line, or in an added block of at least 20
-alphanumeric characters whose every line the PR removed elsewhere (a move), is
-listed in the review body instead of an inline thread. So is, on a PR into a
-branch other than the default, a finding on a changed file's line outside the
-PR's own additions: parent-PR code, or a caller this PR breaks. The review body
-marks each site of a body-only or unverified finding with a hidden `jbot-site`
-key (path, line, title and section). A re-run posts only when some site has no
-key in a prior review body: the same finding does not post again, while a new
-site of a grouped finding, or an unverified concern since confirmed, does.
-Bodies posted before these keys existed count as unreported, so they post once
-more. Several inputs tune the recall/precision/cost balance:
+`*-plan.md`) are dropped; a non-security finding whose title carries an
+unverified label (`Unverified:`, `[unverified]`, "verification not completed")
+is checked as a hypothesis; a maintainability finding about test conventions
+(helper use, cleanup, titles) that cites only `TS-6` rules (not the `TS-6.3`
+coverage tier) is rated `nit`, never one about matcher shape or a test that may
+pass without catching its regression; after verification, confirmed findings
+sharing a rule ID and title, and routed to the same place, collapse into one
+thread listing every site. A finding on a context line, or in an added block of
+at least 20 alphanumeric characters whose every line the PR removed elsewhere (a
+move), is listed in the review body instead of an inline thread. So is, on a PR
+into a branch other than the default, a finding on a changed file's line outside
+the PR's own additions: parent-PR code, or a caller this PR breaks. The review
+body marks each site of a body-only or unverified finding with a hidden
+`jbot-site` key (path, line, title and section). A re-run posts only when some
+site has no key in a prior review body: the same finding does not post again,
+while a new site of a grouped finding, or an unverified concern since confirmed,
+does. Bodies posted before these keys existed count as unreported, so they post
+once more. Several inputs tune the recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run with findings no prior review reports posts. A clean
@@ -1524,11 +1525,10 @@ checkout, so a PR cannot edit, move or rename the rules or ratings that apply to
 it; if the snapshot fails, the review runs without repository guidance and
 reports itself incomplete, A guideline file over 512 KB, or a link that does not
 resolve inside the tree, is left out as if absent; it is reported the same way
-when it is a control file, a root or ancestor
-`AGENTS.md`/`CLAUDE.md`/`REVIEW.md`, or named by a loaded doc or route, and
-ignored otherwise. It fills the rest of its 96 KB budget with sections in rank
-order, clipping any over 6 KB unless a rule ID routes it, and lists the ranked
-sections that did not fit, so it can open the ones that apply.
+when discovery looked it up or listed its directory, and ignored otherwise. It
+fills the rest of its 96 KB budget with sections in rank order, clipping any
+over 6 KB unless a rule ID routes it, and lists the ranked sections that did not
+fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each
