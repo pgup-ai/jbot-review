@@ -1046,7 +1046,7 @@ async function readBaseGuidelines(
   // Resolve each symlink to the file it names inside the tree; one that cannot stays absent.
   const targets = new Map<string, { mode: string; sha: string; size: number }>();
   let links = [...tree]
-    .filter(([path]) => isGuidelineSource(path))
+    .filter(([path]) => isGuidelineSource(path) || posix.dirname(path) === '.pr-governance')
     .map(([path, entry]) => ({ path, at: origin.get(path) ?? path, entry }));
   for (let hop = 0; links.length > 0; hop++) {
     const linkTargets = await readBlobs(

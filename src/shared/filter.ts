@@ -236,7 +236,8 @@ function isSameIssue(
   addable?: ReadonlyMap<string, ReadonlySet<number>>,
 ): boolean {
   const addableLines = addable?.get(finding.path);
-  if (thread.isResolved && thread.line === undefined) return false;
+  // A line-less decline is file-level: it can still match a file-level finding, never a line finding.
+  if (thread.isResolved && thread.line === undefined && finding.line > 0) return false;
   const locationMatches =
     thread.line === undefined
       ? finding.line === 0 || (addableLines !== undefined && !addableLines.has(finding.line))
