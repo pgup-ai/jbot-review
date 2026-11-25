@@ -1492,7 +1492,7 @@ async function runReviewPipeline(params: {
     prEdited: ruleSources.filter((path) => prPaths.has(path)),
     prPaths,
     base: baseSha,
-    complete: !loadedGuidelines.budgetExhausted,
+    complete: !loadedGuidelines.budgetExhausted && !guidelineSnapshotError,
   };
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {
@@ -1531,7 +1531,15 @@ async function runReviewPipeline(params: {
   // Auto-approve runs never skip: approval must re-attest the latest pushed
   // head, and a skipped run would leave the prior approval stranded on the old
   // head — blocking PRs behind stale-approval-dismissing branch protection.
-  if (!localDiff && options.skipUnchanged && !options.autoApprove && headSha && baseRef) {
+  // Without the base rules the gate cannot tell whether they changed.
+  if (
+    !localDiff &&
+    options.skipUnchanged &&
+    !options.autoApprove &&
+    !guidelineSnapshotError &&
+    headSha &&
+    baseRef
+  ) {
     const reviewedHead = completedReviewHead(priorJbotReviewGroups.at(-1)?.body ?? '');
     // Same-head reruns are never assumed unchanged: the base may have advanced
     // since that review, and a same-head compare would only test today's diff
@@ -3546,9 +3554,7 @@ async function runReviewPipeline(params: {
     );
 
     const noiseContext = {
-      priorThreads: priorJbotThreads,
       patchByPath,
-      prFiles: new Set(rawFiles.map((file) => file.filename)),
       stacked: Boolean(baseRef && defaultBranch && baseRef !== defaultBranch),
     };
     const overlapTargets = (lists: Finding[][]) => {

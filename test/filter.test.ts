@@ -21,6 +21,7 @@ import {
   suppressPreviouslyReported,
   unchangedLines,
 } from '../src/shared/filter.ts';
+import type { PriorFindingRef } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 function finding(overrides: Partial<Finding>): Finding {
@@ -687,14 +688,12 @@ describe('filterReviewNoise', () => {
     overrides: Partial<Parameters<typeof filterReviewNoise>[1]> = {},
   ) =>
     filterReviewNoise(findings, {
-      priorThreads: [],
       patchByPath: new Map([['src/example.ts', patch]]),
-      prFiles: new Set(['src/example.ts']),
       stacked: false,
       ...overrides,
     });
 
-  it('drops a P2-or-lower finding declined near the same lines, until those lines change', () => {
+  it('suppresses a P2-or-lower finding declined near the same lines, until those lines change', () => {
     const thread = {
       path: 'src/example.ts',
       line: 12,
@@ -711,28 +710,17 @@ describe('filterReviewNoise', () => {
       finding({ severity: 'P1', title: 'Unscoped write (TS-13)' }),
       finding({ kind: 'security', title: 'Wrap the repository write' }),
     ];
-    // Collapse may merge the kept TS-13 sites, but none of them is dropped.
-    const { dropped } = noise([byRule, byTitle, ...kept], { priorThreads: [thread] });
-    assert.deepEqual(
-      dropped.map(({ finding }) => finding),
-      [byRule, byTitle],
-    );
+    const suppress = (thread: PriorFindingRef, list: Finding[]) =>
+      suppressPreviouslyReported(list, [thread]).findings;
+    assert.deepEqual(suppress(thread, [byRule, byTitle, ...kept]), kept);
+    // Loose overlap with the thread body is not the same claim.
+    const loose = finding({ title: 'Repository requires wrapping' });
+    assert.deepEqual(suppress(thread, [loose]), [loose]);
     for (const changed of [
       { ...thread, outdated: true },
       { ...thread, declined: false },
     ])
-      assert.equal(noise([byRule], { priorThreads: [changed] }).findings.length, 1);
-    // The earlier location-and-title suppression honors the same decline limits.
-    const p1 = finding({ severity: 'P1', title: 'Wrap the repository write' });
-    const security = finding({ kind: 'security', title: 'Wrap the repository write' });
-    assert.deepEqual(suppressPreviouslyReported([byTitle, p1, security], [thread]).findings, [
-      p1,
-      security,
-    ]);
-    assert.equal(
-      suppressPreviouslyReported([byTitle], [{ ...thread, outdated: true }]).findings.length,
-      1,
-    );
+      assert.deepEqual(suppress(changed, [byRule]), [byRule]);
   });
 
   it('drops findings on design notes, plans, and parent-PR code of a stacked PR', () => {
@@ -741,16 +729,23 @@ describe('filterReviewNoise', () => {
       ...paths.map((path) => finding({ path, title: path })),
       finding({ path: paths[1], kind: 'security', title: 'committed credential' }),
       finding({ line: 40, title: 'outside own hunks' }),
-      finding({ path: 'src/parent.ts', title: 'parent file' }),
+      finding({ line: 40, severity: 'P1', title: 'blocking outside own hunks' }),
+      finding({ path: 'src/caller.ts', title: 'caller breaks on the new return contract' }),
       finding({ line: 2, title: 'own line' }),
     ];
     assert.deepEqual(
       noise(findings).findings.map((f) => f.title),
-      ['committed credential', 'outside own hunks', 'parent file', 'own line'],
+      [
+        'committed credential',
+        'outside own hunks',
+        'blocking outside own hunks',
+        'caller breaks on the new return contract',
+        'own line',
+      ],
     );
     assert.deepEqual(
       noise(findings, { stacked: true }).dropped.map(({ reason }) => reason),
-      ['design-note', 'design-note', 'design-note', 'parent-pr', 'parent-pr', 'parent-pr'],
+      ['design-note', 'design-note', 'design-note', 'parent-pr'],
     );
   });
 
@@ -806,14 +801,17 @@ describe('filterReviewNoise', () => {
         line: 2,
         severity: 'P0',
         kind: 'investigate',
+        verificationUncertain: true,
         title: 'Comment restates the code (§12.1)',
       }),
       finding({ path: 'src/c.ts', line: 5, title: 'Comment restates the code' }),
     ]);
-    assert.equal(findings.length, 2);
-    // A verified site leads, ahead of a stronger but unresolved one.
-    assert.equal(findings[0].path, 'src/b.ts');
-    assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`, `src\/d\.ts:2`\.$/);
+    // The unresolved site keeps its own entry instead of riding on a verified one.
+    assert.deepEqual(
+      findings.map((f) => f.path),
+      ['src/b.ts', 'src/d.ts', 'src/c.ts'],
+    );
+    assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`\.$/);
   });
 });
 

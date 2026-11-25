@@ -165,20 +165,21 @@ author or a writer declined, then resolved, within three lines (same guideline
 rule ID such as `TS-13`, `INV-1` or `§12.1`, or a near-identical title) is
 dropped unless that thread's lines changed since; non-security findings on
 design notes and plans (`*-design-note.md`, `docs/**/plans/**`, `*-plan.md`) are
-dropped; on a PR into a branch other than the default, findings on lines outside
-the PR's own hunks belong to the parent PR and are dropped; a finding whose
-title labels it unverified is checked as a hypothesis; a non-bug, non-security
-test-style finding (helper use, matcher shape) that cites only `TS-6` rules (not
-the `TS-6.3` coverage tier) is rated `nit` unless it shows the case passes with
-the guarded line reverted; after verification, findings sharing a rule ID and
-title collapse into one thread listing every site. A finding on a context line,
-or in an added block of at least 20 alphanumeric characters whose every line the
-PR removed elsewhere (a move), is listed in the review body instead of an inline
-thread, and such findings alone do not post a new review. Several inputs tune
-the recall/precision/cost balance:
+dropped; on a PR into a branch other than the default, P2-or-lower non-security
+findings on lines of its changed files outside its own hunks belong to the
+parent PR and are dropped; a finding whose title labels it unverified is checked
+as a hypothesis; a non-bug, non-security test-style finding (helper use, matcher
+shape) that cites only `TS-6` rules (not the `TS-6.3` coverage tier) is rated
+`nit` unless it shows the case passes with the guarded line reverted; after
+verification, findings sharing a rule ID and title collapse into one thread
+listing every site. A finding on a context line, or in an added block of at
+least 20 alphanumeric characters whose every line the PR removed elsewhere (a
+move), is listed in the review body instead of an inline thread, and such
+findings alone do not post a new review. Several inputs tune the
+recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
-(baseline), and any run that finds something posts. A clean re-run posts no
+(baseline), and any run with new inline findings posts. A clean re-run posts no
 comment. With `auto-approve: true`, a clean run approves the exact reviewed
 head only when every prior jbot thread is resolved and GitHub reports the PR
 open, non-draft, and mergeable. CI, required reviews, and every other merge

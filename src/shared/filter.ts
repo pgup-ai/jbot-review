@@ -226,7 +226,7 @@ function isSameIssue(
       ? finding.line === 0 || (addableLines !== undefined && !addableLines.has(finding.line))
       : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
   if (!locationMatches) return false;
-  if (thread.isResolved && !declineCovers(finding, thread)) return false;
+  if (thread.isResolved) return declinedSameIssue(finding, thread);
 
   // No comparable content: keep the finding rather than silently dropping it.
   if (titleTokens.length === 0) return false;
@@ -235,12 +235,27 @@ function isSameIssue(
   return matched / titleTokens.length >= SUPPRESS_TITLE_OVERLAP;
 }
 
-/** A decline covers its own unchanged lines, never a security or P0/P1 finding. */
-function declineCovers(finding: Finding, thread: PriorFindingRef): boolean {
+/**
+ * A resolved decline covers its own unchanged lines, never a security or P0/P1
+ * finding, and only the same claim: a shared guideline rule id, or a
+ * near-identical title (not when a CWE/CVE is cited, which names a bug class).
+ */
+function declinedSameIssue(finding: Finding, thread: PriorFindingRef): boolean {
+  if (
+    thread.outdated ||
+    finding.kind === 'security' ||
+    SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P1
+  )
+    return false;
+  const text = `${finding.title}\n${finding.body}`;
+  const threadIds = ruleIds(thread.body);
+  if ([...ruleIds(text)].some((id) => threadIds.has(id))) return true;
+  if (CWE_OR_CVE.test(text) || CWE_OR_CVE.test(thread.body)) return false;
+  // The posted comment opens with "<label> — <title>".
+  const threadTitle = thread.body.split('\n', 1)[0].split(' — ').slice(1).join(' — ');
+  const titles = titleTokenMatch(threadTitle, finding.title);
   return (
-    !thread.outdated &&
-    finding.kind !== 'security' &&
-    SEVERITY_RANK[finding.severity] > SEVERITY_RANK.P1
+    titles.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS && titles.overlap >= NEAR_IDENTICAL_OVERLAP
   );
 }
 
@@ -269,17 +284,16 @@ const isTestStyleRule = (id: string) => /^TS-6(\.\d+)?$/.test(id) && id !== 'TS-
 const REVERT_STILL_PASSES =
   /\bpass(?:es|ed)?\b[^.]*\brevert|\brevert\w*\b[^.]*\b(?:still )?pass(?:es|ed)?\b/i;
 
-export type NoiseDropReason = 'design-note' | 'parent-pr' | 'declined';
+export type NoiseDropReason = 'design-note' | 'parent-pr';
 
 /**
  * Deterministic over-reach filters, applied before verification:
  * - drops non-security findings on design notes and plans, which record intent
  *   rather than current behavior;
- * - on a PR stacked on another branch, drops findings on lines outside the
- *   PR's own hunks: that code belongs to the parent PR;
- * - drops a P2-or-lower, non-security finding the PR author or a writer
- *   declined near the same lines, matched by a cited guideline rule id or a
- *   near-identical title, unless the declined thread's lines changed since;
+ * - on a PR stacked on another branch, drops P2-or-lower, non-security
+ *   findings on lines of its changed files outside its own hunks: that code
+ *   came from the parent PR. Findings on other files stay, since they may be
+ *   unchanged callers this PR breaks;
  * - treats a finding whose title labels it unverified as a hypothesis for the
  *   verifier, never an inline claim;
  * - rates a non-bug, non-security test-style finding (helper use, matcher
@@ -287,56 +301,27 @@ export type NoiseDropReason = 'design-note' | 'parent-pr' | 'declined';
  */
 export function filterReviewNoise(
   findings: Finding[],
-  context: {
-    priorThreads: PriorFindingRef[];
-    patchByPath: ReadonlyMap<string, string>;
-    prFiles: ReadonlySet<string>;
-    stacked: boolean;
-  },
+  context: { patchByPath: ReadonlyMap<string, string>; stacked: boolean },
 ): { findings: Finding[]; dropped: Array<{ finding: Finding; reason: NoiseDropReason }> } {
-  const declined = context.priorThreads
-    .filter((thread) => thread.declined)
-    .map((thread) => ({
-      thread,
-      ids: ruleIds(thread.body),
-      cwe: CWE_OR_CVE.test(thread.body),
-      // The posted comment opens with "<label> — <title>".
-      title: thread.body.split('\n', 1)[0].split(' — ').slice(1).join(' — '),
-    }));
   const hunkLines = new Map<string, Set<number>>();
-  const dropReason = (finding: Finding, ids: Set<string>): NoiseDropReason | undefined => {
+  const dropReason = (finding: Finding): NoiseDropReason | undefined => {
     if (DESIGN_NOTE_PATH.test(finding.path) && finding.kind !== 'security') return 'design-note';
-    if (context.stacked) {
-      const patch = context.patchByPath.get(finding.path);
-      if (!patch) {
-        if (!context.prFiles.has(finding.path)) return 'parent-pr';
-      } else if (finding.line > 0) {
-        let lines = hunkLines.get(finding.path);
-        if (!lines) {
-          lines = new Set([...newSideLines(patch)].map(({ line }) => line));
-          hunkLines.set(finding.path, lines);
-        }
-        if (!lines.has(finding.line)) return 'parent-pr';
+    const patch = context.patchByPath.get(finding.path);
+    if (
+      context.stacked &&
+      patch &&
+      finding.line > 0 &&
+      finding.kind !== 'security' &&
+      SEVERITY_RANK[finding.severity] > SEVERITY_RANK.P1
+    ) {
+      let lines = hunkLines.get(finding.path);
+      if (!lines) {
+        lines = new Set([...newSideLines(patch)].map(({ line }) => line));
+        hunkLines.set(finding.path, lines);
       }
+      if (!lines.has(finding.line)) return 'parent-pr';
     }
-    const cwe = CWE_OR_CVE.test(`${finding.title}\n${finding.body}`);
-    const declinedMatch = declined.some(({ thread, ids: threadIds, cwe: threadCwe, title }) => {
-      if (thread.path !== finding.path || !declineCovers(finding, thread)) return false;
-      const near =
-        thread.line === undefined
-          ? finding.line === 0
-          : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
-      if (!near) return false;
-      const titles = titleTokenMatch(title, finding.title);
-      return (
-        [...ids].some((id) => threadIds.has(id)) ||
-        (!cwe &&
-          !threadCwe &&
-          titles.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS &&
-          titles.overlap >= NEAR_IDENTICAL_OVERLAP)
-      );
-    });
-    return declinedMatch ? 'declined' : undefined;
+    return undefined;
   };
 
   const dropped: Array<{ finding: Finding; reason: NoiseDropReason }> = [];
@@ -344,7 +329,7 @@ export function filterReviewNoise(
   for (const original of findings) {
     const text = `${original.title}\n${original.body}`;
     const ids = ruleIds(text);
-    const reason = dropReason(original, ids);
+    const reason = dropReason(original);
     if (reason) {
       dropped.push({ finding: original, reason });
       continue;
@@ -369,13 +354,16 @@ export function filterReviewNoise(
 
 /**
  * One thread per pattern: after verification, so each site was checked on its
- * own, findings sharing a guideline rule id and a near-identical title collapse
- * into the strongest one, which lists every other site.
+ * own, resolved findings sharing a guideline rule id and a near-identical title
+ * collapse into the strongest one, which lists every other site.
  */
 export function collapseRepeatedFindings(findings: Finding[]): Finding[] {
   const groups: Array<{ ids: Set<string>; members: Finding[] }> = [];
   for (const finding of findings) {
-    const ids = ruleIds(`${finding.title}\n${finding.body}`);
+    // An unresolved site keeps its own entry, in diagnostics and Unverified concerns.
+    const ids = isUnresolvedFinding(finding)
+      ? new Set<string>()
+      : ruleIds(`${finding.title}\n${finding.body}`);
     const group =
       ids.size > 0
         ? groups.find(
@@ -397,11 +385,7 @@ export function collapseRepeatedFindings(findings: Finding[]): Finding[] {
     const [primary, ...others] = [...members].sort((a, b) => {
       const [severityA, confidenceA] = findingStrength(a);
       const [severityB, confidenceB] = findingStrength(b);
-      return (
-        Number(isUnresolvedFinding(a)) - Number(isUnresolvedFinding(b)) ||
-        severityA - severityB ||
-        confidenceA - confidenceB
-      );
+      return severityA - severityB || confidenceA - confidenceB;
     });
     const sites = others
       .map(({ path, line }) => `\`${line > 0 ? `${path}:${line}` : path}\``)
