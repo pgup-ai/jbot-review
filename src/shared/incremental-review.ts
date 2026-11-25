@@ -256,7 +256,7 @@ const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^
 // docs/tslint.json, docs/mkdocs.yml or a dotfile, no tool loads it by name, so code reading it has
 // to name its file or directory.
 const DOCS_DATA =
-  /^docs\/(.*\/)?(?!\.|(package|tslint|biome|deno|turbo|vercel|mkdocs|docker-compose|compose|pnpm-workspace)\.|[^/]*(config|[-_]rc)\.)[^/]+\.(json[c5]?|ya?ml)$/i;
+  /^docs\/(.*\/)?(?!\.|(package|project|nx|lerna|renovate|tslint|biome|deno|turbo|vercel|mkdocs|docker-compose|compose|pnpm-workspace)\.|[^/]*(config|[-_]rc)\.)[^/]+\.(json[c5]?|ya?ml)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
