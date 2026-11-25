@@ -24,6 +24,7 @@ import {
   capTestConvention,
   newFindingCount,
   bodyFindingMarker,
+  coveredFilesMarker,
 } from '../src/shared/filter.ts';
 import type { PriorFindingRef } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -576,6 +577,9 @@ describe('suppressPreviouslyReported', () => {
       blocking,
     ]);
     assert.deepEqual(suppressPreviouslyReported([site], [grouped], new Map()).findings, [site]);
+    // A decline covers the primary thread's own lines only, never its grouped sites.
+    const declined = { ...grouped, isResolved: true, declined: true };
+    assert.deepEqual(suppressPreviouslyReported([site], [declined], prFiles).findings, [site]);
     // Prose in a thread body is never read as sites.
     const prose = { ...thread, body: `${thread.body}\n\nSame issue at: \`src/b.ts:20\`.` };
     assert.deepEqual(suppressPreviouslyReported([site], [prose], prFiles).findings, [site]);
@@ -779,8 +783,7 @@ describe('filterReviewNoise', () => {
     const [helper, reverted, matcher, matcherWithHelper, ineffective, bug, mixed] = noise([
       finding({
         path: 'src/a.spec.ts',
-        title: 'Use `createTestOrder` for inline test data (TS-6)',
-        body: 'The order is passed as an argument to each case.',
+        title: 'Use `createTestOrder` instead of inline test data (TS-6)',
       }),
       finding({
         path: 'src/a.spec.ts',
@@ -826,6 +829,13 @@ describe('filterReviewNoise', () => {
       'nit',
     );
     assert.equal(capTestConvention(matcher).severity, 'P2');
+    // Any coverage claim keeps severity, however it is phrased.
+    const claim = finding({
+      kind: 'maintainability',
+      title: 'Use `createTestOrder` instead of inline test data (TS-6)',
+      body: 'As written the case may pass without catching its regression.',
+    });
+    assert.equal(capTestConvention(claim).severity, 'P2');
   });
 
   it('collapses one rule and title across sites into one thread listing every site', () => {
@@ -862,37 +872,57 @@ describe('filterReviewNoise', () => {
 
 describe('shouldPostReviewComment', () => {
   it('posts a re-run with a new body-only finding, not one a prior body already lists', () => {
+    // A posted body carries the keys as its last line (buildBody).
+    const posted = (findings: Finding[], prefix = '## J-Bot Code Review') =>
+      `${prefix}\n${bodyFindingMarker(findings)}`;
+    let id = 0;
+    const review = (body: string) => ({ id: ++id, body });
     const contextLine = finding({ severity: 'P1', line: 1, title: 'Lock is released early' });
-    const older = bodyFindingMarker([finding({ line: 9, title: 'Older issue' })]);
+    const older = finding({ line: 9, title: 'Older issue' });
     assert.equal(
-      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [older])),
+      shouldPostReviewComment(
+        1,
+        newFindingCount([contextLine], [contextLine], [review(posted([older]))]),
+      ),
       true,
     );
-    const listed = `${older}${bodyFindingMarker([contextLine])}`;
+    const listed = posted([older, contextLine]);
     assert.equal(
-      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [listed])),
+      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [review(listed)])),
       false,
     );
     // The same title on another file, and another entry on this path, are not this finding.
-    const split = [
-      bodyFindingMarker([{ ...contextLine, path: 'src/other.ts' }]),
-      bodyFindingMarker([{ ...contextLine, title: 'Other' }]),
-    ].join('');
-    assert.equal(newFindingCount([contextLine], [contextLine], [split]), 1);
+    const split = posted([
+      { ...contextLine, path: 'src/other.ts' },
+      { ...contextLine, title: 'Other' },
+    ]);
+    assert.equal(newFindingCount([contextLine], [contextLine], [review(split)]), 1);
+    // A key quoted earlier in the body, not in jbot's trailer, is never read.
+    const quoted = posted([older], `Quoted: ${bodyFindingMarker([contextLine])} in a finding`);
+    assert.equal(newFindingCount([contextLine], [contextLine], [review(quoted)]), 1);
     // An unverified concern re-detected is old; confirmed since, it is new.
     const concern = finding({ title: 'Retry may race', verificationUncertain: true });
-    const posted = bodyFindingMarker([concern]);
-    assert.equal(newFindingCount([concern], [concern], [posted]), 0);
+    assert.equal(newFindingCount([concern], [concern], [review(posted([concern]))]), 0);
     const confirmed = finding({ title: concern.title });
-    assert.equal(newFindingCount([confirmed], [confirmed], [posted]), 1);
+    assert.equal(newFindingCount([confirmed], [confirmed], [review(posted([concern]))]), 1);
     // A grouped finding with one new site is new.
     const reported = finding({ path: 'src/a.ts', line: 10, title: 'Unscoped write (TS-13)' });
     const group = { ...reported, alsoAt: [{ path: 'src/b.ts', line: 20 }] };
+    assert.equal(newFindingCount([group], [group], [review(posted([reported]))]), 1);
     // Changed code at the same site is new too.
-    const quoted = { ...contextLine, evidence: 'releaseLock();' };
-    const requoted = { ...quoted, evidence: 'releaseLock(); retry();' };
-    assert.equal(newFindingCount([requoted], [requoted], [bodyFindingMarker([quoted])]), 1);
-    assert.equal(newFindingCount([group], [group], [bodyFindingMarker([reported])]), 1);
+    const before = { ...contextLine, evidence: 'releaseLock();' };
+    const after = { ...before, evidence: 'releaseLock(); retry();' };
+    assert.equal(newFindingCount([after], [after], [review(posted([before]))]), 1);
+    // A grouped site with changed code is new, judged by its own quote.
+    const sited = { ...group, alsoAt: [{ path: 'src/b.ts', line: 20, evidence: 'a();' }] };
+    const resited = { ...group, alsoAt: [{ path: 'src/b.ts', line: 20, evidence: 'b();' }] };
+    assert.equal(newFindingCount([resited], [resited], [review(posted([sited]))]), 1);
+    // Per file: a later review that skipped a.ts does not make its finding new; one that covered it and dropped it does.
+    const earlier = review(posted([contextLine]));
+    const skipped = review(`## J-Bot\n${coveredFilesMarker(['src/b.ts'])}`);
+    assert.equal(newFindingCount([contextLine], [contextLine], [earlier, skipped]), 0);
+    const dropped = review(`## J-Bot\n${coveredFilesMarker(['src/example.ts'])}`);
+    assert.equal(newFindingCount([contextLine], [contextLine], [earlier, skipped, dropped]), 1);
   });
 
   it('always posts the first visible run, clean or not', () => {

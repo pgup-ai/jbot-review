@@ -97,6 +97,8 @@ import {
   routeFinding,
   capTestConvention,
   newFindingCount,
+  bodyFindingMarker,
+  coveredFilesMarker,
 } from './filter.ts';
 import {
   ASSEMBLED_CONTEXT_WARN_BYTES,
@@ -392,7 +394,7 @@ import {
   renderUnverifiedSection,
 } from './report.ts';
 import { rulesOnlyTestFiles } from './test-tiers.ts';
-import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
+import { formatFileList, formatUsageCost, isFiniteNumber, neutralizeMarkers } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 import { IncompleteReviewError } from './types.ts';
 
@@ -3009,6 +3011,7 @@ async function runReviewPipeline(params: {
       widen: options.guidelineWiden,
       full: guidelines,
       contextPack: options.experiment.contextPack,
+      ...(baseSha ? { baseRevision: baseSha } : {}),
     };
     const guidelinesInMain = auxiliaryDecisions.some(
       (decision) => decision.reason === 'global-guidelines-in-main',
@@ -4090,6 +4093,9 @@ async function runReviewPipeline(params: {
       auxiliaryBaselines,
       diagnosticsUrl,
       reviewScope: scopeStats,
+      ...(scopeStats.mode === 'incremental'
+        ? { coveredFiles: files.map((file) => file.filename) }
+        : {}),
       ...(recheckFiles && auditedHead
         ? {
             complianceScope: {
@@ -4157,14 +4163,10 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
-    // Only the latest review: a finding fixed since and reintroduced is new again.
-    const latestReview = priorJbotReviewGroups.reduce<
-      (typeof priorJbotReviewGroups)[number] | undefined
-    >((latest, group) => (!latest || group.id > latest.id ? group : latest), undefined);
     const findingCount = newFindingCount(
       filteredFindings,
       [...orphaned, ...withheld],
-      latestReview ? [latestReview.body] : [],
+      priorJbotReviewGroups,
     );
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,
@@ -6242,6 +6244,8 @@ export function buildBody(
     reviewScope?: { mode: 'full' | 'incremental'; files: number; totalFiles: number };
     complianceScope?: { files: number; totalFiles: number; reviewedHead: string };
     rulesOnlyTests?: string[];
+    /** An incremental review's files, so a later run judges body-only repeats per file. */
+    coveredFiles?: string[];
     baseline?: ReviewBaseline;
   },
 ): string {
@@ -6279,7 +6283,12 @@ export function buildBody(
   const coverageNotice = formatIncompleteCoverage(incompleteSessions);
   if (coverageNotice) lines.push(coverageNotice, '');
   if (changesSinceLastReview.trim()) {
-    lines.push('**Changes since last review**', '', changesSinceLastReview.trim(), '');
+    lines.push(
+      '**Changes since last review**',
+      '',
+      neutralizeMarkers(changesSinceLastReview.trim()),
+      '',
+    );
   }
   // A clean review's per-shard verification narrative is low-value restatement:
   // the verdict lines and "No new findings" below already convey "clean", and on
@@ -6291,7 +6300,7 @@ export function buildBody(
   // review" block above is independent and still renders on re-reviews.
   const renderedSummary =
     !all.some(isUnresolvedFinding) && summary.trim()
-      ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
+      ? formatSummaryMarkdown(neutralizeMarkers(summary), { suppressNoFindingVerdicts: true })
       : '';
   if (total > 0 && renderedSummary.trim()) {
     lines.push(renderedSummary, '');
@@ -6326,9 +6335,23 @@ export function buildBody(
   );
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
+  // In the trailer, where newFindingCount reads it: every body-only and unverified site listed.
+  const keys = bodyFindingMarker([
+    ...orphaned.filter((finding) => !isUnresolvedFinding(finding)),
+    ...all.filter(isUnresolvedFinding),
+  ]);
   return withReviewCoverage(
     withReviewBaseline(
-      withAuxiliaryBaselines(lines.join('\n'), experiment?.auxiliaryBaselines ?? []),
+      withAuxiliaryBaselines(
+        [
+          lines.join('\n'),
+          keys,
+          experiment?.coveredFiles ? coveredFilesMarker(experiment.coveredFiles) : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        experiment?.auxiliaryBaselines ?? [],
+      ),
       experiment?.baseline,
     ),
     headSha,

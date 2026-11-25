@@ -100,7 +100,7 @@ export interface Finding {
   verificationUncertain?: boolean;
   verificationUnavailable?: boolean;
   /** Other sites of the same issue, collapsed into this finding. */
-  alsoAt?: Array<{ path: string; line: number }>;
+  alsoAt?: Array<{ path: string; line: number; evidence?: string }>;
 }
 
 export interface AddressedPriorComment {

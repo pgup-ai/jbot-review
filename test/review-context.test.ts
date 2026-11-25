@@ -673,6 +673,14 @@ describe('selectFinderGuidelineText', () => {
     assert.match(text, /guideline-compliance pass is not running/);
     assert.match(text, /ARCHITECTURE\.md/);
     assert.doesNotMatch(text, /full set is reviewed by the separate guideline-compliance pass/);
+    // Guidance read at the base sends omitted reads there, not to the PR's checkout.
+    const based = selectFinderGuidelineText({
+      ...params,
+      complianceRuns: false,
+      baseRevision: 'abc1234',
+    });
+    assert.match(based, /git show abc1234:<path>/);
+    assert.match(based, /never read guideline files from the working tree/);
   });
 
   it('renders a clean coverage note when discovery was capped but nothing was sliced out', () => {

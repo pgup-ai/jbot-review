@@ -3,6 +3,7 @@ import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
+import { neutralizeMarkers } from './text.ts';
 import type { LinkedIssue, ReviewCommit } from './review-context.ts';
 import type { PriorThreadOutcome } from './telemetry.ts';
 import {
@@ -501,11 +502,8 @@ export async function listPriorJbotThreads(
             (lastReply.author?.login !== undefined &&
               lastReply.author.login === response.repository?.pullRequest?.author?.login)),
         outdated: thread.isOutdated,
-        // A copied marker in someone else's comment must not widen suppression.
-        ...(isViewerActor(topLevel.author?.login, viewerLogin) &&
-        hasInternalMarker(topLevel.body, FINDING_MARKER)
-          ? { sites: parseGroupedSites(topLevel.body) }
-          : {}),
+        // Only jbot-authored threads reach here (isJbotFinding), so the marker is its own.
+        sites: parseGroupedSites(topLevel.body),
         replyToCommentId: topLevel.databaseId,
         path: thread.path,
         // `line` is null both for file-level comments AND for outdated
@@ -915,18 +913,30 @@ export function formatFindingCommentBody(finding: Finding): string {
         .map(({ path, line }) => `${encodeURIComponent(path)}:${line}`)
         .join(',')} -->\n`
     : '';
-  return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${sites}${FINDING_MARKER}`;
+  return `${formatFindingLabel(finding)} — ${neutralizeMarkers(finding.title)}\n\n${neutralizeMarkers(finding.body)}\n\n${sites}${FINDING_MARKER}`;
 }
 
 /** Grouped sites, read only from a thread the jbot actor itself posted. */
 function parseGroupedSites(body: string): Array<{ path: string; line?: number }> {
-  const listed = new RegExp(`<!-- ${SITES_MARKER}:([^ ]+) -->`).exec(body)?.[1] ?? '';
-  return listed.split(',').flatMap((site) => {
-    const match = /^(.+):(\d+)$/.exec(site);
-    if (!match) return [];
+  // Only jbot's own trailer, never a marker quoted earlier in the comment.
+  const listed = new RegExp(`\\n<!-- ${SITES_MARKER}:(\\S+) -->\\n${FINDING_MARKER}\\s*$`).exec(
+    body,
+  )?.[1];
+  if (!listed) return [];
+  const sites: Array<{ path: string; line?: number }> = [];
+  for (const site of listed.split(',')) {
+    const match = /^([^:,]+):(\d+)$/.exec(site);
+    let path: string;
+    try {
+      path = match ? decodeURIComponent(match[1]) : '';
+    } catch {
+      return []; // An undecodable entry: trust none of the list.
+    }
+    if (!match || !path) return [];
     const line = Number(match[2]);
-    return [{ path: decodeURIComponent(match[1]), ...(line > 0 ? { line } : {}) }];
-  });
+    sites.push({ path, ...(line > 0 ? { line } : {}) });
+  }
+  return sites;
 }
 
 /**
@@ -1155,9 +1165,12 @@ function isJbotFinding(
   reviewIdByCommentId: ReadonlyMap<number, number>,
   commentId?: number,
 ): boolean {
-  if (hasInternalMarker(body, FINDING_MARKER)) return true;
+  // The marker alone is not proof: anyone can paste it into a comment of their own.
   if (!isViewerActor(authorLogin, viewerLogin)) return false;
-  return commentId !== undefined && reviewIdByCommentId.has(commentId);
+  return (
+    body.trimEnd().endsWith(FINDING_MARKER) ||
+    (commentId !== undefined && reviewIdByCommentId.has(commentId))
+  );
 }
 
 function hasInternalMarker(body: string | undefined, marker: string): boolean {

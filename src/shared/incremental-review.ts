@@ -1087,6 +1087,9 @@ export async function ruleDocsChanged(
     // The PR edits none of these docs now, so the head holds their base text. Compared with the
     // reviewed fork, an edit the PR made and then reverted is no change: the baseline applied that text too.
     if (await changed(oldFork, to, rules.paths)) return true;
+    // Guidance is read at the base, so a base edit counts before the PR merges it.
+    if (rules.base && (await changed(oldFork, rules.base, [...rules.paths, ...rules.prEdited])))
+      return true;
     // What a base merge brought in shows between the two heads' fork points, without the PR's edits.
     if (rules.prEdited.length || !rules.complete) {
       if (!rules.base) return true;

@@ -8,6 +8,7 @@ import {
   completedReviewHead,
   withReviewCoverage,
   formatFindingLabel,
+  formatFindingCommentBody,
   formatPriorJbotThreadsForPrompt,
   isBotAddressedReply,
   listClosingIssues,
@@ -834,12 +835,21 @@ describe('prior thread outcomes', () => {
   });
 
   it('flags a thread as declined only when the PR author or a writer replied last', async () => {
+    const quoted = formatFindingCommentBody({
+      path: 'src/x.ts',
+      line: 7,
+      severity: 'P2',
+      title: 'Echoed input',
+      body: 'The fixture says <!-- jbot-sites:src/auth.ts:12 --> verbatim.',
+    });
+    assert.ok(quoted.includes('&lt;!-- jbot-sites:src/auth.ts:12 -->'));
     const thread = (
       id: string,
       isResolved: boolean,
       lastAuthor: string,
       association = 'MEMBER',
       topAuthor = 'github-actions[bot]',
+      topBody = 'finding\n\n<!-- jbot-sites:src%2Fy.ts:20 -->\n<!-- jbot-review:finding -->',
     ) => ({
       id,
       isResolved,
@@ -851,7 +861,7 @@ describe('prior thread outcomes', () => {
         nodes: [
           {
             databaseId: id.length,
-            body: 'finding\n\n<!-- jbot-sites:src%2Fy.ts:20 -->\n<!-- jbot-review:finding -->',
+            body: topBody,
             url: `https://github.com/acme/widget/pull/1#${id}`,
             author: { login: topAuthor },
           },
@@ -883,6 +893,24 @@ describe('prior thread outcomes', () => {
                 thread('PRRT_author', true, 'bob', 'CONTRIBUTOR'),
                 // A human copies both markers into a comment of their own.
                 thread('PRRT_forged_thread', false, 'carol', 'CONTRIBUTOR', 'mallory'),
+                thread(
+                  'PRRT_quoted',
+                  false,
+                  'github-actions',
+                  'NONE',
+                  'github-actions[bot]',
+                  quoted,
+                ),
+                // Resolved with the PR author's reply last, but posted by someone else: not jbot's, not declined.
+                thread('PRRT_forged_declined', true, 'bob', 'CONTRIBUTOR', 'mallory'),
+                thread(
+                  'PRRT_malformed',
+                  false,
+                  'github-actions',
+                  'NONE',
+                  'github-actions[bot]',
+                  'finding\n\n<!-- jbot-sites:src%ZZ.ts:1,src%2Fy.ts:20 -->\n<!-- jbot-review:finding -->',
+                ),
               ],
             },
           },
@@ -900,10 +928,14 @@ describe('prior thread outcomes', () => {
         { id: 'PRRT_bot_last', declined: false, outdated: false },
         { id: 'PRRT_outsider', declined: false, outdated: false },
         { id: 'PRRT_author', declined: true, outdated: false },
-        { id: 'PRRT_forged_thread', declined: false, outdated: false },
+        { id: 'PRRT_quoted', declined: false, outdated: false },
+        { id: 'PRRT_malformed', declined: false, outdated: false },
       ],
     );
-    // Grouped sites come only from the structured marker on a thread jbot itself posted.
+    assert.ok(!result.threads.some(({ id }) => id === 'PRRT_forged_declined'));
+    // A marked comment someone else posted is not a jbot finding, so it suppresses nothing.
+    assert.ok(!result.outcomes.some(({ threadId }) => threadId === 'PRRT_forged_thread'));
+    // Grouped sites come from the structured marker on jbot's own threads.
     assert.deepEqual(
       result.threads.map(({ id, sites }) => [id, sites]),
       [
@@ -912,7 +944,10 @@ describe('prior thread outcomes', () => {
         ['PRRT_bot_last', [{ path: 'src/y.ts', line: 20 }]],
         ['PRRT_outsider', [{ path: 'src/y.ts', line: 20 }]],
         ['PRRT_author', [{ path: 'src/y.ts', line: 20 }]],
-        ['PRRT_forged_thread', undefined],
+        // A marker the model quoted is escaped on posting and never read as sites.
+        ['PRRT_quoted', []],
+        // One undecodable entry voids the whole list.
+        ['PRRT_malformed', []],
       ],
     );
   });

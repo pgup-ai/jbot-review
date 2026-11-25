@@ -203,7 +203,8 @@ export function suppressPreviouslyReported(
   for (const thread of priorThreads) {
     if (thread.isResolved && !thread.declined) continue;
     // A grouped thread also covers its other sites in this PR's files, never a security or P0/P1 finding.
-    const sites = (thread.sites ?? [])
+    // A decline speaks only for the primary thread's own lines, so it never spreads to sites.
+    const sites = (thread.isResolved ? [] : (thread.sites ?? []))
       .filter(({ path }) => addable?.has(path))
       .map(({ path, line }) => ({ ...thread, path, line, grouped: true }));
     for (const site of [thread, ...sites]) {
@@ -305,8 +306,9 @@ const isTestStyleRule = (id: string) => /^TS-6(\.\d+)?$/.test(id) && id !== 'TS-
 // Matcher shape, or any sign the test may not catch its regression, keeps severity.
 const MATCHER_SHAPE =
   /\btoBe(?:Defined|Truthy|Falsy)\b|\btoThrow\b|Containing\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bmatcher\b/i;
-const INEFFECTIVE_TEST =
-  /\bpass(?:es|ed|ing)?\b[^.]*\b(?:revert|remov|delet|without the guard)|\b(?:revert|remov|delet)\w*\b[^.]*\bpass(?:es|ed|ing)?\b|\bwrong reason\b|\bnever (?:exercis|reach|fail|run)|\bcan(?:not|'t) fail\b|\bnot (?:exercis|cover|reach)/i;
+// Any coverage claim keeps severity: only a pure convention finding is clamped.
+const COVERAGE_CLAIM =
+  /\b(?:pass\w*|fail\w*|catch\w*|caught|cover\w*|exercis\w*|reach\w*|regress\w*|revert\w*|guard\w*|assert\w*|verif\w*|prov\w*|mask\w*|hid(?:e|es|den|ing)|false (?:positive|negative)s?)\b/i;
 
 /**
  * A maintainability finding citing only `TS-6` rules (not the `TS-6.3`
@@ -323,7 +325,7 @@ export function capTestConvention(finding: Finding): Finding {
     [...ids].every(isTestStyleRule) &&
     TEST_STYLE.test(text) &&
     !MATCHER_SHAPE.test(text) &&
-    !INEFFECTIVE_TEST.test(text)
+    !COVERAGE_CLAIM.test(text)
     ? { ...finding, severity: 'nit' }
     : finding;
 }
@@ -405,7 +407,11 @@ export function collapseRepeatedFindings(
     return {
       ...primary,
       body: `${primary.body}\n\nSame issue at: ${sites}.`,
-      alsoAt: others.map(({ path, line }) => ({ path, line })),
+      alsoAt: others.map(({ path, line, evidence }) => ({
+        path,
+        line,
+        ...(evidence ? { evidence } : {}),
+      })),
     };
   });
 }
@@ -863,23 +869,32 @@ export function anchorFindings(findings: Finding[], lines: DiffLines): AnchoredF
 /** Marks each site of a body-only finding in a posted review body. */
 export const BODY_FINDING_MARKER = 'jbot-site';
 
-function bodyFindingKeys(finding: Finding): string[] {
+function bodyFindingKeys(finding: Finding): Array<{ path: string; key: string }> {
   const section = isUnresolvedFinding(finding) ? 'unverified' : 'outside';
   const title = finding.title.toLowerCase().replace(/\s+/g, ' ').trim();
-  // The quoted code too, so a site whose code changed counts as new.
-  const evidence = (finding.evidence ?? '').replace(/\s+/g, ' ').trim();
-  return [finding, ...(finding.alsoAt ?? [])].map(({ path, line }) =>
-    createHash('sha1')
-      .update(`${path}|${line}|${title}|${section}|${evidence}`)
+  // Each site's own quoted code, so a site whose code changed counts as new.
+  return [finding, ...(finding.alsoAt ?? [])].map(({ path, line, evidence }) => ({
+    path,
+    key: createHash('sha1')
+      .update(`${path}|${line}|${title}|${section}|${(evidence ?? '').replace(/\s+/g, ' ').trim()}`)
       .digest('hex')
       .slice(0, 12),
-  );
+  }));
+}
+
+/** The hidden markers at the end of a jbot review body; model text cannot open one (neutralizeMarkers). */
+function trailerMarkers(body: string): string[] {
+  const block = /(?:\n<!-- [^\n]* -->[ \t]*)+\s*$/.exec(body)?.[0] ?? '';
+  return [...block.matchAll(/<!-- ([^\n]*?) -->/g)].map(([, marker]) => marker);
 }
 
 /** One hidden marker listing every site key of `findings`, so a later run can tell what it reported. */
 export function bodyFindingMarker(findings: Finding[]): string {
   return findings.length
-    ? `<!-- ${BODY_FINDING_MARKER}:${findings.flatMap(bodyFindingKeys).join(',')} -->`
+    ? `<!-- ${BODY_FINDING_MARKER}:${findings
+        .flatMap(bodyFindingKeys)
+        .map(({ key }) => key)
+        .join(',')} -->`
     : '';
 }
 
@@ -893,18 +908,40 @@ export function bodyFindingMarker(findings: Finding[]): string {
 export function newFindingCount(
   findings: Finding[],
   bodyOnly: Finding[],
-  priorBodies: readonly string[],
+  priorReviews: ReadonlyArray<{ id: number; body: string }>,
 ): number {
-  const marker = new RegExp(`<!-- ${BODY_FINDING_MARKER}:([0-9a-f,]+) -->`, 'g');
-  const reported = new Set(
-    priorBodies.flatMap((body) =>
-      [...body.matchAll(marker)].flatMap(([, keys]) => keys.split(',')),
-    ),
-  );
+  // Newest first; a review without a coverage marker covered every file.
+  const reviews = [...priorReviews]
+    .sort((a, b) => b.id - a.id)
+    .map(({ body }) => {
+      const markers = trailerMarkers(body);
+      const keys = markers.find((marker) => marker.startsWith(`${BODY_FINDING_MARKER}:`));
+      const covered = markers.find((marker) => marker.startsWith(`${COVERED_MARKER}:`));
+      return {
+        keys: new Set(keys?.slice(BODY_FINDING_MARKER.length + 1).split(',') ?? []),
+        covered: covered
+          ? new Set(
+              covered
+                .slice(COVERED_MARKER.length + 1)
+                .split(',')
+                .map(decodeURIComponent),
+            )
+          : undefined,
+      };
+    });
+  // A site is old only when the newest review that covered its file listed it.
+  const reported = ({ path, key }: { path: string; key: string }) =>
+    reviews.find(({ covered }) => !covered || covered.has(path))?.keys.has(key) ?? false;
   return (
-    findings.length -
-    bodyOnly.filter((finding) => bodyFindingKeys(finding).every((key) => reported.has(key))).length
+    findings.length - bodyOnly.filter((finding) => bodyFindingKeys(finding).every(reported)).length
   );
+}
+
+/** The files an incremental review covered, in its trailer; a full review omits it. */
+export const COVERED_MARKER = 'jbot-review:covered';
+
+export function coveredFilesMarker(files: readonly string[]): string {
+  return `<!-- ${COVERED_MARKER}:${files.map(encodeURIComponent).join(',')} -->`;
 }
 
 export function shouldPostReviewComment(

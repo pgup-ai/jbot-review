@@ -17,7 +17,6 @@ import {
 } from '../src/shared/report.ts';
 import type { Finding } from '../src/shared/types.ts';
 import { formatUnverifiedFinding } from '../src/shared/prompt.ts';
-import { newFindingCount } from '../src/shared/filter.ts';
 
 function f(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -105,19 +104,10 @@ test('collapsed concerns bound large diagnostics and disclose omissions', () => 
   ).join('\n');
   assert.equal(text.match(/<pre lang="text"><code>/g)?.length, 10);
   assert.equal(text.match(/<\/code><\/pre>/g)?.length, 10);
-  assert.equal(text.match(/<!-- jbot-site:([0-9a-f,]+) -->/)?.[1].split(',').length, 12);
-  assert.ok(Buffer.byteLength(text) < 25700);
+  assert.ok(Buffer.byteLength(text) < 25300);
   assert.match(text, /2 more concerns omitted/);
   assert.match(text, /truncated/);
   assert.doesNotMatch(text, /\uFFFD|View code/);
-});
-
-test('an unchanged re-run does not re-post past the shown concerns', () => {
-  const concerns = Array.from({ length: 101 }, (_, i) =>
-    f({ title: `Concern ${i}`, verificationUncertain: true }),
-  );
-  const body = renderUnverifiedSection(concerns, 'owner', 'repo').join('\n');
-  assert.equal(newFindingCount(concerns, concerns, [body]), 0);
 });
 
 test('renderOrphanedSection heads with the marker the prior-comment filter keys on', () => {

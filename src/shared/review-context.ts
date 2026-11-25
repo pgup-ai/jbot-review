@@ -923,8 +923,13 @@ export async function discoverBaseGuidelineDocs(
   try {
     const attempted = new Set<string>();
     const discovered = await discoverGuidelineDocs(root, changedFiles, attempted);
-    const missing = snapshot.unloadable.filter(
-      (path) => attempted.has(path) || attempted.has(`${posix.dirname(path)}/`),
+    // Missing guidance: a base file discovery looked up, or a guideline file in a
+    // directory it listed, that the snapshot lacks for any reason.
+    const missing = [...snapshot.basePaths].filter(
+      (path) =>
+        !snapshot.files.has(path) &&
+        (attempted.has(path) ||
+          (isGuidelineSource(path) && attempted.has(`${posix.dirname(path)}/`))),
     );
     return missing.length ? { ...discovered, snapshotSkipped: missing } : discovered;
   } finally {
@@ -943,7 +948,7 @@ const MAX_BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 async function readBaseGuidelines(
   workspace: string,
   base: string,
-): Promise<{ files: Map<string, Buffer>; unloadable: string[] }> {
+): Promise<{ files: Map<string, Buffer>; basePaths: Set<string> }> {
   const options = { cwd: workspace, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 };
   const tree = new Map<string, { mode: string; sha: string; size: number }>();
   const listing = (await exec('git', ['ls-tree', '-r', '-l', '-z', base], options)).stdout;
@@ -977,28 +982,43 @@ async function readBaseGuidelines(
     }
     return blobs;
   };
-  const unloadable: string[] = [];
   // A symlinked directory (`.cursor/rules` -> a tracked rules dir) is listed by
-  // ls-tree only as the link: mirror the guideline files under it. One that
-  // resolves to nothing in the tree is unloadable, reported if discovery uses it.
-  const dirLinks = [...tree].filter(
-    ([path, { mode }]) => mode === '120000' && !isGuidelineSource(path),
-  );
-  const dirTargets = await readBlobs(dirLinks.map(([, { sha }]) => sha));
-  for (const [link, { sha }] of dirLinks) {
-    const raw = dirTargets.get(sha)!.toString();
+  // ls-tree only as the link: mirror the guideline files under its final target,
+  // following link chains up to MAX_SYMLINK_HOPS. A link that cannot be mirrored
+  // stays absent, and is reported if discovery looks it up.
+  const symlinks = [...tree].filter(([, { mode }]) => mode === '120000');
+  const linkBlobs = await readBlobs(symlinks.map(([, { sha }]) => sha));
+  const original = [...tree];
+  const linkTarget = (path: string): string | null | undefined => {
+    const entry = tree.get(path);
+    if (entry?.mode !== '120000') return undefined;
+    const raw = linkBlobs.get(entry.sha)!.toString();
     const target = posix.isAbsolute(raw)
-      ? undefined
-      : posix.normalize(posix.join(posix.dirname(link), raw));
-    const prefix = `${target}/`;
-    const under =
-      target === undefined || target.startsWith('../')
-        ? []
-        : [...tree].filter(([path]) => path.startsWith(prefix));
-    if (under.length === 0 && !tree.has(target ?? '')) unloadable.push(link);
-    for (const [path, entry] of under) tree.set(`${link}/${path.slice(prefix.length)}`, entry);
+      ? ''
+      : posix.normalize(posix.join(posix.dirname(path), raw));
+    return target && !target.startsWith('../') ? target : null;
+  };
+  const finalDirectory = (path: string): string | undefined => {
+    const seen = new Set<string>();
+    for (let at = path, hop = 0; hop <= MAX_SYMLINK_HOPS && !seen.has(at); hop++) {
+      seen.add(at);
+      const next = linkTarget(at);
+      if (next === null) return undefined;
+      if (next === undefined)
+        return original.some(([other]) => other.startsWith(`${at}/`)) ? at : undefined;
+      at = next;
+    }
+    return undefined;
+  };
+  for (const [link] of symlinks) {
+    if (isGuidelineSource(link)) continue;
+    const target = finalDirectory(link);
+    if (!target) continue;
+    for (const [path, entry] of original)
+      if (path.startsWith(`${target}/`))
+        tree.set(`${link}/${path.slice(target.length + 1)}`, entry);
   }
-  // Resolve each symlink to the file it names inside the tree; one that cannot is unloadable.
+  // Resolve each symlink to the file it names inside the tree; one that cannot stays absent.
   const targets = new Map<string, { mode: string; sha: string; size: number }>();
   let links = [...tree]
     .filter(([path]) => isGuidelineSource(path))
@@ -1018,18 +1038,30 @@ async function readBaseGuidelines(
         ? undefined
         : posix.normalize(posix.join(posix.dirname(link.at), raw));
       const entry = target === undefined || target.startsWith('../') ? undefined : tree.get(target);
-      if (hop >= MAX_SYMLINK_HOPS || !entry) unloadable.push(link.path);
-      else next.push({ path: link.path, at: target!, entry });
+      if (hop < MAX_SYMLINK_HOPS && entry) next.push({ path: link.path, at: target!, entry });
     }
     links = next;
   }
-  // Discovery reads at most MAX_RULE_DOC_BYTES of a file; a larger one cannot be loaded.
-  const kept: Array<[string, string]> = [];
-  for (const [path, { mode, sha, size }] of targets)
-    if (size > MAX_RULE_DOC_BYTES || mode === '160000') unloadable.push(path);
-    else kept.push([path, sha]);
-  const blobs = await readBlobs([...new Set(kept.map(([, sha]) => sha))]);
-  return { files: new Map(kept.map(([path, sha]) => [path, blobs.get(sha)!])), unloadable };
+  // A route may name a whole doc of any text type (docs/REVIEW.txt).
+  const routing = targets.get(GUIDELINE_CONTROL_FILES[0]);
+  if (routing && routing.size <= MAX_RULE_DOC_BYTES)
+    for (const route of parseDiffRoutes(
+      (await readBlobs([routing.sha])).get(routing.sha)!.toString(),
+    ))
+      for (const doc of route.docs) {
+        const path = posix.normalize(doc.split('#')[0]);
+        const entry = tree.get(path);
+        if (entry?.mode.startsWith('100') && !targets.has(path)) targets.set(path, entry);
+      }
+  // Discovery reads at most MAX_RULE_DOC_BYTES of a file; a larger one is left out.
+  const kept = [...targets].filter(
+    ([, { mode, size }]) => size <= MAX_RULE_DOC_BYTES && mode !== '160000',
+  );
+  const blobs = await readBlobs([...new Set(kept.map(([, { sha }]) => sha))]);
+  return {
+    files: new Map(kept.map(([path, { sha }]) => [path, blobs.get(sha)!])),
+    basePaths: new Set(tree.keys()),
+  };
 }
 
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.
@@ -1289,9 +1321,9 @@ export async function discoverGuidelineDocs(
     relativeDir: string,
     relevance: GuidelineRelevance,
   ): Promise<void> {
+    attempted?.add(`${relative(cwd, resolve(cwd, relativeDir))}/`);
     const resolvedDir = await resolveExistingInsideWorkspace(resolve(cwd, relativeDir));
     if (!resolvedDir) return;
-    attempted?.add(`${relative(cwd, resolvedDir.absolutePath)}/`);
     try {
       const entries = await readdir(resolvedDir.realPath, { withFileTypes: true });
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -1584,9 +1616,9 @@ export async function discoverGuidelineDocs(
   }
 
   try {
+    attempted?.add('.pr-governance/');
     const resolvedGovernanceDir = await resolveExistingInsideWorkspace(governanceDir);
     if (resolvedGovernanceDir) {
-      attempted?.add('.pr-governance/');
       const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
         if (!entry.isFile()) continue;
@@ -1933,6 +1965,8 @@ export function formatFinderGuidelines(
     lens?: boolean;
     /** context-pack finders: no pointer stubs or agent skills. */
     contextPack?: boolean;
+    /** Guidance was read at this base revision; the checkout holds the PR's version. */
+    baseRevision?: string;
   } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
@@ -2023,7 +2057,9 @@ export function formatFinderGuidelines(
         ? 'The full set is reviewed by the separate guideline-compliance pass.'
         : options.canReadWorkspace === false
           ? 'The guideline-compliance pass is not running this run. Omitted guidance is unavailable to this session.'
-          : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
+          : options.baseRevision
+            ? `The guideline-compliance pass is not running this run. Read any omitted guideline file that applies to the changed files from the base revision with \`git show ${options.baseRevision}:<path>\`; never read guideline files from the working tree, which holds the PR's own version.`
+            : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
       return `### Review guidance budget\n${budgetNotes.join('; ')}. ${coverage}`;
     },
   );
@@ -2050,6 +2086,7 @@ export function selectFinderGuidelineText(params: {
   full: string;
   lens?: boolean;
   contextPack?: boolean;
+  baseRevision?: string;
 }): string {
   const full = !params.complianceRuns && (params.widen === 'full' || !params.mainCanReadWorkspace);
   if (full && !params.lens) return params.full;
@@ -2060,6 +2097,7 @@ export function selectFinderGuidelineText(params: {
     capBytes: params.lens ? MAX_LENS_GUIDELINE_BYTES : full ? MAX_GUIDELINE_TOTAL_BYTES : undefined,
     lens: params.lens,
     contextPack: params.contextPack,
+    baseRevision: params.baseRevision,
   });
 }
 

@@ -170,19 +170,21 @@ findings on design notes and plans (`*-design-note.md`, `docs/**/plans/**`,
 unverified label (`Unverified:`, `[unverified]`, "verification not completed")
 is checked as a hypothesis; a maintainability finding about test conventions
 (helper use, cleanup, titles) that cites only `TS-6` rules (not the `TS-6.3`
-coverage tier) is rated `nit`, never one about matcher shape or a test that may
-pass without catching its regression; after verification, confirmed findings
-sharing a rule ID and title, and routed to the same place, collapse into one
-thread listing every site. A finding on a context line, or in an added block of
-at least 20 alphanumeric characters whose every line the PR removed elsewhere (a
+coverage tier) is rated `nit` only when it is a pure convention finding with no
+coverage claim (never matcher shape, nor any mention of passing, failing,
+catching, covering or reverting); after verification, confirmed findings sharing
+a rule ID and title, and routed to the same place, collapse into one thread
+listing every site. A finding on a context line, or in an added block of at
+least 20 alphanumeric characters whose every line the PR removed elsewhere (a
 move), is listed in the review body instead of an inline thread. So is, on a PR
 into a branch other than the default, a finding on a changed file's line outside
 the PR's own additions: parent-PR code, or a caller this PR breaks. The review
 body marks each site of a body-only or unverified finding with a hidden
 `jbot-site` key (path, line, title, section and quoted code). A re-run posts
-only when some site has no key in the latest prior review body: the same finding
-does not post again, while a new site of a grouped finding, or an unverified
-concern since confirmed, does. Bodies posted before these keys existed count as
+only when some site has no key in the newest prior review that covered its file
+(an incremental review records the files it covered): the same finding does not
+post again, while a new site of a grouped finding, or an unverified concern
+since confirmed, does. Bodies posted before these keys existed count as
 unreported, so they post once more. Several inputs tune the
 recall/precision/cost balance:
 
@@ -1524,13 +1526,15 @@ rendered sections, so a repository's own severity rules reach the pass.
 Guideline sources are read as of the PR's base, from a snapshot outside the
 checkout, so a PR cannot edit, move or rename the rules or ratings that apply to
 it; if the snapshot fails, the review runs without repository guidance and
-reports itself incomplete, A symlinked directory is mirrored from its target. A
-guideline file over 512 KB, or a link that does not resolve inside the tree, is
-left out as if absent; it is reported the same way when discovery looked it up
-or listed its directory, and ignored otherwise. It fills the rest of its 96 KB
-budget with sections in rank order, clipping any over 6 KB unless a rule ID
-routes it, and lists the ranked sections that did not fit, so it can open the
-ones that apply.
+reports itself incomplete. A symlinked directory is mirrored from its final
+target, following link chains. A route may name a whole doc of any text type,
+such as `docs/REVIEW.txt`. A guideline file over 512 KB, or a link that does not
+resolve inside the tree, is left out as if absent. It is reported the same way
+when discovery looked it up or listed its directory, and ignored otherwise. When
+finders must read omitted guidance themselves, they read it from the base with
+`git show <base>:<path>`. It fills the rest of its 96 KB budget with sections in
+rank order, clipping any over 6 KB unless a rule ID routes it, and lists the
+ranked sections that did not fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each

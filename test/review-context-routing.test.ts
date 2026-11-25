@@ -536,19 +536,46 @@ describe('discoverGuidelineDocs with diff routing', () => {
     commit('oversized scoped standards');
     const scoped = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
     assert.ok(scoped.snapshotSkipped?.includes('src/TECHNICAL_STANDARDS.md'));
-    // A symlinked rules directory is mirrored; a dangling one discovery lists is reported.
-    mkdirSync(join(root, 'rules'));
-    writeFileSync(join(root, 'rules/locks.mdc'), '---\nalwaysApply: true\n---\nTake the row lock.');
+    // A rules directory whose only rule cannot be loaded is reported.
+    mkdirSync(join(root, '.cursor/rules'), { recursive: true });
+    writeFileSync(join(root, '.cursor/rules/huge.mdc'), 'x'.repeat(513 * 1024));
+    git('add', '.cursor');
+    commit('oversized rules dir');
+    const huge = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(huge.snapshotSkipped?.includes('.cursor/rules/huge.mdc'));
+    git('rm', '-rq', '.cursor');
+    // A chained directory link (.cursor/rules -> rules -> shared/rules) is mirrored.
+    mkdirSync(join(root, 'shared/rules'), { recursive: true });
+    writeFileSync(
+      join(root, 'shared/rules/locks.mdc'),
+      '---\nalwaysApply: true\n---\nTake the row lock.',
+    );
+    symlinkSync('shared/rules', join(root, 'rules'));
     mkdirSync(join(root, '.cursor'));
     symlinkSync('../rules', join(root, '.cursor/rules'));
-    git('add', 'rules', '.cursor');
+    git('add', 'shared', 'rules', '.cursor');
     commit('linked rules dir');
     const linked = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
     assert.ok(linked.docs.some((doc) => /Take the row lock/.test(doc.text)));
-    git('rm', '-rq', 'rules');
+    // A link chain that cannot be mirrored is reported, not treated as present.
+    git('rm', '-rq', 'shared');
     commit('dangling rules dir');
     const dangling = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
     assert.ok(dangling.snapshotSkipped?.includes('.cursor/rules'));
+
+    // A route may name a whole doc of any text type; it loads from the base.
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      ['entries:', '  - name: app', "    paths: ['src/**']", "    docs: ['docs/REVIEW.txt']"].join(
+        '\n',
+      ),
+    );
+    writeFileSync(join(root, 'docs/REVIEW.txt'), 'Every write takes the row lock.');
+    git('add', '.pr-governance', 'docs');
+    commit('routed text doc');
+    const routed = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(routed.docs.some((doc) => /takes the row lock/.test(doc.text)));
 
     const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
     assert.ok(failed.snapshotError);

@@ -36,6 +36,7 @@ import {
   fallbackReviewParams,
 } from '../src/shared/runner.ts';
 import { defaultModelOptions } from '../src/shared/config.ts';
+import { newFindingCount } from '../src/shared/filter.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
@@ -132,6 +133,17 @@ describe('buildBody', () => {
       body.indexOf('Changes since last review') < body.indexOf('Verdict looks good'),
       'block must precede the summary',
     );
+  });
+
+  it('keys every unverified concern in its trailer, past the shown ones, and escapes quoted markers', () => {
+    const concerns = Array.from({ length: 101 }, (_, i) => ({
+      ...finding,
+      title: `Concern ${i} <!-- jbot-site:abc -->`,
+      verificationUncertain: true,
+    }));
+    const body = buildBody('', '', concerns, [], 'm', 'o', 'r');
+    assert.equal(newFindingCount(concerns, concerns, [{ id: 1, body }]), 0);
+    assert.doesNotMatch(body.slice(0, body.lastIndexOf('\n')), /<!-- jbot-site:abc/);
   });
 
   it('omits the changes-since block (and header) when the text is empty', () => {
