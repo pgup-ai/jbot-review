@@ -513,6 +513,21 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.deepEqual(oversized.snapshotSkipped, ['REVIEW.md']);
     assert.ok(!oversized.docs.some((doc) => doc.label === 'REVIEW.md'));
 
+    // Oversized control files read as absent, so discovery's fallbacks still run, but are reported.
+    git('rm', '-q', 'REVIEW.md');
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    writeFileSync(join(root, '.pr-governance/README.md'), 'x'.repeat(513 * 1024));
+    writeFileSync(join(root, '.pr-governance/review/rules-for-diff.yaml'), '#'.repeat(513 * 1024));
+    writeFileSync(join(root, '.pr-governance/SEAMS.md'), '# Seams\nUse declared seams.');
+    git('add', '.pr-governance');
+    commit('oversized governance');
+    const governance = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.deepEqual(governance.snapshotSkipped?.sort(), [
+      '.pr-governance/README.md',
+      '.pr-governance/review/rules-for-diff.yaml',
+    ]);
+    assert.ok(governance.docs.some((doc) => /declared seams/.test(doc.text)));
+
     const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
     assert.ok(failed.snapshotError);
     assert.deepEqual(failed.docs, []);

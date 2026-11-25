@@ -897,9 +897,11 @@ const exec = promisify(execFile);
  * Discovers guidelines as of `base` from a snapshot outside the checkout, so a
  * PR cannot edit, move or rename away the rules or severity ratings it is
  * reviewed against. Fails closed: when the snapshot cannot be built, no
- * repository guidance loads and `snapshotError` says why. A file discovery would
- * load but cannot (over MAX_RULE_DOC_BYTES, or a link that does not resolve
- * inside the tree) is listed in `snapshotSkipped`; unrelated ones are ignored.
+ * repository guidance loads and `snapshotError` says why. A file that cannot be
+ * loaded (over MAX_RULE_DOC_BYTES, or a link that does not resolve inside the
+ * tree) is left out; `snapshotSkipped` lists it when discovery always consults
+ * it (a control file, or `AGENTS.md`/`CLAUDE.md`/`REVIEW.md` at the root or an
+ * ancestor of a changed file) or a loaded doc or route names it.
  */
 export async function discoverBaseGuidelineDocs(
   workspace: string,
@@ -907,15 +909,11 @@ export async function discoverBaseGuidelineDocs(
   changedFiles: string[],
 ): Promise<DiscoveredGuidelines & { snapshotError?: unknown; snapshotSkipped?: string[] }> {
   const root = await mkdtemp(join(tmpdir(), 'jbot-guidelines-'));
-  let unloadable: string[];
+  let snapshot: Awaited<ReturnType<typeof readBaseGuidelines>>;
   try {
-    const snapshot = await readBaseGuidelines(workspace, base);
-    unloadable = snapshot.unloadable;
-    // A placeholder shows whether discovery would load the file; an unrelated one costs nothing.
-    for (const [path, content] of [
-      ...snapshot.files,
-      ...unloadable.map((path) => [path, UNLOADED_PLACEHOLDER] as const),
-    ]) {
+    // Unloadable files stay absent, so discovery takes the same path as for a missing one.
+    snapshot = await readBaseGuidelines(workspace, base);
+    for (const [path, content] of snapshot.files) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await writeFile(join(root, path), content);
     }
@@ -925,22 +923,27 @@ export async function discoverBaseGuidelineDocs(
   }
   try {
     const discovered = await discoverGuidelineDocs(root, changedFiles);
-    const missing = unloadable.filter(
+    const ancestors = new Set(['.', ...getChangedFileAncestorDirs(changedFiles)]);
+    // What discovery read: loaded docs and the routing config, which name further docs.
+    const consulted = [
+      ...discovered.docs.map((doc) => doc.text),
+      snapshot.files.get(GUIDELINE_CONTROL_FILES[0])?.toString() ?? '',
+    ].join('\n');
+    const missing = snapshot.unloadable.filter(
       (path) =>
-        discovered.referenced.includes(path) ||
-        discovered.docs.some((doc) => doc.label.replace(/ \(.*\)$/, '') === path),
+        GUIDELINE_CONTROL_FILES.includes(path) ||
+        ROOT_GUIDELINE_FILES.includes(path) ||
+        (/^(?:AGENTS|CLAUDE|REVIEW)\.md$/.test(posix.basename(path)) &&
+          ancestors.has(posix.dirname(path))) ||
+        consulted.includes(posix.basename(path)),
     );
-    const docs = discovered.docs.filter((doc) => !doc.text.includes(UNLOADED_PLACEHOLDER));
-    return missing.length
-      ? { ...discovered, docs, snapshotSkipped: missing }
-      : { ...discovered, docs };
+    return missing.length ? { ...discovered, snapshotSkipped: missing } : discovered;
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 const MAX_SYMLINK_HOPS = 8;
-const UNLOADED_PLACEHOLDER = '<!-- jbot-review: not loaded from the base -->';
 const MAX_BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 
 /**

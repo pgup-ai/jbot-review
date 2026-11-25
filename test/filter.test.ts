@@ -23,7 +23,7 @@ import {
   routeFinding,
   capTestConvention,
   newFindingCount,
-  bodyFindingMarkers,
+  bodyFindingMarker,
 } from '../src/shared/filter.ts';
 import type { PriorFindingRef } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -839,32 +839,32 @@ describe('filterReviewNoise', () => {
 describe('shouldPostReviewComment', () => {
   it('posts a re-run with a new body-only finding, not one a prior body already lists', () => {
     const contextLine = finding({ severity: 'P1', line: 1, title: 'Lock is released early' });
-    const older = bodyFindingMarkers(finding({ line: 9, title: 'Older issue' }));
+    const older = bodyFindingMarker([finding({ line: 9, title: 'Older issue' })]);
     assert.equal(
       shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [older])),
       true,
     );
-    const listed = `${older}${bodyFindingMarkers(contextLine)}`;
+    const listed = `${older}${bodyFindingMarker([contextLine])}`;
     assert.equal(
       shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [listed])),
       false,
     );
     // The same title on another file, and another entry on this path, are not this finding.
     const split = [
-      bodyFindingMarkers({ ...contextLine, path: 'src/other.ts' }),
-      bodyFindingMarkers({ ...contextLine, title: 'Other' }),
+      bodyFindingMarker([{ ...contextLine, path: 'src/other.ts' }]),
+      bodyFindingMarker([{ ...contextLine, title: 'Other' }]),
     ].join('');
     assert.equal(newFindingCount([contextLine], [contextLine], [split]), 1);
     // An unverified concern re-detected is old; confirmed since, it is new.
     const concern = finding({ title: 'Retry may race', verificationUncertain: true });
-    const posted = bodyFindingMarkers(concern);
+    const posted = bodyFindingMarker([concern]);
     assert.equal(newFindingCount([concern], [concern], [posted]), 0);
     const confirmed = finding({ title: concern.title });
     assert.equal(newFindingCount([confirmed], [confirmed], [posted]), 1);
     // A grouped finding with one new site is new.
     const reported = finding({ path: 'src/a.ts', line: 10, title: 'Unscoped write (TS-13)' });
     const group = { ...reported, alsoAt: [{ path: 'src/b.ts', line: 20 }] };
-    assert.equal(newFindingCount([group], [group], [bodyFindingMarkers(reported)]), 1);
+    assert.equal(newFindingCount([group], [group], [bodyFindingMarker([reported])]), 1);
   });
 
   it('always posts the first visible run, clean or not', () => {

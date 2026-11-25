@@ -1522,10 +1522,13 @@ rendered sections, so a repository's own severity rules reach the pass.
 Guideline sources are read as of the PR's base, from a snapshot outside the
 checkout, so a PR cannot edit, move or rename the rules or ratings that apply to
 it; if the snapshot fails, the review runs without repository guidance and
-reports itself incomplete, and a guideline file over 512 KB at the base is
-skipped and reported the same way. It fills the rest of its 96 KB budget with
-sections in rank order, clipping any over 6 KB unless a rule ID routes it, and
-lists the ranked sections that did not fit, so it can open the ones that apply.
+reports itself incomplete, A guideline file over 512 KB, or a link that does not
+resolve inside the tree, is left out as if absent; it is reported the same way
+when it is a control file, a root or ancestor
+`AGENTS.md`/`CLAUDE.md`/`REVIEW.md`, or named by a loaded doc or route, and
+ignored otherwise. It fills the rest of its 96 KB budget with sections in rank
+order, clipping any over 6 KB unless a rule ID routes it, and lists the ranked
+sections that did not fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each

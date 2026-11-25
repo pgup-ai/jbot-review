@@ -854,11 +854,11 @@ function bodyFindingKeys(finding: Finding): string[] {
   );
 }
 
-/** Hidden per-site keys a review body carries, so a later run can tell what it already reported. */
-export function bodyFindingMarkers(finding: Finding): string {
-  return bodyFindingKeys(finding)
-    .map((key) => `<!-- ${BODY_FINDING_MARKER}:${key} -->`)
-    .join('');
+/** One hidden marker listing every site key of `findings`, so a later run can tell what it reported. */
+export function bodyFindingMarker(findings: Finding[]): string {
+  return findings.length
+    ? `<!-- ${BODY_FINDING_MARKER}:${findings.flatMap(bodyFindingKeys).join(',')} -->`
+    : '';
 }
 
 /**
@@ -873,13 +873,15 @@ export function newFindingCount(
   bodyOnly: Finding[],
   priorBodies: readonly string[],
 ): number {
+  const marker = new RegExp(`<!-- ${BODY_FINDING_MARKER}:([0-9a-f,]+) -->`, 'g');
+  const reported = new Set(
+    priorBodies.flatMap((body) =>
+      [...body.matchAll(marker)].flatMap(([, keys]) => keys.split(',')),
+    ),
+  );
   return (
     findings.length -
-    bodyOnly.filter((finding) =>
-      bodyFindingKeys(finding).every((key) =>
-        priorBodies.some((body) => body.includes(`${BODY_FINDING_MARKER}:${key}`)),
-      ),
-    ).length
+    bodyOnly.filter((finding) => bodyFindingKeys(finding).every((key) => reported.has(key))).length
   );
 }
 

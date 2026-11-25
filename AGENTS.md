@@ -109,9 +109,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    union syntax. Each rule is stated exactly once.
 6. **Markers are contracts.** `FINDING_MARKER` / `REVIEW_MARKER` /
    `ADDRESSED_MARKER` in `github.ts` and `BODY_FINDING_MARKER` in `filter.ts`
-   are how prior runs recognize their own
-   output; every posting path must include them (use the shared body
-   builder).
+   are how prior runs recognize their own output; each posting path carries the
+   marker for its output (use the shared builders): `FINDING_MARKER` on inline
+   and file-level comments, site keys on body-only and unverified entries.
 7. **Three-dot diff only** (`base...head`) on GitHub-posting paths: GitHub
    patches — which anchors are validated against — are merge-base-relative.
    Local mode (`src/local/*`) is the one sanctioned exception: it diffs
