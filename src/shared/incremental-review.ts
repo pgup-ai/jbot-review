@@ -604,7 +604,13 @@ export async function planIncrementalReview(input: {
       (
         await grep(
           input.head,
-          ['-w', '-F', ...changed.flatMap((path) => ['-e', posix.basename(path)])],
+          [
+            '-w',
+            '-F',
+            ...changed
+              .filter((path) => DOCUMENT_FILE.test(path))
+              .flatMap((path) => ['-e', posix.basename(path)]),
+          ],
           ...others.map((path) => `:(literal)${path}`),
         )
       ).length
