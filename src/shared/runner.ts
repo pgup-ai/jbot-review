@@ -307,6 +307,7 @@ import { createToolTelemetryAccumulator, type ToolTelemetryAccumulator } from '.
 import {
   buildReviewContext,
   buildReviewScopeContext,
+  baseGuidelineSnapshot,
   discoverGuidelineDocs,
   GUIDELINE_CONTROL_FILES,
   applicableGuidelines,
@@ -1459,7 +1460,19 @@ async function runReviewPipeline(params: {
     return;
   }
 
-  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const guidelineSnapshot = baseSha
+    ? await baseGuidelineSnapshot(
+        workspace,
+        baseSha,
+        rawFiles.map((file) => file.filename),
+      ).catch((error: unknown) => {
+        log(`Base guideline snapshot unavailable; reading the head: ${String(error)}`);
+        return undefined;
+      })
+    : undefined;
+  if (guidelineSnapshot) log('The PR edits guideline sources; reading them at the base.');
+  const guidelineRoot = guidelineSnapshot ?? workspace;
+  const loadedGuidelines = await discoverGuidelineDocs(guidelineRoot, changedFiles);
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
   log(
     `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
@@ -1548,6 +1561,7 @@ async function runReviewPipeline(params: {
         log(
           `Diff unchanged since the last posted review (head ${reviewedHead.slice(0, 7)}); skipping the full review.`,
         );
+        if (guidelineSnapshot) rmSync(guidelineSnapshot, { recursive: true, force: true });
         await finalizePriorResolvedReviews([]);
         finishTelemetry('skipped');
         return;
@@ -1762,10 +1776,11 @@ async function runReviewPipeline(params: {
       current: applicable,
       ruleSources,
       changedFiles,
-      discover: (files) => discoverGuidelineDocs(workspace, files),
+      discover: (files) => discoverGuidelineDocs(guidelineRoot, files),
     },
     rulesChangedSince,
   });
+  if (guidelineSnapshot) rmSync(guidelineSnapshot, { recursive: true, force: true });
   const shadowScope = reviewScope.shadow;
   const totalPatchBytes = fullReviewFiles.reduce(
     (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),

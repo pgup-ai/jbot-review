@@ -165,9 +165,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    PR authors are trusted; `sdk-engine: opencode` keeps a repo off dsh.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal. The one exception is a declined
-   thread: resolved without jbot's addressed reply, with a human reply last.
-   Nothing was fixed there, so it suppresses like an open thread, and anywhere
-   on its file by cited rule ID or near-identical title until its lines change.
+   thread: resolved without jbot's addressed reply, with the PR author or a
+   writer replying last. Nothing was fixed there, so it suppresses like an open
+   thread, and nearby by cited guideline rule ID or near-identical title until
+   its lines change, never a security or P0/P1 finding.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
     module (like `filter.ts`), unit-tested; `runner.ts` only wires.
 11. **Compromise means shutdown, not mitigation.** Runtime components never

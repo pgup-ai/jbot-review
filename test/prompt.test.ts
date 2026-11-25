@@ -758,7 +758,10 @@ describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
 
   it("forbids P0 and defers to the guidelines' own severity ratings", () => {
     assert.match(GUIDELINE_COMPLIANCE_PROMPT, /Do not use "P0"\./);
-    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /documents rate a kind of finding, use their rating/);
+    assert.match(
+      GUIDELINE_COMPLIANCE_PROMPT,
+      /documents rate a convention or test-style finding, use their rating/,
+    );
   });
 
   it('forbids inventing rules that are not written down', () => {

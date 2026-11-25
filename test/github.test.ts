@@ -833,8 +833,13 @@ describe('prior thread outcomes', () => {
     ]);
   });
 
-  it('flags a thread as declined only when a human replied last', async () => {
-    const thread = (id: string, isResolved: boolean, lastAuthor: string) => ({
+  it('flags a thread as declined only when the PR author or a writer replied last', async () => {
+    const thread = (
+      id: string,
+      isResolved: boolean,
+      lastAuthor: string,
+      association = 'MEMBER',
+    ) => ({
       id,
       isResolved,
       isOutdated: id === 'PRRT_open',
@@ -853,6 +858,7 @@ describe('prior thread outcomes', () => {
             databaseId: id.length + 100,
             body: 'Declined: intended.',
             url: `https://github.com/acme/widget/pull/1#${id}-reply`,
+            authorAssociation: association,
             author: { login: lastAuthor },
           },
         ],
@@ -865,12 +871,15 @@ describe('prior thread outcomes', () => {
         viewer: { login: 'github-actions' },
         repository: {
           pullRequest: {
+            author: { login: 'bob' },
             reviewThreads: {
               pageInfo: { hasNextPage: false, endCursor: null },
               nodes: [
                 thread('PRRT_declined', true, 'alice'),
                 thread('PRRT_open', false, 'alice'),
                 thread('PRRT_bot_last', true, 'github-actions'),
+                thread('PRRT_outsider', true, 'carol', 'CONTRIBUTOR'),
+                thread('PRRT_author', true, 'bob', 'CONTRIBUTOR'),
               ],
             },
           },
@@ -886,6 +895,8 @@ describe('prior thread outcomes', () => {
         { id: 'PRRT_declined', declined: true, outdated: false },
         { id: 'PRRT_open', declined: true, outdated: true },
         { id: 'PRRT_bot_last', declined: false, outdated: false },
+        { id: 'PRRT_outsider', declined: false, outdated: false },
+        { id: 'PRRT_author', declined: true, outdated: false },
       ],
     );
   });

@@ -64,7 +64,7 @@ export interface PrFile {
 export interface PriorJbotThread {
   id: string;
   isResolved: boolean;
-  /** A human reply last and no jbot addressed reply: nothing was fixed. */
+  /** The PR author or a writer replied last, with no jbot addressed reply: nothing was fixed. */
   declined?: boolean;
   /** GitHub marks a thread outdated once the lines it was posted on change. */
   outdated?: boolean;
@@ -247,6 +247,7 @@ interface ReviewThreadsResponse {
   };
   repository: {
     pullRequest: {
+      author?: { login: string } | null;
       reviewThreads: {
         pageInfo: {
           hasNextPage: boolean;
@@ -264,6 +265,7 @@ interface ReviewThreadsResponse {
               databaseId?: number | null;
               body: string;
               url: string;
+              authorAssociation?: string;
               author?: {
                 login: string;
               } | null;
@@ -330,6 +332,8 @@ export function classifyPriorJbotThread(input: {
   return input.isResolved ? 'skip' : 'resolve-only';
 }
 
+const WRITE_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
 export async function listPriorJbotThreads(
   octokit: Octokit,
   owner: string,
@@ -347,6 +351,9 @@ export async function listPriorJbotThreads(
       }
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
+          author {
+            login
+          }
           reviewThreads(first: 100, after: $after) {
             pageInfo {
               hasNextPage
@@ -364,6 +371,7 @@ export async function listPriorJbotThreads(
                   databaseId
                   body
                   url
+                  authorAssociation
                   author {
                     login
                   }
@@ -480,7 +488,11 @@ export async function listPriorJbotThreads(
       threads.push({
         id: thread.id,
         isResolved: thread.isResolved,
-        declined: lastReply !== undefined && isHuman(lastReply),
+        declined:
+          lastReply !== undefined &&
+          isHuman(lastReply) &&
+          (WRITE_ASSOCIATIONS.has(lastReply.authorAssociation ?? '') ||
+            lastReply.author?.login === response.repository?.pullRequest?.author?.login),
         outdated: thread.isOutdated,
         replyToCommentId: topLevel.databaseId,
         path: thread.path,

@@ -680,20 +680,28 @@ describe('filterReviewNoise', () => {
       ...overrides,
     });
 
-  it('drops a finding a human declined on the same file by rule id or title, until those lines change', () => {
+  it('drops a P2-or-lower finding declined near the same lines, until those lines change', () => {
     const thread = {
       path: 'src/example.ts',
-      line: 90,
-      body: '**P2** Wrap the repository write per TS-13',
+      line: 12,
+      body: '**P2 · maintainability** — Wrap the repository write\n\nTS-13 requires it. CWE-89.',
       isResolved: true,
       declined: true,
     };
     const byRule = finding({ title: 'Unscoped write (TS-13)' });
     const byTitle = finding({ title: 'Wrap the repository write' });
-    const other = finding({ title: 'Different issue (INV-1)' });
+    const kept = [
+      finding({ title: 'Different issue (INV-1)' }),
+      finding({ title: 'Injection risk (CWE-89)' }),
+      finding({ line: 40, title: 'Unscoped write (TS-13)' }),
+      finding({ severity: 'P1', title: 'Unscoped write (TS-13)' }),
+      finding({ kind: 'security', title: 'Wrap the repository write' }),
+    ];
+    // Collapse may merge the kept TS-13 sites, but none of them is dropped.
+    const { dropped } = noise([byRule, byTitle, ...kept], { priorThreads: [thread] });
     assert.deepEqual(
-      noise([byRule, byTitle, other], { priorThreads: [thread] }).findings.map((f) => f.title),
-      ['Different issue (INV-1)'],
+      dropped.map(({ finding }) => finding),
+      [byRule, byTitle],
     );
     for (const changed of [
       { ...thread, outdated: true },

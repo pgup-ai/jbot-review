@@ -140,7 +140,8 @@ Use these severity levels.
 | P3   | Minor improvement (cleaner approach, DRY, clarity)  |
 | nit  | Trivial suggestion (naming, comment, formatting)    |
 
-Where the repository guidelines rate a kind of finding, use their rating.
+Where the repository guidelines rate a written-convention or test-style finding,
+use their rating; never rate a bug, security, or data-loss finding below its impact.
 P0, P1, and P2 are blocking findings. P3 and nit are advisory only; include
 them only when they are clearly useful and low-noise. Prefer the lower
 severity when uncertain about IMPACT — but do not lower severity merely
@@ -1074,8 +1075,8 @@ rule by rule. Report only observed conflicts with an explicit written rule;
 quote it and name the file it comes from.
 Do not invent rules or infer tool usage, authorship, or generation history
 from file style. A recommendation needs a concrete benefit on changed code.
-For written-rule violations use the guidelines' own rating where they give one,
-nit included; otherwise P1 only for a mandatory/blocking rule with material
+For written-rule violations use the guidelines' own rating where they give one
+for a convention or test-style rule, nit included; otherwise P1 only for a mandatory/blocking rule with material
 impact, P2 for a clear standard violation, and P3 for a recommendation.
 Prefer the lower severity when uncertain; do not use P0 for these violations.`;
 
@@ -1628,8 +1629,9 @@ ${REVIEW_COMMAND_POLICY}
 
 ## Severity
 
-Where the documents rate a kind of finding, use their rating, "nit" included.
-Otherwise:
+Where the documents rate a convention or test-style finding, use their rating,
+"nit" included, but never rate a bug, security, or data-loss risk below its
+impact. Otherwise:
 
 - "P1": violation of a rule the documents mark as mandatory or blocking, with
   material impact on this change.

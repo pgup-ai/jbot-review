@@ -238,16 +238,12 @@ function significantTokens(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])];
 }
 
-const RULE_ID = /\b[A-Z]{2,6}-\d+(?:\.\d+)*\b|§\s?\d+(?:\.\d+)*/g;
-const NOT_RULE_ID = /^(?:SHA|UTF|ISO)-/;
+// Guideline namespaces only: a generic id (CWE, CVE) names a class of bug, not a written rule.
+const RULE_ID = /\b(?:INV|TS)-\d+(?:\.\d+)*\b|§\s?\d+(?:\.\d+)*/g;
 
 /** Written-rule ids a finding cites, such as `TS-13`, `INV-1` or `§12.1`. */
 function ruleIds(text: string): Set<string> {
-  return new Set(
-    (text.match(RULE_ID) ?? [])
-      .map((id) => id.replace(/\s/g, ''))
-      .filter((id) => !NOT_RULE_ID.test(id)),
-  );
+  return new Set((text.match(RULE_ID) ?? []).map((id) => id.replace(/\s/g, '')));
 }
 
 const NEAR_IDENTICAL_OVERLAP = 0.8;
@@ -271,9 +267,9 @@ export type NoiseDropReason = 'design-note' | 'parent-pr' | 'declined';
  *   current behavior;
  * - on a PR stacked on another branch, drops findings on lines outside the
  *   PR's own hunks: that code belongs to the parent PR;
- * - drops a finding a human already declined on the same file, matched by a
- *   cited rule id or a near-identical title, unless the declined thread's
- *   lines changed since;
+ * - drops a P2-or-lower, non-security finding the PR author or a writer
+ *   declined near the same lines, matched by a cited guideline rule id or a
+ *   near-identical title, unless the declined thread's lines changed since;
  * - treats a finding that says it is unverified as a hypothesis for the
  *   verifier, never an inline claim;
  * - rates a test-style finding (helper use, matcher shape) `nit` unless it
@@ -292,7 +288,12 @@ export function filterReviewNoise(
 ): { findings: Finding[]; dropped: Array<{ finding: Finding; reason: NoiseDropReason }> } {
   const declined = context.priorThreads
     .filter((thread) => thread.declined && !thread.outdated)
-    .map((thread) => ({ thread, ids: ruleIds(thread.body), text: thread.body.toLowerCase() }));
+    .map((thread) => ({
+      thread,
+      ids: ruleIds(thread.body),
+      // The posted comment opens with "<label> — <title>".
+      title: thread.body.split('\n', 1)[0].split(' — ').slice(1).join(' — '),
+    }));
   const hunkLines = new Map<string, Set<number>>();
   const dropReason = (finding: Finding, ids: Set<string>): NoiseDropReason | undefined => {
     if (DESIGN_NOTE_PATH.test(finding.path)) return 'design-note';
@@ -309,19 +310,24 @@ export function filterReviewNoise(
         if (!lines.has(finding.line)) return 'parent-pr';
       }
     }
-    const titleTokens = significantTokens(finding.title);
-    if (
-      declined.some(
-        ({ thread, ids: threadIds, text }) =>
-          thread.path === finding.path &&
-          ([...ids].some((id) => threadIds.has(id)) ||
-            (titleTokens.length >= 3 &&
-              titleTokens.filter((token) => text.includes(token)).length / titleTokens.length >=
-                NEAR_IDENTICAL_OVERLAP)),
-      )
-    )
-      return 'declined';
-    return undefined;
+    // A decline never silences a security or P0/P1 finding.
+    if (finding.kind === 'security' || SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P1)
+      return undefined;
+    const declinedMatch = declined.some(({ thread, ids: threadIds, title }) => {
+      if (thread.path !== finding.path) return false;
+      const near =
+        thread.line === undefined
+          ? finding.line === 0
+          : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
+      if (!near) return false;
+      const titles = titleTokenMatch(title, finding.title);
+      return (
+        [...ids].some((id) => threadIds.has(id)) ||
+        (titles.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS &&
+          titles.overlap >= NEAR_IDENTICAL_OVERLAP)
+      );
+    });
+    return declinedMatch ? 'declined' : undefined;
   };
 
   const dropped: Array<{ finding: Finding; reason: NoiseDropReason }> = [];

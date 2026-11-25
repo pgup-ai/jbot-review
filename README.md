@@ -160,19 +160,20 @@ Full reviews cover the complete `base...head` diff. Eligible incremental
 follow-ups select affected files and review each file's complete PR patch, never
 just its latest edit. Repeats of findings covered by unresolved prior jbot
 threads are suppressed in code before posting. Deterministic over-reach filters
-also run before verification: a finding a human already declined on the same
-file (same cited rule ID such as `TS-13` or `§12.1`, or a near-identical title)
-is dropped unless that thread's lines changed since; findings on design notes
-and plans (`*-design-note.md`, `docs/**/plans/**`, `*-plan.md`) are dropped; on
-a PR into a branch other than the default, findings on lines outside the PR's
-own hunks belong to the parent PR and are dropped; a finding that labels itself
-unverified is checked as a hypothesis; a test-style finding (helper use, matcher
-shape) that cites only `TS-6` rules (not the `TS-6.3` coverage tier) is rated
-`nit` unless it shows the case passes with the guarded line reverted; and
-findings sharing a rule ID and title collapse into one thread listing every
-site. A finding on a line the PR only moved or shows as context is listed in the
-review body instead of an inline thread. Several inputs tune the
-recall/precision/cost balance:
+also run before verification: a P2-or-lower, non-security finding that the PR
+author or a writer already declined within three lines (same guideline rule ID
+such as `TS-13`, `INV-1` or `§12.1`, or a near-identical title) is dropped
+unless that thread's lines changed since; findings on design notes and plans
+(`*-design-note.md`, `docs/**/plans/**`, `*-plan.md`) are dropped; on a PR into
+a branch other than the default, findings on lines outside the PR's own hunks
+belong to the parent PR and are dropped; a finding that labels itself unverified
+is checked as a hypothesis; a test-style finding (helper use, matcher shape)
+that cites only `TS-6` rules (not the `TS-6.3` coverage tier) is rated `nit`
+unless it shows the case passes with the guarded line reverted; and findings
+sharing a rule ID and title collapse into one thread listing every site. A
+finding on a line the PR only moved or shows as context is listed in the review
+body instead of an inline thread. Several inputs tune the recall/precision/cost
+balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run that finds something posts. A clean re-run posts no
@@ -1508,9 +1509,11 @@ path, weighted by how critical the changed file is (code over configuration over
 tests over docs). Each doc in the governance README's base reading chain and its
 PR-review list, plus a root `REVIEW.md`, loads in reading order right after the
 routed rules, up to 24 KB in total, so a repository's own severity rules reach
-the pass. It fills the rest of its 96 KB budget with sections in rank order,
-clipping any over 6 KB unless a rule ID routes it, and lists the ranked sections
-that did not fit, so it can open the ones that apply.
+the pass. A PR that edits a guideline source is reviewed against every source as
+of its base, so it cannot rewrite the rules or ratings that apply to it. It
+fills the rest of its 96 KB budget with sections in rank order, clipping any
+over 6 KB unless a rule ID routes it, and lists the ranked sections that did not
+fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each

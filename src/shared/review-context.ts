@@ -1,5 +1,8 @@
-import { access, open, readdir, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { execFile } from 'node:child_process';
+import { mkdtemp, access, open, readdir, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
 import { diffRiskScore } from './diff-context.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
@@ -888,6 +891,34 @@ export function isGuidelineSource(path: string): boolean {
     /\.mdc?$/.test(path)
   );
 }
+const exec = promisify(execFile);
+
+/**
+ * A PR must not rewrite the rules or severity ratings it is reviewed against:
+ * when it edits a guideline source, discovery reads every source as of `base`
+ * from a snapshot outside the checkout. Undefined when the PR edits none.
+ */
+export async function baseGuidelineSnapshot(
+  workspace: string,
+  base: string,
+  prPaths: string[],
+): Promise<string | undefined> {
+  if (!prPaths.some(isGuidelineSource)) return undefined;
+  const git = (...args: string[]) =>
+    exec('git', args, { cwd: workspace, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+  const sources = (await git('ls-tree', '-r', '-z', '--name-only', base)).stdout
+    .split('\0')
+    .filter((path) => path && isGuidelineSource(path));
+  const root = await mkdtemp(join(tmpdir(), 'jbot-guidelines-'));
+  if (sources.length > 0) {
+    const archive = `${root}.tar`;
+    await git('archive', '--format=tar', '-o', archive, base, '--', ...sources);
+    await exec('tar', ['-xf', archive, '-C', root], { timeout: 30_000 });
+    await rm(archive);
+  }
+  return root;
+}
+
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.
 const MAX_GUIDELINE_FILE_BYTES = 128 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;

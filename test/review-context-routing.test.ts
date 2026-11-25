@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
 import {
+  baseGuidelineSnapshot,
   discoverGuidelineDocs,
   formatFinderGuidelines,
   formatGuidelines,
@@ -461,6 +463,24 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(out, /Test-helper findings are nit/);
     // A conditional list's doc still has to name something in the diff.
     assert.doesNotMatch(out, /decimal types/);
+  });
+
+  it('reads guideline sources at the base when the PR edits its own guidelines', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-base-rules-'));
+    roots.push(root);
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root }).toString().trim();
+    git('init', '-q');
+    writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are P2.');
+    writeFileSync(join(root, 'app.ts'), 'export {};');
+    git('add', '.');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base');
+    const base = git('rev-parse', 'HEAD');
+    writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are nit.');
+    assert.equal(await baseGuidelineSnapshot(root, base, ['app.ts']), undefined);
+    const snapshot = await baseGuidelineSnapshot(root, base, ['app.ts', 'REVIEW.md']);
+    roots.push(snapshot!);
+    const { docs } = await discoverGuidelineDocs(snapshot!, ['app.ts']);
+    assert.match(docs.find((doc) => doc.label === 'REVIEW.md')!.text, /are P2/);
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {
