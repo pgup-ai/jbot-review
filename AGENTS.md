@@ -38,7 +38,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 | `src/shared/context-pack.ts`        | Pure per-page context pack for `JBOT_REVIEW_EXPERIMENT=context-pack`: selects, ranks and byte-budgets surrounding code, used definitions, import-linked callers, other pages' diffs and a directory map via an injected provider                                 |
 | `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                             |
 | `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                                   |
-| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                                  |
+| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, over-reach filters, confidence gate, verdicts                                                                                                                                              |
 | `src/shared/rule-checks.ts`         | Pure deterministic rule checks: parse the repo's committed checks, match added lines, shadow agreement with the guideline pass, compiler validation                                                                                                              |
 | `src/shared/benchmark-judge.ts`     | Pure port of AACR-Bench's comment matcher (path → side → line window → LLM same-concern) and official metrics; judge sessions run via `semantic-judge.ts`                                                                                                        |
 | `src/shared/aacr-bench.ts`          | Pure AACR-Bench dataset model: official commit mapping, seeded per-language sample, finding → comment conversion                                                                                                                                                 |
@@ -166,7 +166,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal. The one exception is a declined
    thread: resolved without jbot's addressed reply, with a human reply last.
-   Nothing was fixed there, so it suppresses like an open thread.
+   Nothing was fixed there, so it suppresses like an open thread, and anywhere
+   on its file by cited rule ID or near-identical title until its lines change.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
     module (like `filter.ts`), unit-tested; `runner.ts` only wires.
 11. **Compromise means shutdown, not mitigation.** Runtime components never

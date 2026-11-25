@@ -64,8 +64,10 @@ export interface PrFile {
 export interface PriorJbotThread {
   id: string;
   isResolved: boolean;
-  /** Resolved with a human reply last and no jbot addressed reply: nothing was fixed. */
+  /** A human reply last and no jbot addressed reply: nothing was fixed. */
   declined?: boolean;
+  /** GitHub marks a thread outdated once the lines it was posted on change. */
+  outdated?: boolean;
   replyToCommentId: number;
   path: string;
   line?: number;
@@ -253,6 +255,7 @@ interface ReviewThreadsResponse {
         nodes: Array<{
           id: string;
           isResolved: boolean;
+          isOutdated?: boolean;
           path: string;
           line?: number | null;
           originalLine?: number | null;
@@ -352,6 +355,7 @@ export async function listPriorJbotThreads(
             nodes {
               id
               isResolved
+              isOutdated
               path
               line
               originalLine
@@ -476,7 +480,8 @@ export async function listPriorJbotThreads(
       threads.push({
         id: thread.id,
         isResolved: thread.isResolved,
-        declined: thread.isResolved && lastReply !== undefined && isHuman(lastReply),
+        declined: lastReply !== undefined && isHuman(lastReply),
+        outdated: thread.isOutdated,
         replyToCommentId: topLevel.databaseId,
         path: thread.path,
         // `line` is null both for file-level comments AND for outdated
@@ -861,9 +866,8 @@ export async function updateReviewBody(
 }
 
 export function formatFindingLabel(
-  finding: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>,
+  finding: Pick<Finding, 'severity' | 'kind' | 'confidence'>,
 ): string {
-  if (finding.verificationUncertain) return '**Unverified**';
   const kind = finding.kind ? ` · ${finding.kind}` : '';
   const confidence = finding.confidence
     ? ` (*conf: ${finding.confidence === 'medium' ? 'med' : finding.confidence}*)`

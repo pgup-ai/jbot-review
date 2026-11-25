@@ -77,6 +77,7 @@ import {
   applyFindingVerdicts,
   checkConfirmationEvidence,
   filterFindings,
+  filterReviewNoise,
   clampFindingsToFiles,
   anchorFindings,
   dedupeFindings,
@@ -85,13 +86,13 @@ import {
   resolvesFinding,
   isNoiseFile,
   isUnresolvedFinding,
-  isWithheldFinding,
   isPrCleanAfterRun,
   openFindingThreadIds,
   recheckReasons,
   selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
+  unchangedLines,
 } from './filter.ts';
 import {
   ASSEMBLED_CONTEXT_WARN_BYTES,
@@ -1135,6 +1136,8 @@ async function runReviewPipeline(params: {
   /** Required for GitHub-backed reviews; local worktree reviews omit it. */
   headSha?: string;
   baseRef?: string;
+  /** With baseRef: a PR into any other branch is stacked on a parent PR. */
+  defaultBranch?: string;
   baseSha?: string;
   preparePatchRecovery?: () => Promise<void> | void;
   /**
@@ -1168,6 +1171,7 @@ async function runReviewPipeline(params: {
     baseURL,
     headSha,
     baseRef,
+    defaultBranch,
     baseSha,
     localDiff,
     log,
@@ -3529,6 +3533,12 @@ async function runReviewPipeline(params: {
             ),
     );
 
+    const noiseContext = {
+      priorThreads: priorJbotThreads,
+      patchByPath,
+      prFiles: new Set(rawFiles.map((file) => file.filename)),
+      stacked: Boolean(baseRef && defaultBranch && baseRef !== defaultBranch),
+    };
     const overlapTargets = (lists: Finding[][]) => {
       // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
       // these are the very objects the final pipeline re-anchors and counts —
@@ -3540,10 +3550,13 @@ async function runReviewPipeline(params: {
       for (const list of gatedLists) {
         resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
       }
-      const settled = suppressPreviouslyReported(
-        dedupeFindings(...gatedLists),
-        priorJbotThreads,
-        headSha ? addable : undefined,
+      const settled = filterReviewNoise(
+        suppressPreviouslyReported(
+          dedupeFindings(...gatedLists),
+          priorJbotThreads,
+          headSha ? addable : undefined,
+        ).findings,
+        noiseContext,
       ).findings;
       return selectFindingIndexes(settled).map((index) => settled[index]);
     };
@@ -3854,19 +3867,27 @@ async function runReviewPipeline(params: {
       priorJbotThreads,
       headSha ? addable : undefined,
     );
-    telemetry.snapshot('suppressed', suppression.findings);
     if (suppression.suppressedCount > 0) {
       log(
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
       );
     }
+    const noise = filterReviewNoise(suppression.findings, noiseContext);
+    if (noise.dropped.length > 0) {
+      const reasons = new Map<string, number>();
+      for (const { reason } of noise.dropped) reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+      log(
+        `Dropped ${noise.dropped.length} over-reach finding(s): ${JSON.stringify(Object.fromEntries(reasons))}.`,
+      );
+    }
+    telemetry.snapshot('suppressed', noise.findings);
     initialFilteringDone(
       'completed',
-      telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(noise.findings)) : undefined,
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
     const verifiedFindings = await finishVerificationWaves({
-      findings: suppression.findings,
+      findings: noise.findings,
       firstWave: overlapVerification,
       pendingTargets: options.verifyAuxReady && !optionalEarly ? firstWaveTargets : [],
       logOutcomes: (application) => logVerdictOutcomes(application, log),
@@ -3961,6 +3982,7 @@ async function runReviewPipeline(params: {
       filteredFindings,
       addable,
       !!headSha,
+      unchangedLines(patchByPath),
     );
     if (withheld.length > 0) log(`Unpublished review candidates: ${JSON.stringify(withheld)}`);
     let diagnosticsUrl: string | undefined;
@@ -6246,12 +6268,12 @@ export function buildBody(
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
   const orphanedSection = renderOrphanedSection(
-    orphaned.filter((finding) => !isWithheldFinding(finding)),
+    orphaned.filter((finding) => !isUnresolvedFinding(finding)),
   );
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(
     ...renderUnverifiedSection(
-      all.filter(isWithheldFinding),
+      all.filter(isUnresolvedFinding),
       owner,
       repo,
       headSha,

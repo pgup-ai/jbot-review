@@ -593,7 +593,6 @@ test('distinguishes unsupported producer indexing from invalid source proof', as
     assert.equal(verdict.unavailable, true, path);
     const applied = applyFindingVerdicts([finding], [0], [verdict]).findings[0];
     assert.equal(applied.verificationUnavailable, true);
-    assert.equal(applied.publishUnverified, 'P2');
     for (const invalid of [
       {
         ...candidate,

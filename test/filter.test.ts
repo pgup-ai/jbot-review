@@ -5,6 +5,7 @@ import {
   anchorFindings,
   applyFindingVerdicts,
   filterFindings,
+  filterReviewNoise,
   isUnresolvedFinding,
   mergeVerdictsByLocation,
   dedupeFindings,
@@ -17,6 +18,7 @@ import {
   selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
+  unchangedLines,
 } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -371,81 +373,19 @@ describe('applyFindingVerdicts', () => {
       assert.equal(f.verificationUnavailable, true);
       assert.match(f.body, /Verification not completed/);
       assert.equal(f.confidence, 'low');
-      assert.match(
-        f.body,
-        f.publishUnverified
-          ? /Finding verification did not complete\./
-          : /Finding verification did not return a verdict/,
-      );
+      assert.match(f.body, /Finding verification did not return a verdict/);
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
 
-    assert.deepEqual(
-      result.filter((f) => f.publishUnverified).map((f) => f.title),
-      ['Unverified concern: uncertain me', 'Unverified concern: confirm me'],
-    );
-    const inconclusive = applyFindingVerdicts(findings, selected, [
-      { index: 1, verdict: 'uncertain', reason: 'Unclear.' },
-    ]).findings.find((f) => f.title.includes('uncertain me'));
-    assert.equal(inconclusive?.publishUnverified, undefined);
-    const [speculative] = applyFindingVerdicts(
-      [finding({ severity: 'P1', kind: 'investigate' })],
-      [0],
-      [],
-    ).findings;
-    assert.equal(speculative.publishUnverified, undefined);
-    const [failed] = applyFindingVerdicts(
-      [finding({ severity: 'P1' })],
-      [0],
-      [
-        {
-          index: 0,
-          verdict: 'uncertain',
-          unavailable: true,
-          reason: 'exited 1: {"user_id":"org_x"}',
-        },
-      ],
-    ).findings;
-    assert.equal(failed.publishUnverified, 'P1');
-    assert.doesNotMatch(failed.body, /org_x/);
+    // An unchecked P0-P2 claim stays a question in the review body, never an inline thread.
     const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
       minSeverity: 'nit',
       maxFindings: 0,
     });
-    assert.equal(unchecked.filter((f) => f.publishUnverified).length, 3);
-    const flagged = applyFindingVerdicts(findings, selected, []).findings;
-    for (const [limits, posted] of [
-      [{ minSeverity: 'nit', maxFindings: 2 }, 1],
-      [{ minSeverity: 'P1', maxFindings: 0 }, 1],
-      [{ minSeverity: 'P0', maxFindings: 0 }, 0],
-    ] as const)
-      assert.equal(
-        filterFindings(
-          [finding({ severity: 'P3', title: 'confirmed' }), ...flagged],
-          limits,
-        ).filter((f) => f.publishUnverified).length,
-        posted,
-      );
     const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
-    assert.equal(routed.inline.length, 3);
-    assert.equal(routed.withheld.length, 2);
-    assert.ok(routed.inline.every((f) => f.verificationUncertain));
-  });
-
-  it('gives the limited Unverified slots to the most severe unchecked findings', () => {
-    const ordered = filterFindings(
-      applyFindingVerdicts(
-        (['P2', 'P2', 'P2', 'P2', 'P2', 'P0'] as const).map((severity) => finding({ severity })),
-        [0, 1, 2, 3, 4, 5],
-        [],
-      ).findings,
-      { minSeverity: 'nit', maxFindings: 0 },
-    );
-    assert.deepEqual(
-      ordered.filter((f) => f.publishUnverified).map((f) => f.publishUnverified),
-      ['P2', 'P2', 'P2', 'P2', 'P0'],
-    );
+    assert.equal(routed.inline.length, 0);
+    assert.equal(routed.withheld.length, findings.length);
   });
 });
 
@@ -726,6 +666,113 @@ describe('suppressPreviouslyReported', () => {
   });
 });
 
+describe('filterReviewNoise', () => {
+  const patch = '@@ -1,2 +1,3 @@\n context\n+added\n context';
+  const noise = (
+    findings: Finding[],
+    overrides: Partial<Parameters<typeof filterReviewNoise>[1]> = {},
+  ) =>
+    filterReviewNoise(findings, {
+      priorThreads: [],
+      patchByPath: new Map([['src/example.ts', patch]]),
+      prFiles: new Set(['src/example.ts']),
+      stacked: false,
+      ...overrides,
+    });
+
+  it('drops a finding a human declined on the same file by rule id or title, until those lines change', () => {
+    const thread = {
+      path: 'src/example.ts',
+      line: 90,
+      body: '**P2** Wrap the repository write per TS-13',
+      isResolved: true,
+      declined: true,
+    };
+    const byRule = finding({ title: 'Unscoped write (TS-13)' });
+    const byTitle = finding({ title: 'Wrap the repository write' });
+    const other = finding({ title: 'Different issue (INV-1)' });
+    assert.deepEqual(
+      noise([byRule, byTitle, other], { priorThreads: [thread] }).findings.map((f) => f.title),
+      ['Different issue (INV-1)'],
+    );
+    for (const changed of [
+      { ...thread, outdated: true },
+      { ...thread, declined: false },
+    ])
+      assert.equal(noise([byRule], { priorThreads: [changed] }).findings.length, 1);
+  });
+
+  it('drops findings on design notes, plans, and parent-PR code of a stacked PR', () => {
+    const paths = ['docs/x-design-note.md', 'docs/a/plans/p.md', 'ROLLOUT-plan.md'];
+    const findings = [
+      ...paths.map((path) => finding({ path, title: path })),
+      finding({ line: 40, title: 'outside own hunks' }),
+      finding({ path: 'src/parent.ts', title: 'parent file' }),
+      finding({ line: 2, title: 'own line' }),
+    ];
+    assert.deepEqual(
+      noise(findings).findings.map((f) => f.title),
+      ['outside own hunks', 'parent file', 'own line'],
+    );
+    assert.deepEqual(
+      noise(findings, { stacked: true }).dropped.map(({ reason }) => reason),
+      ['design-note', 'design-note', 'design-note', 'parent-pr', 'parent-pr'],
+    );
+  });
+
+  it('sends a self-declared unverified finding to verification as a hypothesis', () => {
+    const [self, prose] = noise([
+      finding({ title: 'Unverified: retry may double-post' }),
+      finding({ kind: 'security', title: 'Webhook signature is not verified' }),
+    ]).findings;
+    assert.equal(isUnresolvedFinding(self), true);
+    assert.equal(isUnresolvedFinding(prose), false);
+  });
+
+  it('rates a TS-6 test-style finding nit unless it shows the case passes with the line reverted', () => {
+    const [helper, reverted, bug, mixed] = noise([
+      finding({
+        path: 'src/a.spec.ts',
+        title: 'Use `createTestOrder` for inline test data (TS-6)',
+      }),
+      finding({
+        path: 'src/a.spec.ts',
+        title: 'Assertion uses `toBeDefined` (TS-6)',
+        body: 'The case still passes with line 12 reverted.',
+      }),
+      finding({
+        path: 'src/a.spec.ts',
+        kind: 'bug',
+        title: '`afterAll` deletes the shared tenant',
+      }),
+      finding({
+        path: 'src/b.spec.ts',
+        title: 'No case fails when the guard is reverted; use `createTestOrder` (TS-6.3)',
+      }),
+    ]).findings;
+    assert.deepEqual(
+      [helper, reverted, bug, mixed].map((f) => f.severity),
+      ['nit', 'P2', 'P2', 'P2'],
+    );
+  });
+
+  it('collapses one rule and title across sites into one thread listing every site', () => {
+    const findings = noise([
+      finding({
+        path: 'src/a.ts',
+        line: 3,
+        severity: 'P3',
+        title: 'Comment restates the code (§12.1)',
+      }),
+      finding({ path: 'src/b.ts', line: 8, title: 'Comment restates the code (§12.1)' }),
+      finding({ path: 'src/c.ts', line: 5, title: 'Comment restates the code' }),
+    ]).findings;
+    assert.equal(findings.length, 2);
+    assert.equal(findings[0].path, 'src/b.ts');
+    assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`\.$/);
+  });
+});
+
 describe('shouldPostReviewComment', () => {
   it('always posts the first visible run, clean or not', () => {
     assert.equal(shouldPostReviewComment(0, 0), true);
@@ -915,6 +962,30 @@ describe('resolveFindingAnchors', () => {
 });
 
 describe('anchorFindings', () => {
+  it('routes findings on moved or context lines to the review body', () => {
+    const moved = 'const total = computeInvoiceTotal(order.lines);';
+    const patches = new Map([
+      ['src/old.ts', `@@ -1,2 +1,1 @@\n keep\n-${moved}`],
+      ['src/new.ts', `@@ -1,1 +1,4 @@\n context\n+  ${moved}\n+return total;\n+const fresh = 1;`],
+    ]);
+    const unchanged = unchangedLines(patches);
+    const addable = new Map([['src/new.ts', new Set([2, 3, 4])]]);
+    const routed = anchorFindings(
+      [1, 2, 3, 4].map((line) => finding({ path: 'src/new.ts', line, title: `L${line}` })),
+      addable,
+      true,
+      unchanged,
+    );
+    assert.deepEqual(
+      routed.orphaned.map((f) => f.line),
+      [1, 2],
+    );
+    assert.deepEqual(
+      routed.inline.map((f) => f.line),
+      [3, 4],
+    );
+  });
+
   const addable = new Map([['a.ts', new Set([1, 2])]]);
 
   it('splits findings into inline, file-level, and orphaned buckets', () => {

@@ -158,9 +158,21 @@ entry point only after its image and action version are published.
 
 Full reviews cover the complete `base...head` diff. Eligible incremental
 follow-ups select affected files and review each file's complete PR patch, never
-just its latest edit. Repeats of findings covered by unresolved prior jbot threads
-are suppressed in code before posting. Several inputs tune the recall/precision/cost
-balance:
+just its latest edit. Repeats of findings covered by unresolved prior jbot
+threads are suppressed in code before posting. Deterministic over-reach filters
+also run before verification: a finding a human already declined on the same
+file (same cited rule ID such as `TS-13` or `§12.1`, or a near-identical title)
+is dropped unless that thread's lines changed since; findings on design notes
+and plans (`*-design-note.md`, `docs/**/plans/**`, `*-plan.md`) are dropped; on
+a PR into a branch other than the default, findings on lines outside the PR's
+own hunks belong to the parent PR and are dropped; a finding that labels itself
+unverified is checked as a hypothesis; a test-style finding (helper use, matcher
+shape) that cites only `TS-6` rules (not the `TS-6.3` coverage tier) is rated
+`nit` unless it shows the case passes with the guarded line reverted; and
+findings sharing a rule ID and title collapse into one thread listing every
+site. A finding on a line the PR only moved or shows as context is listed in the
+review body instead of an inline thread. Several inputs tune the
+recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run that finds something posts. A clean re-run posts no
@@ -810,10 +822,8 @@ candidates, P3 and nits, enter severity-ordered batches of ten. Findings arrivin
 follow-up check. Verification shares the remaining verification time budget;
 Failed or missing verdicts retain candidates as `not-completed` diagnostics and
 report incomplete coverage. An uncertain verdict is `inconclusive`, not an
-unattempted check. Both remain withheld from PR findings, with one exception: a
-concrete P0–P2 finding whose verification returned no verdict is posted labeled
-Unverified, at most five a run, within `max-findings` and `min-severity` (judged by
-its original severity) and outside the severity counts.
+unattempted check. Both remain withheld from PR findings and are listed under
+the review body's "Unverified concerns".
 
 ## Local review
 
@@ -1046,8 +1056,7 @@ Guidelines may share an interactions session, so reuse does not always remove a
 whole model session.
 
 Every preset withholds uncertain, investigation-only and low-confidence candidates
-from inline and file-level findings (the one exception is under
-[Finding evidence](#finding-evidence)). The PR review body includes a collapsed
+from inline and file-level findings. The PR review body includes a collapsed
 `Unverified concerns (N)` section showing up to 10 withheld hypotheses to anyone
 who can read the PR. Content is HTML-escaped and capped at 2,400 UTF-8 bytes per
 concern, plus a truncation notice; omitted concerns are counted. Failed-verifier

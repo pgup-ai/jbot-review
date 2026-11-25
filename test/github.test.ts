@@ -120,15 +120,6 @@ describe('formatFindingLabel', () => {
         severity: 'P3',
         kind: 'investigate',
         confidence: 'low',
-        verificationUncertain: true,
-      }),
-      '**Unverified**',
-    );
-    assert.equal(
-      formatFindingLabel({
-        severity: 'P3',
-        kind: 'investigate',
-        confidence: 'low',
       }),
       '**P3 · investigate** (*conf: low*)',
     );
@@ -842,10 +833,11 @@ describe('prior thread outcomes', () => {
     ]);
   });
 
-  it('flags a resolved thread as declined only when a human replied last', async () => {
+  it('flags a thread as declined only when a human replied last', async () => {
     const thread = (id: string, isResolved: boolean, lastAuthor: string) => ({
       id,
       isResolved,
+      isOutdated: id === 'PRRT_open',
       path: 'src/x.ts',
       line: 7,
       originalLine: 7,
@@ -889,11 +881,11 @@ describe('prior thread outcomes', () => {
     const result = await listPriorJbotThreads(octokit as unknown as Octokit, 'acme', 'widget', 1);
 
     assert.deepEqual(
-      result.threads.map(({ id, declined }) => ({ id, declined })),
+      result.threads.map(({ id, declined, outdated }) => ({ id, declined, outdated })),
       [
-        { id: 'PRRT_declined', declined: true },
-        { id: 'PRRT_open', declined: false },
-        { id: 'PRRT_bot_last', declined: false },
+        { id: 'PRRT_declined', declined: true, outdated: false },
+        { id: 'PRRT_open', declined: true, outdated: true },
+        { id: 'PRRT_bot_last', declined: false, outdated: false },
       ],
     );
   });

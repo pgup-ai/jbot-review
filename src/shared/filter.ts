@@ -4,6 +4,7 @@ import {
   anchorByEvidenceSnippet,
   evidenceWindow,
   rescueAnchorByEvidence,
+  newSideLines,
   unnumberedEvidence,
 } from './patch.ts';
 import {
@@ -58,14 +59,6 @@ export function isUnresolvedFinding(
     finding.confidence === 'low'
   );
 }
-
-export function isWithheldFinding(
-  finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain' | 'publishUnverified'>,
-): boolean {
-  return isUnresolvedFinding(finding) && !finding.publishUnverified;
-}
-
-const MAX_PUBLISHED_UNVERIFIED = 5;
 
 export const SEVERITY_RANK: Record<Severity, number> = {
   P0: 0,
@@ -170,8 +163,10 @@ export interface PriorFindingRef {
    * incomplete fix that MUST be re-reported. `declined` is the one exception.
    */
   isResolved?: boolean;
-  /** A human declined and resolved it: nothing was fixed, so it still suppresses. */
+  /** A human replied last and nothing was fixed: it still suppresses once resolved. */
   declined?: boolean;
+  /** The thread's lines changed after it was posted. */
+  outdated?: boolean;
 }
 
 const SUPPRESS_LINE_TOLERANCE = 3;
@@ -241,6 +236,186 @@ function isSameIssue(
 
 function significantTokens(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])];
+}
+
+const RULE_ID = /\b[A-Z]{2,6}-\d+(?:\.\d+)*\b|§\s?\d+(?:\.\d+)*/g;
+const NOT_RULE_ID = /^(?:SHA|UTF|ISO)-/;
+
+/** Written-rule ids a finding cites, such as `TS-13`, `INV-1` or `§12.1`. */
+function ruleIds(text: string): Set<string> {
+  return new Set(
+    (text.match(RULE_ID) ?? [])
+      .map((id) => id.replace(/\s/g, ''))
+      .filter((id) => !NOT_RULE_ID.test(id)),
+  );
+}
+
+const NEAR_IDENTICAL_OVERLAP = 0.8;
+const DESIGN_NOTE_PATH = /-design-note\.md$|(^|\/)docs\/(.+\/)?plans\/|-plan\.md$/;
+// The finding's own label, not prose about code that skips a check ("token is not verified").
+const SELF_UNVERIFIED =
+  /^\W*unverified\b|[[(*]unverified[\])*]|\bverification (?:was |is )?not completed\b|\bverification did not complete\b/i;
+// Test-writing style the repo rates nit: helper use and matcher shape.
+const TEST_STYLE =
+  /\btoBeDefined\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bsubstring\b[^.]*\btoThrow|\btoThrow\b[^.]*\bsubstring\b|\bem\.clear\b|\bafterAll\b|\bcreateTest[A-Z]\w*|\btest (?:data )?helpers?\b|\binline (?:test )?(?:data|fixtures?)\b/i;
+// TS-6.3 is the coverage risk tier, rated by what a regression would get past.
+const isTestStyleRule = (id: string) => /^TS-6(\.\d+)?$/.test(id) && id !== 'TS-6.3';
+const REVERT_STILL_PASSES =
+  /\bpass(?:es|ed)?\b[^.]*\brevert|\brevert\w*\b[^.]*\b(?:still )?pass(?:es|ed)?\b/i;
+
+export type NoiseDropReason = 'design-note' | 'parent-pr' | 'declined';
+
+/**
+ * Deterministic over-reach filters, applied before verification:
+ * - drops findings on design notes and plans, which record intent rather than
+ *   current behavior;
+ * - on a PR stacked on another branch, drops findings on lines outside the
+ *   PR's own hunks: that code belongs to the parent PR;
+ * - drops a finding a human already declined on the same file, matched by a
+ *   cited rule id or a near-identical title, unless the declined thread's
+ *   lines changed since;
+ * - treats a finding that says it is unverified as a hypothesis for the
+ *   verifier, never an inline claim;
+ * - rates a test-style finding (helper use, matcher shape) `nit` unless it
+ *   shows the case passes with the guarded line reverted;
+ * - collapses findings sharing a rule id and title into one thread listing
+ *   every site.
+ */
+export function filterReviewNoise(
+  findings: Finding[],
+  context: {
+    priorThreads: PriorFindingRef[];
+    patchByPath: ReadonlyMap<string, string>;
+    prFiles: ReadonlySet<string>;
+    stacked: boolean;
+  },
+): { findings: Finding[]; dropped: Array<{ finding: Finding; reason: NoiseDropReason }> } {
+  const declined = context.priorThreads
+    .filter((thread) => thread.declined && !thread.outdated)
+    .map((thread) => ({ thread, ids: ruleIds(thread.body), text: thread.body.toLowerCase() }));
+  const hunkLines = new Map<string, Set<number>>();
+  const dropReason = (finding: Finding, ids: Set<string>): NoiseDropReason | undefined => {
+    if (DESIGN_NOTE_PATH.test(finding.path)) return 'design-note';
+    if (context.stacked) {
+      const patch = context.patchByPath.get(finding.path);
+      if (!patch) {
+        if (!context.prFiles.has(finding.path)) return 'parent-pr';
+      } else if (finding.line > 0) {
+        let lines = hunkLines.get(finding.path);
+        if (!lines) {
+          lines = new Set([...newSideLines(patch)].map(({ line }) => line));
+          hunkLines.set(finding.path, lines);
+        }
+        if (!lines.has(finding.line)) return 'parent-pr';
+      }
+    }
+    const titleTokens = significantTokens(finding.title);
+    if (
+      declined.some(
+        ({ thread, ids: threadIds, text }) =>
+          thread.path === finding.path &&
+          ([...ids].some((id) => threadIds.has(id)) ||
+            (titleTokens.length >= 3 &&
+              titleTokens.filter((token) => text.includes(token)).length / titleTokens.length >=
+                NEAR_IDENTICAL_OVERLAP)),
+      )
+    )
+      return 'declined';
+    return undefined;
+  };
+
+  const dropped: Array<{ finding: Finding; reason: NoiseDropReason }> = [];
+  const kept: Array<{ finding: Finding; ids: Set<string> }> = [];
+  for (const original of findings) {
+    const text = `${original.title}\n${original.body}`;
+    const ids = ruleIds(text);
+    const reason = dropReason(original, ids);
+    if (reason) {
+      dropped.push({ finding: original, reason });
+      continue;
+    }
+    let finding = original;
+    if (!isUnresolvedFinding(finding) && SELF_UNVERIFIED.test(text))
+      finding = { ...finding, kind: 'investigate' };
+    if (
+      finding.severity !== 'nit' &&
+      finding.kind !== 'bug' &&
+      finding.kind !== 'security' &&
+      ids.size > 0 &&
+      [...ids].every(isTestStyleRule) &&
+      TEST_STYLE.test(text) &&
+      !REVERT_STILL_PASSES.test(text)
+    )
+      finding = { ...finding, severity: 'nit' };
+    kept.push({ finding, ids });
+  }
+
+  const groups: Array<{ ids: Set<string>; members: Finding[] }> = [];
+  for (const { finding, ids } of kept) {
+    const group =
+      ids.size > 0
+        ? groups.find(
+            (candidate) =>
+              [...ids].some((id) => candidate.ids.has(id)) &&
+              titleTokenMatch(candidate.members[0].title, finding.title).overlap >=
+                NEAR_IDENTICAL_OVERLAP,
+          )
+        : undefined;
+    if (group) group.members.push(finding);
+    else groups.push({ ids, members: [finding] });
+  }
+  const collapsed = groups.map(({ members }) => {
+    if (members.length === 1) return members[0];
+    const [primary, ...others] = [...members].sort((a, b) => {
+      const [severityA, confidenceA] = findingStrength(a);
+      const [severityB, confidenceB] = findingStrength(b);
+      return severityA - severityB || confidenceA - confidenceB;
+    });
+    const sites = others
+      .map(({ path, line }) => `\`${line > 0 ? `${path}:${line}` : path}\``)
+      .join(', ');
+    return { ...primary, body: `${primary.body}\n\nSame issue at: ${sites}.` };
+  });
+  return { findings: collapsed, dropped };
+}
+
+// Git's --color-moved counts a block as moved from 20 alphanumeric characters.
+const MOVED_MIN_ALNUM = 20;
+
+/**
+ * New-side lines per file this PR did not write: context lines, and added
+ * lines in a block whose every line was removed elsewhere in the PR (a move,
+ * re-indentation allowed). A finding there reviews code the PR only carried.
+ */
+export function unchangedLines(patchByPath: ReadonlyMap<string, string>): Map<string, Set<number>> {
+  const removed = new Set<string>();
+  for (const patch of patchByPath.values())
+    for (const raw of patch.split('\n'))
+      if (raw.startsWith('-') && raw.slice(1).trim()) removed.add(raw.slice(1).trim());
+  const result = new Map<string, Set<number>>();
+  for (const [path, patch] of patchByPath) {
+    const lines = new Set<number>();
+    let block: number[] = [];
+    let alnum = 0;
+    const flush = () => {
+      if (alnum >= MOVED_MIN_ALNUM) for (const line of block) lines.add(line);
+      block = [];
+      alnum = 0;
+    };
+    for (const { line, content, added } of newSideLines(patch)) {
+      const text = content.trim();
+      if (!added || (text && !removed.has(text))) {
+        flush();
+        if (!added) lines.add(line);
+        continue;
+      }
+      block.push(line);
+      alnum += text.replace(/[^\p{L}\p{N}]/gu, '').length;
+    }
+    flush();
+    result.set(path, lines);
+  }
+  return result;
 }
 
 /** Stable severity order keeps blocking findings first without excluding advisories. */
@@ -419,30 +594,18 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
     confidence: 'medium',
     verificationUncertain: undefined,
     verificationUnavailable: undefined,
-    publishUnverified: undefined,
   };
 }
 
 function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {
-  // No verdict is not a judgment: a concrete blocking claim stays visible, labeled.
-  const publish =
-    unavailable &&
-    !isUnresolvedFinding(finding) &&
-    SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2;
   return {
     ...finding,
-    // A failed verifier's reason can carry raw provider errors; a posted comment gets none.
-    ...formatUnverifiedFinding(
-      finding,
-      publish ? 'Finding verification did not complete.' : reason,
-      unavailable,
-    ),
+    ...formatUnverifiedFinding(finding, reason, unavailable),
     severity: finding.severity === 'nit' ? 'nit' : 'P3',
     kind: 'investigate',
     confidence: 'low',
     verificationUncertain: true,
     verificationUnavailable: unavailable || undefined,
-    publishUnverified: publish ? finding.severity : undefined,
   };
 }
 
@@ -585,22 +748,7 @@ export function filterFindings(
     published = [...published]
       .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
       .slice(0, options.maxFindings);
-  // Unverified posts obey the same display limits, judged by their original severity.
-  const room =
-    options.maxFindings > 0 ? Math.max(0, options.maxFindings - published.length) : Infinity;
-  const unresolved = findings.filter(isUnresolvedFinding);
-  const publishable = new Set(
-    unresolved
-      .filter((finding) => finding.publishUnverified && shown(finding.publishUnverified))
-      .sort((a, b) => SEVERITY_RANK[a.publishUnverified!] - SEVERITY_RANK[b.publishUnverified!])
-      .slice(0, Math.min(MAX_PUBLISHED_UNVERIFIED, room)),
-  );
-  const capped = unresolved.map((finding) =>
-    finding.publishUnverified && !publishable.has(finding)
-      ? { ...finding, publishUnverified: undefined }
-      : finding,
-  );
-  return [...published, ...capped];
+  return [...published, ...findings.filter(isUnresolvedFinding)];
 }
 
 export interface AnchoredFindings {
@@ -609,7 +757,7 @@ export interface AnchoredFindings {
   inline: Finding[];
   /** Findings routed to a changed file instead of a specific added line. */
   fileLevel: Finding[];
-  /** Anchor not in the diff; rendered in the review body's outside-the-diff section. */
+  /** Anchor not in the diff, or on a line the PR only moved or shows as context; rendered in the review body. */
   orphaned: Finding[];
   /** A subset of `fileLevel`: demoted because no anchor resolved, unlike a model-declared line 0. */
   anchorMissed: Finding[];
@@ -619,13 +767,14 @@ export interface AnchoredFindings {
  * Splits final findings by where their anchor lands in the diff. Anchors are
  * already resolved by `resolveFindingAnchors`, so this only routes: a finding on
  * a changed file that still has no usable line falls back to a file-level thread
- * so it remains independently resolvable, and only findings outside the
- * changed-file set stay in the review body.
+ * so it remains independently resolvable. Findings outside the changed-file set,
+ * or on a line this PR only moved or shows as context, stay in the review body.
  */
 export function anchorFindings(
   findings: Finding[],
   addable: ReadonlyMap<string, ReadonlySet<number>>,
   hasHeadSha: boolean,
+  unchanged?: ReadonlyMap<string, ReadonlySet<number>>,
 ): AnchoredFindings {
   const result: AnchoredFindings = {
     inline: [],
@@ -635,7 +784,8 @@ export function anchorFindings(
     withheld: [],
   };
   for (const f of findings) {
-    if (isWithheldFinding(f)) result.withheld.push(f);
+    if (isUnresolvedFinding(f)) result.withheld.push(f);
+    else if (f.line > 0 && unchanged?.get(f.path)?.has(f.line)) result.orphaned.push(f);
     else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
     else if (hasHeadSha && addable.has(f.path)) {

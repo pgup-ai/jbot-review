@@ -105,6 +105,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         baseURL,
         headSha: pr.head.sha,
         baseRef: pr.base.ref,
+        defaultBranch: pr.base.repo.default_branch,
         baseSha: pr.base.sha,
         preparePatchRecovery: cloned.prepareDiff,
         // The multi-pass/verification defaults cost ~3x a single session;
