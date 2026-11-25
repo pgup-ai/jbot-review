@@ -23,6 +23,7 @@ import {
   routeFinding,
   capTestConvention,
   newFindingCount,
+  autoResolvableThreadIds,
   bodyFindingMarker,
   coveredFilesMarker,
 } from '../src/shared/filter.ts';
@@ -1231,5 +1232,15 @@ describe('anchorFindings', () => {
     const out = anchorFindings([f], diff(addable, false));
     assert.equal(out.orphaned[0], f);
     assert.equal(f.line, 99);
+  });
+});
+
+describe('autoResolvableThreadIds', () => {
+  it('never auto-resolves a grouped thread, on the addressed check or the resolve retry', () => {
+    const threads = [{ id: 'single' }, { id: 'grouped', sites: [{ path: 'src/b.ts', line: 20 }] }];
+    assert.deepEqual(autoResolvableThreadIds(['single', 'grouped', 'unknown'], threads), [
+      'single',
+      'unknown',
+    ]);
   });
 });

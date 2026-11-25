@@ -941,6 +941,17 @@ export function newFindingCount(
   );
 }
 
+/** Thread ids that may be auto-resolved: a grouped thread stays open, since only its primary site was checked. */
+export function autoResolvableThreadIds(
+  ids: readonly string[],
+  threads: ReadonlyArray<{ id: string; sites?: ReadonlyArray<unknown> }>,
+): string[] {
+  const grouped = new Set(
+    threads.filter((thread) => thread.sites?.length).map((thread) => thread.id),
+  );
+  return ids.filter((id) => !grouped.has(id));
+}
+
 /** The files an incremental review covered, in its trailer; a full review omits it. */
 export const COVERED_MARKER = 'jbot-review:covered';
 

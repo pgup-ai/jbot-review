@@ -138,6 +138,7 @@ import {
   routeFinding,
   capTestConvention,
   newFindingCount,
+  autoResolvableThreadIds,
   bodyFindingMarker,
   coveredFilesMarker,
 } from './filter.ts';
@@ -4260,7 +4261,7 @@ async function runReviewPipeline(params: {
       const reResolved = await resolveUnresolvedAddressedThreads({
         octokit,
         threadResolutionOctokit: params.threadResolutionOctokit,
-        threadIds: unresolvedAddressedThreadIds,
+        threadIds: autoResolvableThreadIds(unresolvedAddressedThreadIds, allPriorJbotThreads),
         log,
       });
       resolvedThisRun.push(...reResolved);
@@ -6066,8 +6067,7 @@ async function acknowledgeAddressedPriorComments(params: {
       params.log(`Skipping addressed prior comment with unknown thread id: ${addressed.id}`);
       continue;
     }
-    // A grouped thread stays open: the check sees only its primary site, not the others it lists.
-    if (thread.sites?.length) {
+    if (autoResolvableThreadIds([thread.id], [thread]).length === 0) {
       params.log(`Leaving grouped thread ${addressed.id} open: its other sites were not checked`);
       continue;
     }
