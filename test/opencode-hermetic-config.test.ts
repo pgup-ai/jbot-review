@@ -25,6 +25,7 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
     const savedConfigHome = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = ambientHome;
     // The embedded catalog lists openai/gpt-5; a live models.dev copy without it would replace it.
+    const savedModelsFetch = process.env.OPENCODE_DISABLE_MODELS_FETCH;
     process.env.OPENCODE_DISABLE_MODELS_FETCH = '1';
     mkdirSync(join(workspace, '.opencode', 'plugins'), { recursive: true });
     writeFileSync(
@@ -91,7 +92,8 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
       runtime.stop();
       if (savedConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = savedConfigHome;
-      delete process.env.OPENCODE_DISABLE_MODELS_FETCH;
+      if (savedModelsFetch === undefined) delete process.env.OPENCODE_DISABLE_MODELS_FETCH;
+      else process.env.OPENCODE_DISABLE_MODELS_FETCH = savedModelsFetch;
       for (const dir of [ambientHome, workspace]) rmSync(dir, { recursive: true, force: true });
     }
   });
