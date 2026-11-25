@@ -1509,11 +1509,12 @@ path, weighted by how critical the changed file is (code over configuration over
 tests over docs). Each doc in the governance README's base reading chain and its
 PR-review list, plus a root `REVIEW.md`, loads in reading order right after the
 routed rules, up to 24 KB in total, so a repository's own severity rules reach
-the pass. A PR that edits a guideline source is reviewed against every source as
-of its base, so it cannot rewrite the rules or ratings that apply to it. It
-fills the rest of its 96 KB budget with sections in rank order, clipping any
-over 6 KB unless a rule ID routes it, and lists the ranked sections that did not
-fit, so it can open the ones that apply.
+the pass. Guideline sources are read as of the PR's base, from a snapshot
+outside the checkout, so a PR cannot edit, move or rename the rules or ratings
+that apply to it; if the snapshot fails, the review runs without repository
+guidance. It fills the rest of its 96 KB budget with sections in rank order,
+clipping any over 6 KB unless a rule ID routes it, and lists the ranked sections
+that did not fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each

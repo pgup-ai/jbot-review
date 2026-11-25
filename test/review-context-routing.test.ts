@@ -465,7 +465,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.doesNotMatch(out, /decimal types/);
   });
 
-  it('reads guideline sources at the base when the PR edits its own guidelines', async () => {
+  it('reads guideline sources at the base, through renames, and fails closed', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-base-rules-'));
     roots.push(root);
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root }).toString().trim();
@@ -475,12 +475,20 @@ describe('discoverGuidelineDocs with diff routing', () => {
     git('add', '.');
     git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base');
     const base = git('rev-parse', 'HEAD');
+    // The PR moves the rules away and writes its own.
+    git('mv', 'REVIEW.md', 'OLD-REVIEW.md');
     writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are nit.');
-    assert.equal(await baseGuidelineSnapshot(root, base, ['app.ts']), undefined);
-    const snapshot = await baseGuidelineSnapshot(root, base, ['app.ts', 'REVIEW.md']);
-    roots.push(snapshot!);
-    const { docs } = await discoverGuidelineDocs(snapshot!, ['app.ts']);
+    const snapshot = await baseGuidelineSnapshot(root, base);
+    roots.push(snapshot.root);
+    assert.equal(snapshot.error, undefined);
+    const { docs } = await discoverGuidelineDocs(snapshot.root, ['app.ts']);
     assert.match(docs.find((doc) => doc.label === 'REVIEW.md')!.text, /are P2/);
+    assert.ok(!docs.some((doc) => /nit/.test(doc.text)));
+
+    const failed = await baseGuidelineSnapshot(root, 'no-such-revision');
+    roots.push(failed.root);
+    assert.ok(failed.error);
+    assert.deepEqual((await discoverGuidelineDocs(failed.root, ['app.ts'])).docs, []);
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {

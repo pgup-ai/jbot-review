@@ -1460,17 +1460,12 @@ async function runReviewPipeline(params: {
     return;
   }
 
-  const guidelineSnapshot = baseSha
-    ? await baseGuidelineSnapshot(
-        workspace,
-        baseSha,
-        rawFiles.map((file) => file.filename),
-      ).catch((error: unknown) => {
-        log(`Base guideline snapshot unavailable; reading the head: ${String(error)}`);
-        return undefined;
-      })
-    : undefined;
-  if (guidelineSnapshot) log('The PR edits guideline sources; reading them at the base.');
+  const snapshot = baseSha ? await baseGuidelineSnapshot(workspace, baseSha) : undefined;
+  if (snapshot?.error)
+    log(
+      `Base guideline snapshot failed; reviewing without repository guidance: ${String(snapshot.error)}`,
+    );
+  const guidelineSnapshot = snapshot?.root;
   const guidelineRoot = guidelineSnapshot ?? workspace;
   const loadedGuidelines = await discoverGuidelineDocs(guidelineRoot, changedFiles);
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
