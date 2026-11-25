@@ -1314,6 +1314,7 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
     .replace(/^## j-?bot code review\s*/i, '')
     .trim();
   const noun = threadCount === 1 ? 'thread' : 'threads';
+  const keptMarkers = body.match(/^<!-- (?:jbot-site|jbot-review:covered):[^\n]* -->$/gm) ?? [];
   return appendLinkedCommentsFooter(
     appendReviewMarker(
       withReviewCoverage(
@@ -1330,6 +1331,7 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
           '</details>',
           '',
           COMPACTED_REVIEW_MARKER,
+          ...keptMarkers,
         ].join('\n'),
         incrementalHead ?? completedReviewHead(body),
         true,

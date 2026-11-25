@@ -1110,6 +1110,8 @@ export interface ReviewRunOptions {
   onReviewResult?: (result: {
     summary: string;
     findings: Finding[];
+    /** Findings no prior J-Bot review reported: what this run posts. */
+    newFindings: number;
     addressedPriorComments: AddressedPriorComment[];
     /** JSONL telemetry (finding + session rows); present when reviewTelemetry is on. */
     telemetry?: string;
@@ -4067,10 +4069,16 @@ async function runReviewPipeline(params: {
     // Isolated: this is a side-channel hook and must not abort the actual review post below.
     // Terminal telemetry is NOT written here: 'completed' is only earned after
     // the posting/approval phase below succeeds.
+    const findingCount = newFindingCount(
+      filteredFindings,
+      [...orphaned, ...withheld],
+      priorJbotReviewGroups,
+    );
     try {
       options.onReviewResult?.({
         summary: joinContext(coverageNotice, summary),
         findings: filteredFindings,
+        newFindings: findingCount,
         addressedPriorComments: verifiedAddressedPriorComments,
         ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
         incompleteSessions,
@@ -4163,11 +4171,6 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
-    const findingCount = newFindingCount(
-      filteredFindings,
-      [...orphaned, ...withheld],
-      priorJbotReviewGroups,
-    );
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,
       findingCount,
