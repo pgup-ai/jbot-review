@@ -988,14 +988,15 @@ async function readBaseGuidelines(
   // stays absent, and is reported if discovery looks it up.
   const symlinks = [...tree].filter(([, { mode }]) => mode === '120000');
   const linkBlobs = await readBlobs(symlinks.map(([, { sha }]) => sha));
-  const original = [...tree];
+  // A mirrored entry keeps the path it was copied from, so a link inside it resolves from its real location.
+  const origin = new Map<string, string>();
   const linkTarget = (path: string): string | null | undefined => {
     const entry = tree.get(path);
     if (entry?.mode !== '120000') return undefined;
     const raw = linkBlobs.get(entry.sha)!.toString();
     const target = posix.isAbsolute(raw)
       ? ''
-      : posix.normalize(posix.join(posix.dirname(path), raw));
+      : posix.normalize(posix.join(posix.dirname(origin.get(path) ?? path), raw));
     return target && !target.startsWith('../') ? target : null;
   };
   const finalDirectory = (path: string): string | undefined => {
@@ -1005,18 +1006,31 @@ async function readBaseGuidelines(
       const next = linkTarget(at);
       if (next === null) return undefined;
       if (next === undefined)
-        return original.some(([other]) => other.startsWith(`${at}/`)) ? at : undefined;
+        return [...tree.keys()].some((other) => other.startsWith(`${at}/`)) ? at : undefined;
       at = next;
     }
     return undefined;
   };
-  for (const [link] of symlinks) {
-    if (isGuidelineSource(link)) continue;
-    const target = finalDirectory(link);
-    if (!target) continue;
-    for (const [path, entry] of original)
-      if (path.startsWith(`${target}/`))
-        tree.set(`${link}/${path.slice(target.length + 1)}`, entry);
+  // Repeat until no link adds entries: mirroring one link can create another (`.cursor` -> `config`
+  // copies `config/rules` -> `../shared/rules` as `.cursor/rules`).
+  const mirrored = new Set<string>();
+  for (let pass = 0; pass <= MAX_SYMLINK_HOPS; pass++) {
+    const pending = [...tree].filter(
+      ([path, { mode }]) => mode === '120000' && !mirrored.has(path) && !isGuidelineSource(path),
+    );
+    if (pending.length === 0) break;
+    for (const [link] of pending) {
+      mirrored.add(link);
+      const target = finalDirectory(link);
+      if (!target) continue;
+      for (const [path, entry] of Array.from(tree))
+        if (path.startsWith(`${target}/`)) {
+          const copy = `${link}/${path.slice(target.length + 1)}`;
+          if (tree.has(copy)) continue;
+          tree.set(copy, entry);
+          origin.set(copy, origin.get(path) ?? path);
+        }
+    }
   }
   // Resolve each symlink to the file it names inside the tree; one that cannot stays absent.
   const targets = new Map<string, { mode: string; sha: string; size: number }>();

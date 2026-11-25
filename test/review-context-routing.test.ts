@@ -557,6 +557,16 @@ describe('discoverGuidelineDocs with diff routing', () => {
     commit('linked rules dir');
     const linked = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
     assert.ok(linked.docs.some((doc) => /Take the row lock/.test(doc.text)));
+    // A link inside a mirrored directory (.cursor -> config, config/rules -> ../shared/rules) is mirrored too.
+    git('rm', '-rq', 'rules', '.cursor');
+    mkdirSync(join(root, 'config'));
+    symlinkSync('../shared/rules', join(root, 'config/rules'));
+    symlinkSync('config', join(root, '.cursor'));
+    git('add', 'config', '.cursor');
+    commit('nested linked rules dir');
+    const nested = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(nested.docs.some((doc) => /Take the row lock/.test(doc.text)));
+    assert.ok(!nested.snapshotSkipped?.includes('.cursor/rules'));
     // A link chain that cannot be mirrored is reported, not treated as present.
     git('rm', '-rq', 'shared');
     commit('dangling rules dir');
