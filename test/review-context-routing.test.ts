@@ -489,6 +489,13 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(docs.find((doc) => doc.label === 'AGENTS.md')!.text, /Lock every write/);
     assert.ok(!docs.some((doc) => /nit/.test(doc.text)));
 
+    // An absolute link target escapes the tree, even when /REVIEW.md exists in it.
+    symlinkSync('/REVIEW.md', join(root, 'CONTRIBUTING.md'));
+    git('add', 'CONTRIBUTING.md', 'REVIEW.md');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'absolute link');
+    const absolute = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.match(String(absolute.snapshotError), /does not resolve/);
+
     const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
     assert.ok(failed.snapshotError);
     assert.deepEqual(failed.docs, []);

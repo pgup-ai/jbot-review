@@ -167,19 +167,19 @@ near-identical title; when either cites a CWE or CVE, only the rule ID path
 applies) is dropped unless that thread's lines changed since; non-security
 findings on design notes and plans (`*-design-note.md`, `docs/**/plans/**`,
 `*-plan.md`) are dropped; a finding whose title labels it unverified is checked
-as a hypothesis; a non-bug, non-security test-convention finding (helper use,
-cleanup, titles; never matcher shape) that cites only `TS-6` rules (not the
-`TS-6.3` coverage tier) is rated `nit` unless it says the case still passes with
-the guard reverted or removed; after verification, confirmed findings sharing a
-rule ID and title, and routed to the same place, collapse into one thread
-listing every site. A finding on a context line, or in an added block of at
-least 20 alphanumeric characters whose every line the PR removed elsewhere (a
-move), is listed in the review body instead of an inline thread. So is, on a PR
-into a branch other than the default, a finding on a changed file's line outside
-the PR's own additions: parent-PR code, or a caller this PR breaks. A re-run
-posts only for findings no prior review reports, so a body-only or unverified
-finding a prior review body already lists does not post again. Several inputs
-tune the recall/precision/cost balance:
+as a hypothesis; a maintainability finding about test conventions (helper use,
+cleanup, titles) that cites only `TS-6` rules (not the `TS-6.3` coverage tier)
+is rated `nit`, never one about matcher shape or a test that may pass without
+catching its regression; after verification, confirmed findings sharing a rule
+ID and title, and routed to the same place, collapse into one thread listing
+every site. A finding on a context line, or in an added block of at least 20
+alphanumeric characters whose every line the PR removed elsewhere (a move), is
+listed in the review body instead of an inline thread. So is, on a PR into a
+branch other than the default, a finding on a changed file's line outside the
+PR's own additions: parent-PR code, or a caller this PR breaks. A re-run posts
+only for findings no prior review reports, so a body-only or unverified finding
+a prior review body already lists does not post again. Several inputs tune the
+recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run with findings no prior review reports posts. A clean
@@ -1519,9 +1519,10 @@ rendered sections, so a repository's own severity rules reach the pass.
 Guideline sources are read as of the PR's base, from a snapshot outside the
 checkout, so a PR cannot edit, move or rename the rules or ratings that apply to
 it; if the snapshot fails, the review runs without repository guidance and
-reports itself incomplete. It fills the rest of its 96 KB budget with sections
-in rank order, clipping any over 6 KB unless a rule ID routes it, and lists the
-ranked sections that did not fit, so it can open the ones that apply.
+reports itself incomplete, and a guideline file over 512 KB at the base is
+skipped and reported the same way. It fills the rest of its 96 KB budget with
+sections in rank order, clipping any over 6 KB unless a rule ID routes it, and
+lists the ranked sections that did not fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each

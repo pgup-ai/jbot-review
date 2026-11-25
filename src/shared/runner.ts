@@ -1475,6 +1475,13 @@ async function runReviewPipeline(params: {
     log(
       `Base guideline snapshot failed; reviewing without repository guidance: ${String(guidelineSnapshotError)}`,
     );
+  const skippedGuidelines: string[] =
+    ('snapshotSkipped' in loadedGuidelines && (loadedGuidelines.snapshotSkipped as string[])) || [];
+  if (skippedGuidelines.length)
+    log(
+      `Guideline files over the size cap at the base, not loaded: ${skippedGuidelines.join(', ')}`,
+    );
+  const guidelinesIncomplete = Boolean(guidelineSnapshotError) || skippedGuidelines.length > 0;
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
   log(
     `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
@@ -1495,7 +1502,7 @@ async function runReviewPipeline(params: {
     prEdited: ruleSources.filter((path) => prPaths.has(path)),
     prPaths,
     base: baseSha,
-    complete: !loadedGuidelines.budgetExhausted && !guidelineSnapshotError,
+    complete: !loadedGuidelines.budgetExhausted && !guidelinesIncomplete,
   };
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {
@@ -1539,7 +1546,7 @@ async function runReviewPipeline(params: {
     !localDiff &&
     options.skipUnchanged &&
     !options.autoApprove &&
-    !guidelineSnapshotError &&
+    !guidelinesIncomplete &&
     headSha &&
     baseRef
   ) {
@@ -3957,11 +3964,13 @@ async function runReviewPipeline(params: {
     );
     const incompleteSessions = reviewCoverageSessions([
       ...(mainCoverageGap ? [mainCoverageGap] : []),
-      ...(guidelineSnapshotError
+      ...(guidelinesIncomplete
         ? [
             {
               label: 'repository-guidelines',
-              reason: 'not loaded from the base revision, so no repository rules were applied',
+              reason: guidelineSnapshotError
+                ? 'not loaded from the base revision, so no repository rules were applied'
+                : `${skippedGuidelines.length} file(s) over the size cap were not loaded`,
             },
           ]
         : []),

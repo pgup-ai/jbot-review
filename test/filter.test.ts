@@ -748,7 +748,7 @@ describe('filterReviewNoise', () => {
   });
 
   it('rates a TS-6 test-style finding nit unless it shows the case passes with the line reverted', () => {
-    const [helper, reverted, matcher, bug, mixed] = noise([
+    const [helper, reverted, matcher, matcherWithHelper, ineffective, bug, mixed] = noise([
       finding({
         path: 'src/a.spec.ts',
         title: 'Use `createTestOrder` for inline test data (TS-6)',
@@ -766,6 +766,17 @@ describe('filterReviewNoise', () => {
       }),
       finding({
         path: 'src/a.spec.ts',
+        title: 'Use `createTestUser` and assert with `toBeDefined` (TS-6.6)',
+      }),
+      // A helper that hides the case under test is a coverage gap, not style.
+      finding({
+        path: 'src/a.spec.ts',
+        kind: 'test',
+        title: '`createTestUser` builds an admin (TS-6.6)',
+        body: 'The authorization test never exercises the restricted role.',
+      }),
+      finding({
+        path: 'src/a.spec.ts',
         kind: 'bug',
         title: '`afterAll` deletes the shared tenant (TS-6)',
       }),
@@ -775,11 +786,16 @@ describe('filterReviewNoise', () => {
       }),
     ]).findings;
     assert.deepEqual(
-      [helper, reverted, matcher, bug, mixed].map((f) => f.severity),
-      ['nit', 'P2', 'P2', 'P2', 'P2'],
+      [helper, reverted, matcher, matcherWithHelper, ineffective, bug, mixed].map(
+        (f) => f.severity,
+      ),
+      ['nit', 'P2', 'P2', 'P2', 'P2', 'P2', 'P2'],
     );
     // Verification can promote a hypothesis to a rated finding; the cap applies again.
-    assert.equal(capTestConvention({ ...helper, severity: 'P2', kind: 'test' }).severity, 'nit');
+    assert.equal(
+      capTestConvention({ ...helper, severity: 'P2', kind: 'maintainability' }).severity,
+      'nit',
+    );
     assert.equal(capTestConvention(matcher).severity, 'P2');
   });
 
@@ -831,6 +847,9 @@ describe('shouldPostReviewComment', () => {
     });
     const posted = `<pre lang="text"><code>Unverified concern: \`a &lt; b\` may race\nsrc/example.ts:10</code></pre>`;
     assert.equal(newFindingCount([concern], [concern], [posted]), 0);
+    // Confirmed since, at the same line: a new disposition, so it posts.
+    const confirmed = finding({ title: concern.title });
+    assert.equal(newFindingCount([confirmed], [confirmed], [posted]), 1);
   });
 
   it('always posts the first visible run, clean or not', () => {

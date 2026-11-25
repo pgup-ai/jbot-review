@@ -287,25 +287,28 @@ const TEST_STYLE =
   /\bem\.clear\b|\bafterAll\b|\bcreateTest[A-Z]\w*|\btest (?:data )?helpers?\b|\binline (?:test )?(?:data|fixtures?)\b|\btest (?:case )?(?:title|name)\b/i;
 // TS-6.3 is the coverage risk tier, rated by what a regression would get past.
 const isTestStyleRule = (id: string) => /^TS-6(\.\d+)?$/.test(id) && id !== 'TS-6.3';
-const STILL_PASSES =
-  /\bpass(?:es|ed)?\b[^.]*\b(?:revert|remov|delet)|\b(?:revert|remov|delet)\w*\b[^.]*\bpass(?:es|ed)?\b/i;
+// Matcher shape, or any sign the test may not catch its regression, keeps severity.
+const MATCHER_SHAPE =
+  /\btoBe(?:Defined|Truthy|Falsy)\b|\btoThrow\b|Containing\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bmatcher\b/i;
+const INEFFECTIVE_TEST =
+  /\bpass(?:es|ed|ing)?\b|\bnever (?:exercis|reach|fail|run)|\bcan(?:not|'t) fail\b|\bwrong reason\b|\bnot (?:exercis|cover|reach)/i;
 
 /**
- * A non-bug, non-security finding citing only `TS-6` rules (not the `TS-6.3`
- * coverage tier) about test conventions is `nit`, unless it says the case still
- * passes with the guard reverted or removed. Applied again after verification,
- * which can promote a hypothesis to a rated finding.
+ * A maintainability finding citing only `TS-6` rules (not the `TS-6.3`
+ * coverage tier) about test conventions is `nit`. Never one about matcher shape
+ * or a test that may not catch its regression. Applied again after
+ * verification, which can promote a hypothesis to a rated finding.
  */
 export function capTestConvention(finding: Finding): Finding {
   const text = `${finding.title}\n${finding.body}`;
   const ids = ruleIds(text);
   return finding.severity !== 'nit' &&
-    finding.kind !== 'bug' &&
-    finding.kind !== 'security' &&
+    (finding.kind === undefined || finding.kind === 'maintainability') &&
     ids.size > 0 &&
     [...ids].every(isTestStyleRule) &&
     TEST_STYLE.test(text) &&
-    !STILL_PASSES.test(text)
+    !MATCHER_SHAPE.test(text) &&
+    !INEFFECTIVE_TEST.test(text)
     ? { ...finding, severity: 'nit' }
     : finding;
 }
@@ -830,7 +833,8 @@ export function anchorFindings(
  * Findings that are new to the PR. A body-only finding (outside the diff, on a
  * line the PR did not write, or unverified) lives in the review body, which
  * thread suppression cannot see, so it counts unless a prior jbot review body
- * already lists it.
+ * lists it at the same location in the same section: an unverified concern
+ * confirmed since is new.
  */
 export function newFindingCount(
   findings: Finding[],
@@ -839,13 +843,14 @@ export function newFindingCount(
 ): number {
   return (
     findings.length -
-    bodyOnly.filter((finding) =>
-      priorBodies.some(
-        (body) =>
-          (body.includes(finding.title) || body.includes(escapeHtml(finding.title))) &&
-          body.includes(finding.path),
-      ),
-    ).length
+    bodyOnly.filter((finding) => {
+      const location = finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
+      // The shapes renderUnverifiedSection and renderOrphanedSection print.
+      const listed = isUnresolvedFinding(finding)
+        ? escapeHtml(`${finding.title}\n${location}`)
+        : `${finding.title} — \`${location}\``;
+      return priorBodies.some((body) => body.includes(listed));
+    }).length
   );
 }
 

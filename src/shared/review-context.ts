@@ -903,10 +903,13 @@ export async function discoverBaseGuidelineDocs(
   workspace: string,
   base: string,
   changedFiles: string[],
-): Promise<DiscoveredGuidelines & { snapshotError?: unknown }> {
+): Promise<DiscoveredGuidelines & { snapshotError?: unknown; snapshotSkipped?: string[] }> {
   const root = await mkdtemp(join(tmpdir(), 'jbot-guidelines-'));
+  let skipped: string[];
   try {
-    for (const [path, content] of await readBaseGuidelines(workspace, base)) {
+    const snapshot = await readBaseGuidelines(workspace, base);
+    skipped = snapshot.skipped;
+    for (const [path, content] of snapshot.files) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await writeFile(join(root, path), content);
     }
@@ -915,45 +918,60 @@ export async function discoverBaseGuidelineDocs(
     return { docs: [], referenced: [], budgetExhausted: false, snapshotError };
   }
   try {
-    return await discoverGuidelineDocs(root, changedFiles);
+    const discovered = await discoverGuidelineDocs(root, changedFiles);
+    return skipped.length ? { ...discovered, snapshotSkipped: skipped } : discovered;
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 const MAX_SYMLINK_HOPS = 8;
+const MAX_BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 
 /**
  * Every guideline source at `base`, read from the tree itself: `git archive`
  * would honor `export-ignore` and leave symlinks dangling. A symlink resolves
  * inside the tree, up to MAX_SYMLINK_HOPS; one that cannot resolve throws.
  */
-async function readBaseGuidelines(workspace: string, base: string): Promise<Map<string, Buffer>> {
-  const options = { cwd: workspace, timeout: 30_000, maxBuffer: 256 * 1024 * 1024 };
-  const tree = new Map<string, { mode: string; sha: string }>();
-  for (const entry of (await exec('git', ['ls-tree', '-r', '-z', base], options)).stdout.split(
-    '\0',
-  )) {
-    const match = /^(\d+) \w+ ([0-9a-f]+)\t(.+)$/.exec(entry);
-    if (match) tree.set(match[3], { mode: match[1], sha: match[2] });
+async function readBaseGuidelines(
+  workspace: string,
+  base: string,
+): Promise<{ files: Map<string, Buffer>; skipped: string[] }> {
+  const options = { cwd: workspace, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 };
+  const tree = new Map<string, { mode: string; sha: string; size: number }>();
+  const listing = (await exec('git', ['ls-tree', '-r', '-l', '-z', base], options)).stdout;
+  for (const entry of listing.split('\0')) {
+    const match = /^(\d+) \w+ ([0-9a-f]+) +(\d+|-)\t(.+)$/.exec(entry);
+    if (match) tree.set(match[4], { mode: match[1], sha: match[2], size: Number(match[3]) || 0 });
   }
+  // Bounded batches: one large repo's markdown never shares a single output buffer.
   const readBlobs = async (shas: string[]): Promise<Map<string, Buffer>> => {
-    if (shas.length === 0) return new Map();
-    const pending = exec('git', ['cat-file', '--batch'], { ...options, encoding: 'buffer' });
-    pending.child.stdin?.end(`${shas.join('\n')}\n`);
-    const out = (await pending).stdout;
     const blobs = new Map<string, Buffer>();
-    for (let at = 0; at < out.length;) {
-      const eol = out.indexOf(0x0a, at);
-      const [sha, type, size] = out.subarray(at, eol).toString().split(' ');
-      if (type !== 'blob') throw new Error(`guideline object ${sha} is not a blob`);
-      blobs.set(sha, out.subarray(eol + 1, eol + 1 + Number(size)));
-      at = eol + 1 + Number(size) + 1;
+    const sizes = new Map([...tree.values()].map(({ sha, size }) => [sha, size]));
+    for (let start = 0; start < shas.length;) {
+      let end = start;
+      for (
+        let bytes = 0;
+        end < shas.length && (end === start || bytes < MAX_BLOB_BATCH_BYTES);
+        end++
+      )
+        bytes += sizes.get(shas[end]) ?? 0;
+      const pending = exec('git', ['cat-file', '--batch'], { ...options, encoding: 'buffer' });
+      pending.child.stdin?.end(`${shas.slice(start, end).join('\n')}\n`);
+      const out = (await pending).stdout;
+      for (let at = 0; at < out.length;) {
+        const eol = out.indexOf(0x0a, at);
+        const [sha, type, size] = out.subarray(at, eol).toString().split(' ');
+        if (type !== 'blob') throw new Error(`guideline object ${sha} is not a blob`);
+        blobs.set(sha, out.subarray(eol + 1, eol + 1 + Number(size)));
+        at = eol + 1 + Number(size) + 1;
+      }
+      start = end;
     }
     return blobs;
   };
   // Resolve each symlink to the file it names inside the tree.
-  const targets = new Map<string, { mode: string; sha: string }>();
+  const targets = new Map<string, { mode: string; sha: string; size: number }>();
   let links = [...tree]
     .filter(([path]) => isGuidelineSource(path))
     .map(([path, entry]) => ({ path, at: path, entry }));
@@ -967,18 +985,24 @@ async function readBaseGuidelines(workspace: string, base: string): Promise<Map<
         targets.set(link.path, link.entry);
         continue;
       }
-      const target = posix.normalize(
-        posix.join(posix.dirname(link.at), linkTargets.get(link.entry.sha)!.toString()),
-      );
-      const entry = tree.get(target);
-      if (hop >= MAX_SYMLINK_HOPS || target.startsWith('../') || posix.isAbsolute(target) || !entry)
+      const raw = linkTargets.get(link.entry.sha)!.toString();
+      const target = posix.isAbsolute(raw)
+        ? undefined
+        : posix.normalize(posix.join(posix.dirname(link.at), raw));
+      const entry = target === undefined || target.startsWith('../') ? undefined : tree.get(target);
+      if (hop >= MAX_SYMLINK_HOPS || !entry)
         throw new Error(`guideline symlink ${link.path} does not resolve inside the base tree`);
-      next.push({ path: link.path, at: target, entry });
+      next.push({ path: link.path, at: target!, entry });
     }
     links = next;
   }
-  const blobs = await readBlobs([...new Set([...targets.values()].map(({ sha }) => sha))]);
-  return new Map([...targets].map(([path, { sha }]) => [path, blobs.get(sha)!]));
+  // Discovery reads at most MAX_RULE_DOC_BYTES of a file; a larger one is skipped and reported.
+  const skipped = [...targets]
+    .filter(([, { size }]) => size > MAX_RULE_DOC_BYTES)
+    .map(([path]) => path);
+  const kept = [...targets].filter(([path]) => !skipped.includes(path));
+  const blobs = await readBlobs([...new Set(kept.map(([, { sha }]) => sha))]);
+  return { files: new Map(kept.map(([path, { sha }]) => [path, blobs.get(sha)!])), skipped };
 }
 
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.
