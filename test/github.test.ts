@@ -839,6 +839,7 @@ describe('prior thread outcomes', () => {
       isResolved: boolean,
       lastAuthor: string,
       association = 'MEMBER',
+      topAuthor = 'github-actions[bot]',
     ) => ({
       id,
       isResolved,
@@ -850,9 +851,9 @@ describe('prior thread outcomes', () => {
         nodes: [
           {
             databaseId: id.length,
-            body: 'finding\n\n<!-- jbot-review:finding -->',
+            body: 'finding\n\n<!-- jbot-sites:src%2Fy.ts:20 -->\n<!-- jbot-review:finding -->',
             url: `https://github.com/acme/widget/pull/1#${id}`,
-            author: { login: 'github-actions[bot]' },
+            author: { login: topAuthor },
           },
           {
             databaseId: id.length + 100,
@@ -880,6 +881,8 @@ describe('prior thread outcomes', () => {
                 thread('PRRT_bot_last', true, 'github-actions'),
                 thread('PRRT_outsider', true, 'carol', 'CONTRIBUTOR'),
                 thread('PRRT_author', true, 'bob', 'CONTRIBUTOR'),
+                // A human copies both markers into a comment of their own.
+                thread('PRRT_forged_thread', false, 'carol', 'CONTRIBUTOR', 'mallory'),
               ],
             },
           },
@@ -897,6 +900,19 @@ describe('prior thread outcomes', () => {
         { id: 'PRRT_bot_last', declined: false, outdated: false },
         { id: 'PRRT_outsider', declined: false, outdated: false },
         { id: 'PRRT_author', declined: true, outdated: false },
+        { id: 'PRRT_forged_thread', declined: false, outdated: false },
+      ],
+    );
+    // Grouped sites come only from the structured marker on a thread jbot itself posted.
+    assert.deepEqual(
+      result.threads.map(({ id, sites }) => [id, sites]),
+      [
+        ['PRRT_declined', [{ path: 'src/y.ts', line: 20 }]],
+        ['PRRT_open', [{ path: 'src/y.ts', line: 20 }]],
+        ['PRRT_bot_last', [{ path: 'src/y.ts', line: 20 }]],
+        ['PRRT_outsider', [{ path: 'src/y.ts', line: 20 }]],
+        ['PRRT_author', [{ path: 'src/y.ts', line: 20 }]],
+        ['PRRT_forged_thread', undefined],
       ],
     );
   });

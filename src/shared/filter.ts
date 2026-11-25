@@ -169,6 +169,8 @@ export interface PriorFindingRef {
   declined?: boolean;
   /** The thread's lines changed after it was posted. */
   outdated?: boolean;
+  /** Other sites of a grouped finding the jbot actor posted (`listPriorJbotThreads`). */
+  sites?: Array<{ path: string; line?: number }>;
 }
 
 const SUPPRESS_LINE_TOLERANCE = 3;
@@ -200,13 +202,10 @@ export function suppressPreviouslyReported(
   const open = new Map<string, { thread: PriorFindingRef; text: string }[]>();
   for (const thread of priorThreads) {
     if (thread.isResolved && !thread.declined) continue;
-    // A grouped thread covers every site its body lists (`collapseRepeatedFindings`).
-    const listed = thread.body.match(/^Same issue at: (.+)\.$/m)?.[1] ?? '';
-    const sites = [...listed.matchAll(/`([^`]+?)(?::(\d+))?`/g)].map(([, path, line]) => ({
-      ...thread,
-      path,
-      line: line ? Number(line) : undefined,
-    }));
+    // A grouped thread also covers its other sites in this PR's files, never a security or P0/P1 finding.
+    const sites = (thread.sites ?? [])
+      .filter(({ path }) => addable?.has(path))
+      .map(({ path, line }) => ({ ...thread, path, line, grouped: true }));
     for (const site of [thread, ...sites]) {
       const same = open.get(site.path) ?? [];
       same.push({ thread: site, text: thread.body.toLowerCase() });
@@ -217,8 +216,12 @@ export function suppressPreviouslyReported(
     const candidates = open.get(finding.path);
     if (!candidates) return true;
     const titleTokens = significantTokens(finding.title);
-    return !candidates.some(({ thread, text }) =>
-      isSameIssue(finding, titleTokens, thread, text, addable),
+    const capped =
+      finding.kind === 'security' || SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P1;
+    return !candidates.some(
+      ({ thread, text }) =>
+        !('grouped' in thread && capped) &&
+        isSameIssue(finding, titleTokens, thread, text, addable),
     );
   });
   return { findings: kept, suppressedCount: findings.length - kept.length };

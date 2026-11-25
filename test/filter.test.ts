@@ -562,14 +562,23 @@ describe('suppressPreviouslyReported', () => {
 
     assert.equal(suppressedCount, 1);
     assert.equal(findings.length, 0);
-    // A grouped thread also covers the other sites it lists.
-    const grouped = { ...thread, body: `${thread.body}\n\nSame issue at: \`src/b.ts:20\`.` };
+    // A grouped jbot thread also covers its other sites in this PR's files, never a P1 there.
+    const grouped = { ...thread, sites: [{ path: 'src/b.ts', line: 20 }] };
     const site = finding({
       path: 'src/b.ts',
       line: 20,
       title: 'Refund amount uses pre-tax subtotal',
     });
-    assert.deepEqual(suppressPreviouslyReported([site], [grouped]).findings, []);
+    const prFiles = new Map([['src/b.ts', new Set([20])]]);
+    assert.deepEqual(suppressPreviouslyReported([site], [grouped], prFiles).findings, []);
+    const blocking = { ...site, severity: 'P1' as const };
+    assert.deepEqual(suppressPreviouslyReported([blocking], [grouped], prFiles).findings, [
+      blocking,
+    ]);
+    assert.deepEqual(suppressPreviouslyReported([site], [grouped], new Map()).findings, [site]);
+    // Prose in a thread body is never read as sites.
+    const prose = { ...thread, body: `${thread.body}\n\nSame issue at: \`src/b.ts:20\`.` };
+    assert.deepEqual(suppressPreviouslyReported([site], [prose], prFiles).findings, [site]);
   });
 
   it('keeps a different issue near the same lines', () => {

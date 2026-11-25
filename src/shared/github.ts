@@ -16,6 +16,8 @@ const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
 const REVIEW_MARKER = '<!-- jbot-review:review -->';
 const FINDING_MARKER = '<!-- jbot-review:finding -->';
+/** The other sites of a grouped finding thread, as `<!-- jbot-sites:path:line,... -->`. */
+const SITES_MARKER = 'jbot-sites';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
 const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
 const LINKED_COMMENTS_MARKER = 'jbot-review:linked-comments';
@@ -68,6 +70,8 @@ export interface PriorJbotThread {
   declined?: boolean;
   /** GitHub marks a thread outdated once the lines it was posted on change. */
   outdated?: boolean;
+  /** Other sites of a grouped finding, set only when the jbot actor posted the thread. */
+  sites?: Array<{ path: string; line?: number }>;
   replyToCommentId: number;
   path: string;
   line?: number;
@@ -497,6 +501,11 @@ export async function listPriorJbotThreads(
             (lastReply.author?.login !== undefined &&
               lastReply.author.login === response.repository?.pullRequest?.author?.login)),
         outdated: thread.isOutdated,
+        // A copied marker in someone else's comment must not widen suppression.
+        ...(isViewerActor(topLevel.author?.login, viewerLogin) &&
+        hasInternalMarker(topLevel.body, FINDING_MARKER)
+          ? { sites: parseGroupedSites(topLevel.body) }
+          : {}),
         replyToCommentId: topLevel.databaseId,
         path: thread.path,
         // `line` is null both for file-level comments AND for outdated
@@ -901,7 +910,23 @@ export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): 
  * findings by it, so every posting path must go through here.
  */
 export function formatFindingCommentBody(finding: Finding): string {
-  return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
+  const sites = finding.alsoAt?.length
+    ? `<!-- ${SITES_MARKER}:${finding.alsoAt
+        .map(({ path, line }) => `${encodeURIComponent(path)}:${line}`)
+        .join(',')} -->\n`
+    : '';
+  return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${sites}${FINDING_MARKER}`;
+}
+
+/** Grouped sites, read only from a thread the jbot actor itself posted. */
+function parseGroupedSites(body: string): Array<{ path: string; line?: number }> {
+  const listed = new RegExp(`<!-- ${SITES_MARKER}:([^ ]+) -->`).exec(body)?.[1] ?? '';
+  return listed.split(',').flatMap((site) => {
+    const match = /^(.+):(\d+)$/.exec(site);
+    if (!match) return [];
+    const line = Number(match[2]);
+    return [{ path: decodeURIComponent(match[1]), ...(line > 0 ? { line } : {}) }];
+  });
 }
 
 /**
