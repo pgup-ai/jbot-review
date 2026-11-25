@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
 import {
-  baseGuidelineSnapshot,
+  discoverBaseGuidelineDocs,
   discoverGuidelineDocs,
   formatFinderGuidelines,
   formatGuidelines,
@@ -478,17 +478,14 @@ describe('discoverGuidelineDocs with diff routing', () => {
     // The PR moves the rules away and writes its own.
     git('mv', 'REVIEW.md', 'OLD-REVIEW.md');
     writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are nit.');
-    const snapshot = await baseGuidelineSnapshot(root, base);
-    roots.push(snapshot.root);
-    assert.equal(snapshot.error, undefined);
-    const { docs } = await discoverGuidelineDocs(snapshot.root, ['app.ts']);
+    const { docs, snapshotError } = await discoverBaseGuidelineDocs(root, base, ['app.ts']);
+    assert.equal(snapshotError, undefined);
     assert.match(docs.find((doc) => doc.label === 'REVIEW.md')!.text, /are P2/);
     assert.ok(!docs.some((doc) => /nit/.test(doc.text)));
 
-    const failed = await baseGuidelineSnapshot(root, 'no-such-revision');
-    roots.push(failed.root);
-    assert.ok(failed.error);
-    assert.deepEqual((await discoverGuidelineDocs(failed.root, ['app.ts'])).docs, []);
+    const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
+    assert.ok(failed.snapshotError);
+    assert.deepEqual(failed.docs, []);
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {

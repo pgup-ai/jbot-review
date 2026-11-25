@@ -226,12 +226,22 @@ function isSameIssue(
       ? finding.line === 0 || (addableLines !== undefined && !addableLines.has(finding.line))
       : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
   if (!locationMatches) return false;
+  if (thread.isResolved && !declineCovers(finding, thread)) return false;
 
   // No comparable content: keep the finding rather than silently dropping it.
   if (titleTokens.length === 0) return false;
 
   const matched = titleTokens.filter((token) => threadText.includes(token)).length;
   return matched / titleTokens.length >= SUPPRESS_TITLE_OVERLAP;
+}
+
+/** A decline covers its own unchanged lines, never a security or P0/P1 finding. */
+function declineCovers(finding: Finding, thread: PriorFindingRef): boolean {
+  return (
+    !thread.outdated &&
+    finding.kind !== 'security' &&
+    SEVERITY_RANK[finding.severity] > SEVERITY_RANK.P1
+  );
 }
 
 function significantTokens(text: string): string[] {
@@ -248,9 +258,9 @@ function ruleIds(text: string): Set<string> {
 
 const NEAR_IDENTICAL_OVERLAP = 0.8;
 const DESIGN_NOTE_PATH = /-design-note\.md$|(^|\/)docs\/(.+\/)?plans\/|-plan\.md$/;
-// The finding's own label, not prose about code that skips a check ("token is not verified").
-const SELF_UNVERIFIED =
-  /^\W*unverified\b|[[(*]unverified[\])*]|\bverification (?:was |is )?not completed\b|\bverification did not complete\b/i;
+// A title label ("Unverified: …", "[unverified]"), never body prose about unchecked input.
+const SELF_UNVERIFIED = /^\W*unverified\b|[[(]unverified[\])]/i;
+const CWE_OR_CVE = /\b(?:CWE|CVE)-\d+/;
 // Test-writing style the repo rates nit: helper use and matcher shape.
 const TEST_STYLE =
   /\btoBeDefined\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bsubstring\b[^.]*\btoThrow|\btoThrow\b[^.]*\bsubstring\b|\bem\.clear\b|\bafterAll\b|\bcreateTest[A-Z]\w*|\btest (?:data )?helpers?\b|\binline (?:test )?(?:data|fixtures?)\b/i;
@@ -263,19 +273,17 @@ export type NoiseDropReason = 'design-note' | 'parent-pr' | 'declined';
 
 /**
  * Deterministic over-reach filters, applied before verification:
- * - drops findings on design notes and plans, which record intent rather than
- *   current behavior;
+ * - drops non-security findings on design notes and plans, which record intent
+ *   rather than current behavior;
  * - on a PR stacked on another branch, drops findings on lines outside the
  *   PR's own hunks: that code belongs to the parent PR;
  * - drops a P2-or-lower, non-security finding the PR author or a writer
  *   declined near the same lines, matched by a cited guideline rule id or a
  *   near-identical title, unless the declined thread's lines changed since;
- * - treats a finding that says it is unverified as a hypothesis for the
+ * - treats a finding whose title labels it unverified as a hypothesis for the
  *   verifier, never an inline claim;
- * - rates a test-style finding (helper use, matcher shape) `nit` unless it
- *   shows the case passes with the guarded line reverted;
- * - collapses findings sharing a rule id and title into one thread listing
- *   every site.
+ * - rates a non-bug, non-security test-style finding (helper use, matcher
+ *   shape) `nit` unless it shows the case passes with the guarded line reverted.
  */
 export function filterReviewNoise(
   findings: Finding[],
@@ -287,16 +295,17 @@ export function filterReviewNoise(
   },
 ): { findings: Finding[]; dropped: Array<{ finding: Finding; reason: NoiseDropReason }> } {
   const declined = context.priorThreads
-    .filter((thread) => thread.declined && !thread.outdated)
+    .filter((thread) => thread.declined)
     .map((thread) => ({
       thread,
       ids: ruleIds(thread.body),
+      cwe: CWE_OR_CVE.test(thread.body),
       // The posted comment opens with "<label> — <title>".
       title: thread.body.split('\n', 1)[0].split(' — ').slice(1).join(' — '),
     }));
   const hunkLines = new Map<string, Set<number>>();
   const dropReason = (finding: Finding, ids: Set<string>): NoiseDropReason | undefined => {
-    if (DESIGN_NOTE_PATH.test(finding.path)) return 'design-note';
+    if (DESIGN_NOTE_PATH.test(finding.path) && finding.kind !== 'security') return 'design-note';
     if (context.stacked) {
       const patch = context.patchByPath.get(finding.path);
       if (!patch) {
@@ -310,11 +319,9 @@ export function filterReviewNoise(
         if (!lines.has(finding.line)) return 'parent-pr';
       }
     }
-    // A decline never silences a security or P0/P1 finding.
-    if (finding.kind === 'security' || SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P1)
-      return undefined;
-    const declinedMatch = declined.some(({ thread, ids: threadIds, title }) => {
-      if (thread.path !== finding.path) return false;
+    const cwe = CWE_OR_CVE.test(`${finding.title}\n${finding.body}`);
+    const declinedMatch = declined.some(({ thread, ids: threadIds, cwe: threadCwe, title }) => {
+      if (thread.path !== finding.path || !declineCovers(finding, thread)) return false;
       const near =
         thread.line === undefined
           ? finding.line === 0
@@ -323,7 +330,9 @@ export function filterReviewNoise(
       const titles = titleTokenMatch(title, finding.title);
       return (
         [...ids].some((id) => threadIds.has(id)) ||
-        (titles.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS &&
+        (!cwe &&
+          !threadCwe &&
+          titles.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS &&
           titles.overlap >= NEAR_IDENTICAL_OVERLAP)
       );
     });
@@ -331,7 +340,7 @@ export function filterReviewNoise(
   };
 
   const dropped: Array<{ finding: Finding; reason: NoiseDropReason }> = [];
-  const kept: Array<{ finding: Finding; ids: Set<string> }> = [];
+  const kept: Finding[] = [];
   for (const original of findings) {
     const text = `${original.title}\n${original.body}`;
     const ids = ruleIds(text);
@@ -341,7 +350,7 @@ export function filterReviewNoise(
       continue;
     }
     let finding = original;
-    if (!isUnresolvedFinding(finding) && SELF_UNVERIFIED.test(text))
+    if (!isUnresolvedFinding(finding) && SELF_UNVERIFIED.test(finding.title))
       finding = { ...finding, kind: 'investigate' };
     if (
       finding.severity !== 'nit' &&
@@ -353,11 +362,20 @@ export function filterReviewNoise(
       !REVERT_STILL_PASSES.test(text)
     )
       finding = { ...finding, severity: 'nit' };
-    kept.push({ finding, ids });
+    kept.push(finding);
   }
+  return { findings: kept, dropped };
+}
 
+/**
+ * One thread per pattern: after verification, so each site was checked on its
+ * own, findings sharing a guideline rule id and a near-identical title collapse
+ * into the strongest one, which lists every other site.
+ */
+export function collapseRepeatedFindings(findings: Finding[]): Finding[] {
   const groups: Array<{ ids: Set<string>; members: Finding[] }> = [];
-  for (const { finding, ids } of kept) {
+  for (const finding of findings) {
+    const ids = ruleIds(`${finding.title}\n${finding.body}`);
     const group =
       ids.size > 0
         ? groups.find(
@@ -367,22 +385,29 @@ export function filterReviewNoise(
                 NEAR_IDENTICAL_OVERLAP,
           )
         : undefined;
-    if (group) group.members.push(finding);
-    else groups.push({ ids, members: [finding] });
+    if (!group) {
+      groups.push({ ids, members: [finding] });
+      continue;
+    }
+    group.members.push(finding);
+    for (const id of ids) group.ids.add(id);
   }
-  const collapsed = groups.map(({ members }) => {
+  return groups.map(({ members }) => {
     if (members.length === 1) return members[0];
     const [primary, ...others] = [...members].sort((a, b) => {
       const [severityA, confidenceA] = findingStrength(a);
       const [severityB, confidenceB] = findingStrength(b);
-      return severityA - severityB || confidenceA - confidenceB;
+      return (
+        Number(isUnresolvedFinding(a)) - Number(isUnresolvedFinding(b)) ||
+        severityA - severityB ||
+        confidenceA - confidenceB
+      );
     });
     const sites = others
       .map(({ path, line }) => `\`${line > 0 ? `${path}:${line}` : path}\``)
       .join(', ');
     return { ...primary, body: `${primary.body}\n\nSame issue at: ${sites}.` };
   });
-  return { findings: collapsed, dropped };
 }
 
 // Git's --color-moved counts a block as moved from 20 alphanumeric characters.
@@ -606,7 +631,12 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
 function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {
   return {
     ...finding,
-    ...formatUnverifiedFinding(finding, reason, unavailable),
+    // A failed verifier's reason can carry raw provider errors; the body gets none.
+    ...formatUnverifiedFinding(
+      finding,
+      unavailable ? 'Finding verification did not complete.' : reason,
+      unavailable,
+    ),
     severity: finding.severity === 'nit' ? 'nit' : 'P3',
     kind: 'investigate',
     confidence: 'low',
@@ -767,6 +797,8 @@ export interface AnchoredFindings {
   orphaned: Finding[];
   /** A subset of `fileLevel`: demoted because no anchor resolved, unlike a model-declared line 0. */
   anchorMissed: Finding[];
+  /** A subset of `orphaned`: on a line the PR only moved or shows as context. */
+  carried: Finding[];
 }
 
 /**
@@ -787,12 +819,15 @@ export function anchorFindings(
     fileLevel: [],
     orphaned: [],
     anchorMissed: [],
+    carried: [],
     withheld: [],
   };
   for (const f of findings) {
     if (isUnresolvedFinding(f)) result.withheld.push(f);
-    else if (f.line > 0 && unchanged?.get(f.path)?.has(f.line)) result.orphaned.push(f);
-    else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
+    else if (f.line > 0 && unchanged?.get(f.path)?.has(f.line)) {
+      result.orphaned.push(f);
+      result.carried.push(f);
+    } else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
     else if (hasHeadSha && addable.has(f.path)) {
       f.line = 0;

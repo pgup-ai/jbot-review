@@ -64,7 +64,7 @@ export interface PrFile {
 export interface PriorJbotThread {
   id: string;
   isResolved: boolean;
-  /** The PR author or a writer replied last, with no jbot addressed reply: nothing was fixed. */
+  /** Resolved with the PR author or a writer replying last and no jbot addressed reply: nothing was fixed. */
   declined?: boolean;
   /** GitHub marks a thread outdated once the lines it was posted on change. */
   outdated?: boolean;
@@ -488,11 +488,14 @@ export async function listPriorJbotThreads(
       threads.push({
         id: thread.id,
         isResolved: thread.isResolved,
+        // An open thread with "will fix" last is pending, not declined.
         declined:
+          thread.isResolved &&
           lastReply !== undefined &&
           isHuman(lastReply) &&
           (WRITE_ASSOCIATIONS.has(lastReply.authorAssociation ?? '') ||
-            lastReply.author?.login === response.repository?.pullRequest?.author?.login),
+            (lastReply.author?.login !== undefined &&
+              lastReply.author.login === response.repository?.pullRequest?.author?.login)),
         outdated: thread.isOutdated,
         replyToCommentId: topLevel.databaseId,
         path: thread.path,

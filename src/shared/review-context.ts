@@ -894,17 +894,19 @@ export function isGuidelineSource(path: string): boolean {
 const exec = promisify(execFile);
 
 /**
- * A PR must not rewrite, move or rename away the rules or severity ratings it
- * is reviewed against, so discovery reads every guideline source as of `base`
- * from a snapshot outside the checkout. Fails closed: when the snapshot cannot
- * be built, the root is empty and no repository guidance loads.
+ * Discovers guidelines as of `base` from a snapshot outside the checkout, so a
+ * PR cannot edit, move or rename away the rules or severity ratings it is
+ * reviewed against. Fails closed: when the snapshot cannot be built, no
+ * repository guidance loads and `snapshotError` says why.
  */
-export async function baseGuidelineSnapshot(
+export async function discoverBaseGuidelineDocs(
   workspace: string,
   base: string,
-): Promise<{ root: string; error?: unknown }> {
+  changedFiles: string[],
+): Promise<DiscoveredGuidelines & { snapshotError?: unknown }> {
   const root = await mkdtemp(join(tmpdir(), 'jbot-guidelines-'));
   const archive = `${root}.tar`;
+  let snapshotError: unknown;
   try {
     const git = (...args: string[]) =>
       exec('git', args, { cwd: workspace, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
@@ -915,11 +917,14 @@ export async function baseGuidelineSnapshot(
       await git('archive', '--format=tar', '-o', archive, base, '--', ...sources);
       await exec('tar', ['-xf', archive, '-C', root], { timeout: 30_000 });
     }
-    return { root };
   } catch (error) {
-    await rm(root, { recursive: true, force: true });
-    return { root: await mkdtemp(join(tmpdir(), 'jbot-guidelines-')), error };
+    snapshotError = error;
+  }
+  try {
+    if (snapshotError) return { docs: [], referenced: [], budgetExhausted: false, snapshotError };
+    return await discoverGuidelineDocs(root, changedFiles);
   } finally {
+    await rm(root, { recursive: true, force: true });
     await rm(archive, { force: true });
   }
 }
@@ -1654,7 +1659,8 @@ function guidelineBudgetNote(discovered: DiscoveredGuidelines, omissions: string
 // Replaying 159 rules cited in real reviews: 50 kept 97% of routed ones while lifting unrouted 37% → 83%.
 const ROUTED_DOC_PRIOR = 50;
 const MAX_RANKED_SECTION_BYTES = 6 * 1024;
-const MAX_REQUIRED_DOC_BYTES = 24 * 1024;
+// Per required doc, charged at the clipped size each section renders at.
+const MAX_REQUIRED_DOC_BYTES = 12 * 1024;
 
 /**
  * The guideline-compliance budget (JBOT_GUIDELINE_RANK=legacy restores
@@ -1702,15 +1708,18 @@ export function formatRankedGuidelines(discovered: DiscoveredGuidelines, files: 
   });
   // The repo requires these docs for every review, so they load in reading order,
   // severity rules included, even when no changed path names them.
-  let required = 0;
-  for (const label of new Set([...(discovered.required ?? []), 'REVIEW.md']))
+  const requiredLabels = [...new Set(['REVIEW.md', ...(discovered.required ?? [])])];
+  requiredLabels.forEach((label, position) => {
+    let used = 0;
     for (const unit of units
       .filter((unit) => unit.doc.label === label)
       .sort((a, b) => a.section.order - b.section.order)) {
-      required += Buffer.byteLength(unit.section.text);
-      if (required > MAX_REQUIRED_DOC_BYTES) break;
-      unit.rank = Number.MAX_SAFE_INTEGER - 1;
+      used += Math.min(Buffer.byteLength(unit.section.text), unit.max);
+      if (used > MAX_REQUIRED_DOC_BYTES) break;
+      // Below routed rules, in reading order.
+      unit.rank = Number.MAX_SAFE_INTEGER - 1 - position;
     }
+  });
   units.sort((a, b) => b.rank - a.rank || a.index - b.index || a.section.order - b.section.order);
 
   // Notes are bounded lists plus under 512 bytes of fixed prose, so the cap holds by construction.

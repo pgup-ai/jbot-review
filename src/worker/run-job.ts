@@ -94,6 +94,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
       apiKey: job.apiKey,
       headSha: pr.data.head.sha,
       baseRef: pr.data.base.ref,
+      defaultBranch: pr.data.base.repo.default_branch,
       baseSha: pr.data.base.sha,
       preparePatchRecovery: cloned.prepareDiff,
       options: {

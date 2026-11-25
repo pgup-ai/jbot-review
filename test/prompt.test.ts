@@ -762,6 +762,10 @@ describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
       GUIDELINE_COMPLIANCE_PROMPT,
       /documents rate a convention or test-style finding, use their rating/,
     );
+    assert.match(
+      GUIDELINE_COMPLIANCE_PROMPT,
+      /never\s+rate a bug, security, or data-loss risk below its impact/,
+    );
   });
 
   it('forbids inventing rules that are not written down', () => {

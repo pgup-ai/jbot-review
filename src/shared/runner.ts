@@ -78,6 +78,7 @@ import {
   checkConfirmationEvidence,
   filterFindings,
   filterReviewNoise,
+  collapseRepeatedFindings,
   clampFindingsToFiles,
   anchorFindings,
   dedupeFindings,
@@ -307,7 +308,7 @@ import { createToolTelemetryAccumulator, type ToolTelemetryAccumulator } from '.
 import {
   buildReviewContext,
   buildReviewScopeContext,
-  baseGuidelineSnapshot,
+  discoverBaseGuidelineDocs,
   discoverGuidelineDocs,
   GUIDELINE_CONTROL_FILES,
   applicableGuidelines,
@@ -1460,14 +1461,17 @@ async function runReviewPipeline(params: {
     return;
   }
 
-  const snapshot = baseSha ? await baseGuidelineSnapshot(workspace, baseSha) : undefined;
-  if (snapshot?.error)
+  const discoverGuidelines = (files: string[]) =>
+    baseSha
+      ? discoverBaseGuidelineDocs(workspace, baseSha, files)
+      : discoverGuidelineDocs(workspace, files);
+  const loadedGuidelines = await discoverGuidelines(changedFiles);
+  const guidelineSnapshotError =
+    'snapshotError' in loadedGuidelines ? loadedGuidelines.snapshotError : undefined;
+  if (guidelineSnapshotError)
     log(
-      `Base guideline snapshot failed; reviewing without repository guidance: ${String(snapshot.error)}`,
+      `Base guideline snapshot failed; reviewing without repository guidance: ${String(guidelineSnapshotError)}`,
     );
-  const guidelineSnapshot = snapshot?.root;
-  const guidelineRoot = guidelineSnapshot ?? workspace;
-  const loadedGuidelines = await discoverGuidelineDocs(guidelineRoot, changedFiles);
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
   log(
     `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
@@ -1556,7 +1560,6 @@ async function runReviewPipeline(params: {
         log(
           `Diff unchanged since the last posted review (head ${reviewedHead.slice(0, 7)}); skipping the full review.`,
         );
-        if (guidelineSnapshot) rmSync(guidelineSnapshot, { recursive: true, force: true });
         await finalizePriorResolvedReviews([]);
         finishTelemetry('skipped');
         return;
@@ -1771,11 +1774,10 @@ async function runReviewPipeline(params: {
       current: applicable,
       ruleSources,
       changedFiles,
-      discover: (files) => discoverGuidelineDocs(guidelineRoot, files),
+      discover: discoverGuidelines,
     },
     rulesChangedSince,
   });
-  if (guidelineSnapshot) rmSync(guidelineSnapshot, { recursive: true, force: true });
   const shadowScope = reviewScope.shadow;
   const totalPatchBytes = fullReviewFiles.reduce(
     (sum, file) => sum + Buffer.byteLength(file.patch ?? ''),
@@ -3947,9 +3949,17 @@ async function runReviewPipeline(params: {
     telemetry.recordEvidenceCache(evidence.stats());
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
-    const filteredFindings = filterFindings(verifiedFindings, options);
+    const filteredFindings = filterFindings(collapseRepeatedFindings(verifiedFindings), options);
     const incompleteSessions = reviewCoverageSessions([
       ...(mainCoverageGap ? [mainCoverageGap] : []),
+      ...(guidelineSnapshotError
+        ? [
+            {
+              label: 'repository-guidelines',
+              reason: 'not loaded from the base revision, so no repository rules were applied',
+            },
+          ]
+        : []),
       ...[...auxCoverage]
         .filter(([, row]) => !row.complete)
         .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) })),
@@ -3988,7 +3998,7 @@ async function runReviewPipeline(params: {
       `Review ${coverageNotice ? 'incomplete' : 'complete'}: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const { inline, fileLevel, orphaned, anchorMissed, withheld } = anchorFindings(
+    const { inline, fileLevel, orphaned, anchorMissed, withheld, carried } = anchorFindings(
       filteredFindings,
       addable,
       !!headSha,
@@ -4132,7 +4142,9 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
-    const findingCount = filteredFindings.length;
+    // A finding on moved or context lines lives only in the body, which thread
+    // suppression cannot see; alone it would re-post the same review every run.
+    const findingCount = filteredFindings.length - carried.length;
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,
       findingCount,
@@ -4318,7 +4330,7 @@ async function runReviewPipeline(params: {
 
     if (
       isPrCleanAfterRun(
-        findingCount,
+        filteredFindings.length,
         openThreadCount,
         priorThreadStateKnown,
         incompleteSessions.length === 0,

@@ -6,6 +6,7 @@ import {
   applyFindingVerdicts,
   filterFindings,
   filterReviewNoise,
+  collapseRepeatedFindings,
   isUnresolvedFinding,
   mergeVerdictsByLocation,
   dedupeFindings,
@@ -373,10 +374,23 @@ describe('applyFindingVerdicts', () => {
       assert.equal(f.verificationUnavailable, true);
       assert.match(f.body, /Verification not completed/);
       assert.equal(f.confidence, 'low');
-      assert.match(f.body, /Finding verification did not return a verdict/);
+      assert.match(f.body, /Finding verification did not complete\./);
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
+    const [failed] = applyFindingVerdicts(
+      [finding({ severity: 'P1' })],
+      [0],
+      [
+        {
+          index: 0,
+          verdict: 'uncertain',
+          unavailable: true,
+          reason: 'exited 1: {"user_id":"org_x"}',
+        },
+      ],
+    ).findings;
+    assert.doesNotMatch(failed.body, /org_x/);
 
     // An unchecked P0-P2 claim stays a question in the review body, never an inline thread.
     const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
@@ -684,7 +698,7 @@ describe('filterReviewNoise', () => {
     const thread = {
       path: 'src/example.ts',
       line: 12,
-      body: '**P2 · maintainability** — Wrap the repository write\n\nTS-13 requires it. CWE-89.',
+      body: '**P2 · maintainability** — Wrap the repository write\n\nTS-13 requires it.',
       isResolved: true,
       declined: true,
     };
@@ -692,7 +706,7 @@ describe('filterReviewNoise', () => {
     const byTitle = finding({ title: 'Wrap the repository write' });
     const kept = [
       finding({ title: 'Different issue (INV-1)' }),
-      finding({ title: 'Injection risk (CWE-89)' }),
+      finding({ title: 'Wrap the repository write (CWE-89)' }),
       finding({ line: 40, title: 'Unscoped write (TS-13)' }),
       finding({ severity: 'P1', title: 'Unscoped write (TS-13)' }),
       finding({ kind: 'security', title: 'Wrap the repository write' }),
@@ -708,33 +722,47 @@ describe('filterReviewNoise', () => {
       { ...thread, declined: false },
     ])
       assert.equal(noise([byRule], { priorThreads: [changed] }).findings.length, 1);
+    // The earlier location-and-title suppression honors the same decline limits.
+    const p1 = finding({ severity: 'P1', title: 'Wrap the repository write' });
+    const security = finding({ kind: 'security', title: 'Wrap the repository write' });
+    assert.deepEqual(suppressPreviouslyReported([byTitle, p1, security], [thread]).findings, [
+      p1,
+      security,
+    ]);
+    assert.equal(
+      suppressPreviouslyReported([byTitle], [{ ...thread, outdated: true }]).findings.length,
+      1,
+    );
   });
 
   it('drops findings on design notes, plans, and parent-PR code of a stacked PR', () => {
     const paths = ['docs/x-design-note.md', 'docs/a/plans/p.md', 'ROLLOUT-plan.md'];
     const findings = [
       ...paths.map((path) => finding({ path, title: path })),
+      finding({ path: paths[1], kind: 'security', title: 'committed credential' }),
       finding({ line: 40, title: 'outside own hunks' }),
       finding({ path: 'src/parent.ts', title: 'parent file' }),
       finding({ line: 2, title: 'own line' }),
     ];
     assert.deepEqual(
       noise(findings).findings.map((f) => f.title),
-      ['outside own hunks', 'parent file', 'own line'],
+      ['committed credential', 'outside own hunks', 'parent file', 'own line'],
     );
     assert.deepEqual(
       noise(findings, { stacked: true }).dropped.map(({ reason }) => reason),
-      ['design-note', 'design-note', 'design-note', 'parent-pr', 'parent-pr'],
+      ['design-note', 'design-note', 'design-note', 'parent-pr', 'parent-pr', 'parent-pr'],
     );
   });
 
   it('sends a self-declared unverified finding to verification as a hypothesis', () => {
-    const [self, prose] = noise([
+    const [self, prose, body] = noise([
       finding({ title: 'Unverified: retry may double-post' }),
       finding({ kind: 'security', title: 'Webhook signature is not verified' }),
+      finding({ title: 'Retry double-posts', body: 'Rules out the unverified hypothesis.' }),
     ]).findings;
     assert.equal(isUnresolvedFinding(self), true);
     assert.equal(isUnresolvedFinding(prose), false);
+    assert.equal(isUnresolvedFinding(body), false);
   });
 
   it('rates a TS-6 test-style finding nit unless it shows the case passes with the line reverted', () => {
@@ -751,7 +779,7 @@ describe('filterReviewNoise', () => {
       finding({
         path: 'src/a.spec.ts',
         kind: 'bug',
-        title: '`afterAll` deletes the shared tenant',
+        title: '`afterAll` deletes the shared tenant (TS-6)',
       }),
       finding({
         path: 'src/b.spec.ts',
@@ -765,7 +793,7 @@ describe('filterReviewNoise', () => {
   });
 
   it('collapses one rule and title across sites into one thread listing every site', () => {
-    const findings = noise([
+    const findings = collapseRepeatedFindings([
       finding({
         path: 'src/a.ts',
         line: 3,
@@ -773,11 +801,19 @@ describe('filterReviewNoise', () => {
         title: 'Comment restates the code (§12.1)',
       }),
       finding({ path: 'src/b.ts', line: 8, title: 'Comment restates the code (§12.1)' }),
+      finding({
+        path: 'src/d.ts',
+        line: 2,
+        severity: 'P0',
+        kind: 'investigate',
+        title: 'Comment restates the code (§12.1)',
+      }),
       finding({ path: 'src/c.ts', line: 5, title: 'Comment restates the code' }),
-    ]).findings;
+    ]);
     assert.equal(findings.length, 2);
+    // A verified site leads, ahead of a stronger but unresolved one.
     assert.equal(findings[0].path, 'src/b.ts');
-    assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`\.$/);
+    assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`, `src\/d\.ts:2`\.$/);
   });
 });
 

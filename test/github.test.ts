@@ -893,7 +893,7 @@ describe('prior thread outcomes', () => {
       result.threads.map(({ id, declined, outdated }) => ({ id, declined, outdated })),
       [
         { id: 'PRRT_declined', declined: true, outdated: false },
-        { id: 'PRRT_open', declined: true, outdated: true },
+        { id: 'PRRT_open', declined: false, outdated: true },
         { id: 'PRRT_bot_last', declined: false, outdated: false },
         { id: 'PRRT_outsider', declined: false, outdated: false },
         { id: 'PRRT_author', declined: true, outdated: false },

@@ -141,7 +141,8 @@ Use these severity levels.
 | nit  | Trivial suggestion (naming, comment, formatting)    |
 
 Where the repository guidelines rate a written-convention or test-style finding,
-use their rating; never rate a bug, security, or data-loss finding below its impact.
+use their rating, unless a test still passes with the guarded line reverted;
+never rate a bug, security, or data-loss finding below its impact.
 P0, P1, and P2 are blocking findings. P3 and nit are advisory only; include
 them only when they are clearly useful and low-noise. Prefer the lower
 severity when uncertain about IMPACT — but do not lower severity merely
@@ -1630,8 +1631,8 @@ ${REVIEW_COMMAND_POLICY}
 ## Severity
 
 Where the documents rate a convention or test-style finding, use their rating,
-"nit" included, but never rate a bug, security, or data-loss risk below its
-impact. Otherwise:
+"nit" included, unless a test still passes with the guarded line reverted; never
+rate a bug, security, or data-loss risk below its impact. Otherwise:
 
 - "P1": violation of a rule the documents mark as mandatory or blocking, with
   material impact on this change.
