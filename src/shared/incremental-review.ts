@@ -241,6 +241,8 @@ export function impactedReviewFiles(
 
 // Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
+// Documents, unlike .txt, which tools read as input: requirements.txt, robots.txt.
+const DOCUMENT_FILE = /\.(md|markdown|rst|adoc)$/i;
 // Generated snapshots no code imports: Jest's (its spec's expected output) and MikroORM's schema.
 const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
 const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
@@ -523,9 +525,10 @@ export async function planIncrementalReview(input: {
         return full('added-removed-or-renamed-file');
       changed.push(path);
     }
-    // A fix's own tests don't make a follow-up broad.
+    // A fix's own tests and documents don't make a follow-up broad.
     const broad = () =>
-      changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
+      changed.filter((path) => ![TEST_FILE, JEST_SNAPSHOT, DOCUMENT_FILE].some((p) => p.test(path)))
+        .length > 3;
     // A base merge alone still reaches the PR files importing what it changed, selected below.
     if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
     if (input.files.some((file) => !file.patch)) return full('unsupported-or-large-pr');
@@ -568,29 +571,51 @@ export async function planIncrementalReview(input: {
         .map((path) => path.slice(ref.length + 1));
     // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
     // it names no changed module as a whole word (so a script's built .js path counts), no changed
-    // module's directory (so a core/*.js glob counts), and no other changed file by full path (so
-    // docs/typescript.md is not the typescript package).
+    // module's directory (so a core/*.js glob counts), and no other changed file by full path except
+    // a document, which runs nothing (so a reviewer config naming its prompt file is safe).
+    const loaded = [
+      ...modules,
+      ...changed.flatMap((path) => {
+        const dir = posix.dirname(path);
+        if (JS_SOURCE.test(path)) return dir === '.' ? [] : [dir];
+        return DOCUMENT_FILE.test(path) ? [] : [path];
+      }),
+    ];
     if (
       unsupported.length &&
+      loaded.length &&
+      (
+        await grep(
+          input.head,
+          ['-w', '-F', ...loaded.flatMap((term) => ['-e', term])],
+          ...unsupported.map((path) => `:(literal)${path}`),
+        )
+      ).length
+    )
+      return full('unsupported-or-large-pr');
+    // Only the document exemption lets a batch this size through, and no graph below follows a
+    // link: another PR file naming a changed document by file name needs the full review.
+    const others = input.files
+      .map((file) => file.filename)
+      .filter((path) => !changed.includes(path));
+    if (
+      changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3 &&
+      others.length &&
       (
         await grep(
           input.head,
           [
             '-w',
             '-F',
-            ...[
-              ...modules,
-              ...changed.flatMap((path) => {
-                const dir = posix.dirname(path);
-                return JS_SOURCE.test(path) ? (dir === '.' ? [] : [dir]) : [path];
-              }),
-            ].flatMap((term) => ['-e', term]),
+            ...changed
+              .filter((path) => DOCUMENT_FILE.test(path))
+              .flatMap((path) => ['-e', posix.basename(path)]),
           ],
-          ...unsupported.map((path) => `:(literal)${path}`),
+          ...others.map((path) => `:(literal)${path}`),
         )
       ).length
     )
-      return full('unsupported-or-large-pr');
+      return full('document-dependencies');
     // Code may name the file or list its directory or a parent: path.join parts, even on separate
     // lines, include a quoted 'docs'. Prose naming the file, such as its runbook, runs nothing but
     // joins the review so the two stay in step.

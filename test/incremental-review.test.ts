@@ -876,6 +876,30 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
           ['docs/email/notice.json', 'guides/mail.md'],
         );
     }
+    // Edited prose doesn't make a follow-up broad unless another PR file links to it.
+    const guides = ['guides/a.md', 'guides/b.md', 'guides/c.md', 'guides/d.md'];
+    for (const readme of ['', 'See [setup](guides/a.md#setup).\n']) {
+      git('checkout', '-q', '--detach', head);
+      if (readme) write('README.md', readme);
+      for (const guide of guides) write(guide, 'Draft.\n');
+      const drafted = commit();
+      for (const guide of guides) write(guide, 'Final.\n');
+      const prose = await planIncrementalReview({
+        ...input,
+        priorBodies: [body(drafted, base)],
+        head: commit(),
+        files: [
+          ...files,
+          ...['README.md', ...guides].map((filename) => ({ filename, patch: 'patch' })),
+        ],
+      });
+      assert.equal(prose.reason, readme ? 'document-dependencies' : 'bounded-followup');
+      if (!readme)
+        assert.deepEqual(
+          prose.files.map((file) => file.filename),
+          guides,
+        );
+    }
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
       git('checkout', '-q', '--detach', head);
@@ -1557,7 +1581,7 @@ test("a follow-up that reverts the PR's doc edits plans only its code edits", as
   }
 });
 
-test('untouched config blocks a follow-up only when it names a changed module, its directory or a doc path', async () => {
+test('untouched config blocks a follow-up only when it names a changed module or its directory, not prose', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-config-');
   try {
     git('init', '-q');
@@ -1567,21 +1591,28 @@ test('untouched config blocks a follow-up only when it names a changed module, i
     write('package.json', '{ "devDependencies": { "typescript": "6.0.0" } }\n');
     write('ci.yaml', 'run: for s in core/*.js; do node "$s"; done\n');
     write('docs.yaml', 'check: docs/typescript.md\n');
+    write('requirements.txt', 'requests==2.0\n');
+    write('install.yaml', 'run: pip install -r requirements.txt\n');
     const workflow = '.depot/workflows/pr.yaml';
     write(workflow, 'name: Tests\n');
     const base = commit();
     write('other/label.ts', 'export function label() {\n  return 2;\n}\n');
     const reviewed = commit();
     write('docs/typescript.md', 'Style, revised.\n');
+    write('requirements.txt', 'requests==2.1\n');
     const docEdit = commit();
     write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
     const codeEdit = commit();
     const plan = (head: string, prior: string, config: string) =>
       planIncrementalReview({
         workspace,
-        files: ['core/limit.ts', 'docs/typescript.md', 'other/label.ts', config].map(
-          (filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }),
-        ),
+        files: [
+          'core/limit.ts',
+          'docs/typescript.md',
+          'other/label.ts',
+          'requirements.txt',
+          config,
+        ].map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' })),
         head,
         base,
         policy,
@@ -1589,7 +1620,9 @@ test('untouched config blocks a follow-up only when it names a changed module, i
         rulesChangedSince: async () => false,
       });
     assert.equal((await plan(docEdit, reviewed, 'package.json')).reason, 'bounded-followup');
-    assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'unsupported-or-large-pr');
+    assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'bounded-followup');
+    // A .txt file can be a tool's input.
+    assert.equal((await plan(docEdit, reviewed, 'install.yaml')).reason, 'unsupported-or-large-pr');
     assert.equal((await plan(codeEdit, docEdit, 'ci.yaml')).reason, 'unsupported-or-large-pr');
     write(workflow, 'name: Worker tests\n');
     const workflowEdit = commit();
@@ -1597,7 +1630,7 @@ test('untouched config blocks a follow-up only when it names a changed module, i
     assert.equal(workflowPlan.mode, 'full');
     assert.equal(workflowPlan.reason, 'changed-workflow-config');
     assert.equal(workflowPlan.reasonPath, workflow);
-    assert.equal(workflowPlan.files.length, 4);
+    assert.equal(workflowPlan.files.length, 5);
     const githubWorkflow = '.github/workflows/ci.yml';
     write(githubWorkflow, 'name: CI\n');
     const addition = commit();
