@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 
-import { escapeHtml } from './text.ts';
-import { formatUnverifiedFinding } from './prompt.ts';
 import {
   anchorByEvidenceSnippet,
   evidenceWindow,
@@ -9,6 +7,8 @@ import {
   newSideLines,
   unnumberedEvidence,
 } from './patch.ts';
+import { formatUnverifiedFinding } from './prompt.ts';
+import { escapeHtml } from './text.ts';
 import {
   parseVerificationProof,
   type Finding,
@@ -929,9 +929,12 @@ export function newFindingCount(
           : undefined,
       };
     });
-  // A site is old only when the newest review that covered its file listed it.
+  // A site is old only when the newest review that covered its file, or listed its key (a caller
+  // outside the PR's files that an incremental review reported), listed it.
   const reported = ({ path, key }: { path: string; key: string }) =>
-    reviews.find(({ covered }) => !covered || covered.has(path))?.keys.has(key) ?? false;
+    reviews
+      .find(({ covered, keys }) => !covered || covered.has(path) || keys.has(key))
+      ?.keys.has(key) ?? false;
   return (
     findings.length - bodyOnly.filter((finding) => bodyFindingKeys(finding).every(reported)).length
   );

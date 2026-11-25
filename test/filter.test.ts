@@ -923,6 +923,14 @@ describe('shouldPostReviewComment', () => {
     assert.equal(newFindingCount([contextLine], [contextLine], [earlier, skipped]), 0);
     const dropped = review(`## J-Bot\n${coveredFilesMarker(['src/example.ts'])}`);
     assert.equal(newFindingCount([contextLine], [contextLine], [earlier, skipped, dropped]), 1);
+    // An incremental review that listed an outside-PR caller reported it, though its coverage omits that file.
+    const caller = finding({
+      path: 'src/caller.ts',
+      line: 4,
+      title: 'Caller breaks on new return type',
+    });
+    const incremental = review(`${posted([caller])}\n${coveredFilesMarker(['src/example.ts'])}`);
+    assert.equal(newFindingCount([caller], [caller], [incremental]), 0);
   });
 
   it('always posts the first visible run, clean or not', () => {
