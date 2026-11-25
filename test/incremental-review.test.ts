@@ -815,6 +815,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       'docs/package-lock.json',
       'docs/pnpm-lock.yaml',
       'docs/renovate.json',
+      'docs/typedoc.json',
     ]) {
       git('checkout', '-q', '--detach', head);
       write(config, '{ "strict": false }\n');
@@ -851,6 +852,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ["glob('docs/**/*.json');\n", 'unsupported-or-large-pr'],
       ["fs.readdirSync('docs', { recursive: true });\n", 'unsupported-or-large-pr'],
       ["glob('./docs/**/*.json');\n", 'unsupported-or-large-pr'],
+      ["globSync('docs/*/*.json');\n", 'unsupported-or-large-pr'],
       ["path.join(root, '../docs', 'email');\n", 'unsupported-or-large-pr'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
