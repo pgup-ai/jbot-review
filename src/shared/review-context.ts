@@ -938,8 +938,8 @@ export async function discoverBaseGuidelineDocs(
   }
 }
 
-/** Hard cap on snapshot entries after mirroring directory links; links past it stay absent (and are reported if consulted). */
-const MAX_MIRRORED_TREE = 50_000;
+/** Hard cap on entries that directory-link mirroring adds; links past it stay absent (and are reported if consulted). */
+const MAX_MIRRORED_ENTRIES = 50_000;
 const MAX_SYMLINK_HOPS = 8;
 const MAX_BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 
@@ -1035,7 +1035,7 @@ async function readBaseGuidelines(
       if (!target || home === target || home.startsWith(`${target}/`)) continue;
       for (const [path, entry] of realEntries)
         if (path.startsWith(`${target}/`)) {
-          if (tree.size >= MAX_MIRRORED_TREE) break;
+          if (origin.size >= MAX_MIRRORED_ENTRIES) break;
           const copy = `${link}/${path.slice(target.length + 1)}`;
           if (tree.has(copy)) continue;
           tree.set(copy, entry);
@@ -1047,7 +1047,7 @@ async function readBaseGuidelines(
   const targets = new Map<string, { mode: string; sha: string; size: number }>();
   let links = [...tree]
     .filter(([path]) => isGuidelineSource(path))
-    .map(([path, entry]) => ({ path, at: path, entry }));
+    .map(([path, entry]) => ({ path, at: origin.get(path) ?? path, entry }));
   for (let hop = 0; links.length > 0; hop++) {
     const linkTargets = await readBlobs(
       links.filter(({ entry }) => entry.mode === '120000').map(({ entry }) => entry.sha),
