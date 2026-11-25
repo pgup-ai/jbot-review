@@ -807,6 +807,75 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
+    // A tool loads docs/tsconfig.json, docs/tslint.json or a lockfile by its name, so no grep finds
+    // its readers.
+    for (const config of [
+      'docs/tsconfig.json',
+      'docs/tslint.json',
+      'docs/package-lock.json',
+      'docs/pnpm-lock.yaml',
+      'docs/renovate.json',
+      'docs/typedoc.json',
+      'docs/dprint.json',
+    ]) {
+      git('checkout', '-q', '--detach', head);
+      write(config, '{ "strict": false }\n');
+      const configured = commit();
+      write(config, '{ "strict": true }\n');
+      assert.equal(
+        (
+          await planIncrementalReview({
+            ...input,
+            priorBodies: [body(configured, base)],
+            head: commit(),
+            files: [...files, { filename: config, patch: 'patch' }],
+          })
+        ).reason,
+        'unsupported-or-large-pr',
+        config,
+      );
+    }
+    // Data kept with docs that only prose names goes incremental with that prose, not with prose
+    // naming just its directory; code naming the file or listing its directory may read it.
+    const docsFiles = [
+      ...files,
+      ...['docs/email/notice.json', 'guides/mail.md', 'guides/layout.md'].map((filename) => ({
+        filename,
+        patch: 'patch',
+      })),
+    ];
+    for (const [reader, reason] of [
+      [undefined, 'bounded-followup'],
+      ["export const template = 'docs/email/notice.json';\n", 'unsupported-or-large-pr'],
+      ["fs.readdirSync('docs/email');\n", 'unsupported-or-large-pr'],
+      ["path.join(root, 'docs', 'email');\n", 'unsupported-or-large-pr'],
+      ["path.join(root, 'docs',\n  'email');\n", 'unsupported-or-large-pr'],
+      ["glob('docs/**/*.json');\n", 'unsupported-or-large-pr'],
+      ["fs.readdirSync('docs', { recursive: true });\n", 'unsupported-or-large-pr'],
+      ["glob('./docs/**/*.json');\n", 'unsupported-or-large-pr'],
+      ["globSync('docs/*/*.json');\n", 'unsupported-or-large-pr'],
+      ["path.join(root, '../docs', 'email');\n", 'unsupported-or-large-pr'],
+    ] as const) {
+      git('checkout', '-q', '--detach', head);
+      write('docs/email/notice.json', '{ "color": "#888" }\n');
+      write('guides/mail.md', 'Upload notice.json to the mail provider.\n');
+      write('guides/layout.md', 'Email templates live in docs/email/.\n');
+      if (reader) write('worker/notice.ts', reader);
+      const documented = commit();
+      write('docs/email/notice.json', '{ "color": "#444" }\n');
+      const plan = await planIncrementalReview({
+        ...input,
+        priorBodies: [body(documented, base)],
+        head: commit(),
+        files: docsFiles,
+      });
+      assert.equal(plan.reason, reason, reader);
+      if (!reader)
+        assert.deepEqual(
+          plan.files.map((file) => file.filename),
+          ['docs/email/notice.json', 'guides/mail.md'],
+        );
+    }
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
       git('checkout', '-q', '--detach', head);
