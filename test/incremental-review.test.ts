@@ -1578,21 +1578,28 @@ test('untouched config blocks a follow-up only when it names a changed module or
     write('package.json', '{ "devDependencies": { "typescript": "6.0.0" } }\n');
     write('ci.yaml', 'run: for s in core/*.js; do node "$s"; done\n');
     write('docs.yaml', 'check: docs/typescript.md\n');
+    write('requirements.txt', 'requests==2.0\n');
+    write('install.yaml', 'run: pip install -r requirements.txt\n');
     const workflow = '.depot/workflows/pr.yaml';
     write(workflow, 'name: Tests\n');
     const base = commit();
     write('other/label.ts', 'export function label() {\n  return 2;\n}\n');
     const reviewed = commit();
     write('docs/typescript.md', 'Style, revised.\n');
+    write('requirements.txt', 'requests==2.1\n');
     const docEdit = commit();
     write('core/limit.ts', 'export function limit() {\n  return 0;\n}\n');
     const codeEdit = commit();
     const plan = (head: string, prior: string, config: string) =>
       planIncrementalReview({
         workspace,
-        files: ['core/limit.ts', 'docs/typescript.md', 'other/label.ts', config].map(
-          (filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' }),
-        ),
+        files: [
+          'core/limit.ts',
+          'docs/typescript.md',
+          'other/label.ts',
+          'requirements.txt',
+          config,
+        ].map((filename) => ({ filename, patch: '@@ -1 +1 @@\n-a\n+b' })),
         head,
         base,
         policy,
@@ -1601,6 +1608,8 @@ test('untouched config blocks a follow-up only when it names a changed module or
       });
     assert.equal((await plan(docEdit, reviewed, 'package.json')).reason, 'bounded-followup');
     assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'bounded-followup');
+    // A .txt file can be a tool's input.
+    assert.equal((await plan(docEdit, reviewed, 'install.yaml')).reason, 'unsupported-or-large-pr');
     assert.equal((await plan(codeEdit, docEdit, 'ci.yaml')).reason, 'unsupported-or-large-pr');
     write(workflow, 'name: Worker tests\n');
     const workflowEdit = commit();
@@ -1608,7 +1617,7 @@ test('untouched config blocks a follow-up only when it names a changed module or
     assert.equal(workflowPlan.mode, 'full');
     assert.equal(workflowPlan.reason, 'changed-workflow-config');
     assert.equal(workflowPlan.reasonPath, workflow);
-    assert.equal(workflowPlan.files.length, 4);
+    assert.equal(workflowPlan.files.length, 5);
     const githubWorkflow = '.github/workflows/ci.yml';
     write(githubWorkflow, 'name: CI\n');
     const addition = commit();

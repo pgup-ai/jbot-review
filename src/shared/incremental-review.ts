@@ -241,6 +241,8 @@ export function impactedReviewFiles(
 
 // Prose only: .mdx and .svg can import or be imported, so they stay unsupported.
 const PROSE_FILE = /\.(md|markdown|rst|adoc|txt)$/i;
+// Documents, unlike .txt, which tools read as input: requirements.txt, robots.txt.
+const DOCUMENT_FILE = /\.(md|markdown|rst|adoc)$/i;
 // Generated snapshots no code imports: Jest's (its spec's expected output) and MikroORM's schema.
 const JEST_SNAPSHOT = /^(.*\/)?__snapshots__\/([^/]+)\.snap$/;
 const SNAPSHOT_FILE = /(^|\/)migrations\/\.snapshot-[^/]+\.json$/;
@@ -523,9 +525,9 @@ export async function planIncrementalReview(input: {
         return full('added-removed-or-renamed-file');
       changed.push(path);
     }
-    // A fix's own tests and prose don't make a follow-up broad.
+    // A fix's own tests and documents don't make a follow-up broad.
     const broad = () =>
-      changed.filter((path) => ![TEST_FILE, JEST_SNAPSHOT, PROSE_FILE].some((p) => p.test(path)))
+      changed.filter((path) => ![TEST_FILE, JEST_SNAPSHOT, DOCUMENT_FILE].some((p) => p.test(path)))
         .length > 3;
     // A base merge alone still reaches the PR files importing what it changed, selected below.
     if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
@@ -570,13 +572,13 @@ export async function planIncrementalReview(input: {
     // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
     // it names no changed module as a whole word (so a script's built .js path counts), no changed
     // module's directory (so a core/*.js glob counts), and no other changed file by full path except
-    // prose, which runs nothing (so a reviewer config naming its prompt file is safe).
+    // a document, which runs nothing (so a reviewer config naming its prompt file is safe).
     const loaded = [
       ...modules,
       ...changed.flatMap((path) => {
         const dir = posix.dirname(path);
         if (JS_SOURCE.test(path)) return dir === '.' ? [] : [dir];
-        return PROSE_FILE.test(path) ? [] : [path];
+        return DOCUMENT_FILE.test(path) ? [] : [path];
       }),
     ];
     if (
