@@ -200,9 +200,18 @@ export function suppressPreviouslyReported(
   const open = new Map<string, { thread: PriorFindingRef; text: string }[]>();
   for (const thread of priorThreads) {
     if (thread.isResolved && !thread.declined) continue;
-    const same = open.get(thread.path) ?? [];
-    same.push({ thread, text: thread.body.toLowerCase() });
-    open.set(thread.path, same);
+    // A grouped thread covers every site its body lists (`collapseRepeatedFindings`).
+    const listed = thread.body.match(/^Same issue at: (.+)\.$/m)?.[1] ?? '';
+    const sites = [...listed.matchAll(/`([^`]+?)(?::(\d+))?`/g)].map(([, path, line]) => ({
+      ...thread,
+      path,
+      line: line ? Number(line) : undefined,
+    }));
+    for (const site of [thread, ...sites]) {
+      const same = open.get(site.path) ?? [];
+      same.push({ thread: site, text: thread.body.toLowerCase() });
+      open.set(site.path, same);
+    }
   }
   const kept = findings.filter((finding) => {
     const candidates = open.get(finding.path);
@@ -854,8 +863,13 @@ export const BODY_FINDING_MARKER = 'jbot-site';
 function bodyFindingKeys(finding: Finding): string[] {
   const section = isUnresolvedFinding(finding) ? 'unverified' : 'outside';
   const title = finding.title.toLowerCase().replace(/\s+/g, ' ').trim();
+  // The quoted code too, so a site whose code changed counts as new.
+  const evidence = (finding.evidence ?? '').replace(/\s+/g, ' ').trim();
   return [finding, ...(finding.alsoAt ?? [])].map(({ path, line }) =>
-    createHash('sha1').update(`${path}|${line}|${title}|${section}`).digest('hex').slice(0, 12),
+    createHash('sha1')
+      .update(`${path}|${line}|${title}|${section}|${evidence}`)
+      .digest('hex')
+      .slice(0, 12),
   );
 }
 

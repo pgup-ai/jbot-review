@@ -977,8 +977,28 @@ async function readBaseGuidelines(
     }
     return blobs;
   };
-  // Resolve each symlink to the file it names inside the tree; one that cannot is unloadable.
   const unloadable: string[] = [];
+  // A symlinked directory (`.cursor/rules` -> a tracked rules dir) is listed by
+  // ls-tree only as the link: mirror the guideline files under it. One that
+  // resolves to nothing in the tree is unloadable, reported if discovery uses it.
+  const dirLinks = [...tree].filter(
+    ([path, { mode }]) => mode === '120000' && !isGuidelineSource(path),
+  );
+  const dirTargets = await readBlobs(dirLinks.map(([, { sha }]) => sha));
+  for (const [link, { sha }] of dirLinks) {
+    const raw = dirTargets.get(sha)!.toString();
+    const target = posix.isAbsolute(raw)
+      ? undefined
+      : posix.normalize(posix.join(posix.dirname(link), raw));
+    const prefix = `${target}/`;
+    const under =
+      target === undefined || target.startsWith('../')
+        ? []
+        : [...tree].filter(([path]) => path.startsWith(prefix));
+    if (under.length === 0 && !tree.has(target ?? '')) unloadable.push(link);
+    for (const [path, entry] of under) tree.set(`${link}/${path.slice(prefix.length)}`, entry);
+  }
+  // Resolve each symlink to the file it names inside the tree; one that cannot is unloadable.
   const targets = new Map<string, { mode: string; sha: string; size: number }>();
   let links = [...tree]
     .filter(([path]) => isGuidelineSource(path))

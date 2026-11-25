@@ -4157,10 +4157,14 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
+    // Only the latest review: a finding fixed since and reintroduced is new again.
+    const latestReview = priorJbotReviewGroups.reduce<
+      (typeof priorJbotReviewGroups)[number] | undefined
+    >((latest, group) => (!latest || group.id > latest.id ? group : latest), undefined);
     const findingCount = newFindingCount(
       filteredFindings,
       [...orphaned, ...withheld],
-      priorJbotReviewGroups.map((group) => group.body),
+      latestReview ? [latestReview.body] : [],
     );
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,

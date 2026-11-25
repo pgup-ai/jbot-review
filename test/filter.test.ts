@@ -562,6 +562,14 @@ describe('suppressPreviouslyReported', () => {
 
     assert.equal(suppressedCount, 1);
     assert.equal(findings.length, 0);
+    // A grouped thread also covers the other sites it lists.
+    const grouped = { ...thread, body: `${thread.body}\n\nSame issue at: \`src/b.ts:20\`.` };
+    const site = finding({
+      path: 'src/b.ts',
+      line: 20,
+      title: 'Refund amount uses pre-tax subtotal',
+    });
+    assert.deepEqual(suppressPreviouslyReported([site], [grouped]).findings, []);
   });
 
   it('keeps a different issue near the same lines', () => {
@@ -871,6 +879,10 @@ describe('shouldPostReviewComment', () => {
     // A grouped finding with one new site is new.
     const reported = finding({ path: 'src/a.ts', line: 10, title: 'Unscoped write (TS-13)' });
     const group = { ...reported, alsoAt: [{ path: 'src/b.ts', line: 20 }] };
+    // Changed code at the same site is new too.
+    const quoted = { ...contextLine, evidence: 'releaseLock();' };
+    const requoted = { ...quoted, evidence: 'releaseLock(); retry();' };
+    assert.equal(newFindingCount([requoted], [requoted], [bodyFindingMarker([quoted])]), 1);
     assert.equal(newFindingCount([group], [group], [bodyFindingMarker([reported])]), 1);
   });
 
