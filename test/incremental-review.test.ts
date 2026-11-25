@@ -807,8 +807,9 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // A tool loads docs/tsconfig.json or docs/tslint.json by its name, so no grep finds its readers.
-    for (const config of ['docs/tsconfig.json', 'docs/tslint.json']) {
+    // A tool loads docs/tsconfig.json, docs/tslint.json or a lockfile by its name, so no grep finds
+    // its readers.
+    for (const config of ['docs/tsconfig.json', 'docs/tslint.json', 'docs/package-lock.json']) {
       git('checkout', '-q', '--detach', head);
       write(config, '{ "strict": false }\n');
       const configured = commit();
@@ -843,6 +844,8 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ["path.join(root, 'docs',\n  'email');\n", 'unsupported-or-large-pr'],
       ["glob('docs/**/*.json');\n", 'unsupported-or-large-pr'],
       ["fs.readdirSync('docs', { recursive: true });\n", 'unsupported-or-large-pr'],
+      ["glob('./docs/**/*.json');\n", 'unsupported-or-large-pr'],
+      ["path.join(root, '../docs', 'email');\n", 'unsupported-or-large-pr'],
     ] as const) {
       git('checkout', '-q', '--detach', head);
       write('docs/email/notice.json', '{ "color": "#888" }\n');

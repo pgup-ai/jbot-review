@@ -256,7 +256,7 @@ const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^
 // docs/tslint.json, docs/mkdocs.yml or a dotfile, no tool loads it by name, so code reading it has
 // to name its file or directory.
 const DOCS_DATA =
-  /^docs\/(.*\/)?(?!\.|(package|project|nx|lerna|renovate|tslint|biome|deno|turbo|vercel|mkdocs|docker-compose|compose|pnpm-workspace)\.|[^/]*(config|[-_]rc)\.)[^/]+\.(json[c5]?|ya?ml)$/i;
+  /^docs\/(.*\/)?(?!\.|(package|package-lock|npm-shrinkwrap|pnpm-lock|project|nx|lerna|renovate|tslint|biome|deno|turbo|vercel|mkdocs|docker-compose|compose|pnpm-workspace)\.|[^/]*(config|[-_]rc)\.)[^/]+\.(json[c5]?|ya?ml)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
@@ -591,47 +591,32 @@ export async function planIncrementalReview(input: {
       ).length
     )
       return full('unsupported-or-large-pr');
-    // Code may name the file or list its directory or a parent, as one path or as path.join parts
-    // that can sit on separate lines, so a file quoting every segment counts; prose naming the file,
-    // such as its runbook, runs nothing but joins the review so the two stay in step.
+    // Code may name the file or list its directory or a parent: path.join parts, even on separate
+    // lines, include a quoted 'docs'. Prose naming the file, such as its runbook, runs nothing but
+    // joins the review so the two stay in step.
     const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const { head } = input;
     const mentions = async (args: string[]) =>
-      (await grep(head, ['-E', ...args])).filter((path) => !docsData.includes(path));
-    const docsNamed = docsData.length
-      ? await mentions(docsData.flatMap((path) => ['-e', literal(posix.basename(path))]))
-      : [];
-    const docsReaders = [
-      ...(docsData.length
-        ? await mentions(
-            docsData.flatMap((path) => [
-              '-e',
-              `(^|[^[:alnum:]_.-])${literal(posix.dirname(path))}([^[:alnum:]_.-]|$)`,
-              // A walk or glob of a parent directory, such as 'docs' or 'docs/**/*.json'.
-              ...posix
-                .dirname(path)
-                .split('/')
-                .flatMap((_, i, segments) => [
-                  '-e',
-                  `['"\`]${literal(segments.slice(0, i + 1).join('/'))}/?(\\*\\*[^'"\`]*)?['"\`]`,
-                ]),
-            ]),
-          )
-        : []),
-      ...(
-        await Promise.all(
-          docsData.map((path) =>
-            mentions([
-              '--all-match',
-              ...posix
-                .dirname(path)
-                .split('/')
-                .flatMap((segment) => ['-e', `['"\`]${literal(segment)}['"\`]`]),
-            ]),
-          ),
-        )
-      ).flat(),
-    ];
+      docsData.length
+        ? (await grep(head, ['-E', ...args])).filter((path) => !docsData.includes(path))
+        : [];
+    const docsNamed = await mentions(
+      docsData.flatMap((path) => ['-e', literal(posix.basename(path))]),
+    );
+    const docsReaders = await mentions(
+      docsData.flatMap((path) => [
+        '-e',
+        `(^|[^[:alnum:]_.-])${literal(posix.dirname(path))}([^[:alnum:]_.-]|$)`,
+        // A walk or glob of a parent directory, such as './docs' or 'docs/**/*.json'.
+        ...posix
+          .dirname(path)
+          .split('/')
+          .flatMap((_, i, segments) => [
+            '-e',
+            `['"\`](\\.\\.?/)*${literal(segments.slice(0, i + 1).join('/'))}/?(\\*\\*[^'"\`]*)?['"\`]`,
+          ]),
+      ]),
+    );
     if ([...docsNamed, ...docsReaders].some((path) => !PROSE_FILE.test(path)))
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
