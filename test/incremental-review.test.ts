@@ -809,7 +809,13 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
     );
     // A tool loads docs/tsconfig.json, docs/tslint.json or a lockfile by its name, so no grep finds
     // its readers.
-    for (const config of ['docs/tsconfig.json', 'docs/tslint.json', 'docs/package-lock.json']) {
+    for (const config of [
+      'docs/tsconfig.json',
+      'docs/tslint.json',
+      'docs/package-lock.json',
+      'docs/pnpm-lock.yaml',
+      'docs/renovate.json',
+    ]) {
       git('checkout', '-q', '--detach', head);
       write(config, '{ "strict": false }\n');
       const configured = commit();
