@@ -816,6 +816,7 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       'docs/pnpm-lock.yaml',
       'docs/renovate.json',
       'docs/typedoc.json',
+      'docs/dprint.json',
     ]) {
       git('checkout', '-q', '--detach', head);
       write(config, '{ "strict": false }\n');
