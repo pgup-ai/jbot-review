@@ -876,6 +876,22 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
           ['docs/email/notice.json', 'guides/mail.md'],
         );
     }
+    // Edited prose doesn't make a follow-up broad.
+    const guides = ['guides/a.md', 'guides/b.md', 'guides/c.md', 'guides/d.md'];
+    git('checkout', '-q', '--detach', head);
+    for (const guide of guides) write(guide, 'Draft.\n');
+    const drafted = commit();
+    for (const guide of guides) write(guide, 'Final.\n');
+    const prose = await planIncrementalReview({
+      ...input,
+      priorBodies: [body(drafted, base)],
+      head: commit(),
+      files: [...files, ...guides.map((filename) => ({ filename, patch: 'patch' }))],
+    });
+    assert.deepEqual(
+      [prose.reason, prose.files.map((file) => file.filename)],
+      ['bounded-followup', guides],
+    );
     // A helper under __tests__/ can be named by config, unlike a spec.
     for (const path of ['core/new.ts', 'core/__tests__/setup.ts']) {
       git('checkout', '-q', '--detach', head);
@@ -1552,7 +1568,7 @@ test("a follow-up that reverts the PR's doc edits plans only its code edits", as
   }
 });
 
-test('untouched config blocks a follow-up only when it names a changed module, its directory or a doc path', async () => {
+test('untouched config blocks a follow-up only when it names a changed module or its directory, not prose', async () => {
   const { workspace, git, write, commit } = gitRepo('jbot-incremental-config-');
   try {
     git('init', '-q');
@@ -1584,7 +1600,7 @@ test('untouched config blocks a follow-up only when it names a changed module, i
         rulesChangedSince: async () => false,
       });
     assert.equal((await plan(docEdit, reviewed, 'package.json')).reason, 'bounded-followup');
-    assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'unsupported-or-large-pr');
+    assert.equal((await plan(docEdit, reviewed, 'docs.yaml')).reason, 'bounded-followup');
     assert.equal((await plan(codeEdit, docEdit, 'ci.yaml')).reason, 'unsupported-or-large-pr');
     write(workflow, 'name: Worker tests\n');
     const workflowEdit = commit();

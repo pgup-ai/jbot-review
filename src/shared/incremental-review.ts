@@ -523,9 +523,10 @@ export async function planIncrementalReview(input: {
         return full('added-removed-or-renamed-file');
       changed.push(path);
     }
-    // A fix's own tests don't make a follow-up broad.
+    // A fix's own tests and prose don't make a follow-up broad.
     const broad = () =>
-      changed.filter((path) => !TEST_FILE.test(path) && !JEST_SNAPSHOT.test(path)).length > 3;
+      changed.filter((path) => ![TEST_FILE, JEST_SNAPSHOT, PROSE_FILE].some((p) => p.test(path)))
+        .length > 3;
     // A base merge alone still reaches the PR files importing what it changed, selected below.
     if ((!changed.length && !merged?.size) || broad()) return full('broad-or-empty-followup');
     if (input.files.some((file) => !file.patch)) return full('unsupported-or-large-pr');
@@ -568,24 +569,23 @@ export async function planIncrementalReview(input: {
         .map((path) => path.slice(ref.length + 1));
     // Config such as a CI workflow loads code by path, not by import: an untouched file is safe while
     // it names no changed module as a whole word (so a script's built .js path counts), no changed
-    // module's directory (so a core/*.js glob counts), and no other changed file by full path (so
-    // docs/typescript.md is not the typescript package).
+    // module's directory (so a core/*.js glob counts), and no other changed file by full path except
+    // prose, which runs nothing (so a reviewer config naming its prompt file is safe).
+    const loaded = [
+      ...modules,
+      ...changed.flatMap((path) => {
+        const dir = posix.dirname(path);
+        if (JS_SOURCE.test(path)) return dir === '.' ? [] : [dir];
+        return PROSE_FILE.test(path) ? [] : [path];
+      }),
+    ];
     if (
       unsupported.length &&
+      loaded.length &&
       (
         await grep(
           input.head,
-          [
-            '-w',
-            '-F',
-            ...[
-              ...modules,
-              ...changed.flatMap((path) => {
-                const dir = posix.dirname(path);
-                return JS_SOURCE.test(path) ? (dir === '.' ? [] : [dir]) : [path];
-              }),
-            ].flatMap((term) => ['-e', term]),
-          ],
+          ['-w', '-F', ...loaded.flatMap((term) => ['-e', term])],
           ...unsupported.map((path) => `:(literal)${path}`),
         )
       ).length
