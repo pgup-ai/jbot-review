@@ -252,6 +252,11 @@ const SERVER_ROUTE =
 const CONFIG_FILE = /\.(json[c5]?|ya?ml|toml|ini|lock)$/i;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
+// Data kept with docs, such as an email template a person uploads; unlike docs/tsconfig.json,
+// docs/tslint.json, docs/mkdocs.yml or a dotfile, no tool loads it by name, so code reading it has
+// to name its file or directory.
+const DOCS_DATA =
+  /^docs\/(.*\/)?(?!\.|(package|package-lock|npm-shrinkwrap|pnpm-lock|project|nx|lerna|renovate|tslint|dprint|typedoc|biome|deno|turbo|vercel|mkdocs|docker-compose|compose|pnpm-workspace)\.|[^/]*(config|[-_]rc)\.)[^/]+\.(json[c5]?|ya?ml)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.
@@ -536,7 +541,12 @@ export async function planIncrementalReview(input: {
           // An untouched fixture depends on no code; an edited one may be read by path.
           !(JSON_FIXTURE.test(path) && !changed.includes(path)),
       );
-    if (unsupported.some((path) => changed.includes(path) || !CONFIG_FILE.test(path)))
+    const docsData = changed.filter((path) => DOCS_DATA.test(path));
+    if (
+      unsupported.some(
+        (path) => (changed.includes(path) && !docsData.includes(path)) || !CONFIG_FILE.test(path),
+      )
+    )
       return full('unsupported-or-large-pr');
     // What a specifier loading a changed module contains: its file stem, or its directory for an index.
     const modules = [...changed.filter((path) => JS_SOURCE.test(path)), ...(merged ?? [])]
@@ -580,6 +590,34 @@ export async function planIncrementalReview(input: {
         )
       ).length
     )
+      return full('unsupported-or-large-pr');
+    // Code may name the file or list its directory or a parent: path.join parts, even on separate
+    // lines, include a quoted 'docs'. Prose naming the file, such as its runbook, runs nothing but
+    // joins the review so the two stay in step.
+    const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const { head } = input;
+    const mentions = async (args: string[]) =>
+      docsData.length
+        ? (await grep(head, ['-E', ...args])).filter((path) => !docsData.includes(path))
+        : [];
+    const docsNamed = await mentions(
+      docsData.flatMap((path) => ['-e', literal(posix.basename(path))]),
+    );
+    const docsReaders = await mentions(
+      docsData.flatMap((path) => [
+        '-e',
+        `(^|[^[:alnum:]_.-])${literal(posix.dirname(path))}([^[:alnum:]_.-]|$)`,
+        // A walk or glob of a parent directory, such as './docs' or 'docs/*/*.json'.
+        ...posix
+          .dirname(path)
+          .split('/')
+          .flatMap((_, i, segments) => [
+            '-e',
+            `['"\`](\\.\\.?/)*${literal(segments.slice(0, i + 1).join('/'))}(/?|/[^'"\`]*\\*[^'"\`]*)['"\`]`,
+          ]),
+      ]),
+    );
+    if ([...docsNamed, ...docsReaders].some((path) => !PROSE_FILE.test(path)))
       return full('unsupported-or-large-pr');
     if (changed.some((path) => !paths.has(path))) return full('change-outside-current-pr-diff');
     // A test under a sensitive directory cannot change what that code does, and a monorepo
@@ -902,7 +940,12 @@ export async function planIncrementalReview(input: {
     const files = input.files.filter(
       (file) => impacted.has(file.filename) || tests.includes(file.filename),
     );
-    const selection = new Set([...files.map((file) => file.filename), ...dotenv, ...readers]);
+    const selection = new Set([
+      ...files.map((file) => file.filename),
+      ...dotenv,
+      ...readers,
+      ...docsNamed.filter((path) => paths.has(path)),
+    ]);
     if (selection.size === input.files.length || (!standaloneTestsOnly && selection.size > 8))
       return full('broad-impact');
     // A caller through an unchanged intermediary is outside the graph above.
@@ -930,7 +973,7 @@ export async function planIncrementalReview(input: {
     );
     if (terms.length && leftOutCode) {
       const confirmed = new Set<string>();
-      const literals = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const literals = terms.map(literal);
       const reference = new RegExp(`(?<!\\w)(?:${literals.join('|')})(?!\\w)`);
       for (const ref of [baseline.head, input.head]) {
         const hits = await grep(
