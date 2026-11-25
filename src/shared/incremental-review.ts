@@ -253,10 +253,10 @@ const CONFIG_FILE = /\.(json[c5]?|ya?ml|toml|ini|lock)$/i;
 // Recorded test data, unlike config JSON such as package.json, whose scripts can call changed code.
 const JSON_FIXTURE = /(^|\/)(fixtures|__fixtures__)\/(.*\/)?(?!package\.json$)[^/]+\.json$/i;
 // Data kept with docs, such as an email template a person uploads; unlike docs/tsconfig.json,
-// docs/mkdocs.yml or a dotfile, no tool loads it by convention, so code reading it has to name its
-// file or directory.
+// docs/tslint.json, docs/mkdocs.yml or a dotfile, no tool loads it by name, so code reading it has
+// to name its file or directory.
 const DOCS_DATA =
-  /^docs\/(.*\/)?(?!\.|package\.json$|mkdocs\.ya?ml$|[^/]*(config|rc\.))[^/]+\.(json[c5]?|ya?ml)$/i;
+  /^docs\/(.*\/)?(?!\.|(package|tslint|biome|deno|turbo|vercel|mkdocs|docker-compose|compose|pnpm-workspace)\.|[^/]*(config|[-_]rc)\.)[^/]+\.(json[c5]?|ya?ml)$/i;
 // Code reads a dotenv value by its key, not an import; a follow-up selects the key's readers.
 const DOTENV_FILE = /(^|\/)\.env(\.[\w-]+)*$/;
 // A .env.ts module or .env.example.md doc is code or prose, not a dotenv file.

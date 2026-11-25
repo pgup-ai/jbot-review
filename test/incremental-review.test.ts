@@ -807,22 +807,25 @@ test('incremental planning uses a successful ancestor and falls back on uncertai
       ).reason,
       'unsupported-or-large-pr',
     );
-    // A tool loads docs/tsconfig.json by its name, so no grep finds its readers.
-    git('checkout', '-q', '--detach', head);
-    write('docs/tsconfig.json', '{ "compilerOptions": { "strict": false } }\n');
-    const configured = commit();
-    write('docs/tsconfig.json', '{ "compilerOptions": { "strict": true } }\n');
-    assert.equal(
-      (
-        await planIncrementalReview({
-          ...input,
-          priorBodies: [body(configured, base)],
-          head: commit(),
-          files: [...files, { filename: 'docs/tsconfig.json', patch: 'patch' }],
-        })
-      ).reason,
-      'unsupported-or-large-pr',
-    );
+    // A tool loads docs/tsconfig.json or docs/tslint.json by its name, so no grep finds its readers.
+    for (const config of ['docs/tsconfig.json', 'docs/tslint.json']) {
+      git('checkout', '-q', '--detach', head);
+      write(config, '{ "strict": false }\n');
+      const configured = commit();
+      write(config, '{ "strict": true }\n');
+      assert.equal(
+        (
+          await planIncrementalReview({
+            ...input,
+            priorBodies: [body(configured, base)],
+            head: commit(),
+            files: [...files, { filename: config, patch: 'patch' }],
+          })
+        ).reason,
+        'unsupported-or-large-pr',
+        config,
+      );
+    }
     // Data kept with docs that only prose names goes incremental with that prose, not with prose
     // naming just its directory; code naming the file or listing its directory may read it.
     const docsFiles = [
