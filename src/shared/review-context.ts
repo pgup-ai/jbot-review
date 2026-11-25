@@ -937,6 +937,8 @@ export async function discoverBaseGuidelineDocs(
   }
 }
 
+/** Hard cap on snapshot entries after mirroring directory links; links past it stay absent (and are reported if consulted). */
+const MAX_MIRRORED_TREE = 50_000;
 const MAX_SYMLINK_HOPS = 8;
 const MAX_BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 
@@ -999,14 +1001,19 @@ async function readBaseGuidelines(
       : posix.normalize(posix.join(posix.dirname(origin.get(path) ?? path), raw));
     return target && !target.startsWith('../') ? target : null;
   };
+  // Real (non-mirrored) directories, computed once; mirroring copies only from real entries.
+  const realDirectories = new Set<string>();
+  for (const [path] of tree)
+    for (let dir = posix.dirname(path); dir !== '.'; dir = posix.dirname(dir))
+      realDirectories.add(dir);
+  const realEntries = [...tree];
   const finalDirectory = (path: string): string | undefined => {
     const seen = new Set<string>();
     for (let at = path, hop = 0; hop <= MAX_SYMLINK_HOPS && !seen.has(at); hop++) {
       seen.add(at);
       const next = linkTarget(at);
       if (next === null) return undefined;
-      if (next === undefined)
-        return [...tree.keys()].some((other) => other.startsWith(`${at}/`)) ? at : undefined;
+      if (next === undefined) return realDirectories.has(at) ? at : undefined;
       at = next;
     }
     return undefined;
@@ -1022,9 +1029,12 @@ async function readBaseGuidelines(
     for (const [link] of pending) {
       mirrored.add(link);
       const target = finalDirectory(link);
-      if (!target) continue;
-      for (const [path, entry] of Array.from(tree))
+      const home = origin.get(link) ?? link;
+      // A link to its own directory or an ancestor would copy itself forever.
+      if (!target || home === target || home.startsWith(`${target}/`)) continue;
+      for (const [path, entry] of realEntries)
         if (path.startsWith(`${target}/`)) {
+          if (tree.size >= MAX_MIRRORED_TREE) break;
           const copy = `${link}/${path.slice(target.length + 1)}`;
           if (tree.has(copy)) continue;
           tree.set(copy, entry);

@@ -567,6 +567,14 @@ describe('discoverGuidelineDocs with diff routing', () => {
     const nested = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
     assert.ok(nested.docs.some((doc) => /Take the row lock/.test(doc.text)));
     assert.ok(!nested.snapshotSkipped?.includes('.cursor/rules'));
+    // A link to its own directory or an ancestor (shared/rules/loop -> ..) is not mirrored into itself.
+    symlinkSync('..', join(root, 'shared/rules/loop'));
+    git('add', 'shared');
+    commit('self-referencing link');
+    const looped = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(looped.docs.some((doc) => /Take the row lock/.test(doc.text)));
+    git('rm', '-q', 'shared/rules/loop');
+    commit('drop self-referencing link');
     // A link chain that cannot be mirrored is reported, not treated as present.
     git('rm', '-rq', 'shared');
     commit('dangling rules dir');
