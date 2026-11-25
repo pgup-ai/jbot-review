@@ -167,8 +167,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    resolved location is a regression signal. The one exception is a declined
    thread: resolved without jbot's addressed reply, with the PR author or a
    writer replying last. Nothing was fixed there, so until its lines change it
-   suppresses a P2-or-lower, non-security finding within three lines that cites
-   the same guideline rule ID or repeats its title.
+   suppresses a P2-or-lower, non-security finding within three lines that repeats
+   its title, or cites the same guideline rule ID with an overlapping title.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
     module (like `filter.ts`), unit-tested; `runner.ts` only wires.
 11. **Compromise means shutdown, not mitigation.** Runtime components never

@@ -237,8 +237,8 @@ function isSameIssue(
 
 /**
  * A resolved decline covers its own unchanged lines, never a security or P0/P1
- * finding, and only the same claim: a shared guideline rule id, or a
- * near-identical title (not when a CWE/CVE is cited, which names a bug class).
+ * finding, and only the same claim: a shared guideline rule id with overlapping
+ * titles, or a near-identical title (not when a CWE/CVE is cited).
  */
 function declinedSameIssue(finding: Finding, thread: PriorFindingRef): boolean {
   if (
@@ -248,12 +248,17 @@ function declinedSameIssue(finding: Finding, thread: PriorFindingRef): boolean {
   )
     return false;
   const text = `${finding.title}\n${finding.body}`;
-  const threadIds = ruleIds(thread.body);
-  if ([...ruleIds(text)].some((id) => threadIds.has(id))) return true;
-  if (CWE_OR_CVE.test(text) || CWE_OR_CVE.test(thread.body)) return false;
   // The posted comment opens with "<label> — <title>".
   const threadTitle = thread.body.split('\n', 1)[0].split(' — ').slice(1).join(' — ');
   const titles = titleTokenMatch(threadTitle, finding.title);
+  // A shared rule id alone is not the same claim: one rule covers many mistakes.
+  const threadIds = ruleIds(thread.body);
+  if (
+    [...ruleIds(text)].some((id) => threadIds.has(id)) &&
+    titles.overlap >= SUPPRESS_TITLE_OVERLAP
+  )
+    return true;
+  if (CWE_OR_CVE.test(text) || CWE_OR_CVE.test(thread.body)) return false;
   return (
     titles.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS && titles.overlap >= NEAR_IDENTICAL_OVERLAP
   );

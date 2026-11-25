@@ -705,6 +705,7 @@ describe('filterReviewNoise', () => {
     const byTitle = finding({ title: 'Wrap the repository write' });
     const kept = [
       finding({ title: 'Different issue (INV-1)' }),
+      finding({ title: 'Missing in-transaction recheck (TS-13)' }),
       finding({ title: 'Wrap the repository write (CWE-89)' }),
       finding({ line: 40, title: 'Unscoped write (TS-13)' }),
       finding({ severity: 'P1', title: 'Unscoped write (TS-13)' }),
