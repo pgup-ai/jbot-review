@@ -108,7 +108,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    reminder stays last there too. Schemas use concrete JSON examples, never
    union syntax. Each rule is stated exactly once.
 6. **Markers are contracts.** `FINDING_MARKER` / `REVIEW_MARKER` /
-   `ADDRESSED_MARKER` in `github.ts` are how prior runs recognize their own
+   `ADDRESSED_MARKER` in `github.ts` and `BODY_FINDING_MARKER` in `filter.ts`
+   are how prior runs recognize their own
    output; every posting path must include them (use the shared body
    builder).
 7. **Three-dot diff only** (`base...head`) on GitHub-posting paths: GitHub

@@ -897,7 +897,9 @@ const exec = promisify(execFile);
  * Discovers guidelines as of `base` from a snapshot outside the checkout, so a
  * PR cannot edit, move or rename away the rules or severity ratings it is
  * reviewed against. Fails closed: when the snapshot cannot be built, no
- * repository guidance loads and `snapshotError` says why.
+ * repository guidance loads and `snapshotError` says why. A file discovery would
+ * load but cannot (over MAX_RULE_DOC_BYTES, or a link that does not resolve
+ * inside the tree) is listed in `snapshotSkipped`; unrelated ones are ignored.
  */
 export async function discoverBaseGuidelineDocs(
   workspace: string,
@@ -905,11 +907,15 @@ export async function discoverBaseGuidelineDocs(
   changedFiles: string[],
 ): Promise<DiscoveredGuidelines & { snapshotError?: unknown; snapshotSkipped?: string[] }> {
   const root = await mkdtemp(join(tmpdir(), 'jbot-guidelines-'));
-  let skipped: string[];
+  let unloadable: string[];
   try {
     const snapshot = await readBaseGuidelines(workspace, base);
-    skipped = snapshot.skipped;
-    for (const [path, content] of snapshot.files) {
+    unloadable = snapshot.unloadable;
+    // A placeholder shows whether discovery would load the file; an unrelated one costs nothing.
+    for (const [path, content] of [
+      ...snapshot.files,
+      ...unloadable.map((path) => [path, UNLOADED_PLACEHOLDER] as const),
+    ]) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await writeFile(join(root, path), content);
     }
@@ -919,24 +925,33 @@ export async function discoverBaseGuidelineDocs(
   }
   try {
     const discovered = await discoverGuidelineDocs(root, changedFiles);
-    return skipped.length ? { ...discovered, snapshotSkipped: skipped } : discovered;
+    const missing = unloadable.filter(
+      (path) =>
+        discovered.referenced.includes(path) ||
+        discovered.docs.some((doc) => doc.label.replace(/ \(.*\)$/, '') === path),
+    );
+    const docs = discovered.docs.filter((doc) => !doc.text.includes(UNLOADED_PLACEHOLDER));
+    return missing.length
+      ? { ...discovered, docs, snapshotSkipped: missing }
+      : { ...discovered, docs };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 const MAX_SYMLINK_HOPS = 8;
+const UNLOADED_PLACEHOLDER = '<!-- jbot-review: not loaded from the base -->';
 const MAX_BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 
 /**
  * Every guideline source at `base`, read from the tree itself: `git archive`
  * would honor `export-ignore` and leave symlinks dangling. A symlink resolves
- * inside the tree, up to MAX_SYMLINK_HOPS; one that cannot resolve throws.
+ * inside the tree, up to MAX_SYMLINK_HOPS.
  */
 async function readBaseGuidelines(
   workspace: string,
   base: string,
-): Promise<{ files: Map<string, Buffer>; skipped: string[] }> {
+): Promise<{ files: Map<string, Buffer>; unloadable: string[] }> {
   const options = { cwd: workspace, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 };
   const tree = new Map<string, { mode: string; sha: string; size: number }>();
   const listing = (await exec('git', ['ls-tree', '-r', '-l', '-z', base], options)).stdout;
@@ -970,7 +985,8 @@ async function readBaseGuidelines(
     }
     return blobs;
   };
-  // Resolve each symlink to the file it names inside the tree.
+  // Resolve each symlink to the file it names inside the tree; one that cannot is unloadable.
+  const unloadable: string[] = [];
   const targets = new Map<string, { mode: string; sha: string; size: number }>();
   let links = [...tree]
     .filter(([path]) => isGuidelineSource(path))
@@ -990,19 +1006,18 @@ async function readBaseGuidelines(
         ? undefined
         : posix.normalize(posix.join(posix.dirname(link.at), raw));
       const entry = target === undefined || target.startsWith('../') ? undefined : tree.get(target);
-      if (hop >= MAX_SYMLINK_HOPS || !entry)
-        throw new Error(`guideline symlink ${link.path} does not resolve inside the base tree`);
-      next.push({ path: link.path, at: target!, entry });
+      if (hop >= MAX_SYMLINK_HOPS || !entry) unloadable.push(link.path);
+      else next.push({ path: link.path, at: target!, entry });
     }
     links = next;
   }
-  // Discovery reads at most MAX_RULE_DOC_BYTES of a file; a larger one is skipped and reported.
-  const skipped = [...targets]
-    .filter(([, { size }]) => size > MAX_RULE_DOC_BYTES)
-    .map(([path]) => path);
-  const kept = [...targets].filter(([path]) => !skipped.includes(path));
-  const blobs = await readBlobs([...new Set(kept.map(([, { sha }]) => sha))]);
-  return { files: new Map(kept.map(([path, { sha }]) => [path, blobs.get(sha)!])), skipped };
+  // Discovery reads at most MAX_RULE_DOC_BYTES of a file; a larger one cannot be loaded.
+  const kept: Array<[string, string]> = [];
+  for (const [path, { mode, sha, size }] of targets)
+    if (size > MAX_RULE_DOC_BYTES || mode === '160000') unloadable.push(path);
+    else kept.push([path, sha]);
+  const blobs = await readBlobs([...new Set(kept.map(([, sha]) => sha))]);
+  return { files: new Map(kept.map(([path, sha]) => [path, blobs.get(sha)!])), unloadable };
 }
 
 // Whole docs, so section ranking can pick past a doc's opening; render budgets bound the prompt.

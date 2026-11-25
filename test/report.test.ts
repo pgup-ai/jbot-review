@@ -104,7 +104,8 @@ test('collapsed concerns bound large diagnostics and disclose omissions', () => 
   ).join('\n');
   assert.equal(text.match(/<pre lang="text"><code>/g)?.length, 10);
   assert.equal(text.match(/<\/code><\/pre>/g)?.length, 10);
-  assert.ok(Buffer.byteLength(text) < 25300);
+  assert.equal(text.match(/<!-- jbot-site:/g)?.length, 12);
+  assert.ok(Buffer.byteLength(text) < 25700);
   assert.match(text, /2 more concerns omitted/);
   assert.match(text, /truncated/);
   assert.doesNotMatch(text, /\uFFFD|View code/);

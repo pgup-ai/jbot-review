@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { escapeHtml } from './text.ts';
 import { formatUnverifiedFinding } from './prompt.ts';
 import {
@@ -291,7 +293,7 @@ const isTestStyleRule = (id: string) => /^TS-6(\.\d+)?$/.test(id) && id !== 'TS-
 const MATCHER_SHAPE =
   /\btoBe(?:Defined|Truthy|Falsy)\b|\btoThrow\b|Containing\b|\boptional chaining\b|\bexpect\([^)]*\?\.|\bmatcher\b/i;
 const INEFFECTIVE_TEST =
-  /\bpass(?:es|ed|ing)?\b|\bnever (?:exercis|reach|fail|run)|\bcan(?:not|'t) fail\b|\bwrong reason\b|\bnot (?:exercis|cover|reach)/i;
+  /\bpass(?:es|ed|ing)?\b[^.]*\b(?:revert|remov|delet|without the guard)|\b(?:revert|remov|delet)\w*\b[^.]*\bpass(?:es|ed|ing)?\b|\bwrong reason\b|\bnever (?:exercis|reach|fail|run)|\bcan(?:not|'t) fail\b|\bnot (?:exercis|cover|reach)/i;
 
 /**
  * A maintainability finding citing only `TS-6` rules (not the `TS-6.3`
@@ -347,7 +349,7 @@ export function filterReviewNoise(findings: Finding[]): {
  */
 export function collapseRepeatedFindings(
   findings: Finding[],
-  bodyOnly: (finding: Finding) => boolean = () => false,
+  route: (finding: Finding) => FindingRoute,
 ): Finding[] {
   const groups: Array<{ ids: Set<string>; members: Finding[] }> = [];
   for (const finding of findings) {
@@ -360,7 +362,7 @@ export function collapseRepeatedFindings(
         ? groups.find(
             (candidate) =>
               // Same routing only: a body-only primary would hide an inline site.
-              bodyOnly(candidate.members[0]) === bodyOnly(finding) &&
+              route(candidate.members[0]) === route(finding) &&
               [...ids].some((id) => candidate.ids.has(id)) &&
               titleTokenMatch(candidate.members[0].title, finding.title).overlap >=
                 NEAR_IDENTICAL_OVERLAP,
@@ -383,7 +385,11 @@ export function collapseRepeatedFindings(
     const sites = others
       .map(({ path, line }) => `\`${line > 0 ? `${path}:${line}` : path}\``)
       .join(', ');
-    return { ...primary, body: `${primary.body}\n\nSame issue at: ${sites}.` };
+    return {
+      ...primary,
+      body: `${primary.body}\n\nSame issue at: ${sites}.`,
+      alsoAt: others.map(({ path, line }) => ({ path, line })),
+    };
   });
 }
 
@@ -426,21 +432,34 @@ export function unchangedLines(patchByPath: ReadonlyMap<string, string>): Map<st
   return result;
 }
 
+export type FindingRoute = 'withheld' | 'inline' | 'fileLevel' | 'body';
+
+/** Where the PR's diff can carry a finding: added lines, and lines this PR did not write. */
+export interface DiffLines {
+  addable: ReadonlyMap<string, ReadonlySet<number>>;
+  /** Moved and context lines per file (`unchangedLines`). */
+  unchanged: ReadonlyMap<string, ReadonlySet<number>>;
+  /** The PR targets a branch other than the default, so other lines may be parent code. */
+  stacked: boolean;
+  hasHeadSha: boolean;
+}
+
 /**
- * A finding on a line this PR did not write belongs in the review body: a moved
- * or context line, or, on a PR stacked on another branch, any line of a changed
- * file outside the PR's own additions (parent code, or a caller this PR breaks).
+ * The one routing rule for a final finding. Unresolved ones are withheld. A
+ * finding on a line this PR did not write goes to the review body: a moved or
+ * context line, a file outside the diff, or, on a stacked PR, any line of a
+ * changed file outside the PR's own additions (parent code, or a caller this PR
+ * breaks). An added line is inline; any other line of a changed file falls back
+ * to a file-level thread.
  */
-export function isBodyOnly(
-  finding: Pick<Finding, 'path' | 'line'>,
-  addable: ReadonlyMap<string, ReadonlySet<number>>,
-  unchanged: ReadonlyMap<string, ReadonlySet<number>>,
-  stacked: boolean,
-): boolean {
-  if (finding.line <= 0) return false;
-  if (unchanged.get(finding.path)?.has(finding.line)) return true;
-  const added = addable.get(finding.path);
-  return stacked && added !== undefined && !added.has(finding.line);
+export function routeFinding(finding: Finding, lines: DiffLines): FindingRoute {
+  if (isUnresolvedFinding(finding)) return 'withheld';
+  const added = lines.addable.get(finding.path);
+  if (finding.line > 0 && lines.unchanged.get(finding.path)?.has(finding.line)) return 'body';
+  if (!added || !lines.hasHeadSha) return added?.has(finding.line) ? 'inline' : 'body';
+  if (finding.line === 0) return 'fileLevel';
+  if (added.has(finding.line)) return 'inline';
+  return lines.stacked ? 'body' : 'fileLevel';
 }
 
 /** Stable severity order keeps blocking findings first without excluding advisories. */
@@ -800,12 +819,7 @@ export interface AnchoredFindings {
  * so it remains independently resolvable. Findings outside the changed-file set,
  * or on a line this PR only moved or shows as context, stay in the review body.
  */
-export function anchorFindings(
-  findings: Finding[],
-  addable: ReadonlyMap<string, ReadonlySet<number>>,
-  hasHeadSha: boolean,
-  bodyOnly: (finding: Finding) => boolean = () => false,
-): AnchoredFindings {
+export function anchorFindings(findings: Finding[], lines: DiffLines): AnchoredFindings {
   const result: AnchoredFindings = {
     inline: [],
     fileLevel: [],
@@ -814,27 +828,45 @@ export function anchorFindings(
     withheld: [],
   };
   for (const f of findings) {
-    if (isUnresolvedFinding(f)) result.withheld.push(f);
-    else if (bodyOnly(f)) result.orphaned.push(f);
-    else if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
-    else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
-    else if (hasHeadSha && addable.has(f.path)) {
-      f.line = 0;
+    const route = routeFinding(f, lines);
+    if (route === 'withheld') result.withheld.push(f);
+    else if (route === 'inline') result.inline.push(f);
+    else if (route === 'body') result.orphaned.push(f);
+    else {
+      if (f.line > 0) {
+        f.line = 0;
+        result.anchorMissed.push(f);
+      }
       result.fileLevel.push(f);
-      result.anchorMissed.push(f);
-    } else {
-      result.orphaned.push(f);
     }
   }
   return result;
+}
+
+/** Marks each site of a body-only finding in a posted review body. */
+export const BODY_FINDING_MARKER = 'jbot-site';
+
+function bodyFindingKeys(finding: Finding): string[] {
+  const section = isUnresolvedFinding(finding) ? 'unverified' : 'outside';
+  const title = finding.title.toLowerCase().replace(/\s+/g, ' ').trim();
+  return [finding, ...(finding.alsoAt ?? [])].map(({ path, line }) =>
+    createHash('sha1').update(`${path}|${line}|${title}|${section}`).digest('hex').slice(0, 12),
+  );
+}
+
+/** Hidden per-site keys a review body carries, so a later run can tell what it already reported. */
+export function bodyFindingMarkers(finding: Finding): string {
+  return bodyFindingKeys(finding)
+    .map((key) => `<!-- ${BODY_FINDING_MARKER}:${key} -->`)
+    .join('');
 }
 
 /**
  * Findings that are new to the PR. A body-only finding (outside the diff, on a
  * line the PR did not write, or unverified) lives in the review body, which
  * thread suppression cannot see, so it counts unless a prior jbot review body
- * lists it at the same location in the same section: an unverified concern
- * confirmed since is new.
+ * marks every one of its sites in the same disposition: a newly confirmed
+ * concern, or a new site of a grouped finding, is new.
  */
 export function newFindingCount(
   findings: Finding[],
@@ -843,14 +875,11 @@ export function newFindingCount(
 ): number {
   return (
     findings.length -
-    bodyOnly.filter((finding) => {
-      const location = finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
-      // The shapes renderUnverifiedSection and renderOrphanedSection print.
-      const listed = isUnresolvedFinding(finding)
-        ? escapeHtml(`${finding.title}\n${location}`)
-        : `${finding.title} — \`${location}\``;
-      return priorBodies.some((body) => body.includes(listed));
-    }).length
+    bodyOnly.filter((finding) =>
+      bodyFindingKeys(finding).every((key) =>
+        priorBodies.some((body) => body.includes(`${BODY_FINDING_MARKER}:${key}`)),
+      ),
+    ).length
   );
 }
 

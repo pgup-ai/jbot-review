@@ -176,10 +176,13 @@ every site. A finding on a context line, or in an added block of at least 20
 alphanumeric characters whose every line the PR removed elsewhere (a move), is
 listed in the review body instead of an inline thread. So is, on a PR into a
 branch other than the default, a finding on a changed file's line outside the
-PR's own additions: parent-PR code, or a caller this PR breaks. A re-run posts
-only for findings no prior review reports, so a body-only or unverified finding
-a prior review body already lists does not post again. Several inputs tune the
-recall/precision/cost balance:
+PR's own additions: parent-PR code, or a caller this PR breaks. The review body
+marks each site of a body-only or unverified finding with a hidden `jbot-site`
+key (path, line, title and section). A re-run posts only when some site has no
+key in a prior review body: the same finding does not post again, while a new
+site of a grouped finding, or an unverified concern since confirmed, does.
+Bodies posted before these keys existed count as unreported, so they post once
+more. Several inputs tune the recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run with findings no prior review reports posts. A clean

@@ -99,6 +99,8 @@ export interface Finding {
   /** Set by verification, never accepted from model output. */
   verificationUncertain?: boolean;
   verificationUnavailable?: boolean;
+  /** Other sites of the same issue, collapsed into this finding. */
+  alsoAt?: Array<{ path: string; line: number }>;
 }
 
 export interface AddressedPriorComment {

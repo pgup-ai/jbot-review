@@ -94,7 +94,7 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
   unchangedLines,
-  isBodyOnly,
+  routeFinding,
   capTestConvention,
   newFindingCount,
 } from './filter.ts';
@@ -1478,9 +1478,7 @@ async function runReviewPipeline(params: {
   const skippedGuidelines: string[] =
     ('snapshotSkipped' in loadedGuidelines && (loadedGuidelines.snapshotSkipped as string[])) || [];
   if (skippedGuidelines.length)
-    log(
-      `Guideline files over the size cap at the base, not loaded: ${skippedGuidelines.join(', ')}`,
-    );
+    log(`Guideline files not loadable at the base: ${skippedGuidelines.join(', ')}`);
   const guidelinesIncomplete = Boolean(guidelineSnapshotError) || skippedGuidelines.length > 0;
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
   log(
@@ -3563,9 +3561,12 @@ async function runReviewPipeline(params: {
             ),
     );
 
-    const stacked = Boolean(baseRef && defaultBranch && baseRef !== defaultBranch);
-    const unchanged = unchangedLines(patchByPath);
-    const bodyOnly = (finding: Finding) => isBodyOnly(finding, addable, unchanged, stacked);
+    const diffLines = {
+      addable,
+      unchanged: unchangedLines(patchByPath),
+      stacked: Boolean(baseRef && defaultBranch && baseRef !== defaultBranch),
+      hasHeadSha: !!headSha,
+    };
     const overlapTargets = (lists: Finding[][]) => {
       // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
       // these are the very objects the final pipeline re-anchors and counts —
@@ -3959,7 +3960,9 @@ async function runReviewPipeline(params: {
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(
-      collapseRepeatedFindings(verifiedFindings.map(capTestConvention), bodyOnly),
+      collapseRepeatedFindings(verifiedFindings.map(capTestConvention), (finding) =>
+        routeFinding(finding, diffLines),
+      ),
       options,
     );
     const incompleteSessions = reviewCoverageSessions([
@@ -3970,7 +3973,7 @@ async function runReviewPipeline(params: {
               label: 'repository-guidelines',
               reason: guidelineSnapshotError
                 ? 'not loaded from the base revision, so no repository rules were applied'
-                : `${skippedGuidelines.length} file(s) over the size cap were not loaded`,
+                : `${skippedGuidelines.length} file(s) could not be loaded from the base revision`,
             },
           ]
         : []),
@@ -4014,9 +4017,7 @@ async function runReviewPipeline(params: {
 
     const { inline, fileLevel, orphaned, anchorMissed, withheld } = anchorFindings(
       filteredFindings,
-      addable,
-      !!headSha,
-      bodyOnly,
+      diffLines,
     );
     if (withheld.length > 0) log(`Unpublished review candidates: ${JSON.stringify(withheld)}`);
     let diagnosticsUrl: string | undefined;

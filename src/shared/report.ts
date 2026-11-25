@@ -1,6 +1,6 @@
 import { escapeHtml, formatFileList } from './text.ts';
 import type { Finding, Severity } from './types.ts';
-import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
+import { SEVERITY_RANK, bodyFindingMarkers, isUnresolvedFinding } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
 import { truncateUtf8WithNotice } from './prompt.ts';
 
@@ -25,9 +25,12 @@ export const ADVISORY_FINDINGS_HEADING = '### Unverified concerns';
 export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];
   const lines = [ORPHANED_FINDINGS_HEADING, ''];
-  for (const finding of orphaned) lines.push(findingLine(finding), `  ${finding.body}`);
+  for (const finding of orphaned)
+    lines.push(`${findingLine(finding)}${bodyFindingMarkers(finding)}`, `  ${finding.body}`);
   return lines;
 }
+
+const MAX_MARKED_CONCERNS = 100;
 
 export function renderUnverifiedSection(
   findings: Finding[],
@@ -68,6 +71,8 @@ export function renderUnverifiedSection(
     }
   }
   if (findings.length > 10) lines.push(`${findings.length - 10} more concerns omitted.`, '');
+  // Shown or omitted, so a later run does not re-post it; bounded like the rest of the section.
+  lines.push(findings.slice(0, MAX_MARKED_CONCERNS).map(bodyFindingMarkers).join(''), '');
   if (diagnosticsUrl)
     lines.push(`[Full diagnostics](${diagnosticsUrl}) (\`unverified-findings.json\`).`, '');
   else

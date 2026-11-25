@@ -20,12 +20,17 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
   unchangedLines,
-  isBodyOnly,
+  routeFinding,
   capTestConvention,
   newFindingCount,
+  bodyFindingMarkers,
 } from '../src/shared/filter.ts';
 import type { PriorFindingRef } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
+
+function diff(addable: Map<string, Set<number>>, hasHeadSha = true) {
+  return { addable, unchanged: new Map(), stacked: false, hasHeadSha };
+}
 
 function finding(overrides: Partial<Finding>): Finding {
   return {
@@ -348,8 +353,7 @@ describe('applyFindingVerdicts', () => {
         assert.equal(isUnresolvedFinding(result.findings[0]), !promoted);
         const routed = anchorFindings(
           result.findings,
-          new Map([[candidate.path, new Set([candidate.line])]]),
-          true,
+          diff(new Map([[candidate.path, new Set([candidate.line])]])),
         );
         assert.equal(routed.inline.length, promoted ? 1 : 0);
         if (promoted) {
@@ -401,7 +405,7 @@ describe('applyFindingVerdicts', () => {
       minSeverity: 'nit',
       maxFindings: 0,
     });
-    const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
+    const routed = anchorFindings(unchecked, diff(new Map([['src/example.ts', new Set([10])]])));
     assert.equal(routed.inline.length, 0);
     assert.equal(routed.withheld.length, findings.length);
   });
@@ -752,6 +756,7 @@ describe('filterReviewNoise', () => {
       finding({
         path: 'src/a.spec.ts',
         title: 'Use `createTestOrder` for inline test data (TS-6)',
+        body: 'The order is passed as an argument to each case.',
       }),
       finding({
         path: 'src/a.spec.ts',
@@ -771,7 +776,7 @@ describe('filterReviewNoise', () => {
       // A helper that hides the case under test is a coverage gap, not style.
       finding({
         path: 'src/a.spec.ts',
-        kind: 'test',
+        kind: 'maintainability',
         title: '`createTestUser` builds an admin (TS-6.6)',
         body: 'The authorization test never exercises the restricted role.',
       }),
@@ -800,59 +805,66 @@ describe('filterReviewNoise', () => {
   });
 
   it('collapses one rule and title across sites into one thread listing every site', () => {
-    const findings = collapseRepeatedFindings([
-      finding({
-        path: 'src/a.ts',
-        line: 3,
-        severity: 'P3',
-        title: 'Comment restates the code (§12.1)',
-      }),
-      finding({ path: 'src/b.ts', line: 8, title: 'Comment restates the code (§12.1)' }),
-      finding({
-        path: 'src/d.ts',
-        line: 2,
-        severity: 'P0',
-        kind: 'investigate',
-        verificationUncertain: true,
-        title: 'Comment restates the code (§12.1)',
-      }),
-      finding({ path: 'src/c.ts', line: 5, title: 'Comment restates the code' }),
-    ]);
+    const findings = collapseRepeatedFindings(
+      [
+        finding({
+          path: 'src/a.ts',
+          line: 3,
+          severity: 'P3',
+          title: 'Comment restates the code (§12.1)',
+        }),
+        finding({ path: 'src/b.ts', line: 8, title: 'Comment restates the code (§12.1)' }),
+        finding({
+          path: 'src/d.ts',
+          line: 2,
+          severity: 'P0',
+          kind: 'investigate',
+          verificationUncertain: true,
+          title: 'Comment restates the code (§12.1)',
+        }),
+        finding({ path: 'src/c.ts', line: 5, title: 'Comment restates the code' }),
+      ],
+      () => 'inline',
+    );
     // The unresolved site keeps its own entry instead of riding on a verified one.
     assert.deepEqual(
       findings.map((f) => f.path),
       ['src/b.ts', 'src/d.ts', 'src/c.ts'],
     );
     assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`\.$/);
+    assert.deepEqual(findings[0].alsoAt, [{ path: 'src/a.ts', line: 3 }]);
   });
 });
 
 describe('shouldPostReviewComment', () => {
   it('posts a re-run with a new body-only finding, not one a prior body already lists', () => {
     const contextLine = finding({ severity: 'P1', line: 1, title: 'Lock is released early' });
-    const prior = '- **P1** Older issue — `src/example.ts:9`';
+    const older = bodyFindingMarkers(finding({ line: 9, title: 'Older issue' }));
     assert.equal(
-      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [prior])),
+      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [older])),
       true,
     );
-    // Title and location must sit in the same entry, not anywhere in the body.
-    const split = `- **P1** Lock is released early — \`src/other.ts:1\`\n- **P2** Other — \`src/example.ts:1\``;
-    assert.equal(newFindingCount([contextLine], [contextLine], [split]), 1);
-    const listed = `${prior}\n- **P1** Lock is released early — \`src/example.ts:1\``;
+    const listed = `${older}${bodyFindingMarkers(contextLine)}`;
     assert.equal(
       shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [listed])),
       false,
     );
-    // The same unverified concern re-detected on the same head is not new either.
-    const concern = finding({
-      title: 'Unverified concern: `a < b` may race',
-      verificationUncertain: true,
-    });
-    const posted = `<pre lang="text"><code>Unverified concern: \`a &lt; b\` may race\nsrc/example.ts:10</code></pre>`;
+    // The same title on another file, and another entry on this path, are not this finding.
+    const split = [
+      bodyFindingMarkers({ ...contextLine, path: 'src/other.ts' }),
+      bodyFindingMarkers({ ...contextLine, title: 'Other' }),
+    ].join('');
+    assert.equal(newFindingCount([contextLine], [contextLine], [split]), 1);
+    // An unverified concern re-detected is old; confirmed since, it is new.
+    const concern = finding({ title: 'Retry may race', verificationUncertain: true });
+    const posted = bodyFindingMarkers(concern);
     assert.equal(newFindingCount([concern], [concern], [posted]), 0);
-    // Confirmed since, at the same line: a new disposition, so it posts.
     const confirmed = finding({ title: concern.title });
     assert.equal(newFindingCount([confirmed], [confirmed], [posted]), 1);
+    // A grouped finding with one new site is new.
+    const reported = finding({ path: 'src/a.ts', line: 10, title: 'Unscoped write (TS-13)' });
+    const group = { ...reported, alsoAt: [{ path: 'src/b.ts', line: 20 }] };
+    assert.equal(newFindingCount([group], [group], [bodyFindingMarkers(reported)]), 1);
   });
 
   it('always posts the first visible run, clean or not', () => {
@@ -1055,13 +1067,11 @@ describe('anchorFindings', () => {
     const sites = [1, 2, 3, 4, 40].map((line) =>
       finding({ path: 'src/new.ts', line, title: `L${line}` }),
     );
+    const lines = (stacked: boolean) => ({ addable, unchanged, stacked, hasHeadSha: true });
     for (const stacked of [false, true]) {
-      const bodyOnly = (f: Finding) => isBodyOnly(f, addable, unchanged, stacked);
       const routed = anchorFindings(
         sites.map((f) => ({ ...f })),
-        addable,
-        true,
-        bodyOnly,
+        lines(stacked),
       );
       assert.deepEqual(
         routed.orphaned.map((f) => f.line),
@@ -1073,21 +1083,24 @@ describe('anchorFindings', () => {
       );
       assert.equal(routed.anchorMissed.length, stacked ? 0 : 1);
     }
-    // A confirmed added-line site is not hidden behind a context-line site of the same pattern.
-    const bodyOnly = (f: Finding) => isBodyOnly(f, addable, unchanged, false);
+    // Grouping follows the same routes: a context-line or outside-file site never hides an inline one.
     const collapsed = collapseRepeatedFindings(
-      [1, 3].map((line) =>
+      [
+        { path: 'src/new.ts', line: 1 },
+        { path: 'src/new.ts', line: 3 },
+        { path: 'src/elsewhere.ts', line: 5 },
+      ].map(({ path, line }) =>
         finding({
-          path: 'src/new.ts',
+          path,
           line,
-          severity: line === 1 ? 'P1' : 'P2',
+          severity: line === 3 ? 'P2' : 'P1',
           title: 'Unscoped write (TS-13)',
         }),
       ),
-      bodyOnly,
+      (f) => routeFinding(f, lines(false)),
     );
     assert.deepEqual(
-      anchorFindings(collapsed, addable, true, bodyOnly).inline.map((f) => f.line),
+      anchorFindings(collapsed, lines(false)).inline.map((f) => f.line),
       [3],
     );
   });
@@ -1109,8 +1122,7 @@ describe('anchorFindings', () => {
         finding({ path: 'outside.ts', line: 99 }),
         ...unresolved,
       ],
-      addable,
-      true,
+      diff(addable),
     );
     assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
     assert.equal(fallback.line, 0);
@@ -1125,8 +1137,7 @@ describe('anchorFindings', () => {
         ],
         { minSeverity: 'P1', maxFindings: 1 },
       ),
-      addable,
-      true,
+      diff(addable),
     );
     assert.equal(bounded.inline.length, 1);
     assert.equal(bounded.inline[0].severity, 'P1');
@@ -1146,12 +1157,12 @@ describe('anchorFindings', () => {
 
   it('keeps findings outside the changed-file set in the review body', () => {
     const f = finding({ path: 'outside.ts', line: 99 });
-    assert.equal(anchorFindings([f], addable, true).orphaned[0], f);
+    assert.equal(anchorFindings([f], diff(addable)).orphaned[0], f);
   });
 
   it('does not create a file-level route without a review head', () => {
     const f = finding({ path: 'a.ts', line: 99 });
-    const out = anchorFindings([f], addable, false);
+    const out = anchorFindings([f], diff(addable, false));
     assert.equal(out.orphaned[0], f);
     assert.equal(f.line, 99);
   });

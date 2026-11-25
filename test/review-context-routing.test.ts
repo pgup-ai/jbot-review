@@ -465,7 +465,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.doesNotMatch(out, /decimal types/);
   });
 
-  it('reads guideline sources at the base, through renames, and fails closed', async () => {
+  it('reads guideline sources at the base, through renames, and reports only needed unloadable files', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-base-rules-'));
     roots.push(root);
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root }).toString().trim();
@@ -494,7 +494,24 @@ describe('discoverGuidelineDocs with diff routing', () => {
     git('add', 'CONTRIBUTING.md', 'REVIEW.md');
     git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'absolute link');
     const absolute = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
-    assert.match(String(absolute.snapshotError), /does not resolve/);
+    assert.deepEqual(absolute.snapshotSkipped, ['CONTRIBUTING.md']);
+
+    // Unloadable files discovery never reaches leave the guidance complete.
+    const commit = (message: string) =>
+      git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', message);
+    git('rm', '-q', 'CONTRIBUTING.md');
+    writeFileSync(join(root, 'docs/archive.md'), 'x'.repeat(513 * 1024));
+    symlinkSync('gone.md', join(root, 'docs/old.md'));
+    git('add', 'docs');
+    commit('unrelated');
+    const unrelated = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.equal(unrelated.snapshotSkipped, undefined);
+    writeFileSync(join(root, 'REVIEW.md'), 'x'.repeat(513 * 1024));
+    git('add', 'REVIEW.md');
+    commit('oversized review');
+    const oversized = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.deepEqual(oversized.snapshotSkipped, ['REVIEW.md']);
+    assert.ok(!oversized.docs.some((doc) => doc.label === 'REVIEW.md'));
 
     const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
     assert.ok(failed.snapshotError);
