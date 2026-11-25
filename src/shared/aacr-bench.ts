@@ -1,6 +1,6 @@
 import type { JudgeComment } from './benchmark-judge.ts';
 import { benchmarkRandom } from './benchmark-score.ts';
-import { isWithheldFinding } from './filter.ts';
+import { isUnresolvedFinding } from './filter.ts';
 import type { Finding } from './types.ts';
 
 export interface AacrInstance {
@@ -88,7 +88,7 @@ export function sampleAacrInstances(
 /** Only what jbot would post: withheld candidates never reach the PR. */
 export function toJudgeComments(findings: Finding[]): JudgeComment[] {
   return findings
-    .filter((finding) => !isWithheldFinding(finding))
+    .filter((finding) => !isUnresolvedFinding(finding))
     .map(({ path, line, title, body }) => ({
       path,
       side: 'right' as const,

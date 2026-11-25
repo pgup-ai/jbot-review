@@ -756,8 +756,16 @@ describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
     assert.match(GUIDELINE_COMPLIANCE_PROMPT, /violates `TECHNICAL_STANDARDS\.md`/);
   });
 
-  it('forbids P0 and nit severities for compliance findings', () => {
-    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /Do not use "P0" or "nit"/);
+  it("forbids P0 and defers to the guidelines' own severity ratings", () => {
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /Do not use "P0"\./);
+    assert.match(
+      GUIDELINE_COMPLIANCE_PROMPT,
+      /documents rate a convention or test-style finding, use their rating/,
+    );
+    assert.match(
+      GUIDELINE_COMPLIANCE_PROMPT,
+      /never\s+rate a bug, security, or data-loss risk below its impact/,
+    );
   });
 
   it('forbids inventing rules that are not written down', () => {

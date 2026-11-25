@@ -167,7 +167,7 @@ inputs:
     required: false
     default: '1'
   verify-findings:
-    description: 'Verify all findings, including P3 and nits, in severity-ordered batches before posting. Refuted findings are dropped; uncertain candidates remain in diagnostics and are withheld from PR comments, except up to five concrete P0–P2 findings a run whose verification returned no verdict, which post labeled Unverified within max-findings and min-severity.'
+    description: "Verify all findings, including P3 and nits, in severity-ordered batches before posting. Refuted findings are dropped; uncertain candidates remain in diagnostics and are listed under the review body's Unverified concerns, never as PR comments."
     required: false
     default: 'true'
   time-budget-minutes:
@@ -216,7 +216,7 @@ inputs:
 
 outputs:
   findings-posted:
-    description: 'Findings posted (or logged in dry-run) by this run, including a partial review whose main pass was cut off. Unset when the review fails before posting.'
+    description: 'Findings this run newly reports (or logs in dry-run): findings and unverified concerns no prior J-Bot review listed, including from a partial review whose main pass was cut off. A finding a prior review already listed is not counted even when the rebuilt review body lists it again. Unset when the review fails before posting.'
   terminal-state:
     description: 'completed when the review pipeline finished; partial when it posted a main review that was cut off or timed out (the step then fails unless fail-on-error is false); failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
 

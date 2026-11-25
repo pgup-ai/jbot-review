@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 
-import { isWithheldFinding } from '../shared/filter.ts';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
@@ -157,6 +156,7 @@ async function main(): Promise<void> {
       baseURL,
       headSha: pull.head.sha,
       baseRef: pull.base.ref,
+      defaultBranch: pull.base.repo.default_branch,
       baseSha: pull.base.sha,
       threadResolutionOctokit,
       options: {
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
         modelOptions,
         modelOptionsExplicit: core.getInput('model-options').trim() !== '',
         onReviewResult: (result) => {
-          findingCount = result.findings.filter((finding) => !isWithheldFinding(finding)).length;
+          findingCount = result.newFindings;
           mainCutOff = result.incompleteSessions.some(({ label }) => isMainReviewLabel(label));
         },
       },

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
 import {
+  discoverBaseGuidelineDocs,
   discoverGuidelineDocs,
   formatFinderGuidelines,
   formatGuidelines,
@@ -414,7 +416,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!(await matches('x/a/c.md')), '? does not match a slash');
   });
 
-  it("keeps the best section of each doc the README's review reading lists, clipped", async () => {
+  it("keeps every section of each doc the README's review reading lists, clipped", async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-required-'));
     roots.push(root);
     mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
@@ -444,7 +446,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     );
     writeFileSync(
       join(root, '.pr-governance/review/CHECKLIST.md'),
-      `# Checklist\n${'Check every item. '.repeat(200)}`,
+      `# Checklist\n${'Check every item. '.repeat(400)}\n## Severity\nTest-helper findings are nit.`,
     );
     const discovered = await discoverGuidelineDocs(root, ['src/check.ts']);
     assert.deepEqual(discovered.required, [
@@ -457,8 +459,145 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(out, /Keep changes small/);
     assert.match(out, /declared seams/);
     assert.match(out, /Check every item\.[^]*\[section truncated\]/);
+    // A later section the diff names nothing from, such as the repo's severity rules.
+    assert.match(out, /Test-helper findings are nit/);
     // A conditional list's doc still has to name something in the diff.
     assert.doesNotMatch(out, /decimal types/);
+  });
+
+  it('reads guideline sources at the base, through renames, and reports only needed unloadable files', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-base-rules-'));
+    roots.push(root);
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root }).toString().trim();
+    git('init', '-q');
+    writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are P2.');
+    writeFileSync(join(root, 'app.ts'), 'export {};');
+    // Neither export-ignore nor a symlinked AGENTS.md may hide a rule.
+    writeFileSync(join(root, '.gitattributes'), 'REVIEW.md export-ignore\n');
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(join(root, 'docs/RULES.md'), '# Rules\nLock every write.');
+    symlinkSync('docs/RULES.md', join(root, 'AGENTS.md'));
+    git('add', '.');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base');
+    const base = git('rev-parse', 'HEAD');
+    // The PR moves the rules away and writes its own.
+    git('mv', 'REVIEW.md', 'OLD-REVIEW.md');
+    writeFileSync(join(root, 'REVIEW.md'), '# Review\nUnscoped writes are nit.');
+    const { docs, snapshotError } = await discoverBaseGuidelineDocs(root, base, ['app.ts']);
+    assert.equal(snapshotError, undefined);
+    assert.match(docs.find((doc) => doc.label === 'REVIEW.md')!.text, /are P2/);
+    assert.match(docs.find((doc) => doc.label === 'AGENTS.md')!.text, /Lock every write/);
+    assert.ok(!docs.some((doc) => /nit/.test(doc.text)));
+
+    // An absolute link target escapes the tree, even when /REVIEW.md exists in it.
+    symlinkSync('/REVIEW.md', join(root, 'CONTRIBUTING.md'));
+    git('add', 'CONTRIBUTING.md', 'REVIEW.md');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'absolute link');
+    const absolute = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.deepEqual(absolute.snapshotSkipped, ['CONTRIBUTING.md']);
+
+    // Unloadable files discovery never reaches leave the guidance complete.
+    const commit = (message: string) =>
+      git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', message);
+    git('rm', '-q', 'CONTRIBUTING.md');
+    writeFileSync(join(root, 'docs/archive.md'), 'x'.repeat(513 * 1024));
+    // A loaded doc naming another file that ends the same way does not make it needed.
+    writeFileSync(join(root, 'docs/RULES.md'), '# Rules\nLock every write. See old-archive.md.');
+    symlinkSync('gone.md', join(root, 'docs/old.md'));
+    git('add', 'docs');
+    commit('unrelated');
+    const unrelated = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.equal(unrelated.snapshotSkipped, undefined);
+    writeFileSync(join(root, 'REVIEW.md'), 'x'.repeat(513 * 1024));
+    git('add', 'REVIEW.md');
+    commit('oversized review');
+    const oversized = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.deepEqual(oversized.snapshotSkipped, ['REVIEW.md']);
+    assert.ok(!oversized.docs.some((doc) => doc.label === 'REVIEW.md'));
+
+    // Oversized control files read as absent, so discovery's fallbacks still run, but are reported.
+    git('rm', '-q', 'REVIEW.md');
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    writeFileSync(join(root, '.pr-governance/README.md'), 'x'.repeat(513 * 1024));
+    writeFileSync(join(root, '.pr-governance/review/rules-for-diff.yaml'), '#'.repeat(513 * 1024));
+    writeFileSync(join(root, '.pr-governance/SEAMS.md'), '# Seams\nUse declared seams.');
+    git('add', '.pr-governance');
+    commit('oversized governance');
+    const governance = await discoverBaseGuidelineDocs(root, 'HEAD', ['app.ts']);
+    assert.deepEqual(governance.snapshotSkipped?.sort(), [
+      '.pr-governance/README.md',
+      '.pr-governance/review/rules-for-diff.yaml',
+    ]);
+    assert.ok(governance.docs.some((doc) => /declared seams/.test(doc.text)));
+    // Any scoped guideline name above a changed file is looked up, so it is needed.
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src/TECHNICAL_STANDARDS.md'), 'x'.repeat(513 * 1024));
+    git('add', 'src');
+    commit('oversized scoped standards');
+    const scoped = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(scoped.snapshotSkipped?.includes('src/TECHNICAL_STANDARDS.md'));
+    // A rules directory whose only rule cannot be loaded is reported.
+    mkdirSync(join(root, '.cursor/rules'), { recursive: true });
+    writeFileSync(join(root, '.cursor/rules/huge.mdc'), 'x'.repeat(513 * 1024));
+    git('add', '.cursor');
+    commit('oversized rules dir');
+    const huge = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(huge.snapshotSkipped?.includes('.cursor/rules/huge.mdc'));
+    git('rm', '-rq', '.cursor');
+    // A chained directory link (.cursor/rules -> rules -> shared/rules) is mirrored.
+    mkdirSync(join(root, 'shared/rules'), { recursive: true });
+    writeFileSync(
+      join(root, 'shared/rules/locks.mdc'),
+      '---\nalwaysApply: true\n---\nTake the row lock.',
+    );
+    symlinkSync('shared/rules', join(root, 'rules'));
+    mkdirSync(join(root, '.cursor'));
+    symlinkSync('../rules', join(root, '.cursor/rules'));
+    git('add', 'shared', 'rules', '.cursor');
+    commit('linked rules dir');
+    const linked = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(linked.docs.some((doc) => /Take the row lock/.test(doc.text)));
+    // A link inside a mirrored directory (.cursor -> config, config/rules -> ../shared/rules) is mirrored too.
+    git('rm', '-rq', 'rules', '.cursor');
+    mkdirSync(join(root, 'config'));
+    symlinkSync('../shared/rules', join(root, 'config/rules'));
+    symlinkSync('config', join(root, '.cursor'));
+    git('add', 'config', '.cursor');
+    commit('nested linked rules dir');
+    const nested = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(nested.docs.some((doc) => /Take the row lock/.test(doc.text)));
+    assert.ok(!nested.snapshotSkipped?.includes('.cursor/rules'));
+    // A link to its own directory or an ancestor (shared/rules/loop -> ..) is not mirrored into itself.
+    symlinkSync('..', join(root, 'shared/rules/loop'));
+    git('add', 'shared');
+    commit('self-referencing link');
+    const looped = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(looped.docs.some((doc) => /Take the row lock/.test(doc.text)));
+    git('rm', '-q', 'shared/rules/loop');
+    commit('drop self-referencing link');
+    // A link chain that cannot be mirrored is reported, not treated as present.
+    git('rm', '-rq', 'shared');
+    commit('dangling rules dir');
+    const dangling = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(dangling.snapshotSkipped?.includes('.cursor/rules'));
+
+    // A route may name a whole doc of any text type; it loads from the base.
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      ['entries:', '  - name: app', "    paths: ['src/**']", "    docs: ['docs/REVIEW.txt']"].join(
+        '\n',
+      ),
+    );
+    writeFileSync(join(root, 'docs/REVIEW.txt'), 'Every write takes the row lock.');
+    git('add', '.pr-governance', 'docs');
+    commit('routed text doc');
+    const routed = await discoverBaseGuidelineDocs(root, 'HEAD', ['src/app.ts']);
+    assert.ok(routed.docs.some((doc) => /takes the row lock/.test(doc.text)));
+
+    const failed = await discoverBaseGuidelineDocs(root, 'no-such-revision', ['app.ts']);
+    assert.ok(failed.snapshotError);
+    assert.deepEqual(failed.docs, []);
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {

@@ -1,137 +1,16 @@
-import { JevVerifierShadow } from './jev-verifier-shadow.ts';
-import {
-  GuidelineVerifierShadow,
-  guidelinePreviewPolicy,
-  observesGuidelineVerifier,
-} from './guideline-verifier-shadow.ts';
-import { VerificationEvidence } from './verification-evidence.ts';
-import {
-  BASELINE_REFRESH_REASONS,
-  fetchMissingCommit,
-  planIncrementalReview,
-  reviewBaseline,
-  ruleDocsChanged,
-  withReviewBaseline,
-  type ReviewBaseline,
-} from './incremental-review.ts';
-import { NativeEvidenceStore } from './native-evidence.ts';
-import {
-  loadRuleChecks,
-  RULE_CHECKS_PATH,
-  ruleCheckAgreement,
-  ruleCheckFinding,
-  runRuleChecks,
-} from './rule-checks.ts';
-import { budgetReviewBackend } from './prompt-budget.ts';
-import {
-  buildShardPlans,
-  buildAuxiliaryPlans,
-  prioritizeAuxiliaryPlans,
-  addContextPack,
-  addReviewEvidence,
-  planPageFiles,
-  diffUnits,
-  offPageFiles,
-  targetedVerifierContext,
-  targetedDiff,
-  measureReviewPrompt,
-  reviewPromptBudget,
-  reviewDelivery,
-  uncoveredFiles,
-  REVIEW_EVIDENCE_BYTES,
-  COMPLETE_DIFF_OPTIONS,
-  type ReviewPromptBudget,
-  type ShardPlan,
-} from './review-plan.ts';
-import { buildContextPack } from './context-pack.ts';
-import { mergeSuppliedContexts, type SuppliedContext } from './review-read-locations.ts';
-import { reviewExperiment, toolLessAuxiliary, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import {
-  computeFinderTimeoutMs,
-  computeRunDeadline,
-  computeRetryTimeoutMs,
-  computeVerificationTimeoutMs,
-  computeEvidenceTimeoutMs,
-  computeAuxiliaryGraceMs,
-  sharedPrefixLaunchDelayMs,
-  wrapUpReserveMs,
-} from './time-budget.ts';
-import { createCliProcessScope, markFatalSignals, onCliFatalSignal } from './cli-process.ts';
-import { collectChangesSinceContext } from './changes-since.ts';
-import { EvidenceStore } from './evidence.ts';
-import { buildFindingSourceContext } from './finding-context.ts';
-import {
-  auxiliaryPolicy,
-  planAuxiliaryReuse,
-  planComplianceRecheck,
-  withAuxiliaryBaselines,
-  type AuxiliaryBaseline,
-} from './auxiliary-reuse.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 
-import {
-  applyFindingVerdicts,
-  checkConfirmationEvidence,
-  filterFindings,
-  clampFindingsToFiles,
-  anchorFindings,
-  dedupeFindings,
-  demoteLowConfidenceBlockingFindings,
-  resolveFindingAnchors,
-  resolvesFinding,
-  isNoiseFile,
-  isUnresolvedFinding,
-  isWithheldFinding,
-  isPrCleanAfterRun,
-  openFindingThreadIds,
-  recheckReasons,
-  selectFindingIndexes,
-  shouldPostReviewComment,
-  suppressPreviouslyReported,
-} from './filter.ts';
-import {
-  ASSEMBLED_CONTEXT_WARN_BYTES,
-  assembledContextWarning,
-  createPhaseTelemetryTracker,
-  createTelemetryRecorder,
-  runPhaseStopReason,
-  type RunTerminalState,
-  type SessionCoverageRecorder,
-  type TelemetryRecorder,
-} from './telemetry.ts';
-import {
-  auxiliaryModelPolicy,
-  modelPolicy,
-  runConfiguration,
-  runIdentity,
-  effectiveReasoningEffort,
-  roleTelemetry,
-} from './run-telemetry.ts';
-import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
-import type { ContextBlock } from './context-trim.ts';
-import {
-  backendRequiresCompleteEmbeddedDiff,
-  selectReviewBackends,
-  type CliBackendID,
-} from './backend-selection.ts';
-import {
-  createProviderSessionLimiters,
-  limitReviewBackendSessions,
-  type ReviewBackend,
-} from './session-concurrency.ts';
-import {
-  loadCachedShardResult,
-  resolveShardCacheDir,
-  saveShardResult,
-  shardFingerprint,
-} from './shard-cache.ts';
-import { closeObserver, reportRun, setRunName } from './observer.ts';
-import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec, truncateForLog } from '@symma/protocol';
+import { parseModelName } from '@symma/protocol';
+import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
+import { CODEX_PROVIDER_ID, CURSOR_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
+import { assertValidKiloAuth, KILO_PROVIDER_ID } from '@symma/protocol';
+
 import {
   ACP_GATEWAY_PROVIDERS,
   checkAuxGatewayEndpointReady,
@@ -139,103 +18,38 @@ import {
   createRemoteAcpBackend,
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
+import { createAcpBackend } from './acp.ts';
+import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
 import {
-  assertPoolsideApiKey,
-  poolsideReasoningEffort,
-  runPoolsideAddressedPriorCommentsCheck,
-  runPoolsideChangesSinceLastReview,
-  runPoolsideFindingVerification,
-  runPoolsideGuidelineComplianceCheck,
-  runPoolsideReview,
-  POOLSIDE_TELEMETRY_CAPABILITY,
-} from './poolside.ts';
+  auxiliaryPolicy,
+  planAuxiliaryReuse,
+  planComplianceRecheck,
+  withAuxiliaryBaselines,
+  type AuxiliaryBaseline,
+} from './auxiliary-reuse.ts';
 import {
-  createDshBackend,
-  dshCandidate,
-  resolveSdkEngine,
-  sdkEngineName,
-  startDsh,
-} from './dsh.ts';
+  backendRequiresCompleteEmbeddedDiff,
+  selectReviewBackends,
+  type CliBackendID,
+} from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
+import { collectChangesSinceContext } from './changes-since.ts';
+import { createCliProcessScope, markFatalSignals, onCliFatalSignal } from './cli-process.ts';
 import {
-  buildDiffHunksBlockWithMetadata,
-  classifyChangeShape,
-  isDocOnlyChange,
-  samePatchSet,
-  shardFilesForReview,
-} from './diff-context.ts';
-import {
-  auxModelOptionsFor,
-  mainReviewModelOptions,
-  complianceModelOptions,
-  reportsFindings,
-  defaultModelOptions,
-  modelSupportsAgenticTools,
-  needsAuxOpencodeConfig,
-  parseEnvBoolean,
-  providerSessionConcurrency,
-  resolvePromptCachePolicy,
-  sizedModelOptions,
-  supportedModelOptions,
-  verificationModelOptions,
-  type ProviderCredential,
-} from './config.ts';
-import {
-  classifyProviderRejection,
-  ModelRejectedError,
-  planModelFallback,
-  withModelFallback,
-  type ModelFallback,
-  type ModelRejection,
-} from './model-fallback.ts';
-import { parseModelName } from '@symma/protocol';
-import { finishVerificationWaves } from './verification-waves.ts';
-import { parseAddedLines } from './patch.ts';
-import {
-  buildIncrementalReviewContext,
-  buildRulesOnlyTestsContext,
-  COUNTED_LENS_KEYS,
-  REVIEW_LENSES,
-  GUIDELINE_REVIEW_LENS,
-  LENS_CONTEXT_NOTE,
-  SUPPLEMENTARY_BLOCK_NAMES,
-  UNTRUSTED_PR_CONTENT_NOTE,
-  buildAddressedPriorCommentsContext,
-  buildContextTrimNotice,
-  compactReviewPageContexts,
-  buildReviewFocusBlock,
-  assembleReviewPrompt,
-  assembleGuidelineCompliancePrompt,
-  withEnforcedRuleChecks,
-  assembleFindingVerificationPrompt,
-  verifierOmissionNote,
-  COMPLIANCE_PACK_NOTE,
-  COMPLIANCE_RECHECK_NOTE,
-  selectLensKeys,
-  STATE_EVIDENCE_OMISSION,
-  VERIFICATION_SUPPORT_PROMPT,
-} from './prompt.ts';
-import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
-import {
-  abortOpencodeSessionsByLabel,
-  finalizeOpencodeSessionsByLabel,
-  startOpencode,
-  withTimeout,
-  configureSessionConcurrency,
-  runReview as runOpencodeReview,
-  runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
-  runFindingVerification as runOpencodeFindingVerification,
-  runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
-  runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
-  Semaphore,
-  OPENCODE_TELEMETRY_CAPABILITY,
-  configureOpencodeTelemetry,
-} from './opencode.ts';
-import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import { decodeTps } from './token-usage.ts';
-import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
-import { createDevinCliBackend } from './devin-cli.ts';
-import { resolveOpencodeApiKeys } from './opencode-usage.ts';
+  CLINE_PROVIDER_ID,
+  CLINE_TELEMETRY_CAPABILITY,
+  runClineAddressedPriorCommentsCheck,
+  runClineChangesSinceLastReview,
+  runClineFindingVerification,
+  runClineGuidelineComplianceCheck,
+  runClineReview,
+  runClineSdkFindingVerification,
+  withClineSdkFallback,
+  CLINE_MODEL_LIMITS,
+  isClineProvider,
+  writeClineAuth,
+  type ClineRuntime,
+} from './cline.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_MODEL_LIMITS,
@@ -253,34 +67,33 @@ import {
   writeCommandCodeReadOnlySettings,
   type CommandCodeRuntime,
 } from './commandcode.ts';
-import { CODEX_PROVIDER_ID, CURSOR_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
 import {
-  CLINE_PROVIDER_ID,
-  CLINE_TELEMETRY_CAPABILITY,
-  runClineAddressedPriorCommentsCheck,
-  runClineChangesSinceLastReview,
-  runClineFindingVerification,
-  runClineGuidelineComplianceCheck,
-  runClineReview,
-  runClineSdkFindingVerification,
-  withClineSdkFallback,
-  CLINE_MODEL_LIMITS,
-  isClineProvider,
-  writeClineAuth,
-  type ClineRuntime,
-} from './cline.ts';
+  auxModelOptionsFor,
+  mainReviewModelOptions,
+  complianceModelOptions,
+  reportsFindings,
+  defaultModelOptions,
+  modelSupportsAgenticTools,
+  needsAuxOpencodeConfig,
+  parseEnvBoolean,
+  providerSessionConcurrency,
+  resolvePromptCachePolicy,
+  sizedModelOptions,
+  supportedModelOptions,
+  verificationModelOptions,
+  type ProviderCredential,
+} from './config.ts';
+import { buildContextPack } from './context-pack.ts';
+import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
+import type { ContextBlock } from './context-trim.ts';
+import { createDevinCliBackend } from './devin-cli.ts';
 import {
-  GROK_PROVIDER_ID,
-  GROK_TELEMETRY_CAPABILITY,
-  assertGrokAuthenticated,
-  configureGrokHome,
-  runGrokAddressedPriorCommentsCheck,
-  runGrokChangesSinceLastReview,
-  runGrokFindingVerification,
-  runGrokGuidelineComplianceCheck,
-  runGrokReview,
-  type GrokRuntime,
-} from './grok.ts';
+  buildDiffHunksBlockWithMetadata,
+  classifyChangeShape,
+  isDocOnlyChange,
+  samePatchSet,
+  shardFilesForReview,
+} from './diff-context.ts';
 import {
   DIM_PROVIDER_ID,
   DIM_TELEMETRY_CAPABILITY,
@@ -292,38 +105,45 @@ import {
   runDimReview,
   type DimRuntime,
 } from './dim.ts';
-import { assertValidKiloAuth, KILO_PROVIDER_ID } from '@symma/protocol';
 import {
-  QODER_PROVIDER_ID,
-  QODER_TELEMETRY_CAPABILITY,
-  runQoderAddressedPriorCommentsCheck,
-  runQoderChangesSinceLastReview,
-  runQoderFindingVerification,
-  runQoderGuidelineComplianceCheck,
-  runQoderReview,
-} from './qoder.ts';
-import { createToolTelemetryAccumulator, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
-import {
-  buildReviewContext,
-  buildReviewScopeContext,
-  discoverGuidelineDocs,
-  GUIDELINE_CONTROL_FILES,
-  applicableGuidelines,
-  canCheckGlobalGuidelinesInMain,
-  citedGuidelineSections,
-  formatGuidelines,
-  formatRankedGuidelines,
-  formatFinderGuidelines,
-  formatDiffScope,
-  formatReviewCommits,
-  formatContextBudget,
-  rankGuidelineSections,
-  selectFinderGuidelineText,
-  truncatePrBody,
-  type LinkedIssue,
-  type ReviewCommit,
-} from './review-context.ts';
+  createDshBackend,
+  dshCandidate,
+  resolveSdkEngine,
+  sdkEngineName,
+  startDsh,
+} from './dsh.ts';
+import { EvidenceStore } from './evidence.ts';
 import { planReviewFanout } from './fanout.ts';
+import {
+  applyFindingVerdicts,
+  checkConfirmationEvidence,
+  filterFindings,
+  filterReviewNoise,
+  collapseRepeatedFindings,
+  clampFindingsToFiles,
+  anchorFindings,
+  dedupeFindings,
+  demoteLowConfidenceBlockingFindings,
+  resolveFindingAnchors,
+  resolvesFinding,
+  isNoiseFile,
+  isUnresolvedFinding,
+  isPrCleanAfterRun,
+  openFindingThreadIds,
+  recheckReasons,
+  selectFindingIndexes,
+  shouldPostReviewComment,
+  suppressPreviouslyReported,
+  unchangedLines,
+  routeFinding,
+  capTestConvention,
+  newFindingCount,
+  autoResolvableThreadIds,
+  bodyFindingMarker,
+  coveredFilesMarker,
+} from './filter.ts';
+import { buildFindingSourceContext } from './finding-context.ts';
+import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
   completedReviewHead,
   withReviewCoverage,
@@ -359,14 +179,105 @@ import {
   type PriorJbotThread,
   type PriorJbotThreads,
 } from './github.ts';
-import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
-import { setTimeout as sleep } from 'node:timers/promises';
 import {
-  classifyReviewStaleness,
-  classifyMainShardFailure,
-  STALE_CHECK_MIN_ATTEMPT_MS,
-  StaleReviewError,
-} from './retry-policy.ts';
+  GROK_PROVIDER_ID,
+  GROK_TELEMETRY_CAPABILITY,
+  assertGrokAuthenticated,
+  configureGrokHome,
+  runGrokAddressedPriorCommentsCheck,
+  runGrokChangesSinceLastReview,
+  runGrokFindingVerification,
+  runGrokGuidelineComplianceCheck,
+  runGrokReview,
+  type GrokRuntime,
+} from './grok.ts';
+import {
+  GuidelineVerifierShadow,
+  guidelinePreviewPolicy,
+  observesGuidelineVerifier,
+} from './guideline-verifier-shadow.ts';
+import {
+  BASELINE_REFRESH_REASONS,
+  fetchMissingCommit,
+  planIncrementalReview,
+  reviewBaseline,
+  ruleDocsChanged,
+  withReviewBaseline,
+  type ReviewBaseline,
+} from './incremental-review.ts';
+import { JevVerifierShadow } from './jev-verifier-shadow.ts';
+import {
+  classifyProviderRejection,
+  ModelRejectedError,
+  planModelFallback,
+  withModelFallback,
+  type ModelFallback,
+  type ModelRejection,
+} from './model-fallback.ts';
+import { NativeEvidenceStore } from './native-evidence.ts';
+import { closeObserver, reportRun, setRunName } from './observer.ts';
+import { resolveOpencodeApiKeys } from './opencode-usage.ts';
+import {
+  abortOpencodeSessionsByLabel,
+  finalizeOpencodeSessionsByLabel,
+  startOpencode,
+  withTimeout,
+  configureSessionConcurrency,
+  runReview as runOpencodeReview,
+  runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
+  runFindingVerification as runOpencodeFindingVerification,
+  runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
+  runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
+  Semaphore,
+  OPENCODE_TELEMETRY_CAPABILITY,
+  configureOpencodeTelemetry,
+} from './opencode.ts';
+import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
+import { parseAddedLines } from './patch.ts';
+import {
+  assertPoolsideApiKey,
+  poolsideReasoningEffort,
+  runPoolsideAddressedPriorCommentsCheck,
+  runPoolsideChangesSinceLastReview,
+  runPoolsideFindingVerification,
+  runPoolsideGuidelineComplianceCheck,
+  runPoolsideReview,
+  POOLSIDE_TELEMETRY_CAPABILITY,
+} from './poolside.ts';
+import { budgetReviewBackend } from './prompt-budget.ts';
+import {
+  buildIncrementalReviewContext,
+  buildRulesOnlyTestsContext,
+  COUNTED_LENS_KEYS,
+  REVIEW_LENSES,
+  GUIDELINE_REVIEW_LENS,
+  LENS_CONTEXT_NOTE,
+  SUPPLEMENTARY_BLOCK_NAMES,
+  UNTRUSTED_PR_CONTENT_NOTE,
+  buildAddressedPriorCommentsContext,
+  buildContextTrimNotice,
+  compactReviewPageContexts,
+  buildReviewFocusBlock,
+  assembleReviewPrompt,
+  assembleGuidelineCompliancePrompt,
+  withEnforcedRuleChecks,
+  assembleFindingVerificationPrompt,
+  verifierOmissionNote,
+  COMPLIANCE_PACK_NOTE,
+  COMPLIANCE_RECHECK_NOTE,
+  selectLensKeys,
+  STATE_EVIDENCE_OMISSION,
+  VERIFICATION_SUPPORT_PROMPT,
+} from './prompt.ts';
+import {
+  QODER_PROVIDER_ID,
+  QODER_TELEMETRY_CAPABILITY,
+  runQoderAddressedPriorCommentsCheck,
+  runQoderChangesSinceLastReview,
+  runQoderFindingVerification,
+  runQoderGuidelineComplianceCheck,
+  runQoderReview,
+} from './qoder.ts';
 import {
   getMergeGuidance,
   buildSeverityTable,
@@ -385,10 +296,109 @@ import {
   renderOrphanedSection,
   renderUnverifiedSection,
 } from './report.ts';
+import {
+  classifyReviewStaleness,
+  classifyMainShardFailure,
+  STALE_CHECK_MIN_ATTEMPT_MS,
+  StaleReviewError,
+} from './retry-policy.ts';
+import {
+  buildReviewContext,
+  buildReviewScopeContext,
+  discoverBaseGuidelineDocs,
+  discoverGuidelineDocs,
+  GUIDELINE_CONTROL_FILES,
+  applicableGuidelines,
+  canCheckGlobalGuidelinesInMain,
+  citedGuidelineSections,
+  formatGuidelines,
+  formatRankedGuidelines,
+  formatFinderGuidelines,
+  formatDiffScope,
+  formatReviewCommits,
+  formatContextBudget,
+  rankGuidelineSections,
+  selectFinderGuidelineText,
+  truncatePrBody,
+  type LinkedIssue,
+  type ReviewCommit,
+} from './review-context.ts';
+import { reviewExperiment, toolLessAuxiliary, type ReviewExperiment } from './review-experiment.ts';
+import {
+  buildShardPlans,
+  buildAuxiliaryPlans,
+  prioritizeAuxiliaryPlans,
+  addContextPack,
+  addReviewEvidence,
+  planPageFiles,
+  diffUnits,
+  offPageFiles,
+  targetedVerifierContext,
+  targetedDiff,
+  measureReviewPrompt,
+  reviewPromptBudget,
+  reviewDelivery,
+  uncoveredFiles,
+  REVIEW_EVIDENCE_BYTES,
+  COMPLETE_DIFF_OPTIONS,
+  type ReviewPromptBudget,
+  type ShardPlan,
+} from './review-plan.ts';
+import { mergeSuppliedContexts, type SuppliedContext } from './review-read-locations.ts';
+import {
+  loadRuleChecks,
+  RULE_CHECKS_PATH,
+  ruleCheckAgreement,
+  ruleCheckFinding,
+  runRuleChecks,
+} from './rule-checks.ts';
+import {
+  auxiliaryModelPolicy,
+  modelPolicy,
+  runConfiguration,
+  runIdentity,
+  effectiveReasoningEffort,
+  roleTelemetry,
+} from './run-telemetry.ts';
+import {
+  createProviderSessionLimiters,
+  limitReviewBackendSessions,
+  type ReviewBackend,
+} from './session-concurrency.ts';
+import {
+  loadCachedShardResult,
+  resolveShardCacheDir,
+  saveShardResult,
+  shardFingerprint,
+} from './shard-cache.ts';
+import {
+  ASSEMBLED_CONTEXT_WARN_BYTES,
+  assembledContextWarning,
+  createPhaseTelemetryTracker,
+  createTelemetryRecorder,
+  runPhaseStopReason,
+  type RunTerminalState,
+  type SessionCoverageRecorder,
+  type TelemetryRecorder,
+} from './telemetry.ts';
 import { rulesOnlyTestFiles } from './test-tiers.ts';
-import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
+import { formatFileList, formatUsageCost, isFiniteNumber, neutralizeMarkers } from './text.ts';
+import {
+  computeFinderTimeoutMs,
+  computeRunDeadline,
+  computeRetryTimeoutMs,
+  computeVerificationTimeoutMs,
+  computeEvidenceTimeoutMs,
+  computeAuxiliaryGraceMs,
+  sharedPrefixLaunchDelayMs,
+  wrapUpReserveMs,
+} from './time-budget.ts';
+import { decodeTps } from './token-usage.ts';
+import { createToolTelemetryAccumulator, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 import { IncompleteReviewError } from './types.ts';
+import { VerificationEvidence } from './verification-evidence.ts';
+import { finishVerificationWaves } from './verification-waves.ts';
 
 // One verifier session works serially; shards of this size run in parallel so verify time tracks the slowest shard.
 const VERIFICATION_SHARD_SIZE = 4;
@@ -1102,6 +1112,8 @@ export interface ReviewRunOptions {
   onReviewResult?: (result: {
     summary: string;
     findings: Finding[];
+    /** Findings no prior J-Bot review reported: what this run posts. */
+    newFindings: number;
     addressedPriorComments: AddressedPriorComment[];
     /** JSONL telemetry (finding + session rows); present when reviewTelemetry is on. */
     telemetry?: string;
@@ -1135,6 +1147,8 @@ async function runReviewPipeline(params: {
   /** Required for GitHub-backed reviews; local worktree reviews omit it. */
   headSha?: string;
   baseRef?: string;
+  /** With baseRef: a PR into any other branch is stacked on a parent PR. */
+  defaultBranch?: string;
   baseSha?: string;
   preparePatchRecovery?: () => Promise<void> | void;
   /**
@@ -1168,6 +1182,7 @@ async function runReviewPipeline(params: {
     baseURL,
     headSha,
     baseRef,
+    defaultBranch,
     baseSha,
     localDiff,
     log,
@@ -1336,9 +1351,7 @@ async function runReviewPipeline(params: {
       }
     } catch (error) {
       log(
-        `Could not verify PR freshness before startup; continuing: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Could not verify PR freshness before startup; continuing: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -1455,7 +1468,22 @@ async function runReviewPipeline(params: {
     return;
   }
 
-  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const discoverGuidelines = (files: string[]) =>
+    baseSha
+      ? discoverBaseGuidelineDocs(workspace, baseSha, files)
+      : discoverGuidelineDocs(workspace, files);
+  const loadedGuidelines = await discoverGuidelines(changedFiles);
+  const guidelineSnapshotError =
+    'snapshotError' in loadedGuidelines ? loadedGuidelines.snapshotError : undefined;
+  if (guidelineSnapshotError)
+    log(
+      `Base guideline snapshot failed; reviewing without repository guidance: ${String(guidelineSnapshotError)}`,
+    );
+  const skippedGuidelines: string[] =
+    ('snapshotSkipped' in loadedGuidelines && (loadedGuidelines.snapshotSkipped as string[])) || [];
+  if (skippedGuidelines.length)
+    log(`Guideline files not loadable at the base: ${skippedGuidelines.join(', ')}`);
+  const guidelinesIncomplete = Boolean(guidelineSnapshotError) || skippedGuidelines.length > 0;
   const applicable = applicableGuidelines(loadedGuidelines, changedFiles);
   log(
     `Guideline scope: ${applicable.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - applicable.docs.length} explicitly scoped documents excluded.`,
@@ -1476,7 +1504,7 @@ async function runReviewPipeline(params: {
     prEdited: ruleSources.filter((path) => prPaths.has(path)),
     prPaths,
     base: baseSha,
-    complete: !loadedGuidelines.budgetExhausted,
+    complete: !loadedGuidelines.budgetExhausted && !guidelinesIncomplete,
   };
   const ruleChanges = new Map<string, Promise<boolean>>();
   const rulesChangedSince = (reviewed: string) => {
@@ -1515,7 +1543,15 @@ async function runReviewPipeline(params: {
   // Auto-approve runs never skip: approval must re-attest the latest pushed
   // head, and a skipped run would leave the prior approval stranded on the old
   // head — blocking PRs behind stale-approval-dismissing branch protection.
-  if (!localDiff && options.skipUnchanged && !options.autoApprove && headSha && baseRef) {
+  // Without the base rules the gate cannot tell whether they changed.
+  if (
+    !localDiff &&
+    options.skipUnchanged &&
+    !options.autoApprove &&
+    !guidelinesIncomplete &&
+    headSha &&
+    baseRef
+  ) {
     const reviewedHead = completedReviewHead(priorJbotReviewGroups.at(-1)?.body ?? '');
     // Same-head reruns are never assumed unchanged: the base may have advanced
     // since that review, and a same-head compare would only test today's diff
@@ -1529,9 +1565,7 @@ async function runReviewPipeline(params: {
         reviewedHead,
       ).catch((error) => {
         log(
-          `Unchanged-diff check unavailable; running the full review: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `Unchanged-diff check unavailable; running the full review: ${error instanceof Error ? error.message : String(error)}`,
         );
         return null;
       });
@@ -1758,7 +1792,7 @@ async function runReviewPipeline(params: {
       current: applicable,
       ruleSources,
       changedFiles,
-      discover: (files) => discoverGuidelineDocs(workspace, files),
+      discover: discoverGuidelines,
     },
     rulesChangedSince,
   });
@@ -2977,6 +3011,7 @@ async function runReviewPipeline(params: {
       widen: options.guidelineWiden,
       full: guidelines,
       contextPack: options.experiment.contextPack,
+      ...(baseSha ? { baseRevision: baseSha } : {}),
     };
     const guidelinesInMain = auxiliaryDecisions.some(
       (decision) => decision.reason === 'global-guidelines-in-main',
@@ -3529,6 +3564,12 @@ async function runReviewPipeline(params: {
             ),
     );
 
+    const diffLines = {
+      addable,
+      unchanged: unchangedLines(patchByPath),
+      stacked: Boolean(baseRef && defaultBranch && baseRef !== defaultBranch),
+      hasHeadSha: !!headSha,
+    };
     const overlapTargets = (lists: Finding[][]) => {
       // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
       // these are the very objects the final pipeline re-anchors and counts —
@@ -3540,10 +3581,12 @@ async function runReviewPipeline(params: {
       for (const list of gatedLists) {
         resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
       }
-      const settled = suppressPreviouslyReported(
-        dedupeFindings(...gatedLists),
-        priorJbotThreads,
-        headSha ? addable : undefined,
+      const settled = filterReviewNoise(
+        suppressPreviouslyReported(
+          dedupeFindings(...gatedLists),
+          priorJbotThreads,
+          headSha ? addable : undefined,
+        ).findings,
       ).findings;
       return selectFindingIndexes(settled).map((index) => settled[index]);
     };
@@ -3721,9 +3764,7 @@ async function runReviewPipeline(params: {
     ]);
     if (auxiliaryWaitLabels.length > 0) {
       log(
-        `Main review shards complete; waiting for auxiliary session(s) to settle: ${auxiliaryWaitLabels.join(
-          ', ',
-        )}.`,
+        `Main review shards complete; waiting for auxiliary session(s) to settle: ${auxiliaryWaitLabels.join(', ')}.`,
       );
     }
     // Start all grace timers together so the waits cannot accumulate.
@@ -3854,19 +3895,22 @@ async function runReviewPipeline(params: {
       priorJbotThreads,
       headSha ? addable : undefined,
     );
-    telemetry.snapshot('suppressed', suppression.findings);
     if (suppression.suppressedCount > 0) {
       log(
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
       );
     }
+    const noise = filterReviewNoise(suppression.findings);
+    if (noise.dropped.length > 0)
+      log(`Dropped ${noise.dropped.length} finding(s) on design notes and plans.`);
+    telemetry.snapshot('suppressed', noise.findings);
     initialFilteringDone(
       'completed',
-      telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(noise.findings)) : undefined,
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
     const verifiedFindings = await finishVerificationWaves({
-      findings: suppression.findings,
+      findings: noise.findings,
       firstWave: overlapVerification,
       pendingTargets: options.verifyAuxReady && !optionalEarly ? firstWaveTargets : [],
       logOutcomes: (application) => logVerdictOutcomes(application, log),
@@ -3916,9 +3960,24 @@ async function runReviewPipeline(params: {
     telemetry.recordEvidenceCache(evidence.stats());
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
-    const filteredFindings = filterFindings(verifiedFindings, options);
+    const filteredFindings = filterFindings(
+      collapseRepeatedFindings(verifiedFindings.map(capTestConvention), (finding) =>
+        routeFinding(finding, diffLines),
+      ),
+      options,
+    );
     const incompleteSessions = reviewCoverageSessions([
       ...(mainCoverageGap ? [mainCoverageGap] : []),
+      ...(guidelinesIncomplete
+        ? [
+            {
+              label: 'repository-guidelines',
+              reason: guidelineSnapshotError
+                ? 'not loaded from the base revision, so no repository rules were applied'
+                : `${skippedGuidelines.length} file(s) could not be loaded from the base revision`,
+            },
+          ]
+        : []),
       ...[...auxCoverage]
         .filter(([, row]) => !row.complete)
         .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) })),
@@ -3959,8 +4018,7 @@ async function runReviewPipeline(params: {
 
     const { inline, fileLevel, orphaned, anchorMissed, withheld } = anchorFindings(
       filteredFindings,
-      addable,
-      !!headSha,
+      diffLines,
     );
     if (withheld.length > 0) log(`Unpublished review candidates: ${JSON.stringify(withheld)}`);
     let diagnosticsUrl: string | undefined;
@@ -4007,10 +4065,16 @@ async function runReviewPipeline(params: {
     // Isolated: this is a side-channel hook and must not abort the actual review post below.
     // Terminal telemetry is NOT written here: 'completed' is only earned after
     // the posting/approval phase below succeeds.
+    const findingCount = newFindingCount(
+      filteredFindings,
+      [...orphaned, ...withheld, ...fileLevel],
+      priorJbotReviewGroups,
+    );
     try {
       options.onReviewResult?.({
         summary: joinContext(coverageNotice, summary),
         findings: filteredFindings,
+        newFindings: findingCount,
         addressedPriorComments: verifiedAddressedPriorComments,
         ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
         incompleteSessions,
@@ -4033,6 +4097,9 @@ async function runReviewPipeline(params: {
       auxiliaryBaselines,
       diagnosticsUrl,
       reviewScope: scopeStats,
+      ...(scopeStats.mode === 'incremental'
+        ? { coveredFiles: files.map((file) => file.filename) }
+        : {}),
       ...(recheckFiles && auditedHead
         ? {
             complianceScope: {
@@ -4086,9 +4153,7 @@ async function runReviewPipeline(params: {
       }
       if (verifiedAddressedPriorComments.length > 0) {
         log(
-          `Dry run addressed prior comments:\n${verifiedAddressedPriorComments
-            .map(formatAddressedPriorComment)
-            .join('\n')}`,
+          `Dry run addressed prior comments:\n${verifiedAddressedPriorComments.map(formatAddressedPriorComment).join('\n')}`,
         );
       }
       postingDone();
@@ -4100,7 +4165,6 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
-    const findingCount = filteredFindings.length;
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,
       findingCount,
@@ -4149,9 +4213,7 @@ async function runReviewPipeline(params: {
           log(`Posted file-level comment for ${finding.path}.`);
         } catch (error) {
           log(
-            `Failed to post file-level comment for ${finding.path}; folding into review body: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `Failed to post file-level comment for ${finding.path}; folding into review body: ${error instanceof Error ? error.message : String(error)}`,
           );
           orphaned.push(finding);
         }
@@ -4199,7 +4261,7 @@ async function runReviewPipeline(params: {
       const reResolved = await resolveUnresolvedAddressedThreads({
         octokit,
         threadResolutionOctokit: params.threadResolutionOctokit,
-        threadIds: unresolvedAddressedThreadIds,
+        threadIds: autoResolvableThreadIds(unresolvedAddressedThreadIds, allPriorJbotThreads),
         log,
       });
       resolvedThisRun.push(...reResolved);
@@ -4238,9 +4300,7 @@ async function runReviewPipeline(params: {
         );
       } catch (error) {
         log(
-          `Could not verify auto-approval safety; leaving a comment instead: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `Could not verify auto-approval safety; leaving a comment instead: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
 
@@ -4259,9 +4319,7 @@ async function runReviewPipeline(params: {
         } catch (error) {
           if (!isDefinitiveApprovalRejection(error)) throw error;
           log(
-            `GitHub rejected auto-approval; leaving a comment instead: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `GitHub rejected auto-approval; leaving a comment instead: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       } else if (decision?.status === 'already-approved') {
@@ -4286,7 +4344,7 @@ async function runReviewPipeline(params: {
 
     if (
       isPrCleanAfterRun(
-        findingCount,
+        filteredFindings.length,
         openThreadCount,
         priorThreadStateKnown,
         incompleteSessions.length === 0,
@@ -5252,16 +5310,12 @@ function logVerdictOutcomes(
 ): void {
   for (const { finding, reason } of application.dropped) {
     log(
-      `Dropped refuted finding ${formatFindingLocation(finding)} "${finding.title}".${
-        reason ? ` Reason: ${reason}` : ''
-      }`,
+      `Dropped refuted finding ${formatFindingLocation(finding)} "${finding.title}".${reason ? ` Reason: ${reason}` : ''}`,
     );
   }
   for (const { finding, reason } of application.demoted) {
     log(
-      `Marked uncertain finding ${formatFindingLocation(finding)} "${finding.title}" as unverified.${
-        reason ? ` Reason: ${reason}` : ''
-      }`,
+      `Marked uncertain finding ${formatFindingLocation(finding)} "${finding.title}" as unverified.${reason ? ` Reason: ${reason}` : ''}`,
     );
   }
 }
@@ -5377,7 +5431,10 @@ export async function runShardedReview(params: {
             '',
             params.evidenceQuotes,
             params.embeddedFirstPrompt,
-            { contextFirst: params.contextFirst, contextPack: plan.contextPack },
+            {
+              contextFirst: params.contextFirst,
+              contextPack: plan.contextPack,
+            },
           ),
         );
       const oversized = assembledContextWarning(plan.label, promptBytes);
@@ -5718,9 +5775,7 @@ async function safeListPriorJbotThreads(
     };
   } catch (error) {
     log(
-      `Prior jbot-review thread lookup skipped: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `Prior jbot-review thread lookup skipped: ${error instanceof Error ? error.message : String(error)}`,
     );
     return {
       threads: [],
@@ -5791,9 +5846,7 @@ function startAddressedPriorCommentsCheck(params: {
     })
     .catch((error) => {
       params.log(
-        `(skipped addressed-prior-comments check: ${
-          error instanceof Error ? error.message : String(error)
-        })`,
+        `(skipped addressed-prior-comments check: ${error instanceof Error ? error.message : String(error)})`,
       );
       params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
       return [];
@@ -5864,9 +5917,7 @@ export function startChangesSinceLastReviewSummary(params: {
     })
     .catch((error) => {
       params.log(
-        `(skipped changes-since-last-review summary: ${
-          error instanceof Error ? error.message : String(error)
-        })`,
+        `(skipped changes-since-last-review summary: ${error instanceof Error ? error.message : String(error)})`,
       );
       // A git failure before any model session is a skip, not a failed model
       // session — that distinction is what modelRan exists for.
@@ -5978,9 +6029,7 @@ export function startGuidelineComplianceCheck(params: {
     .catch((error) => {
       params.onQueued?.(session);
       params.log(
-        `(skipped guideline-compliance check: ${
-          error instanceof Error ? error.message : String(error)
-        })`,
+        `(skipped guideline-compliance check: ${error instanceof Error ? error.message : String(error)})`,
       );
       params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
       return [];
@@ -6018,6 +6067,10 @@ async function acknowledgeAddressedPriorComments(params: {
       params.log(`Skipping addressed prior comment with unknown thread id: ${addressed.id}`);
       continue;
     }
+    if (autoResolvableThreadIds([thread.id], [thread]).length === 0) {
+      params.log(`Leaving grouped thread ${addressed.id} open: its other sites were not checked`);
+      continue;
+    }
 
     const addressedByCommit = addressed.addressedByCommit || params.headSha || 'the latest commit';
     try {
@@ -6034,9 +6087,7 @@ async function acknowledgeAddressedPriorComments(params: {
       // The reply is a courtesy; a failure must not block the resolve — always
       // try to close an addressed thread.
       params.log(
-        `Failed to reply to addressed prior thread ${thread.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Failed to reply to addressed prior thread ${thread.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
@@ -6091,9 +6142,7 @@ async function finalizeResolvedReviews(params: {
         params.log(`Compacted resolved jbot-review ${review.id}.`);
       } catch (error) {
         params.log(
-          `Failed to compact resolved jbot-review ${review.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `Failed to compact resolved jbot-review ${review.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -6106,9 +6155,7 @@ async function finalizeResolvedReviews(params: {
       params.log(`Minimized resolved jbot-review ${review.id}.`);
     } catch (error) {
       params.log(
-        `Failed to minimize resolved jbot-review ${review.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Failed to minimize resolved jbot-review ${review.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -6126,9 +6173,7 @@ async function minimizeSupersededCleanReviews(
       log(`Minimized superseded clean jbot-review ${review.id}.`);
     } catch (error) {
       log(
-        `Failed to minimize superseded clean jbot-review ${review.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Failed to minimize superseded clean jbot-review ${review.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -6177,6 +6222,8 @@ export function buildBody(
     reviewScope?: { mode: 'full' | 'incremental'; files: number; totalFiles: number };
     complianceScope?: { files: number; totalFiles: number; reviewedHead: string };
     rulesOnlyTests?: string[];
+    /** An incremental review's files, so a later run judges body-only repeats per file. */
+    coveredFiles?: string[];
     baseline?: ReviewBaseline;
   },
 ): string {
@@ -6214,7 +6261,12 @@ export function buildBody(
   const coverageNotice = formatIncompleteCoverage(incompleteSessions);
   if (coverageNotice) lines.push(coverageNotice, '');
   if (changesSinceLastReview.trim()) {
-    lines.push('**Changes since last review**', '', changesSinceLastReview.trim(), '');
+    lines.push(
+      '**Changes since last review**',
+      '',
+      neutralizeMarkers(changesSinceLastReview.trim()),
+      '',
+    );
   }
   // A clean review's per-shard verification narrative is low-value restatement:
   // the verdict lines and "No new findings" below already convey "clean", and on
@@ -6226,7 +6278,7 @@ export function buildBody(
   // review" block above is independent and still renders on re-reviews.
   const renderedSummary =
     !all.some(isUnresolvedFinding) && summary.trim()
-      ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
+      ? formatSummaryMarkdown(neutralizeMarkers(summary), { suppressNoFindingVerdicts: true })
       : '';
   if (total > 0 && renderedSummary.trim()) {
     lines.push(renderedSummary, '');
@@ -6246,12 +6298,12 @@ export function buildBody(
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
   const orphanedSection = renderOrphanedSection(
-    orphaned.filter((finding) => !isWithheldFinding(finding)),
+    orphaned.filter((finding) => !isUnresolvedFinding(finding)),
   );
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(
     ...renderUnverifiedSection(
-      all.filter(isWithheldFinding),
+      all.filter(isUnresolvedFinding),
       owner,
       repo,
       headSha,
@@ -6261,9 +6313,23 @@ export function buildBody(
   );
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
+  // In the trailer, where newFindingCount reads it: every body-only and unverified site listed.
+  const keys = bodyFindingMarker([
+    ...orphaned.filter((finding) => !isUnresolvedFinding(finding)),
+    ...all.filter(isUnresolvedFinding),
+  ]);
   return withReviewCoverage(
     withReviewBaseline(
-      withAuxiliaryBaselines(lines.join('\n'), experiment?.auxiliaryBaselines ?? []),
+      withAuxiliaryBaselines(
+        [
+          lines.join('\n'),
+          keys,
+          experiment?.coveredFiles ? coveredFilesMarker(experiment.coveredFiles) : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        experiment?.auxiliaryBaselines ?? [],
+      ),
       experiment?.baseline,
     ),
     headSha,
@@ -6331,9 +6397,7 @@ export function formatReviewedWith(
     (usageModel) => usageModel !== model,
   );
   if (auxiliaryModels.length === 0) return `Reviewed with ${withEngine(model)}.`;
-  return `Reviewed with ${withEngine(model)}; auxiliary sessions used ${auxiliaryModels
-    .map(withEngine)
-    .join(', ')}.`;
+  return `Reviewed with ${withEngine(model)}; auxiliary sessions used ${auxiliaryModels.map(withEngine).join(', ')}.`;
 }
 
 function uniqueModels(primary: string, others: string[]): string[] {

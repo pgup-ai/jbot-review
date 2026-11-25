@@ -959,6 +959,11 @@ test('a rule doc edit the PR reverted is no rule change; a base edit still is', 
     write('AGENTS.md', 'Rules, now mandatory.\n');
     commit();
     git('checkout', '-q', 'pr');
+    // Rules come from the base: its edit counts before the PR merges it.
+    assert.equal(
+      await ruleDocsChanged(workspace, { ...rules, base: 'main' }, reverted, reverted),
+      true,
+    );
     git('merge', '-q', '--no-edit', 'main');
     const merged = git('rev-parse', 'HEAD');
     assert.equal(

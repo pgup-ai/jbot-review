@@ -11,6 +11,11 @@ export function formatUsageCost(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(4);
 }
 
+/** Quoted text can never open a hidden HTML comment, so it cannot forge a jbot marker. */
+export function neutralizeMarkers(text: string): string {
+  return text.replaceAll('<!--', '&lt;!--');
+}
+
 export function formatFileList(files: string[]): string {
   const listed = files.slice(0, 10).join(', ');
   const remainder = files.length > 10 ? `, and ${files.length - 10} more` : '';

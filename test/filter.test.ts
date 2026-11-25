@@ -5,6 +5,8 @@ import {
   anchorFindings,
   applyFindingVerdicts,
   filterFindings,
+  filterReviewNoise,
+  collapseRepeatedFindings,
   isUnresolvedFinding,
   mergeVerdictsByLocation,
   dedupeFindings,
@@ -17,8 +19,20 @@ import {
   selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
+  unchangedLines,
+  routeFinding,
+  capTestConvention,
+  newFindingCount,
+  autoResolvableThreadIds,
+  bodyFindingMarker,
+  coveredFilesMarker,
 } from '../src/shared/filter.ts';
+import type { PriorFindingRef } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
+
+function diff(addable: Map<string, Set<number>>, hasHeadSha = true) {
+  return { addable, unchanged: new Map(), stacked: false, hasHeadSha };
+}
 
 function finding(overrides: Partial<Finding>): Finding {
   return {
@@ -341,8 +355,7 @@ describe('applyFindingVerdicts', () => {
         assert.equal(isUnresolvedFinding(result.findings[0]), !promoted);
         const routed = anchorFindings(
           result.findings,
-          new Map([[candidate.path, new Set([candidate.line])]]),
-          true,
+          diff(new Map([[candidate.path, new Set([candidate.line])]])),
         );
         assert.equal(routed.inline.length, promoted ? 1 : 0);
         if (promoted) {
@@ -371,30 +384,10 @@ describe('applyFindingVerdicts', () => {
       assert.equal(f.verificationUnavailable, true);
       assert.match(f.body, /Verification not completed/);
       assert.equal(f.confidence, 'low');
-      assert.match(
-        f.body,
-        f.publishUnverified
-          ? /Finding verification did not complete\./
-          : /Finding verification did not return a verdict/,
-      );
+      assert.match(f.body, /Finding verification did not complete\./);
     }
     assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
     assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
-
-    assert.deepEqual(
-      result.filter((f) => f.publishUnverified).map((f) => f.title),
-      ['Unverified concern: uncertain me', 'Unverified concern: confirm me'],
-    );
-    const inconclusive = applyFindingVerdicts(findings, selected, [
-      { index: 1, verdict: 'uncertain', reason: 'Unclear.' },
-    ]).findings.find((f) => f.title.includes('uncertain me'));
-    assert.equal(inconclusive?.publishUnverified, undefined);
-    const [speculative] = applyFindingVerdicts(
-      [finding({ severity: 'P1', kind: 'investigate' })],
-      [0],
-      [],
-    ).findings;
-    assert.equal(speculative.publishUnverified, undefined);
     const [failed] = applyFindingVerdicts(
       [finding({ severity: 'P1' })],
       [0],
@@ -407,45 +400,16 @@ describe('applyFindingVerdicts', () => {
         },
       ],
     ).findings;
-    assert.equal(failed.publishUnverified, 'P1');
     assert.doesNotMatch(failed.body, /org_x/);
+
+    // An unchecked P0-P2 claim stays a question in the review body, never an inline thread.
     const unchecked = filterFindings(applyFindingVerdicts(findings, selected, []).findings, {
       minSeverity: 'nit',
       maxFindings: 0,
     });
-    assert.equal(unchecked.filter((f) => f.publishUnverified).length, 3);
-    const flagged = applyFindingVerdicts(findings, selected, []).findings;
-    for (const [limits, posted] of [
-      [{ minSeverity: 'nit', maxFindings: 2 }, 1],
-      [{ minSeverity: 'P1', maxFindings: 0 }, 1],
-      [{ minSeverity: 'P0', maxFindings: 0 }, 0],
-    ] as const)
-      assert.equal(
-        filterFindings(
-          [finding({ severity: 'P3', title: 'confirmed' }), ...flagged],
-          limits,
-        ).filter((f) => f.publishUnverified).length,
-        posted,
-      );
-    const routed = anchorFindings(unchecked, new Map([['src/example.ts', new Set([10])]]), true);
-    assert.equal(routed.inline.length, 3);
-    assert.equal(routed.withheld.length, 2);
-    assert.ok(routed.inline.every((f) => f.verificationUncertain));
-  });
-
-  it('gives the limited Unverified slots to the most severe unchecked findings', () => {
-    const ordered = filterFindings(
-      applyFindingVerdicts(
-        (['P2', 'P2', 'P2', 'P2', 'P2', 'P0'] as const).map((severity) => finding({ severity })),
-        [0, 1, 2, 3, 4, 5],
-        [],
-      ).findings,
-      { minSeverity: 'nit', maxFindings: 0 },
-    );
-    assert.deepEqual(
-      ordered.filter((f) => f.publishUnverified).map((f) => f.publishUnverified),
-      ['P2', 'P2', 'P2', 'P2', 'P0'],
-    );
+    const routed = anchorFindings(unchecked, diff(new Map([['src/example.ts', new Set([10])]])));
+    assert.equal(routed.inline.length, 0);
+    assert.equal(routed.withheld.length, findings.length);
   });
 });
 
@@ -600,6 +564,26 @@ describe('suppressPreviouslyReported', () => {
 
     assert.equal(suppressedCount, 1);
     assert.equal(findings.length, 0);
+    // A grouped jbot thread also covers its other sites in this PR's files, never a P1 there.
+    const grouped = { ...thread, sites: [{ path: 'src/b.ts', line: 20 }] };
+    const site = finding({
+      path: 'src/b.ts',
+      line: 20,
+      title: 'Refund amount uses pre-tax subtotal',
+    });
+    const prFiles = new Map([['src/b.ts', new Set([20])]]);
+    assert.deepEqual(suppressPreviouslyReported([site], [grouped], prFiles).findings, []);
+    const blocking = { ...site, severity: 'P1' as const };
+    assert.deepEqual(suppressPreviouslyReported([blocking], [grouped], prFiles).findings, [
+      blocking,
+    ]);
+    assert.deepEqual(suppressPreviouslyReported([site], [grouped], new Map()).findings, [site]);
+    // A decline covers the primary thread's own lines only, never its grouped sites.
+    const declined = { ...grouped, isResolved: true, declined: true };
+    assert.deepEqual(suppressPreviouslyReported([site], [declined], prFiles).findings, [site]);
+    // Prose in a thread body is never read as sites.
+    const prose = { ...thread, body: `${thread.body}\n\nSame issue at: \`src/b.ts:20\`.` };
+    assert.deepEqual(suppressPreviouslyReported([site], [prose], prFiles).findings, [site]);
   });
 
   it('keeps a different issue near the same lines', () => {
@@ -726,7 +710,230 @@ describe('suppressPreviouslyReported', () => {
   });
 });
 
+describe('filterReviewNoise', () => {
+  const noise = (findings: Finding[]) => filterReviewNoise(findings);
+
+  it('suppresses a P2-or-lower finding declined near the same lines, until those lines change', () => {
+    const thread = {
+      path: 'src/example.ts',
+      line: 12,
+      body: '**P2 · maintainability** — Wrap the repository write\n\nTS-13 requires it.',
+      isResolved: true,
+      declined: true,
+    };
+    const byRule = finding({ title: 'Unscoped write (TS-13)' });
+    const byTitle = finding({ title: 'Wrap the repository write' });
+    const kept = [
+      finding({ title: 'Different issue (INV-1)' }),
+      finding({ title: 'Missing in-transaction recheck (TS-13)' }),
+      finding({ title: 'Wrap the repository write (CWE-89)' }),
+      finding({ line: 40, title: 'Unscoped write (TS-13)' }),
+      finding({ severity: 'P1', title: 'Unscoped write (TS-13)' }),
+      finding({ kind: 'security', title: 'Wrap the repository write' }),
+    ];
+    const suppress = (thread: PriorFindingRef, list: Finding[]) =>
+      suppressPreviouslyReported(list, [thread]).findings;
+    assert.deepEqual(suppress(thread, [byRule, byTitle, ...kept]), kept);
+    // Loose overlap with the thread body is not the same claim.
+    const loose = finding({ title: 'Repository requires wrapping' });
+    assert.deepEqual(suppress(thread, [loose]), [loose]);
+    for (const changed of [
+      { ...thread, outdated: true },
+      { ...thread, declined: false },
+    ])
+      assert.deepEqual(suppress(changed, [byRule]), [byRule]);
+  });
+
+  it('drops non-security findings on design notes and plans', () => {
+    const paths = ['docs/x-design-note.md', 'docs/a/plans/p.md', 'ROLLOUT-plan.md'];
+    const { findings, dropped } = noise([
+      ...paths.map((path) => finding({ path, title: path })),
+      finding({ path: paths[1], kind: 'security', title: 'committed credential' }),
+      finding({ title: 'own code' }),
+    ]);
+    assert.deepEqual(
+      findings.map((f) => f.title),
+      ['committed credential', 'own code'],
+    );
+    assert.equal(dropped.length, 3);
+  });
+
+  it('sends a self-declared unverified finding to verification as a hypothesis', () => {
+    const [self, prose, body, defect, security] = noise([
+      finding({ title: 'Unverified: retry may double-post' }),
+      finding({ kind: 'security', title: 'Webhook signature is not verified' }),
+      finding({ title: 'Retry double-posts', body: 'Rules out the unverified hypothesis.' }),
+      // A title that names an unverified input is a defect, not a label.
+      finding({ title: 'Unverified redirect parameter enables open redirect' }),
+      finding({ kind: 'security', title: 'Unverified: webhook signature permits forgery' }),
+    ]).findings;
+    assert.equal(isUnresolvedFinding(self), true);
+    assert.deepEqual([prose, body, defect, security].map(isUnresolvedFinding), [
+      false,
+      false,
+      false,
+      false,
+    ]);
+    const [labeled] = noise([
+      finding({ title: 'Retry double-posts (verification not completed)' }),
+    ]).findings;
+    assert.equal(isUnresolvedFinding(labeled), true);
+  });
+
+  it('rates a TS-6 test-style finding nit unless it shows the case passes with the line reverted', () => {
+    const [helper, reverted, matcher, matcherWithHelper, ineffective, bug, mixed] = noise([
+      finding({
+        path: 'src/a.spec.ts',
+        title: 'Use `createTestOrder` instead of inline test data (TS-6)',
+      }),
+      finding({
+        path: 'src/a.spec.ts',
+        title: 'Clean up in `afterAll` (TS-6)',
+        body: 'The case still passes with the guard removed.',
+      }),
+      // Matcher shape can hide a test passing for the wrong reason: never clamped.
+      finding({
+        path: 'src/a.spec.ts',
+        title: '`expect(result?.id).toBeDefined()` cannot fail (TS-6.6)',
+        body: 'It still passes when the authorization guard is removed.',
+      }),
+      finding({
+        path: 'src/a.spec.ts',
+        title: 'Use `createTestUser` and assert with `toBeDefined` (TS-6.6)',
+      }),
+      // A helper that hides the case under test is a coverage gap, not style.
+      finding({
+        path: 'src/a.spec.ts',
+        kind: 'maintainability',
+        title: '`createTestUser` builds an admin (TS-6.6)',
+        body: 'The authorization test never exercises the restricted role.',
+      }),
+      finding({
+        path: 'src/a.spec.ts',
+        kind: 'bug',
+        title: '`afterAll` deletes the shared tenant (TS-6)',
+      }),
+      finding({
+        path: 'src/b.spec.ts',
+        title: 'No case fails when the guard is reverted; use `createTestOrder` (TS-6.3)',
+      }),
+    ]).findings;
+    assert.deepEqual(
+      [helper, reverted, matcher, matcherWithHelper, ineffective, bug, mixed].map(
+        (f) => f.severity,
+      ),
+      ['nit', 'P2', 'P2', 'P2', 'P2', 'P2', 'P2'],
+    );
+    // Verification can promote a hypothesis to a rated finding; the cap applies again.
+    assert.equal(
+      capTestConvention({ ...helper, severity: 'P2', kind: 'maintainability' }).severity,
+      'nit',
+    );
+    assert.equal(capTestConvention(matcher).severity, 'P2');
+    // Any coverage claim keeps severity, however it is phrased.
+    const claim = finding({
+      kind: 'maintainability',
+      title: 'Use `createTestOrder` instead of inline test data (TS-6)',
+      body: 'As written the case may pass without catching its regression.',
+    });
+    assert.equal(capTestConvention(claim).severity, 'P2');
+  });
+
+  it('collapses one rule and title across sites into one thread listing every site', () => {
+    const findings = collapseRepeatedFindings(
+      [
+        finding({
+          path: 'src/a.ts',
+          line: 3,
+          severity: 'P3',
+          title: 'Comment restates the code (§12.1)',
+        }),
+        finding({ path: 'src/b.ts', line: 8, title: 'Comment restates the code (§12.1)' }),
+        finding({
+          path: 'src/d.ts',
+          line: 2,
+          severity: 'P0',
+          kind: 'investigate',
+          verificationUncertain: true,
+          title: 'Comment restates the code (§12.1)',
+        }),
+        finding({ path: 'src/c.ts', line: 5, title: 'Comment restates the code' }),
+      ],
+      () => 'inline',
+    );
+    // The unresolved site keeps its own entry instead of riding on a verified one.
+    assert.deepEqual(
+      findings.map((f) => f.path),
+      ['src/b.ts', 'src/d.ts', 'src/c.ts'],
+    );
+    assert.match(findings[0].body, /Same issue at: `src\/a\.ts:3`\.$/);
+    assert.deepEqual(findings[0].alsoAt, [{ path: 'src/a.ts', line: 3 }]);
+  });
+});
+
 describe('shouldPostReviewComment', () => {
+  it('posts a re-run with a new body-only finding, not one a prior body already lists', () => {
+    // A posted body carries the keys as its last line (buildBody).
+    const posted = (findings: Finding[], prefix = '## J-Bot Code Review') =>
+      `${prefix}\n${bodyFindingMarker(findings)}`;
+    let id = 0;
+    const review = (body: string) => ({ id: ++id, body });
+    const contextLine = finding({ severity: 'P1', line: 1, title: 'Lock is released early' });
+    const older = finding({ line: 9, title: 'Older issue' });
+    assert.equal(
+      shouldPostReviewComment(
+        1,
+        newFindingCount([contextLine], [contextLine], [review(posted([older]))]),
+      ),
+      true,
+    );
+    const listed = posted([older, contextLine]);
+    assert.equal(
+      shouldPostReviewComment(1, newFindingCount([contextLine], [contextLine], [review(listed)])),
+      false,
+    );
+    // The same title on another file, and another entry on this path, are not this finding.
+    const split = posted([
+      { ...contextLine, path: 'src/other.ts' },
+      { ...contextLine, title: 'Other' },
+    ]);
+    assert.equal(newFindingCount([contextLine], [contextLine], [review(split)]), 1);
+    // A key quoted earlier in the body, not in jbot's trailer, is never read.
+    const quoted = posted([older], `Quoted: ${bodyFindingMarker([contextLine])} in a finding`);
+    assert.equal(newFindingCount([contextLine], [contextLine], [review(quoted)]), 1);
+    // An unverified concern re-detected is old; confirmed since, it is new.
+    const concern = finding({ title: 'Retry may race', verificationUncertain: true });
+    assert.equal(newFindingCount([concern], [concern], [review(posted([concern]))]), 0);
+    const confirmed = finding({ title: concern.title });
+    assert.equal(newFindingCount([confirmed], [confirmed], [review(posted([concern]))]), 1);
+    // A grouped finding with one new site is new.
+    const reported = finding({ path: 'src/a.ts', line: 10, title: 'Unscoped write (TS-13)' });
+    const group = { ...reported, alsoAt: [{ path: 'src/b.ts', line: 20 }] };
+    assert.equal(newFindingCount([group], [group], [review(posted([reported]))]), 1);
+    // Changed code at the same site is new too.
+    const before = { ...contextLine, evidence: 'releaseLock();' };
+    const after = { ...before, evidence: 'releaseLock(); retry();' };
+    assert.equal(newFindingCount([after], [after], [review(posted([before]))]), 1);
+    // A grouped site with changed code is new, judged by its own quote.
+    const sited = { ...group, alsoAt: [{ path: 'src/b.ts', line: 20, evidence: 'a();' }] };
+    const resited = { ...group, alsoAt: [{ path: 'src/b.ts', line: 20, evidence: 'b();' }] };
+    assert.equal(newFindingCount([resited], [resited], [review(posted([sited]))]), 1);
+    // Per file: a later review that skipped a.ts does not make its finding new; one that covered it and dropped it does.
+    const earlier = review(posted([contextLine]));
+    const skipped = review(`## J-Bot\n${coveredFilesMarker(['src/b.ts'])}`);
+    assert.equal(newFindingCount([contextLine], [contextLine], [earlier, skipped]), 0);
+    const dropped = review(`## J-Bot\n${coveredFilesMarker(['src/example.ts'])}`);
+    assert.equal(newFindingCount([contextLine], [contextLine], [earlier, skipped, dropped]), 1);
+    // An incremental review that listed an outside-PR caller reported it, though its coverage omits that file.
+    const caller = finding({
+      path: 'src/caller.ts',
+      line: 4,
+      title: 'Caller breaks on new return type',
+    });
+    const incremental = review(`${posted([caller])}\n${coveredFilesMarker(['src/example.ts'])}`);
+    assert.equal(newFindingCount([caller], [caller], [incremental]), 0);
+  });
+
   it('always posts the first visible run, clean or not', () => {
     assert.equal(shouldPostReviewComment(0, 0), true);
     assert.equal(shouldPostReviewComment(0, 3), true);
@@ -915,6 +1122,56 @@ describe('resolveFindingAnchors', () => {
 });
 
 describe('anchorFindings', () => {
+  it('routes findings on lines this PR did not write to the review body', () => {
+    const moved = 'const total = computeInvoiceTotal(order.lines);';
+    const patches = new Map([
+      ['src/old.ts', `@@ -1,2 +1,1 @@\n keep\n-${moved}`],
+      ['src/new.ts', `@@ -1,1 +1,4 @@\n context\n+  ${moved}\n+return total;\n+const fresh = 1;`],
+    ]);
+    const unchanged = unchangedLines(patches);
+    const addable = new Map([['src/new.ts', new Set([2, 3, 4])]]);
+    // Line 40 is an unchanged caller farther down the same changed file.
+    const sites = [1, 2, 3, 4, 40].map((line) =>
+      finding({ path: 'src/new.ts', line, title: `L${line}` }),
+    );
+    const lines = (stacked: boolean) => ({ addable, unchanged, stacked, hasHeadSha: true });
+    for (const stacked of [false, true]) {
+      const routed = anchorFindings(
+        sites.map((f) => ({ ...f })),
+        lines(stacked),
+      );
+      assert.deepEqual(
+        routed.orphaned.map((f) => f.line),
+        stacked ? [1, 2, 40] : [1, 2],
+      );
+      assert.deepEqual(
+        routed.inline.map((f) => f.line),
+        [3, 4],
+      );
+      assert.equal(routed.anchorMissed.length, stacked ? 0 : 1);
+    }
+    // Grouping follows the same routes: a context-line or outside-file site never hides an inline one.
+    const collapsed = collapseRepeatedFindings(
+      [
+        { path: 'src/new.ts', line: 1 },
+        { path: 'src/new.ts', line: 3 },
+        { path: 'src/elsewhere.ts', line: 5 },
+      ].map(({ path, line }) =>
+        finding({
+          path,
+          line,
+          severity: line === 3 ? 'P2' : 'P1',
+          title: 'Unscoped write (TS-13)',
+        }),
+      ),
+      (f) => routeFinding(f, lines(false)),
+    );
+    assert.deepEqual(
+      anchorFindings(collapsed, lines(false)).inline.map((f) => f.line),
+      [3],
+    );
+  });
+
   const addable = new Map([['a.ts', new Set([1, 2])]]);
 
   it('splits findings into inline, file-level, and orphaned buckets', () => {
@@ -932,8 +1189,7 @@ describe('anchorFindings', () => {
         finding({ path: 'outside.ts', line: 99 }),
         ...unresolved,
       ],
-      addable,
-      true,
+      diff(addable),
     );
     assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
     assert.equal(fallback.line, 0);
@@ -948,8 +1204,7 @@ describe('anchorFindings', () => {
         ],
         { minSeverity: 'P1', maxFindings: 1 },
       ),
-      addable,
-      true,
+      diff(addable),
     );
     assert.equal(bounded.inline.length, 1);
     assert.equal(bounded.inline[0].severity, 'P1');
@@ -969,13 +1224,23 @@ describe('anchorFindings', () => {
 
   it('keeps findings outside the changed-file set in the review body', () => {
     const f = finding({ path: 'outside.ts', line: 99 });
-    assert.equal(anchorFindings([f], addable, true).orphaned[0], f);
+    assert.equal(anchorFindings([f], diff(addable)).orphaned[0], f);
   });
 
   it('does not create a file-level route without a review head', () => {
     const f = finding({ path: 'a.ts', line: 99 });
-    const out = anchorFindings([f], addable, false);
+    const out = anchorFindings([f], diff(addable, false));
     assert.equal(out.orphaned[0], f);
     assert.equal(f.line, 99);
+  });
+});
+
+describe('autoResolvableThreadIds', () => {
+  it('never auto-resolves a grouped thread, on the addressed check or the resolve retry', () => {
+    const threads = [{ id: 'single' }, { id: 'grouped', sites: [{ path: 'src/b.ts', line: 20 }] }];
+    assert.deepEqual(autoResolvableThreadIds(['single', 'grouped', 'unknown'], threads), [
+      'single',
+      'unknown',
+    ]);
   });
 });

@@ -158,42 +158,68 @@ entry point only after its image and action version are published.
 
 Full reviews cover the complete `base...head` diff. Eligible incremental
 follow-ups select affected files and review each file's complete PR patch, never
-just its latest edit. Repeats of findings covered by unresolved prior jbot threads
-are suppressed in code before posting. Several inputs tune the recall/precision/cost
-balance:
+just its latest edit. Repeats of findings covered by unresolved prior jbot
+threads are suppressed in code before posting. Deterministic over-reach filters
+also run before verification: a P2-or-lower, non-security finding that the PR
+author or a writer declined, then resolved, within three lines (same guideline
+rule ID such as `TS-13`, `INV-1` or `§12.1` with an overlapping title, or a
+near-identical title; when either cites a CWE or CVE, only the rule ID path
+applies) is dropped unless that thread's lines changed since; non-security
+findings on design notes and plans (`*-design-note.md`, `docs/**/plans/**`,
+`*-plan.md`) are dropped; a non-security finding whose title carries an
+unverified label (`Unverified:`, `[unverified]`, "verification not completed")
+is checked as a hypothesis; a maintainability finding about test conventions
+(helper use, cleanup, titles) that cites only `TS-6` rules (not the `TS-6.3`
+coverage tier) is rated `nit` only when it is a pure convention finding with no
+coverage claim (never matcher shape, nor any coverage word such as passing,
+failing, catching, covering, reverting, guarding or asserting; `COVERAGE_CLAIM`
+in `src/shared/filter.ts` holds the full list); after verification, confirmed findings sharing
+a rule ID and title, and routed to the same place, collapse into one thread
+listing every site. A finding on a context line, or in an added block of at
+least 20 alphanumeric characters whose every line the PR removed elsewhere (a
+move), is listed in the review body instead of an inline thread. So is, on a PR
+into a branch other than the default, a finding on a changed file's line outside
+the PR's own additions: parent-PR code, or a caller this PR breaks. The review
+body marks each site of a body-only or unverified finding with a hidden
+`jbot-site` key (path, line, title, section and quoted code). A re-run posts
+only when some site has no key in the newest prior review that covered its file
+(an incremental review records the files it covered): the same finding does not
+post again, while a new site of a grouped finding, or an unverified concern
+since confirmed, does. Bodies posted before these keys existed count as
+unreported, so they post once more. Several inputs tune the
+recall/precision/cost balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
-(baseline), and any run that finds something posts. A clean re-run posts no
-comment. With `auto-approve: true`, a clean run approves the exact reviewed
-head only when every prior jbot thread is resolved and GitHub reports the PR
-open, non-draft, and mergeable. CI, required reviews, and every other merge
-requirement remain GitHub's responsibility. Jbot never submits a blocking
-`REQUEST_CHANGES` review or calls the review-dismissal API. To keep an older
-approval from covering a new head, repositories must require approval of the
-most recent reviewable push. That rule does not invalidate an approval when a
-same-head re-run finds new or open findings; repositories that need those
+(baseline), and any run with findings no prior review reports posts. A clean
+re-run posts no comment. With `auto-approve: true`, a clean run approves the
+exact reviewed head only when every prior jbot thread is resolved and GitHub
+reports the PR open, non-draft, and mergeable. CI, required reviews, and every
+other merge requirement remain GitHub's responsibility. Jbot never submits a
+blocking `REQUEST_CHANGES` review or calls the review-dismissal API. To keep an
+older approval from covering a new head, repositories must require approval of
+the most recent reviewable push. That rule does not invalidate an approval when
+a same-head re-run finds new or open findings; repositories that need those
 findings to block merge must enforce a separate manual or workflow safeguard.
-The 🚀 reaction means **the PR has
-no open jbot findings** — it is
-added only when a real review leaves zero new findings _and_ every prior
-finding thread is resolved, and removed when a review starts. So 🚀-present
-means "reviewed, all good"; 🚀-absent means a review is in flight or the PR
-has open findings. Addressed-thread replies and resolution always run
-regardless. A push that leaves the diff byte-identical to the last posted
-review, typically an "Update branch" merge from main (see `skip-unchanged`), or
-a docs/diagram-only PR under `skip-doc-only: true`, is skipped before any model
-call and leaves the reaction unchanged (it isn't reviewed, so it neither earns
-nor loses the 🚀). The exception is a merge that changed a rule document the
-review loads: that push is reviewed. _Reactions are best-effort: if they don't
-appear, grant the workflow `issues: write` (PR reactions use the issues API);
-the review itself is unaffected._
+The 🚀 reaction means **the PR has no open jbot findings** — it is added only
+when a real review leaves zero new findings _and_ every prior finding thread is
+resolved, and removed when a review starts. So 🚀-present means "reviewed, all
+good"; 🚀-absent means a review is in flight or the PR has open findings.
+Addressed-thread replies and resolution always run regardless. A push that
+leaves the diff byte-identical to the last posted review, typically an "Update
+branch" merge from main (see `skip-unchanged`), or a docs/diagram-only PR under
+`skip-doc-only: true`, is skipped before any model call and leaves the reaction
+unchanged (it isn't reviewed, so it neither earns nor loses the 🚀). The
+exception is a merge that changed a rule document the review loads: that push is
+reviewed. _Reactions are best-effort: if they don't appear, grant the workflow
+`issues: write` (PR reactions use the issues API); the review itself is
+unaffected._
 
 | Input                     | Default            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auto-approve`            | `false`            | Approve the exact reviewed head when the run produces no findings before display filters, all prior jbot threads are resolved, and GitHub reports the PR open, non-draft, and mergeable. Existing same-head jbot approvals are not duplicated. GitHub branch protection still decides whether the PR can merge.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain candidates remain in diagnostics and are withheld from PR comments, except as described under [Finding evidence](#finding-evidence).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `verify-findings`         | `true`             | All findings, including P3 and nits, are adversarially re-checked before posting, with blocking findings first. Refuted findings are dropped; uncertain candidates remain in diagnostics and are listed under the review body's Unverified concerns, never as PR comments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `review-shards`           | `1`                | Initial file groups: `1`, `0` for automatic grouping, or `N`. Oversized groups and files are automatically paged against the full prompt budget. Every page must complete; additional pages wait under the session concurrency limit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). See [review scheduling](#review-scheduling) for finder deadlines, verification reserves and incomplete coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `max-concurrent-sessions` | `3`                | Maximum simultaneous model sessions. `0` also selects the bounded default of `3`; set a positive limit appropriate for your provider tier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -811,10 +837,8 @@ candidates, P3 and nits, enter severity-ordered batches of ten. Findings arrivin
 follow-up check. Verification shares the remaining verification time budget;
 Failed or missing verdicts retain candidates as `not-completed` diagnostics and
 report incomplete coverage. An uncertain verdict is `inconclusive`, not an
-unattempted check. Both remain withheld from PR findings, with one exception: a
-concrete P0–P2 finding whose verification returned no verdict is posted labeled
-Unverified, at most five a run, within `max-findings` and `min-severity` (judged by
-its original severity) and outside the severity counts.
+unattempted check. Both remain withheld from PR findings and are listed under
+the review body's "Unverified concerns".
 
 ## Local review
 
@@ -1047,8 +1071,7 @@ Guidelines may share an interactions session, so reuse does not always remove a
 whole model session.
 
 Every preset withholds uncertain, investigation-only and low-confidence candidates
-from inline and file-level findings (the one exception is under
-[Finding evidence](#finding-evidence)). The PR review body includes a collapsed
+from inline and file-level findings. The PR review body includes a collapsed
 `Unverified concerns (N)` section showing up to 10 withheld hypotheses to anyone
 who can read the PR. Content is HTML-escaped and capped at 2,400 UTF-8 bytes per
 concern, plus a truncation notice; omitted concerns are counted. Failed-verifier
@@ -1497,11 +1520,22 @@ Guideline files load whole, up to 128 KB each and 1 MB in total. Guideline
 compliance ranks every section of every applicable file on one scale: routed
 rule IDs first, then routed and nearby files, then sections that name a changed
 path, weighted by how critical the changed file is (code over configuration over
-tests over docs). Each doc in the governance README's base reading chain and
-its PR-review list, plus a root `REVIEW.md`, keeps its best section (up to 2 KB)
-right after the routed rules. It fills the rest of its 96 KB budget with
-sections in rank order, clipping any over 6 KB unless a rule ID routes it, and
-lists the ranked sections that did not fit, so it can open the ones that apply.
+tests over docs). Each doc in the governance README's base reading chain and its
+PR-review list, plus a root `REVIEW.md`, loads right after the routed rules,
+`REVIEW.md` first and the rest in the reading chain's order, each up to 12 KB of
+rendered sections, so a repository's own severity rules reach the pass.
+Guideline sources are read as of the PR's base, from a snapshot outside the
+checkout, so a PR cannot edit, move or rename the rules or ratings that apply to
+it; if the snapshot fails, the review runs without repository guidance and
+reports itself incomplete. A symlinked directory is mirrored from its final
+target, following link chains. A route may name a whole doc of any text type,
+such as `docs/REVIEW.txt`. A guideline file over 512 KB, or a link that does not
+resolve inside the tree, is left out as if absent. It is reported the same way
+when discovery looked it up or listed its directory, and ignored otherwise. When
+finders must read omitted guidance themselves, they read it from the base with
+`git show <base>:<path>`. It fills the rest of its 96 KB budget with sections in
+rank order, clipping any over 6 KB unless a rule ID routes it, and lists the
+ranked sections that did not fit, so it can open the ones that apply.
 Sections that name nothing in the diff are omitted and counted, unless every
 changed path is generic (`src/app/index.ts`). Set
 `JBOT_GUIDELINE_RANK=legacy` to restore the earlier per-file budget, where each

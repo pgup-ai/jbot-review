@@ -3,6 +3,7 @@ import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
+import { neutralizeMarkers } from './text.ts';
 import type { LinkedIssue, ReviewCommit } from './review-context.ts';
 import type { PriorThreadOutcome } from './telemetry.ts';
 import {
@@ -16,6 +17,8 @@ const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
 const REVIEW_MARKER = '<!-- jbot-review:review -->';
 const FINDING_MARKER = '<!-- jbot-review:finding -->';
+/** The other sites of a grouped finding thread, as `<!-- jbot-sites:path:line,... -->`. */
+const SITES_MARKER = 'jbot-sites';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
 const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
 const LINKED_COMMENTS_MARKER = 'jbot-review:linked-comments';
@@ -64,8 +67,12 @@ export interface PrFile {
 export interface PriorJbotThread {
   id: string;
   isResolved: boolean;
-  /** Resolved with a human reply last and no jbot addressed reply: nothing was fixed. */
+  /** Resolved with the PR author or a writer replying last and no jbot addressed reply: nothing was fixed. */
   declined?: boolean;
+  /** GitHub marks a thread outdated once the lines it was posted on change. */
+  outdated?: boolean;
+  /** Other sites of a grouped finding, set only when the jbot actor posted the thread. */
+  sites?: Array<{ path: string; line?: number }>;
   replyToCommentId: number;
   path: string;
   line?: number;
@@ -245,6 +252,7 @@ interface ReviewThreadsResponse {
   };
   repository: {
     pullRequest: {
+      author?: { login: string } | null;
       reviewThreads: {
         pageInfo: {
           hasNextPage: boolean;
@@ -253,6 +261,7 @@ interface ReviewThreadsResponse {
         nodes: Array<{
           id: string;
           isResolved: boolean;
+          isOutdated?: boolean;
           path: string;
           line?: number | null;
           originalLine?: number | null;
@@ -261,6 +270,7 @@ interface ReviewThreadsResponse {
               databaseId?: number | null;
               body: string;
               url: string;
+              authorAssociation?: string;
               author?: {
                 login: string;
               } | null;
@@ -327,6 +337,8 @@ export function classifyPriorJbotThread(input: {
   return input.isResolved ? 'skip' : 'resolve-only';
 }
 
+const WRITE_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
 export async function listPriorJbotThreads(
   octokit: Octokit,
   owner: string,
@@ -344,6 +356,9 @@ export async function listPriorJbotThreads(
       }
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
+          author {
+            login
+          }
           reviewThreads(first: 100, after: $after) {
             pageInfo {
               hasNextPage
@@ -352,6 +367,7 @@ export async function listPriorJbotThreads(
             nodes {
               id
               isResolved
+              isOutdated
               path
               line
               originalLine
@@ -360,6 +376,7 @@ export async function listPriorJbotThreads(
                   databaseId
                   body
                   url
+                  authorAssociation
                   author {
                     login
                   }
@@ -460,7 +477,9 @@ export async function listPriorJbotThreads(
       });
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
-      if (disposition === 'resolve-only') {
+      // A grouped thread is never retry-resolved: only its primary site was checked. It stays an
+      // open thread, so it still suppresses repeats and counts as open.
+      if (disposition === 'resolve-only' && parseGroupedSites(topLevel.body).length === 0) {
         unresolvedAddressedThreadIds.push(thread.id);
         continue;
       }
@@ -476,7 +495,17 @@ export async function listPriorJbotThreads(
       threads.push({
         id: thread.id,
         isResolved: thread.isResolved,
-        declined: thread.isResolved && lastReply !== undefined && isHuman(lastReply),
+        // An open thread with "will fix" last is pending, not declined.
+        declined:
+          thread.isResolved &&
+          lastReply !== undefined &&
+          isHuman(lastReply) &&
+          (WRITE_ASSOCIATIONS.has(lastReply.authorAssociation ?? '') ||
+            (lastReply.author?.login !== undefined &&
+              lastReply.author.login === response.repository?.pullRequest?.author?.login)),
+        outdated: thread.isOutdated,
+        // Only jbot-authored threads reach here (isJbotFinding), so the marker is its own.
+        sites: parseGroupedSites(topLevel.body),
         replyToCommentId: topLevel.databaseId,
         path: thread.path,
         // `line` is null both for file-level comments AND for outdated
@@ -861,9 +890,8 @@ export async function updateReviewBody(
 }
 
 export function formatFindingLabel(
-  finding: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>,
+  finding: Pick<Finding, 'severity' | 'kind' | 'confidence'>,
 ): string {
-  if (finding.verificationUncertain) return '**Unverified**';
   const kind = finding.kind ? ` · ${finding.kind}` : '';
   const confidence = finding.confidence
     ? ` (*conf: ${finding.confidence === 'medium' ? 'med' : finding.confidence}*)`
@@ -882,7 +910,35 @@ export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): 
  * findings by it, so every posting path must go through here.
  */
 export function formatFindingCommentBody(finding: Finding): string {
-  return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
+  const sites = finding.alsoAt?.length
+    ? `<!-- ${SITES_MARKER}:${finding.alsoAt
+        .map(({ path, line }) => `${encodeURIComponent(path)}:${line}`)
+        .join(',')} -->\n`
+    : '';
+  return `${formatFindingLabel(finding)} — ${neutralizeMarkers(finding.title)}\n\n${neutralizeMarkers(finding.body)}\n\n${sites}${FINDING_MARKER}`;
+}
+
+/** Grouped sites, read only from a thread the jbot actor itself posted. */
+function parseGroupedSites(body: string): Array<{ path: string; line?: number }> {
+  // Only jbot's own trailer, never a marker quoted earlier in the comment.
+  const listed = new RegExp(`\\n<!-- ${SITES_MARKER}:(\\S+) -->\\n${FINDING_MARKER}\\s*$`).exec(
+    body,
+  )?.[1];
+  if (!listed) return [];
+  const sites: Array<{ path: string; line?: number }> = [];
+  for (const site of listed.split(',')) {
+    const match = /^([^:,]+):(\d+)$/.exec(site);
+    let path: string;
+    try {
+      path = match ? decodeURIComponent(match[1]) : '';
+    } catch {
+      return []; // An undecodable entry: trust none of the list.
+    }
+    if (!match || !path) return [];
+    const line = Number(match[2]);
+    sites.push({ path, ...(line > 0 ? { line } : {}) });
+  }
+  return sites;
 }
 
 /**
@@ -1111,9 +1167,12 @@ function isJbotFinding(
   reviewIdByCommentId: ReadonlyMap<number, number>,
   commentId?: number,
 ): boolean {
-  if (hasInternalMarker(body, FINDING_MARKER)) return true;
+  // The marker alone is not proof: anyone can paste it into a comment of their own.
   if (!isViewerActor(authorLogin, viewerLogin)) return false;
-  return commentId !== undefined && reviewIdByCommentId.has(commentId);
+  return (
+    body.trimEnd().endsWith(FINDING_MARKER) ||
+    (commentId !== undefined && reviewIdByCommentId.has(commentId))
+  );
 }
 
 function hasInternalMarker(body: string | undefined, marker: string): boolean {
@@ -1257,6 +1316,7 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
     .replace(/^## j-?bot code review\s*/i, '')
     .trim();
   const noun = threadCount === 1 ? 'thread' : 'threads';
+  const keptMarkers = body.match(/^<!-- (?:jbot-site|jbot-review:covered):[^\n]* -->$/gm) ?? [];
   return appendLinkedCommentsFooter(
     appendReviewMarker(
       withReviewCoverage(
@@ -1273,6 +1333,7 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
           '</details>',
           '',
           COMPACTED_REVIEW_MARKER,
+          ...keptMarkers,
         ].join('\n'),
         incrementalHead ?? completedReviewHead(body),
         true,

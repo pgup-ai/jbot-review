@@ -91,7 +91,7 @@ describe('toJudgeComments', () => {
         finding({}),
         finding({ line: 0 }),
         finding({ confidence: 'low' }),
-        finding({ verificationUncertain: true, publishUnverified: 'P1' }),
+        finding({ verificationUncertain: true }),
       ]),
       [
         {
@@ -106,13 +106,6 @@ describe('toJudgeComments', () => {
           side: 'right',
           fromLine: null,
           toLine: null,
-          note: 'Nil map write\n\nPanics when empty.',
-        },
-        {
-          path: 'pkg/a.go',
-          side: 'right',
-          fromLine: 4,
-          toLine: 4,
           note: 'Nil map write\n\nPanics when empty.',
         },
       ],

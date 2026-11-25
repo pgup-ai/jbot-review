@@ -1,4 +1,4 @@
-import { escapeHtml, formatFileList } from './text.ts';
+import { escapeHtml, formatFileList, neutralizeMarkers } from './text.ts';
 import type { Finding, Severity } from './types.ts';
 import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
@@ -12,7 +12,7 @@ import { truncateUtf8WithNotice } from './prompt.ts';
  */
 
 function findingLine(finding: Finding): string {
-  return `- ${formatFindingLabel(finding)} ${finding.title} — \`${formatFindingLocation(finding)}\``;
+  return `- ${formatFindingLabel(finding)} ${neutralizeMarkers(finding.title)} — \`${formatFindingLocation(finding)}\``;
 }
 
 /**
@@ -25,7 +25,8 @@ export const ADVISORY_FINDINGS_HEADING = '### Unverified concerns';
 export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];
   const lines = [ORPHANED_FINDINGS_HEADING, ''];
-  for (const finding of orphaned) lines.push(findingLine(finding), `  ${finding.body}`);
+  for (const finding of orphaned)
+    lines.push(findingLine(finding), `  ${neutralizeMarkers(finding.body)}`);
   return lines;
 }
 

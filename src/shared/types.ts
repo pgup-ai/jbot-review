@@ -99,8 +99,8 @@ export interface Finding {
   /** Set by verification, never accepted from model output. */
   verificationUncertain?: boolean;
   verificationUnavailable?: boolean;
-  /** Original severity of an unchecked concrete P0–P2 claim, posted labeled Unverified (at most five a run). */
-  publishUnverified?: Severity;
+  /** Other sites of the same issue, collapsed into this finding. */
+  alsoAt?: Array<{ path: string; line: number; evidence?: string }>;
 }
 
 export interface AddressedPriorComment {

@@ -38,7 +38,7 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 | `src/shared/context-pack.ts`        | Pure per-page context pack for `JBOT_REVIEW_EXPERIMENT=context-pack`: selects, ranks and byte-budgets surrounding code, used definitions, import-linked callers, other pages' diffs and a directory map via an injected provider                                 |
 | `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                             |
 | `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                                   |
-| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                                  |
+| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, over-reach filters, confidence gate, verdicts                                                                                                                                              |
 | `src/shared/rule-checks.ts`         | Pure deterministic rule checks: parse the repo's committed checks, match added lines, shadow agreement with the guideline pass, compiler validation                                                                                                              |
 | `src/shared/benchmark-judge.ts`     | Pure port of AACR-Bench's comment matcher (path → side → line window → LLM same-concern) and official metrics; judge sessions run via `semantic-judge.ts`                                                                                                        |
 | `src/shared/aacr-bench.ts`          | Pure AACR-Bench dataset model: official commit mapping, seeded per-language sample, finding → comment conversion                                                                                                                                                 |
@@ -108,9 +108,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    reminder stays last there too. Schemas use concrete JSON examples, never
    union syntax. Each rule is stated exactly once.
 6. **Markers are contracts.** `FINDING_MARKER` / `REVIEW_MARKER` /
-   `ADDRESSED_MARKER` in `github.ts` are how prior runs recognize their own
-   output; every posting path must include them (use the shared body
-   builder).
+   `ADDRESSED_MARKER` in `github.ts` and `BODY_FINDING_MARKER` in `filter.ts`
+   are how prior runs recognize their own output; each posting path carries the
+   marker for its output (use the shared builders): `FINDING_MARKER` on inline
+   and file-level comments, site keys on body-only and unverified entries.
 7. **Three-dot diff only** (`base...head`) on GitHub-posting paths: GitHub
    patches — which anchors are validated against — are merge-base-relative.
    Local mode (`src/local/*`) is the one sanctioned exception: it diffs
@@ -165,8 +166,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    PR authors are trusted; `sdk-engine: opencode` keeps a repo off dsh.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal. The one exception is a declined
-   thread: resolved without jbot's addressed reply, with a human reply last.
-   Nothing was fixed there, so it suppresses like an open thread.
+   thread: resolved without jbot's addressed reply, with the PR author or a
+   writer replying last. Nothing was fixed there, so until its lines change it
+   suppresses a P2-or-lower, non-security finding within three lines that repeats
+   its title, or cites the same guideline rule ID with an overlapping title.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
     module (like `filter.ts`), unit-tested; `runner.ts` only wires.
 11. **Compromise means shutdown, not mitigation.** Runtime components never
