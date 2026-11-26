@@ -538,13 +538,17 @@ export async function runFindingVerification(
     verdicts = parseFindingVerdicts(raw, findings.length, log);
     if (verdicts?.length === findings.length) return verdicts;
   } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    // opencode ends a capped turn's last step on an assistant message, which Claude 5 models refuse as prefill.
+    const prefillRejected = /does not support assistant message prefill/.test(error.message);
     if (
-      !(error instanceof Error) ||
+      !prefillRejected &&
       !/^opencode finding-verification prompt (?:did not finish within \d+s|settled without a completed assistant message)$/.test(
         error.message,
       )
     )
       throw error;
+    if (prefillRejected) stepsUsed = VERIFY_STEPS;
     failure = error;
   }
   const stepsLeft = VERIFY_STEPS - (stepsUsed ?? VERIFY_STEPS);

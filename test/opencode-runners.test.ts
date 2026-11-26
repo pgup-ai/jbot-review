@@ -432,6 +432,32 @@ describe('runFindingVerification on V2', () => {
     }
   });
 
+  it('answers tool-less when the provider rejects the step-limit prefill', async () => {
+    const fake = fakeOpencodeServer((session) =>
+      session.agent === 'jbot-verify'
+        ? {
+            text: '',
+            steps: VERIFY_STEPS - 1,
+            error:
+              'This model does not support assistant message prefill. The conversation must end with a user message.',
+          }
+        : { text: verdicts },
+    );
+    const result = await runFindingVerification(
+      runtime(fake),
+      'anthropic/claude-haiku-5-5',
+      'ctx',
+      [finding],
+      log,
+      300_000,
+      undefined,
+      undefined,
+      'capped',
+    );
+    assert.equal(result?.[0].verdict, 'confirmed');
+    assert.equal([...fake.sessions.values()].at(-1)?.agent, CLOSED_BOOK_AGENT);
+  });
+
   it('does not switch a capped verifier to an uncapped wrap-up agent', async () => {
     const fake = fakeOpencodeServer(() => ({ text: verdicts, delayMs: 25 }));
     const rt = runtime(fake);
